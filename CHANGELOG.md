@@ -30,6 +30,47 @@ First public preview cutting five compressed sprints into `main`.
 - Password reset flow · rate limit · settings account tab
 - Full `docs/01-13` coverage (only 01-02 shipped)
 
+## [0.1.1] - 2026-08-11
+
+Post-release patch closing the P0 items from
+`doc/codex/开源整合方案/10-v0.1.0-alpha-测试报告.md`.
+
+### Fixed
+- **Business tables now always built** · `init_db()` runs unconditionally in
+  lifespan; `HUNTER_MINIMAL_BOOT=1` only gates the background schedulers
+  (collector · signal_monitor · gm_alerts · backtest · stocks_catalog seed).
+  Fixes 500 on `/api/watchlist` `/api/alerts/list` `/api/user_mcp`
+  `/api/portfolio/summary` after fresh volume.
+- **Redis env respected** · `apps/api/app/routers/{quote,portfolio}.py` +
+  `services/collector.py` switched from hardcoded `redis://localhost:6379`
+  to `os.getenv("REDIS_URL", ...)`. Fixes `redis.ConnectionError` in docker.
+- **Multi-tenant migration folded into `init_db`** · `stocks` /
+  `position_thesis` / `push_tasks` now always have `user_id` column and the
+  composite primary keys. Fixes `UndefinedColumn: column "user_id" does not
+  exist` on `/api/watchlist` and `/api/portfolio/summary`.
+- **Swagger closed by default** · FastAPI ctor now hides `/docs` `/redoc`
+  `/openapi.json` unless `HUNTER_ENABLE_DOCS=1`. Fixes API-surface leak via
+  direct `:8100/docs` bypass (nginx wasn't intercepting).
+- **`/api/signals/` public** · middleware whitelist widened so the signal
+  dashboard renders without auth for anonymous visitors.
+
+### Removed
+- `apps/api/routers/` and `apps/api/services/` dead paths (rsync artifact
+  from hermes' old layout; only `apps/api/app/*` is imported).
+- `POST /api/watchlist/feishu/config` + `GET /api/watchlist/feishu/config`
+  routes and their `get_feishu_config` / `upsert_feishu_config` +
+  `feishu_bindings` helpers · P2 completion.
+
+### Added
+- `scripts/export-openapi.py` · dumps `app.openapi()` to
+  `docs/api-reference.json` (spec is generated even while HTTP endpoint is
+  closed).
+- `.github/workflows/ci.yml` · new `guardrails` job that fails CI on
+  regressions: hardcoded `redis://localhost:6379`, stray
+  `apps/api/{routers,services}` dirs, `wx_openid`/`feishu_bindings`/
+  `booth_admin`/`ADVENTUREX_` leftovers.
+- `.env.example` · clearer `HUNTER_MINIMAL_BOOT` docstring.
+
 ## [Unreleased]
 
 ### Added
