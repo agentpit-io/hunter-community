@@ -67,6 +67,11 @@ async def get_quote(code: str):
     stock_map = {s["code"]: s for s in stocks}
     if code not in stock_map:
         raise HTTPException(404, f"股票 {code} 不存在")
+    # Cache-miss path · try provider fallback (via finance_data_client's SaaS
+    # or provider bridge · fills cache side-effect free).
+    fresh = await asyncio.to_thread(_kline_refresh, code, today)
+    if fresh:
+        return JSONResponse(content=fresh, headers=_NO_STORE_HEADERS)
     return JSONResponse(
         content={"code": code, "name": stock_map[code]["name"], "price": None,
                  "msg": "非交易时间或数据未就绪"},
