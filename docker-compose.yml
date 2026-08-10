@@ -75,9 +75,6 @@ services:
       KRONOS_LOCAL_URL: ${KRONOS_LOCAL_URL:-}
       HUNTER_SAAS_KRONOS_URL: ${HUNTER_SAAS_KRONOS_URL:-}
       HUNTER_SAAS_KRONOS_KEY: ${HUNTER_SAAS_KRONOS_KEY:-}
-      # These are placeholders · P4 will introduce provider abstraction
-      LLM_API_BASE: ${LLM_API_BASE:-}
-      LLM_API_KEY: ${LLM_API_KEY:-}
     ports:
       - "${API_HOST_PORT:-8100}:8000"
 
