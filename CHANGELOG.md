@@ -30,6 +30,42 @@ First public preview cutting five compressed sprints into `main`.
 - Password reset flow · rate limit · settings account tab
 - Full `docs/01-13` coverage (only 01-02 shipped)
 
+## [0.1.2] - 2026-08-11
+
+### Security
+- **Scrub `FinAPI@2026!` token leak** · previously hardcoded as a `os.getenv`
+  fallback default in `finance_data_client.py`, `online_analysis/unified_fetcher.py`,
+  `agents/sentinel/unified_fetcher.py`, `factor_engine.py`. All 4 defaults
+  now empty · users must provide `FINANCE_DATA_TOKEN` explicitly.
+  Trufflehog didn't catch this because it's a plain word (no entropy).
+- New CI guardrail: `os.getenv` fallback values matching a shared-secret
+  pattern (6+ alphanumerics not on the whitelist) fail the build.
+
+### Added
+- **Provider fallback in `finance_data_client.get_quote()`** · when
+  `FINANCE_DATA_URL` is empty (the OSS default) it now delegates to
+  `providers.data_source.get_data_source().get_quote()` via an async→sync
+  bridge · users can pick `akshare` (A-shares, China network) or
+  `yfinance` (US/HK/A, non-China network) with a single env var.
+- `yfinance==0.2.51` added to `requirements.txt` (was missing despite
+  the provider impl existing).
+- Quote `/api/quote/{code}` cache-miss branch actively fetches via
+  `fd_get_quote` before returning "数据未就绪" placeholder · fills cache.
+
+### Fixed
+- `providers/data_source/yfinance_impl.py::get_quote()` rewritten to use
+  `Ticker.history(period="5d")` instead of `fast_info` · the latter throws
+  `KeyError: 'currentTradingPeriod'` on newer yfinance when market is closed.
+- Shape adapter in `finance_data_client.get_quote` returns `None` when the
+  provider yields null price · UI now correctly shows "数据未就绪" instead of
+  misleading `price: 0.0`.
+
+### Known limitation
+- The demo instance at `https://hunter-community.agentpit.io` shows null
+  prices for A-shares (akshare backend blocked from GCP Singapore) and US
+  stocks (Yahoo Finance rate-limits GCP IPs with HTTP 429). Users on other
+  networks or with a `HUNTER_SAAS_DATA_URL/KEY` are unaffected.
+
 ## [0.1.1] - 2026-08-11
 
 Post-release patch closing the P0 items from
