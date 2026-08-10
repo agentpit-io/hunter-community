@@ -1,17 +1,34 @@
-﻿'use client'
-import { useState } from 'react'
+'use client'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { Activity, Mail, Lock, Loader2, AlertCircle } from 'lucide-react'
 
 const API = process.env.NEXT_PUBLIC_API_URL || ''
-const AGENTPIT_REGISTER = 'https://agentpit.io'
 
+/**
+ * Hunter Community · local login page.
+ *
+ * On mount checks /api/auth/status:
+ *  - If needs_setup=true (fresh install, no admin yet) forwards to /register
+ *    where the first user gets auto-admin role.
+ *  - Otherwise renders the plain email + password form.
+ */
 export default function LoginPage() {
   const router = useRouter()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [checking, setChecking] = useState(true)
+
+  useEffect(() => {
+    // SetupWizard · route the very first visitor to /register
+    fetch(`${API}/api/auth/status`).then(r => r.json()).then((s) => {
+      if (s?.needs_setup) router.replace('/register?setup=1')
+      else setChecking(false)
+    }).catch(() => setChecking(false))
+  }, [router])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -24,17 +41,27 @@ export default function LoginPage() {
         body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
       })
       const d = await r.json()
-      if (d.ok && d.token) {
-        localStorage.setItem('hunter_token', d.token)
+      if (r.ok && (d.access_token || d.token)) {
+        localStorage.setItem('hunter_token', d.access_token || d.token)
+        if (d.refresh_token) localStorage.setItem('hunter_refresh', d.refresh_token)
         router.replace('/')
       } else {
-        setError(d.error || '邮箱或密码错误')
+        setError(d.detail || d.error || '邮箱或密码错误')
       }
     } catch {
       setError('网络错误，请稍后重试')
     } finally {
       setLoading(false)
     }
+  }
+
+  if (checking) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)' }}>
+        <Loader2 style={{ width: 20, height: 20, color: 'var(--text-muted)', animation: 'spin 1s linear infinite' }} />
+        <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+      </div>
+    )
   }
 
   return (
@@ -59,7 +86,7 @@ export default function LoginPage() {
 
         <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)', margin: '0 0 6px' }}>登录</h1>
         <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 24px' }}>
-          使用 AgentPit 账号登录
+          用你在本实例的邮箱与密码登录
         </p>
 
         <form onSubmit={handleLogin}>
@@ -102,9 +129,9 @@ export default function LoginPage() {
 
         <div style={{ marginTop: 20, textAlign: 'center', fontSize: 13, color: 'var(--text-muted)' }}>
           还没有账号？{' '}
-          <a href={AGENTPIT_REGISTER} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--blue)', textDecoration: 'none' }}>
-            前往 AgentPit 注册 →
-          </a>
+          <Link href="/register" style={{ color: 'var(--blue)', textDecoration: 'none' }}>
+            注册本地账号 →
+          </Link>
         </div>
       </div>
       <style>{`

@@ -57,7 +57,12 @@ services:
       HUNTER_MINIMAL_BOOT: "${HUNTER_MINIMAL_BOOT:-1}"
       DATABASE_URL: postgresql://${POSTGRES_USER:-hunter}:${POSTGRES_PASSWORD:-hunter}@postgres:5432/${POSTGRES_DB:-hunter}
       REDIS_URL: redis://redis:6379/0
+      # Local auth (P3) · JWT signing + registration policy
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-3600}
+      JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-2592000}
+      REGISTRATION_MODE: ${REGISTRATION_MODE:-open}
+      HUNTER_ADMIN_EMAILS: ${HUNTER_ADMIN_EMAILS:-}
       # These are placeholders · P4 will introduce provider abstraction
       LLM_API_BASE: ${LLM_API_BASE:-}
       LLM_API_KEY: ${LLM_API_KEY:-}

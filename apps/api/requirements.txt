@@ -26,3 +26,9 @@ websockets==16.0
 # JWT for auth · PyJWT is imported as `jwt`
 PyJWT==2.10.1
 
+# argon2id password hashing · GPU-resistant · replaces bcrypt for new users
+argon2-cffi==23.1.0
+
+# email validation for pydantic EmailStr
+email-validator==2.2.0
+
