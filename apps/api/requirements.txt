@@ -23,3 +23,9 @@ uvloop==0.22.1
 watchfiles==1.1.1
 websockets==16.0
 
+# JWT for auth · PyJWT is imported as `jwt`
+PyJWT==2.10.1
+
+# Legacy SaaS deps (wx_push · P2 will remove) · needed for module import until then
+pymysql==1.1.1
+
