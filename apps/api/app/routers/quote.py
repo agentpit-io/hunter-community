@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import redis
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Request
@@ -9,7 +10,10 @@ from app.services.database import get_stocks, get_stocks_by_user
 from app.services.finance_data_client import register_stocks, get_reliable_close
 
 router = APIRouter()
-_redis = redis.Redis.from_url("redis://localhost:6379/0", decode_responses=True)
+_redis = redis.Redis.from_url(
+    os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+    decode_responses=True,
+)
 
 CST = timezone(timedelta(hours=8))
 

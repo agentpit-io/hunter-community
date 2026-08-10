@@ -5,6 +5,7 @@ PUT  /api/portfolio/{code}/position  — 更新单只股票持仓数据（不覆
 DELETE /api/portfolio/{code}/position — 清除持仓数据（保留买入理由）
 """
 import json
+import os
 import redis
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -19,7 +20,10 @@ from app.services.database import (
 )
 
 router = APIRouter()
-_redis = redis.Redis.from_url("redis://localhost:6379/0", decode_responses=True)
+_redis = redis.Redis.from_url(
+    os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+    decode_responses=True,
+)
 
 
 class PositionIn(BaseModel):

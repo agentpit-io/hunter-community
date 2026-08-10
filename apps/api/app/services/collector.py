@@ -1,12 +1,16 @@
 import asyncio
 import json
+import os
 import redis
 from datetime import datetime, time, timezone, timedelta
 from loguru import logger
 from app.services.database import get_stocks
 from app.services.finance_data_client import get_quote, get_reliable_close, register_stocks
 
-_redis = redis.Redis.from_url("redis://localhost:6379/0", decode_responses=True)
+_redis = redis.Redis.from_url(
+    os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+    decode_responses=True,
+)
 _task = None
 
 # A 股 + 港股交易时段以北京时间 (CST) 判定；服务器若为 UTC 也能正确比较

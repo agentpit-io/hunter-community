@@ -26,6 +26,7 @@ _PUBLIC_PREFIXES = (
     "/api/kpred/",
     "/api/quote/", "/api/kline/", "/api/news/", "/api/fundflow/",
     "/api/orderbook/", "/api/financial/", "/api/timeshare/",
+    "/api/signals/",   # macro signal dashboard is public data
     "/api/v1/signal/report/",
     "/api/online-analysis/stream/",
     "/api/online-analysis/search-stock",

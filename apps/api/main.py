@@ -12,9 +12,10 @@ from app.services import signal_monitor
 import asyncio
 import os
 
-# Hunter Community · P1 skeleton flag · skip all background schedulers
-# to boot without full SaaS deps (finance-data, LLM keys, GM alerts, backtest).
-# P2 will strip these paths entirely; until then this gate lets docker up succeed.
+# Hunter Community · when 1, skip background schedulers (collector · signal_monitor
+# · gm_alerts · backtest · stocks_catalog seed) that need external creds.
+# DDL is ALWAYS run so table-backed features (auth · watchlist · settings)
+# work regardless of this flag. Only impacts the polling / scheduled jobs.
 HUNTER_MINIMAL_BOOT = os.getenv("HUNTER_MINIMAL_BOOT", "0") == "1"
 
 _signal_task = None
@@ -24,11 +25,19 @@ _backtest_task = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _signal_task, _gm_alert_task, _backtest_task
+
+    # ─── Business tables · always ensure (idempotent · no side effects) ───
+    try:
+        await init_db()
+    except Exception as e:
+        logger.error("[boot] init_db failed (service will run but table-backed features may 500): {}", e)
+
     if HUNTER_MINIMAL_BOOT:
-        logger.warning("[hunter-community] HUNTER_MINIMAL_BOOT=1 · skipping DB init and background schedulers")
+        logger.warning("[hunter-community] HUNTER_MINIMAL_BOOT=1 · skipping background schedulers only (tables OK)")
         yield
         return
-    await init_db()
+
+    # ─── Background jobs · gated by MINIMAL_BOOT ───
     register_stocks(get_stocks())
     await start_collector()
     _signal_task = asyncio.create_task(signal_monitor.run_monitors())
@@ -94,7 +103,16 @@ async def lifespan(app: FastAPI):
     if _backtest_task:
         _backtest_task.cancel()
 
-app = FastAPI(title="Hunter 财经聚合 API", lifespan=lifespan)
+# FastAPI Swagger + OpenAPI closed by default · they leak full API surface.
+# Ops who want them can set HUNTER_ENABLE_DOCS=1 (behind their own auth layer).
+_ENABLE_DOCS = os.getenv("HUNTER_ENABLE_DOCS", "0") == "1"
+app = FastAPI(
+    title="Hunter 财经聚合 API",
+    lifespan=lifespan,
+    docs_url="/docs" if _ENABLE_DOCS else None,
+    redoc_url="/redoc" if _ENABLE_DOCS else None,
+    openapi_url="/openapi.json" if _ENABLE_DOCS else None,
+)
 
 app.add_middleware(AuthMiddleware)
 app.add_middleware(

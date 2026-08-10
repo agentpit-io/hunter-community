@@ -7,7 +7,6 @@ from app.services.database import (
     get_stocks_by_user, add_stock_by_user, remove_stock_by_user,
     hard_remove_stock_by_user, list_stocks_with_thesis_by_user,
     get_thesis_by_user, upsert_thesis_by_user, delete_thesis_by_user,
-    get_feishu_config, upsert_feishu_config,
 )
 from app.services.finance_data_client import subscribe as fd_subscribe, register_stocks
 
@@ -27,12 +26,6 @@ class ThesisIn(BaseModel):
     shares:      Optional[int]   = None
     cost_price:  Optional[float] = None
     buy_date:    Optional[str]   = None
-
-
-class FeishuConfigIn(BaseModel):
-    app_id:       str
-    app_secret:   str
-    home_channel: str
 
 
 def _get_user_id(request: Request) -> str | None:
@@ -141,39 +134,9 @@ async def hard_delete_stock(code: str, request: Request):
     return {"ok": True}
 
 
-# ─────────────────────────────────────────────────────────────────────
-# 飞书配置（多租户）
-# ─────────────────────────────────────────────────────────────────────
-
-@router.get("/feishu/config")
-async def get_feishu(request: Request):
-    user_id = _get_user_id(request)
-    if not user_id:
-        raise HTTPException(401, "需要登录")
-    cfg = get_feishu_config(user_id)
-    if not cfg:
-        return {"configured": False, "app_id": "", "home_channel": ""}
-    return {
-        "configured": bool(cfg["app_id"]),
-        "app_id_masked": (cfg["app_id"][:6] + "...") if cfg["app_id"] else "",
-        "home_channel_masked": (cfg["home_channel"][:6] + "...") if cfg["home_channel"] else "",
-        "home_channel": cfg["home_channel"] or "",
-        "enabled": cfg["enabled"],
-    }
-
-
-@router.post("/feishu/config")
-async def save_feishu(body: FeishuConfigIn, request: Request):
-    user_id = _get_user_id(request)
-    if not user_id:
-        raise HTTPException(401, "需要登录")
-    if not body.app_id.startswith("cli_"):
-        return {"ok": False, "error": "App ID 必须以 cli_ 开头"}
-    if len(body.app_secret) < 16:
-        return {"ok": False, "error": "App Secret 长度异常"}
-    upsert_feishu_config(user_id, body.app_id, body.app_secret, body.home_channel)
-    return {"ok": True, "message": "飞书配置已保存"}
-
+# P2 completion: /feishu/config endpoints removed with the Lark push channel.
+# When SMTP/Slack channels land (Sprint 06 Day 7), settings-tab UI will host
+# their equivalent.
 
 # ─────────────────────────────────────────────────────────────────────
 # 股票搜索（东方财富 suggest API）

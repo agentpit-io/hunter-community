@@ -125,12 +125,7 @@ CREATE INDEX IF NOT EXISTS idx_oar_user_time  ON online_analysis_report (user_id
 CREATE INDEX IF NOT EXISTS idx_oar_stock_time ON online_analysis_report (stock_code, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_oar_thesis_status ON online_analysis_report (thesis_status, created_at DESC);
 
-CREATE TABLE IF NOT EXISTS feishu_bindings (
-    user_id  VARCHAR(50) PRIMARY KEY,
-    open_id  VARCHAR(100) NOT NULL UNIQUE,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS idx_feishu_bindings_open_id ON feishu_bindings(open_id);
+-- P2 completion: Lark binding table dropped with the SaaS push channel.
 
 CREATE TABLE IF NOT EXISTS market_signals (
     id              BIGSERIAL    PRIMARY KEY,
@@ -752,39 +747,7 @@ def delete_thesis_by_user(code: str, user_id: str):
     conn.close()
 
 
-# ─── 飞书配置（多租户）───────────────────────────────────────────────
-
-def get_feishu_config(user_id: str) -> dict | None:
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute(
-        "SELECT app_id, app_secret, home_channel, enabled FROM user_feishu_config WHERE user_id = %s",
-        (user_id,),
-    )
-    row = cur.fetchone()
-    conn.close()
-    if not row:
-        return None
-    return {"app_id": row[0], "app_secret": row[1], "home_channel": row[2], "enabled": row[3]}
-
-
-def upsert_feishu_config(user_id: str, app_id: str, app_secret: str,
-                         home_channel: str, enabled: bool = True):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO user_feishu_config (user_id, app_id, app_secret, home_channel, enabled, updated_at)
-        VALUES (%s, %s, %s, %s, %s, NOW())
-        ON CONFLICT (user_id) DO UPDATE SET
-            app_id       = EXCLUDED.app_id,
-            app_secret   = EXCLUDED.app_secret,
-            home_channel = EXCLUDED.home_channel,
-            enabled      = EXCLUDED.enabled,
-            updated_at   = NOW()
-    """, (user_id, app_id, app_secret, home_channel, enabled))
-    conn.commit()
-    conn.close()
-
+# P2 completion: feishu config helpers removed with the Lark push channel.
 
 # ─────────────────────────────────────────────────────────────────────
 # 在线分析（2026-05-23）· 报告 CRUD
@@ -1047,52 +1010,7 @@ def get_latest_kill_conditions_for_stock(code: str) -> list:
     return kcs if isinstance(kcs, list) else []
 
 
-# ─────────────────────────────────────────────────────────────────────
-# 飞书企业 Bot 绑定（open_id ↔ user_id）
-# ─────────────────────────────────────────────────────────────────────
-
-def get_feishu_binding_by_open_id(open_id: str) -> dict | None:
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute(
-        "SELECT user_id, open_id, created_at FROM feishu_bindings WHERE open_id = %s",
-        (open_id,),
-    )
-    row = cur.fetchone()
-    conn.close()
-    if not row:
-        return None
-    return {"user_id": row[0], "open_id": row[1], "created_at": row[2]}
-
-
-def get_feishu_binding_by_user_id(user_id: str) -> dict | None:
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute(
-        "SELECT user_id, open_id, created_at FROM feishu_bindings WHERE user_id = %s",
-        (user_id,),
-    )
-    row = cur.fetchone()
-    conn.close()
-    if not row:
-        return None
-    return {"user_id": row[0], "open_id": row[1], "created_at": row[2]}
-
-
-def save_feishu_binding(user_id: str, open_id: str):
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        INSERT INTO feishu_bindings (user_id, open_id, created_at)
-        VALUES (%s, %s, NOW())
-        ON CONFLICT (user_id) DO UPDATE SET open_id = EXCLUDED.open_id, created_at = NOW()
-        """,
-        (user_id, open_id),
-    )
-    conn.commit()
-    conn.close()
-
+# P2 completion: Lark binding CRUD helpers removed with the SaaS push channel.
 
 # ─────────────────────────────────────────────────────────────────────
 # 市场信号 market_signals

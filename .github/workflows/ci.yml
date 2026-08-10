@@ -49,6 +49,51 @@ jobs:
           JWT_SECRET: ci-test-secret
           DATABASE_URL: postgresql://placeholder@localhost/placeholder
         run: python -c "import main; print('import ok')"
+      - name: Export OpenAPI spec (audit diff)
+        env:
+          HUNTER_MINIMAL_BOOT: '1'
+          JWT_SECRET: ci-test-secret
+          DATABASE_URL: postgresql://placeholder@localhost/placeholder
+        run: |
+          python scripts/export-openapi.py
+          head -c 500 docs/api-reference.json
+          echo
+          # Fail if spec unexpectedly shrinks · route count guard
+          COUNT=$(python -c "import json; print(len(json.load(open('docs/api-reference.json'))['paths']))")
+          echo "route count: $COUNT"
+          [ "$COUNT" -ge 30 ] || (echo "❌ suspicious route count $COUNT (expected ≥30)" && exit 1)
+
+  guardrails:
+    name: Guard against known footguns
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: No hardcoded redis://localhost:6379 outside env fallback
+        run: |
+          set -euo pipefail
+          BAD=$(grep -rn 'redis://localhost:6379' apps/api/app/ 2>/dev/null | grep -v 'getenv\|environ' || true)
+          if [ -n "$BAD" ]; then
+            echo "❌ hardcoded redis without env fallback:"
+            echo "$BAD"
+            exit 1
+          fi
+      - name: No stray apps/api/routers or apps/api/services (must live under app/)
+        run: |
+          if [ -d apps/api/routers ] || [ -d apps/api/services ]; then
+            echo "❌ dead code path · move contents to apps/api/app/{routers,services}"
+            exit 1
+          fi
+      - name: No wx / feishu / booth / ax leftovers in code
+        run: |
+          set -euo pipefail
+          BAD=$(grep -rn -iE 'wx_openid|feishu_bindings|booth_admin|ADVENTUREX_' apps/api/app 2>/dev/null || true)
+          # NOTE: feishu still appears in some comments / user_feishu_config
+          # helpers · we only forbid the SaaS-specific tables/env
+          if [ -n "$BAD" ]; then
+            echo "❌ SaaS leftover found · P2 was supposed to strip:"
+            echo "$BAD"
+            exit 1
+          fi
 
   web:
     name: Web · typecheck + build
