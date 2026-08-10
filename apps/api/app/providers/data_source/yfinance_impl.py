@@ -31,21 +31,36 @@ class YFinanceDataSource(IDataSource):
         return c  # US ticker as-is
 
     async def get_quote(self, code: str) -> dict:
+        """Reliable quote via 2-day history · yf.fast_info breaks when the
+        market is closed (KeyError: 'currentTradingPeriod') on newer yfinance.
+        """
         import yfinance as yf
         symbol = self._to_yahoo(code)
         t = await asyncio.to_thread(yf.Ticker, symbol)
-        info = await asyncio.to_thread(lambda: t.fast_info)
+        # 5d history · we need last two closes to compute change_pct
+        hist = await asyncio.to_thread(t.history, period="5d")
+        if hist is None or hist.empty:
+            return {
+                "code": code, "symbol": symbol, "name": symbol,
+                "price": None, "prev_close": None, "change_pct": None,
+                "volume": None, "open": None, "high": None, "low": None,
+            }
+        last = hist.iloc[-1]
+        prev = hist.iloc[-2] if len(hist) >= 2 else None
+        last_close = _f(last.get("Close"))
+        prev_close = _f(prev.get("Close")) if prev is not None else None
         return {
             "code": code,
             "symbol": symbol,
-            "name": getattr(info, "shortName", "") or symbol,
-            "price": _f(getattr(info, "last_price", None)),
-            "prev_close": _f(getattr(info, "previous_close", None)),
-            "change_pct": _pct(getattr(info, "last_price", None),
-                               getattr(info, "previous_close", None)),
-            "volume": _f(getattr(info, "last_volume", None)),
-            "high": _f(getattr(info, "day_high", None)),
-            "low": _f(getattr(info, "day_low", None)),
+            "name": symbol,  # yfinance shortName is behind a slow HTTP call, skip
+            "price": last_close,
+            "prev_close": prev_close,
+            "change_pct": _pct(last_close, prev_close),
+            "volume": _f(last.get("Volume")),
+            "open": _f(last.get("Open")),
+            "high": _f(last.get("High")),
+            "low": _f(last.get("Low")),
+            "ts": last.name.isoformat() if hasattr(last.name, "isoformat") else str(last.name),
         }
 
     async def get_kline(self, code: str, days: int = 30) -> dict:
