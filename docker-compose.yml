@@ -91,17 +91,32 @@ services:
     ports:
       - "${WEB_HOST_PORT:-3100}:3000"
 
-  # opencode:
-  #   image: ghcr.io/agentpit-io/hunter-opencode:${OPENCODE_TAG:-latest}
-  #   # ← Uncomment once the image is published (Sprint 06 · P3 Day 11).
-  #   # See doc/codex/开源整合方案/08-命名与依赖策略变更.md
-  #   <<: *restart
-  #   environment:
-  #     OPENCODE_SERVER_USERNAME: ${OPENCODE_USER:-opencode}
-  #     OPENCODE_SERVER_PASSWORD: ${OPENCODE_PASS:-changeme}
-  #     JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
-  #   ports:
-  #     - "${OPENCODE_HOST_PORT:-3921}:3901"
+  opencode:
+    # Built by huntercode private repo via
+    # .github/workflows/hunter-community-publish.yml
+    image: ghcr.io/agentpit-io/hunter-opencode:${OPENCODE_TAG:-latest}
+    <<: *restart
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      # HTTP Basic Auth in front of opencode's own /session /agent etc endpoints
+      OPENCODE_SERVER_USERNAME: ${OPENCODE_USER:-opencode}
+      OPENCODE_SERVER_PASSWORD: ${OPENCODE_PASS:-changeme}
+      # Shared with api container · lets hunter-auth plugin verify Bearer JWT locally
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production-please}
+      # MCP subprocesses reach the api container via internal docker network
+      HERMES_API_URL: http://api:8000
+      # Shared secret for /api/internal/* calls
+      HUNTER_INTERNAL_KEY: ${HUNTER_INTERNAL_KEY:-}
+      # LLM · same source of truth as api container
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai_compat}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_DEFAULT_MODEL: ${LLM_DEFAULT_MODEL:-gpt-4o-mini}
+      HUNTER_BUDGET_ENABLED: ${HUNTER_BUDGET_ENABLED:-false}
+    ports:
+      - "${OPENCODE_HOST_PORT:-3921}:3901"
 
 volumes:
   hunter_pg_data:
