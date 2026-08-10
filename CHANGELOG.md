@@ -30,6 +30,44 @@ First public preview cutting five compressed sprints into `main`.
 - Password reset flow · rate limit · settings account tab
 - Full `docs/01-13` coverage (only 01-02 shipped)
 
+## [0.2.0] - 2026-08-11
+
+### Added
+- **`opencode` chat engine now runs** via `ghcr.io/agentpit-io/hunter-opencode:latest`
+  · docker-compose service uncommented · 5 hunter plugins loaded
+  (hunter-auth · hunter-audit · hunter-guard · hunter-budget · hunter-mcp-context)
+  · 4 MCP servers registered (watchlist · portfolio · uzi · hunter_user).
+- **Companion image build** in huntercode private repo:
+  `packages/hunter-server/Dockerfile` (bun 1.3.14-alpine + python3 + `mcp` +
+  `httpx`) · `.github/workflows/hunter-community-publish.yml` publishes on
+  push to dev · multi-tag GHCR (branch, sha, tag).
+- **nginx `/api/opencode/` location** proxies to `:3921` (opencode host port)
+  with 600s SSE-friendly timeout · Bearer JWT passed through.
+
+### Changed
+- **opencode basic auth OFF by default** · `OPENCODE_USER/PASS` defaults are
+  empty in `docker-compose.yml`. hunter-auth plugin (JWT via shared
+  `JWT_SECRET`) is the sole gate. Setting the vars re-enables basic auth
+  but requires additional nginx work.
+- `.env.example` documents `HUNTER_INTERNAL_KEY` (shared secret for MCP →
+  api container callbacks), `OPENCODE_TAG`, `HUNTER_BUDGET_ENABLED`.
+
+### Fixed (during Session B / opencode enablement)
+- `packages/hunter-server/Dockerfile` broadened `COPY . .` (needs
+  patches/ turbo.json for `bun install --frozen-lockfile`) + added
+  python3+make+g++ to deps stage (postinstall node-gyp compile).
+
+### Verified on fin-r1
+- `GET /api/opencode/agent` → 200 · 19.5KB (9 agents including build/plan/
+  explore/summary/triage/duplicate-pr)
+- `GET /api/opencode/session` → 200 · `[]`
+- `GET /api/opencode/config/providers` → 200 · 6KB provider list
+
+### GHCR
+- `ghcr.io/agentpit-io/hunter-opencode:dev` published (visibility: private
+  by default · needs manual UI flip to public per doc 08 for anon pull)
+- Alternative: `docker login ghcr.io` with a PAT to pull private image
+
 ## [0.1.3] - 2026-08-11
 
 ### Added
