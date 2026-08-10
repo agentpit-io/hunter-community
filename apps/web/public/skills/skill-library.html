@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>能力库 · 猎鹿人 Hunter</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="demo-page">
+
+<div class="modal-mask">
+  <div class="modal-shell" role="dialog" aria-label="能力库">
+
+    <!-- ═════ Header ═════ -->
+    <div class="modal-header">
+      <span style="font-size:20px">⚡</span>
+      <div class="title">能力库 <span style="color:var(--muted);font-family:inherit;font-weight:400;font-size:13px;margin-left:8px">40 个精选场景 · 点击即用</span></div>
+      <button class="btn ghost small">建议新能力 →</button>
+      <button class="close" aria-label="关闭">×</button>
+    </div>
+
+    <!-- ═════ Body ═════ -->
+    <div class="modal-body">
+
+      <!-- ─── Left Nav ─── -->
+      <nav class="nav">
+        <div class="nav-search">
+          <span class="ic">🔍</span>
+          <input placeholder="搜索能力名字 / 场景 / 股票…" />
+        </div>
+
+        <div class="nav-item active">
+          <span class="ic">◈</span>全部
+          <span class="cnt">40</span>
+        </div>
+        <div class="nav-item">
+          <span class="ic">★</span>为你推荐
+          <span class="cnt">8</span>
+        </div>
+        <div class="nav-item">
+          <span class="ic">⚑</span>我的常用
+          <span class="cnt">3</span>
+        </div>
+
+        <div class="nav-sep"></div>
+        <div class="nav-label">按分类浏览</div>
+
+        <div class="nav-item"><span class="ic">📊</span>行情速查<span class="cnt">8</span></div>
+        <div class="nav-item"><span class="ic">🏢</span>公司研究<span class="cnt">12</span></div>
+        <div class="nav-item"><span class="ic">🎯</span>事件驱动<span class="cnt">6</span></div>
+        <div class="nav-item"><span class="ic">🔎</span>选股筛选<span class="cnt">4</span></div>
+        <div class="nav-item"><span class="ic">💼</span>组合风控<span class="cnt">4</span></div>
+        <div class="nav-item"><span class="ic">🌐</span>宏观行业<span class="cnt">3</span></div>
+        <div class="nav-item"><span class="ic">🧠</span>深度分析<span class="cnt">3</span></div>
+
+        <div class="nav-sep"></div>
+        <div class="nav-item"><span class="ic">✎</span>我的自定义<span class="cnt">2</span></div>
+
+        <div class="nav-foot">
+          <div style="padding:8px 12px;color:var(--muted);font-size:11px;line-height:1.6">
+            没找到想要的？<br>
+            <a style="color:var(--brand)">➤ 提能力需求</a>
+          </div>
+        </div>
+      </nav>
+
+      <!-- ─── Right Content ─── -->
+      <div class="content">
+
+        <!-- ★ Featured -->
+        <section class="section featured">
+          <div class="section-hd">
+            <div>
+              <span class="h">★ 为你推荐</span>
+              <span class="desc">依据你关注的 <b style="color:var(--brand-dark)">茅台 · 宁德时代 · 腾讯</b> · <a style="color:var(--brand);cursor:pointer">换一批</a></span>
+            </div>
+          </div>
+          <div class="cards">
+            <div class="card">
+              <button class="star on" title="已加常用">★</button>
+              <div class="row1">
+                <span class="icon">🐯</span>
+                <span class="name">今日龙虎榜</span>
+              </div>
+              <div class="hint">近 30 日 3 只关注股上榜 · 席位标记游资/机构 · 净买入排名</div>
+              <div class="foot">
+                <span class="chip new">NEW</span>
+                <span>表格 · 席位标签</span>
+                <span class="arrow">→</span>
+              </div>
+            </div>
+
+            <div class="card">
+              <button class="star" title="加入常用">☆</button>
+              <div class="row1">
+                <span class="icon">📋</span>
+                <span class="name">财报三点</span>
+              </div>
+              <div class="hint">收入/利润/现金流三张表核心 · 一句话结论 · 同环比</div>
+              <div class="foot">
+                <span>3 条要点 + 关键数字</span>
+                <span class="arrow">→</span>
+              </div>
+            </div>
+
+            <div class="card">
+              <button class="star" title="加入常用">☆</button>
+              <div class="row1">
+                <span class="icon">⚖️</span>
+                <span class="name">多空辩论</span>
+              </div>
+              <div class="hint">6 位分析师 · 2 轮对辩 · 生成 HTML 深度报告 · 60-90s</div>
+              <div class="foot">
+                <span class="chip workflow">深度分析 · 90s</span>
+                <span class="arrow">→</span>
+              </div>
+            </div>
+
+            <div class="card">
+              <button class="star on" title="已加常用">★</button>
+              <div class="row1">
+                <span class="icon">💹</span>
+                <span class="name">北向资金流向</span>
+              </div>
+              <div class="hint">近 5 日陆股通净流入 · 行业排位 · 同比变化</div>
+              <div class="foot">
+                <span>数字 + 行业排位</span>
+                <span class="arrow">→</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 📊 行情速查 -->
+        <section class="section">
+          <div class="section-hd">
+            <div><span class="h">📊 行情速查<span class="cnt">8 条</span></span></div>
+            <a class="more">查看全部 →</a>
+          </div>
+          <div class="cards">
+            <div class="card">
+              <button class="star">☆</button>
+              <div class="row1"><span class="icon">📈</span><span class="name">实时股价</span></div>
+              <div class="hint">开高低收 + 成交量 + 五档盘口</div>
+              <div class="foot"><span>一行数字 + 表</span><span class="arrow">→</span></div>
+            </div>
+            <div class="card">
+              <button class="star on">★</button>
+              <div class="row1"><span class="icon">🐯</span><span class="name">今日龙虎榜</span></div>
+              <div class="hint">游资/机构标记 · 净买入</div>
+              <div class="foot"><span class="chip new">NEW</span><span>表格</span><span class="arrow">→</span></div>
+            </div>
+            <div class="card">
+              <button class="star on">★</button>
+              <div class="row1"><span class="icon">💹</span><span class="name">北向资金</span></div>
+              <div class="hint">近 5 日陆股通净流入 · 行业排位</div>
+              <div class="foot"><span>数字 + 排位</span><span class="arrow">→</span></div>
+            </div>
+            <div class="card">
+              <button class="star">☆</button>
+              <div class="row1"><span class="icon">💰</span><span class="name">融资融券</span></div>
+              <div class="hint">融资余额变化 · 空头信号</div>
+              <div class="foot"><span>数字 + 趋势</span><span class="arrow">→</span></div>
+            </div>
+            <div class="card">
+              <button class="star">☆</button>
+              <div class="row1"><span class="icon">📅</span><span class="name">日线趋势</span></div>
+              <div class="hint">近 60 日 K 线关键点</div>
+              <div class="foot"><span>文字描述 + 关键位</span><span class="arrow">→</span></div>
+            </div>
+            <div class="card">
+              <button class="star">☆</button>
+              <div class="row1"><span class="icon">⏱</span><span class="name">分时异动</span></div>
+              <div class="hint">当日大单流入 · 拉升时点</div>
+              <div class="foot"><span>时点表</span><span class="arrow">→</span></div>
+            </div>
+            <div class="card">
+              <button class="star">☆</button>
+              <div class="row1"><span class="icon">🏦</span><span class="name">大宗交易</span></div>
+              <div class="hint">近 20 日大宗成交 · 折溢价率</div>
+              <div class="foot"><span>表格</span><span class="arrow">→</span></div>
+            </div>
+            <div class="card">
+              <button class="star">☆</button>
+              <div class="row1"><span class="icon">📉</span><span class="name">同业对比</span></div>
+              <div class="hint">多只股横向 · 涨跌幅/估值</div>
+              <div class="foot"><span>对比表 + 结论</span><span class="arrow">→</span></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 🏢 公司研究 -->
+        <section class="section">
+          <div class="section-hd">
+            <div><span class="h">🏢 公司研究<span class="cnt">12 条</span></span></div>
+            <a class="more">查看全部 →</a>
+          </div>
+          <div class="cards">
+            <div class="card">
+              <button class="star on">★</button>
+              <div class="row1"><span class="icon">📋</span><span class="name">财报三点</span></div>
+              <div class="hint">利润 / 资产负债 / 现金流</div>
+              <div class="foot"><span>3 条 + 关键数字</span><span class="arrow">→</span></div>
+            </div>
+            <div class="card">
+              <button class="star">☆</button>
+              <div class="row1"><span class="icon">💵</span><span class="name">回购与分红</span></div>
+              <div class="hint">近 12 月股东回报率</div>
+              <div class="foot"><span>表格 + 走势</span><span class="arrow">→</span></div>
+            </div>
+            <div class="card">
+              <button class="star">☆</button>
+              <div class="row1"><span class="icon">👔</span><span class="name">管理层变更</span></div>
+              <div class="hint">高管变动 + 增减持</div>
+              <div class="foot"><span>时间线</span><span class="arrow">→</span></div>
+            </div>
+            <div class="card">
+              <button class="star">☆</button>
+              <div class="row1"><span class="icon">🏛</span><span class="name">机构调研</span></div>
+              <div class="hint">近 30 日接待机构 + 问题</div>
+              <div class="foot"><span>要点纪要</span><span class="arrow">→</span></div>
+            </div>
+            <div class="card">
+              <button class="star">☆</button>
+              <div class="row1"><span class="icon">🔗</span><span class="name">股权质押</span></div>
+              <div class="hint">大股东质押率 + 风险</div>
+              <div class="foot"><span>数字 + 预警</span><span class="arrow">→</span></div>
+            </div>
+            <div class="card">
+              <button class="star">☆</button>
+              <div class="row1"><span class="icon">📄</span><span class="name">最新公告</span></div>
+              <div class="hint">近 30 日公告要点</div>
+              <div class="foot"><span>列表 + 摘要</span><span class="arrow">→</span></div>
+            </div>
+            <div class="card">
+              <button class="star">☆</button>
+              <div class="row1"><span class="icon">🧑‍🤝‍🧑</span><span class="name">员工持股</span></div>
+              <div class="hint">股权激励 + 解锁进度</div>
+              <div class="foot"><span>时间线</span><span class="arrow">→</span></div>
+            </div>
+            <div class="card">
+              <button class="star">☆</button>
+              <div class="row1"><span class="icon">🧾</span><span class="name">应收 / 存货</span></div>
+              <div class="hint">周转率变化 · 风险信号</div>
+              <div class="foot"><span>数字 + 走势</span><span class="arrow">→</span></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 🎯 事件驱动 -->
+        <section class="section">
+          <div class="section-hd">
+            <div><span class="h">🎯 事件驱动<span class="cnt">6 条</span></span></div>
+            <a class="more">查看全部 →</a>
+          </div>
+          <div class="cards">
+            <div class="card">
+              <button class="star">☆</button>
+              <div class="row1"><span class="icon">📆</span><span class="name">财报季雷达</span></div>
+              <div class="hint">下 30 日发布日历 + 预期</div>
+              <div class="foot"><span>日历表</span><span class="arrow">→</span></div>
+            </div>
+            <div class="card">
+              <button class="star">☆</button>
+              <div class="row1"><span class="icon">🏛</span><span class="name">政策解读</span></div>
+              <div class="hint">最近政策变化 + 受益股</div>
+              <div class="foot"><span>要点 + 受益标的</span><span class="arrow">→</span></div>
+            </div>
+            <div class="card">
+              <button class="star">☆</button>
+              <div class="row1"><span class="icon">🔀</span><span class="name">并购重组</span></div>
+              <div class="hint">近期资产重组 · 换股比例</div>
+              <div class="foot"><span>要点</span><span class="arrow">→</span></div>
+            </div>
+            <div class="card">
+              <button class="star">☆</button>
+              <div class="row1"><span class="icon">⚠️</span><span class="name">退市风险</span></div>
+              <div class="hint">*ST 名单 · 退市指标扫描</div>
+              <div class="foot"><span>清单 + 指标</span><span class="arrow">→</span></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 🧠 深度分析（重能力） -->
+        <section class="section">
+          <div class="section-hd">
+            <div><span class="h">🧠 深度分析<span class="cnt">3 条</span></span>
+              <span class="desc">workflow 型 · 生成 HTML 报告 · 60-120s</span>
+            </div>
+            <a class="more">查看全部 →</a>
+          </div>
+          <div class="cards">
+            <div class="card">
+              <button class="star on">★</button>
+              <div class="row1"><span class="icon">⚖️</span><span class="name">多空辩论</span></div>
+              <div class="hint">6 位分析师 · 2 轮 · 买卖决策</div>
+              <div class="foot">
+                <span class="chip workflow">深度 · 60-90s</span>
+                <span class="arrow">→</span>
+              </div>
+            </div>
+            <div class="card">
+              <button class="star">☆</button>
+              <div class="row1"><span class="icon">📈</span><span class="name">Kronos 预测</span></div>
+              <div class="hint">清华 Kronos 金融时序大模型 · 5 日走势</div>
+              <div class="foot">
+                <span class="chip workflow">深度 · 30-60s</span>
+                <span class="arrow">→</span>
+              </div>
+            </div>
+            <div class="card">
+              <button class="star">☆</button>
+              <div class="row1"><span class="icon">🧠</span><span class="name">AI 财报深读</span></div>
+              <div class="hint">财报全文 → 结构化要点 + 5 年趋势 · HTML 报告</div>
+              <div class="foot">
+                <span class="chip workflow">深度 · 90-120s</span>
+                <span class="chip pro">PRO</span>
+                <span class="arrow">→</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // 关闭按钮 / Esc / 点击遮罩 → 回到 /chat
+  const goBack = () => { location.href = '/chat' }
+  document.querySelectorAll('.close').forEach(b => b.addEventListener('click', goBack))
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') goBack() })
+  document.querySelector('.modal-mask')?.addEventListener('click', e => {
+    if (e.target.classList.contains('modal-mask')) goBack()
+  })
+</script>
+
+</body>
+</html>

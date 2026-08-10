@@ -1,0 +1,573 @@
+'use client'
+import { useEffect, useRef, useState } from 'react'
+import { ChevronDown } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import rehypeHighlight from 'rehype-highlight'
+import 'highlight.js/styles/github.css'
+import type { Message, MessagePart, MessagePartText, MessagePartTool } from '../lib/types'
+import ToolCallCard from './ToolCallCard'
+import FollowUpSuggestions from './FollowUpSuggestions'
+import ReportPreviewButton from './ReportPreviewButton'
+import HomeHero from './HomeHero'
+import { isReportWorthy, getAssistantText } from '../lib/reportDetect'
+import { HUNTER, HUNTER_LOGO } from '../../lib/hunter-theme'
+
+function isText(p: MessagePart): p is MessagePartText {
+  return p.type === 'text'
+}
+function isTool(p: MessagePart): p is MessagePartTool {
+  return p.type === 'tool'
+}
+
+interface Props {
+  messages: Message[]
+  onOpenArtifact?: (part: MessagePartTool) => void
+  /** 点建议 chip · 填输入框(不发送) · 走 draft 机制 */
+  onPickSuggestion?: (text: string) => void
+  /** 是否正在生成中 · true 时不显示 FollowUpSuggestions (等结束才显示) */
+  busy?: boolean
+  /** 打开 assistant 消息的最终报告预览 · 传入完整 text */
+  onOpenReport?: (text: string, sourceMessageId: string, artifactType?: 'markdown' | 'html', overrideTitle?: string) => void
+  /** 消息流底部额外内容 · 供多专家辩论等特殊 UI 插入进度卡 */
+  extraBottom?: React.ReactNode
+  /** 空态 quick-card 点击 · 与 sidebar 能力卡走同一 handler */
+  onPickSkill?: (prompt: string, key?: string) => void
+  /** 空态下把 InputBox 内联到 Hero 下方 · 由 ChatWorkspace 传入 */
+  heroInput?: React.ReactNode
+  /** Sprint E · HTML artifact 缓存 · 消息 id → 已生成的 HTML · 供 reopen */
+  htmlArtifacts?: Record<string, { html: string; title: string }>
+  /** 点消息底部 HTML 报告按钮时的 reopen 回调 */
+  onReopenHtmlArtifact?: (msgId: string) => void
+}
+
+function UserBubble({ text }: { text: string }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 20 }}>
+      <div
+        style={{
+          maxWidth: 680,
+          padding: '13px 16px',
+          background: '#f4eee7',
+          border: '1px solid #ead9c9',
+          borderRadius: '16px 16px 4px 16px',
+          color: HUNTER.INK,
+          fontSize: 14,
+          lineHeight: 1.6,
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+        }}
+      >
+        {text}
+      </div>
+    </div>
+  )
+}
+
+function AssistantBlock({ children, modeNote }: { children: React.ReactNode; modeNote?: string }) {
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '42px 1fr',
+        gap: 14,
+        marginBottom: 24,
+      }}
+    >
+      {/* 助手头像 · 与 sidebar / hero 同源 */}
+      <img
+        src={HUNTER_LOGO}
+        alt="Hunter"
+        width={38}
+        height={38}
+        style={{
+          width: 38,
+          height: 38,
+          minWidth: 38,
+          minHeight: 38,
+          borderRadius: '50%',
+          objectFit: 'cover',
+          flexShrink: 0,
+          boxShadow: '0 0 0 1px rgba(181,107,45,.42)',
+        }}
+        onError={(e) => {
+          (e.currentTarget as HTMLImageElement).style.display = 'none'
+        }}
+      />
+      <article style={{ minWidth: 0 }}>
+        <div
+          style={{
+            fontFamily: HUNTER.SERIF,
+            fontSize: 15,
+            fontWeight: 700,
+            color: HUNTER.INK,
+          }}
+        >
+          猎鹿人 Hunter
+        </div>
+        {modeNote && (
+          <div style={{ fontSize: 11, color: HUNTER.INK_F, marginTop: 3, marginBottom: 6 }}>
+            {modeNote}
+          </div>
+        )}
+        <div
+          style={{
+            color: HUNTER.INK,
+            fontSize: 14,
+            lineHeight: 1.85,
+            fontFamily: HUNTER.SANS,
+          }}
+        >
+          {children}
+        </div>
+      </article>
+    </div>
+  )
+}
+
+function MetricStrip({ rows }: { rows: Array<{ label: string; strong: string; note?: string }> }) {
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: `repeat(${Math.min(rows.length, 3)}, 1fr)`,
+        gap: 10,
+        margin: '16px 0',
+      }}
+    >
+      {rows.map((r, i) => (
+        <div
+          key={i}
+          style={{
+            border: `1px solid ${HUNTER.LINE}`,
+            borderRadius: 13,
+            padding: 13,
+            background: '#fff',
+          }}
+        >
+          <div style={{ color: HUNTER.INK_F, fontSize: 11 }}>{r.label}</div>
+          <div style={{ fontSize: 18, fontWeight: 700, marginTop: 5, color: HUNTER.INK }}>{r.strong}</div>
+          {r.note && <div style={{ fontSize: 11, color: HUNTER.SUCCESS, marginTop: 4 }}>{r.note}</div>}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function SourceCard({ text }: { text: string }) {
+  return (
+    <div
+      style={{
+        marginTop: 18,
+        border: `1px solid ${HUNTER.LINE}`,
+        borderRadius: 14,
+        padding: '14px 15px',
+        background: '#fafaf7',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+      }}
+    >
+      <div
+        style={{
+          width: 34,
+          height: 34,
+          borderRadius: 10,
+          background: '#ece8df',
+          display: 'grid',
+          placeItems: 'center',
+          fontSize: 15,
+          flexShrink: 0,
+          color: HUNTER.INK_S,
+        }}
+      >
+        ▤
+      </div>
+      <div>
+        <b style={{ fontSize: 13, color: HUNTER.INK }}>研究依据与数据来源</b>
+        <div style={{ color: HUNTER.INK_F, fontSize: 11, marginTop: 3 }}>{text}</div>
+      </div>
+    </div>
+  )
+}
+
+/** Tag chip · 支持 TAG:xxx（绿 · 中性）/ TAG_WARN:xxx（橙 · 提示） */
+function renderTagCell(raw: string): React.ReactNode {
+  const m = raw.trim().match(/^TAG(_WARN)?:(.+)$/)
+  if (!m) return raw
+  const warn = !!m[1]
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        height: 24,
+        padding: '0 8px',
+        borderRadius: 999,
+        background: warn ? HUNTER.TAG_WARN_BG : HUNTER.TAG_OK_BG,
+        color: warn ? HUNTER.TAG_WARN_FG : HUNTER.TAG_OK_FG,
+        fontSize: 11,
+        fontWeight: 600,
+      }}
+    >
+      {m[2].trim()}
+    </span>
+  )
+}
+
+/** 抽出 markdown 尾部约定标记 `> 数据来源: xxx` · 返回 { body, source } */
+function extractSource(text: string): { body: string; source: string | null } {
+  // 匹配最后一段 blockquote 形式 · 或 HTML 注释形式
+  const m = text.match(/(?:^|\n)\s*>\s*数据来源\s*[:：]\s*(.+?)\s*$/)
+  if (m) return { body: text.slice(0, m.index).trimEnd(), source: m[1].trim() }
+  const c = text.match(/<!--\s*source:\s*(.+?)\s*-->/i)
+  if (c) return { body: text.replace(c[0], '').trimEnd(), source: c[1].trim() }
+  return { body: text, source: null }
+}
+
+function MdText({ text }: { text: string }) {
+  const { body, source } = extractSource(text)
+  return (
+    <div className="hunter-md">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeHighlight]}
+        components={{
+          p: ({ children }) => (
+            <p style={{ margin: '0 0 12px 0', lineHeight: 1.75 }}>{children}</p>
+          ),
+          h1: ({ children }) => (
+            <h1 style={{ fontSize: 22, fontWeight: 700, margin: '20px 0 12px', color: HUNTER.INK, fontFamily: HUNTER.SERIF }}>{children}</h1>
+          ),
+          h2: ({ children }) => (
+            <h2 style={{ fontSize: 18, fontWeight: 700, margin: '18px 0 10px', color: HUNTER.INK, fontFamily: HUNTER.SERIF }}>{children}</h2>
+          ),
+          h3: ({ children }) => (
+            <h3 style={{ fontSize: 15, fontWeight: 700, margin: '16px 0 8px', color: HUNTER.INK }}>{children}</h3>
+          ),
+          ul: ({ children }) => (
+            <ul style={{ margin: '0 0 12px 0', paddingLeft: 22, lineHeight: 1.75 }}>{children}</ul>
+          ),
+          ol: ({ children }) => (
+            <ol style={{ margin: '0 0 12px 0', paddingLeft: 22, lineHeight: 1.75 }}>{children}</ol>
+          ),
+          li: ({ children }) => (
+            <li style={{ margin: '2px 0' }}>{children}</li>
+          ),
+          strong: ({ children }) => (
+            <strong style={{ fontWeight: 700, color: HUNTER.INK }}>{children}</strong>
+          ),
+          em: ({ children }) => (
+            <em style={{ fontStyle: 'italic', color: HUNTER.INK_S }}>{children}</em>
+          ),
+          code: ({ inline, className, children, ...props }: any) => {
+            if (inline) {
+              return (
+                <code
+                  style={{
+                    background: '#f0ede2',
+                    padding: '1px 6px',
+                    borderRadius: 4,
+                    fontSize: '0.9em',
+                    fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
+                    color: HUNTER.COPPER3,
+                  }}
+                  {...props}
+                >
+                  {children}
+                </code>
+              )
+            }
+            // ```metric 特殊 fenced block · 每行 label|strong|note
+            if (className === 'language-metric') {
+              const src = Array.isArray(children) ? children.join('') : String(children || '')
+              const rows = src
+                .split('\n')
+                .map((l: string) => l.trim())
+                .filter(Boolean)
+                .map((l: string) => {
+                  const [label = '', strong = '', note = ''] = l.split('|').map((s) => s.trim())
+                  return { label, strong, note }
+                })
+                .filter((r: any) => r.label && r.strong)
+              if (rows.length > 0) return <MetricStrip rows={rows} />
+            }
+            return (
+              <code className={className} {...props}>
+                {children}
+              </code>
+            )
+          },
+          pre: ({ children }: any) => (
+            <pre
+              style={{
+                background: '#f8f6ef',
+                border: `1px solid ${HUNTER.LINE}`,
+                borderRadius: 8,
+                padding: '12px 14px',
+                overflow: 'auto',
+                fontSize: 13,
+                margin: '10px 0',
+                fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
+                lineHeight: 1.5,
+              }}
+            >
+              {children}
+            </pre>
+          ),
+          a: ({ href, children }: any) => (
+            <a
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: HUNTER.THEME, textDecoration: 'underline' }}
+            >
+              {children}
+            </a>
+          ),
+          table: ({ children }) => (
+            <div style={{ overflowX: 'auto', margin: '16px 0' }}>
+              <table
+                style={{
+                  width: '100%',
+                  borderCollapse: 'separate',
+                  borderSpacing: 0,
+                  border: `1px solid ${HUNTER.LINE}`,
+                  borderRadius: 13,
+                  overflow: 'hidden',
+                  background: '#fff',
+                  fontSize: 12,
+                }}
+              >
+                {children}
+              </table>
+            </div>
+          ),
+          th: ({ children }) => (
+            <th style={{ padding: '12px 13px', background: '#f5f4ef', textAlign: 'left', fontWeight: 650, borderRight: `1px solid ${HUNTER.LINE}`, borderBottom: `1px solid ${HUNTER.LINE}` }}>
+              {children}
+            </th>
+          ),
+          td: ({ children }) => {
+            // 支持 TAG:xxx / TAG_WARN:xxx chip · 单元格纯文本时替换
+            const raw =
+              typeof children === 'string'
+                ? children
+                : Array.isArray(children) && children.length === 1 && typeof children[0] === 'string'
+                ? (children[0] as string)
+                : null
+            const content = raw ? renderTagCell(raw) : children
+            return (
+              <td style={{ padding: '12px 13px', borderRight: `1px solid ${HUNTER.LINE}`, borderBottom: `1px solid ${HUNTER.LINE}`, verticalAlign: 'top' }}>
+                {content}
+              </td>
+            )
+          },
+          blockquote: ({ children }) => (
+            <blockquote
+              style={{
+                borderLeft: `3px solid ${HUNTER.THEME}`,
+                paddingLeft: 12,
+                margin: '10px 0',
+                color: HUNTER.INK_S,
+                fontStyle: 'italic',
+              }}
+            >
+              {children}
+            </blockquote>
+          ),
+        }}
+      >
+        {body}
+      </ReactMarkdown>
+      {source && <SourceCard text={source} />}
+    </div>
+  )
+}
+
+export default function MessageList({ messages, onOpenArtifact, onPickSuggestion, busy, onOpenReport, extraBottom, onPickSkill, heroInput, htmlArtifacts, onReopenHtmlArtifact }: Props) {
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const bottomRef = useRef<HTMLDivElement>(null)
+  // 用户是否在底部 · 决定是否自动滚
+  // 初始 true · 用户手动上滚后转 false · 滚回底部又转 true
+  const userAtBottomRef = useRef(true)
+  const [showJumpBtn, setShowJumpBtn] = useState(false)
+
+  const NEAR_BOTTOM_PX = 120
+
+  const checkAtBottom = () => {
+    const el = scrollRef.current
+    if (!el) return true
+    return el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX
+  }
+
+  const handleScroll = () => {
+    const atBottom = checkAtBottom()
+    userAtBottomRef.current = atBottom
+    setShowJumpBtn(!atBottom)
+  }
+
+  const jumpToBottom = () => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    userAtBottomRef.current = true
+    setShowJumpBtn(false)
+  }
+
+  // messages 变化 · 只在用户当前处于底部时才自动滚
+  // 避免用户上滚看历史时被强拉回底部
+  useEffect(() => {
+    if (userAtBottomRef.current) {
+      // 用 requestAnimationFrame 等 DOM 更新完再滚 · 避免抖动
+      requestAnimationFrame(() => {
+        bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+      })
+    }
+  }, [messages])
+
+  return (
+    <div
+      ref={scrollRef}
+      onScroll={handleScroll}
+      style={{
+        flex: 1,
+        overflowY: 'auto',
+        background: '#ffffff',
+        position: 'relative',
+      }}
+    >
+      {messages.length === 0 && (
+        <div style={{ padding: '0 0 24px' }}>
+          <HomeHero
+            onPick={(prompt, key) => {
+              if (key && onPickSkill) onPickSkill(prompt, key)
+              else onPickSuggestion?.(prompt)
+            }}
+          />
+          {heroInput}
+        </div>
+      )}
+
+      <div
+        style={{
+          maxWidth: 900,
+          margin: '0 auto',
+          padding: messages.length === 0 ? '0' : '40px 24px 200px',
+        }}
+      >
+
+        {messages.map((msg, idx) => {
+          const isUser = msg.role === 'user'
+          const parts = msg.parts || []
+
+          if (isUser) {
+            const text = parts.filter(isText).map((p) => p.text).join('\n')
+            return <UserBubble key={msg.id} text={text} />
+          }
+
+          // 是否最后一条 assistant · 用于决定是否显示 FollowUp
+          const isLastAssistant =
+            idx === messages.length - 1 ||
+            !messages.slice(idx + 1).some((m) => m.role === 'assistant')
+          const hasText = parts.some((p) => isText(p) && (p as MessagePartText).text)
+
+          // 报告检测 · 长文 + markdown 特征
+          const reportWorthy = isReportWorthy(msg, isLastAssistant ? !!busy : false)
+
+          // mode-note · 数据截至日期 · 由 message.time 派生
+          const ts = msg.time?.updated || msg.time?.created
+          const modeNote = ts
+            ? `深度思考完成 · 数据截至 ${new Date(ts).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })}`
+            : undefined
+          // A · 过滤 Gemini function-calling 前置 planning 段
+          // Gemini 常在调 tool 前吐 "I will predict... First I need to..."
+          // 这类文本是内部编排 · 用户不需要 · 找到最后一个 tool_call 位置 ·
+          // 之前的 text 段一律不渲染(tool_call 卡片本身仍显示)
+          const lastToolIdx = parts
+            .map((p, i) => (isTool(p) ? i : -1))
+            .filter((i) => i >= 0)
+            .pop() ?? -1
+
+          return (
+            <AssistantBlock key={msg.id} modeNote={modeNote}>
+              {parts.map((part, i) => {
+                // 隐藏所有位于最后 tool_call 之前的 text 段
+                if (isText(part) && i < lastToolIdx) return null
+                if (isText(part)) return <MdText key={i} text={part.text} />
+                if (isTool(part)) return <ToolCallCard key={i} part={part} onOpenArtifact={onOpenArtifact} />
+                return null
+              })}
+
+              {/* 报告预览按钮 · 每条 assistant 满足启发式条件都显示 */}
+              {reportWorthy && onOpenReport && !htmlArtifacts?.[msg.id] && (
+                <ReportPreviewButton
+                  onOpen={() => onOpenReport(getAssistantText(msg), msg.id)}
+                />
+              )}
+
+              {/* Sprint E · HTML artifact 预览按钮 · 用户关闭 Artifact 面板后可再打开 */}
+              {htmlArtifacts?.[msg.id] && onReopenHtmlArtifact && (
+                <ReportPreviewButton
+                  artifactType="html"
+                  onOpen={() => onReopenHtmlArtifact(msg.id)}
+                />
+              )}
+
+              {/* 每条最后 assistant · 且非 busy · 且有 text · 显示 5 追问建议 */}
+              {isLastAssistant && !busy && hasText && onPickSuggestion && (
+                <FollowUpSuggestions
+                  messages={messages}
+                  currentIndex={idx}
+                  onPick={onPickSuggestion}
+                />
+              )}
+            </AssistantBlock>
+          )
+        })}
+
+        {extraBottom}
+
+        <div ref={bottomRef} />
+      </div>
+
+      {/* 回底按钮 · 只在用户上滚离开底部时显示 */}
+      {showJumpBtn && (
+        <button
+          type="button"
+          onClick={jumpToBottom}
+          title="回到底部"
+          style={{
+            position: 'sticky',
+            bottom: 20,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            marginLeft: 'auto',
+            marginRight: 'auto',
+            display: 'block',
+            width: 40,
+            height: 40,
+            borderRadius: '50%',
+            background: '#ffffff',
+            border: `1px solid ${HUNTER.LINE}`,
+            color: HUNTER.INK_S,
+            cursor: 'pointer',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
+            transition: 'all 0.15s',
+            zIndex: 10,
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = HUNTER.THEME
+            e.currentTarget.style.color = '#fff'
+            e.currentTarget.style.borderColor = HUNTER.THEME
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = '#ffffff'
+            e.currentTarget.style.color = HUNTER.INK_S
+            e.currentTarget.style.borderColor = HUNTER.LINE
+          }}
+        >
+          <ChevronDown size={18} style={{ margin: 'auto', display: 'block' }} />
+        </button>
+      )}
+    </div>
+  )
+}

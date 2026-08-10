@@ -1,0 +1,65 @@
+{
+  "_meta": {
+    "version": 1,
+    "created": "2026-08-04",
+    "source": "doc/codex/04-开发计划.md · T-P0-04",
+    "note": "6 场景 × 3 条 · 用于 e2e 回归 + 汇总质量评测"
+  },
+  "scenarios": {
+    "A_simple_data": {
+      "desc": "简单数据问答，只调 MCP tool，无需 sub-agent",
+      "expected_max_tool_agents": 0,
+      "expected_max_duration_ms": 3000,
+      "queries": [
+        {"stock_code": "600519", "stock_name": "贵州茅台", "query": "茅台现在什么价"},
+        {"stock_code": "000001", "stock_name": "平安银行", "query": "平安银行涨了多少"},
+        {"stock_code": "600519", "stock_name": "贵州茅台", "query": "茅台的成交量"}
+      ]
+    },
+    "B_combo_analysis": {
+      "desc": "组合分析，主 agent 应并行调 research + quant_predict + scout",
+      "expected_min_tool_agents": 2,
+      "expected_max_duration_ms": 15000,
+      "queries": [
+        {"stock_code": "600519", "stock_name": "贵州茅台", "query": "茅台最近能买吗"},
+        {"stock_code": "300750", "stock_name": "宁德时代", "query": "宁德时代现在值不值得研究"},
+        {"stock_code": "000858", "stock_name": "五粮液", "query": "五粮液怎么样"}
+      ]
+    },
+    "C_hold_judge": {
+      "desc": "持仓判断，触发 hold_judge 长流程（多空辩论），预期 25/50/75/100 进度",
+      "expected_min_tool_agents": 1,
+      "expected_max_duration_ms": 45000,
+      "queries": [
+        {"stock_code": "600519", "stock_name": "贵州茅台", "query": "我在 1850 买的茅台，还该拿吗"},
+        {"stock_code": "300750", "stock_name": "宁德时代", "query": "宁德持仓要止损吗"},
+        {"stock_code": "000001", "stock_name": "平安银行", "query": "平安银行成本 15，撤不撤"}
+      ]
+    },
+    "D_stock_switch": {
+      "desc": "多轮股票切换，助手应识别并更新 stock_code 上下文",
+      "expected_min_tool_agents": 1,
+      "sequence": [
+        {"stock_code": "600519", "query": "茅台呢"},
+        {"stock_code": null, "query": "那 00700 呢？"}
+      ]
+    },
+    "E_partial_error": {
+      "desc": "单专家失败降级：mock quant 抛异常，其他 sub-agent 仍返回",
+      "mock_error_tools": ["quant_predict"],
+      "queries": [
+        {"stock_code": "600519", "stock_name": "贵州茅台", "query": "茅台能买吗"}
+      ],
+      "expected_summary_contains": ["量化择时", "不含"]
+    },
+    "F_full_llm_failure": {
+      "desc": "function calling 全链路故障，降级到关键词路由",
+      "mock_llm_failure": true,
+      "queries": [
+        {"stock_code": "600519", "stock_name": "贵州茅台", "query": "茅台最近怎么样"}
+      ],
+      "expected_error_code": "LLM_FAILED",
+      "expected_fallback": "keyword_route"
+    }
+  }
+}

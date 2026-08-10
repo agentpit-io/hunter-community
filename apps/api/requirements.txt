@@ -1,0 +1,25 @@
+fastapi==0.136.1
+uvicorn==0.46.0
+pydantic==2.13.4
+pydantic-settings==2.14.0
+httpx==0.28.1
+psycopg2-binary==2.9.12
+bcrypt==4.3.0
+redis==7.4.0
+APScheduler==3.11.2
+loguru==0.7.3
+akshare==1.18.60
+openai==2.36.0
+# AES-256-GCM · 用户自定义 MCP 的 API key 保护(mcp_crypto.py)
+cryptography==43.0.3
+
+# hermes-api 通过 sys.path in-process import /opt/hermes-agent-core 跑 /api/hermes/chat
+# 下面这几个是 hermes-agent-core 的 run_agent.py 启动时必需的依赖，缺一个 import 就 500
+PyYAML==6.0.3
+ta==0.11.0
+# uvicorn[standard] 的可选高性能依赖，hermes-agent-core 默认 import 探测，缺了会报 warning（不致命，但跟现网一致更稳）
+httptools==0.7.1
+uvloop==0.22.1
+watchfiles==1.1.1
+websockets==16.0
+

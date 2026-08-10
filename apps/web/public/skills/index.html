@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>能力中心 · 猎鹿人 Hunter</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    body{background:var(--bg);padding:60px 24px}
+    .wrap{max-width:960px;margin:0 auto}
+    h1{
+      font-family:Georgia,"Noto Serif SC",serif;
+      font-size:34px;margin:0 0 10px;letter-spacing:.01em;
+    }
+    .sub{color:var(--muted);margin-bottom:36px;font-size:14px;line-height:1.7}
+    .card-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:24px}
+    .entry-card{
+      display:flex;flex-direction:column;
+      padding:22px 20px;background:#fff;
+      border:1px solid var(--line);border-radius:14px;
+      box-shadow:0 4px 18px rgba(40,35,27,.025);
+      transition:.15s;
+      color:inherit;
+      min-height:230px;
+    }
+    .entry-card:hover{
+      transform:translateY(-3px);
+      border-color:#c8b39f;
+      box-shadow:0 12px 24px rgba(40,35,27,.08);
+    }
+    .entry-card .cover{
+      width:56px;height:56px;border-radius:14px;background:var(--brand-pale);
+      display:grid;place-items:center;font-size:26px;color:var(--brand-dark);
+      margin-bottom:16px;
+    }
+    .entry-card h3{margin:0 0 6px;font-size:17px;font-weight:650;font-family:Georgia,"Noto Serif SC",serif;letter-spacing:.01em}
+    .entry-card .desc{color:var(--muted);font-size:13px;line-height:1.65;flex:1}
+    .entry-card .foot{
+      margin-top:14px;padding-top:12px;border-top:1px solid var(--panel-2);
+      color:var(--brand);font-size:12.5px;font-weight:600;
+      display:flex;align-items:center;gap:4px;
+    }
+    .back-link{
+      display:inline-flex;align-items:center;gap:6px;
+      color:var(--muted);font-size:13px;
+    }
+    .back-link:hover{color:var(--brand)}
+    .intro{
+      background:linear-gradient(180deg,#fff9f0 0%,#fff 100%);
+      border:1px solid #e8dcc4;border-radius:14px;
+      padding:20px 22px;margin-top:28px;
+      font-size:13px;color:var(--text);line-height:1.75;
+    }
+    .intro b{color:var(--brand-dark)}
+  </style>
+</head>
+<body>
+
+<div class="wrap">
+  <a href="/chat" class="back-link">← 返回对话</a>
+  <h1 style="margin-top:14px">能力中心</h1>
+  <div class="sub">
+    Hunter 内置和你自建的所有分析能力都在这里。<br>
+    浏览场景 · 定制专属能力 · 从对话一键保存常用问法。
+  </div>
+
+  <div class="card-grid">
+    <a class="entry-card" href="skill-library.html">
+      <div class="cover">⚡</div>
+      <h3>浏览能力</h3>
+      <div class="desc">
+        7 大类共 40+ 个精选投研场景 —— 行情速查、公司研究、事件驱动、选股筛选、组合风控、宏观行业、深度分析。按类目找、按关键词搜、按你的关注推荐。
+      </div>
+      <div class="foot">打开能力库 →</div>
+    </a>
+
+    <a class="entry-card" href="skill-manager-v2.html">
+      <div class="cover">📝</div>
+      <h3>定制能力</h3>
+      <div class="desc">
+        把你常问的问法存成模板，支持多参数（股票 / 日期范围 / 风险偏好…），指定深度思考与工具组合，可生成分享链接给同事。
+      </div>
+      <div class="foot">管理我的能力 →</div>
+    </a>
+
+    <a class="entry-card" href="save-as-skill.html">
+      <div class="cover">💾</div>
+      <h3>从对话保存</h3>
+      <div class="desc">
+        对话时看到一段特别顺手的问法？在消息上点"存为能力"，框选一段文字变成参数，下次一键复用不用再想措辞。
+      </div>
+      <div class="foot">了解交互 →</div>
+    </a>
+  </div>
+
+  <div class="intro">
+    <b>关于能力中心</b><br>
+    我们把 Hunter 的 AI 能力打包成一张张场景卡片，让你不用记"该怎么问"。<br>
+    找不到想要的场景？<a href="mailto:hangeaiagent@gmail.com" style="color:var(--brand)">给我们发能力建议 →</a>
+  </div>
+</div>
+
+</body>
+</html>

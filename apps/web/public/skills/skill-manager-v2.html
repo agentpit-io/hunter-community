@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>定制能力 · 猎鹿人 Hunter</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    /* skill-manager-v2 专属 · 较窄的居中对话框 */
+    .mgr-shell{
+      background:var(--bg);border-radius:16px;
+      width:100%;max-width:640px;max-height:calc(100vh - 60px);
+      border:1px solid var(--line);
+      box-shadow:0 30px 80px rgba(20,15,8,.35);
+      display:flex;flex-direction:column;overflow:hidden;
+    }
+    .mgr-body{padding:16px 20px 20px;overflow-y:auto}
+    .param-row{
+      display:grid;grid-template-columns:24px 130px 110px 1fr 28px;gap:8px;
+      align-items:center;margin-bottom:8px;
+    }
+    .param-row .hand{color:var(--soft);text-align:center;cursor:grab}
+    .param-row .name-input{
+      padding:7px 10px;background:#fff;border:1px solid var(--line);border-radius:8px;
+      font-size:12.5px;outline:none;
+    }
+    .param-row .del{color:var(--danger);text-align:center;cursor:pointer;font-size:14px}
+    .param-row .del:hover{color:var(--brand-dark)}
+    .param-tpl-hint{
+      margin:6px 0 12px;font-size:11px;color:var(--muted);
+      background:var(--panel-2);padding:8px 12px;border-radius:8px;line-height:1.6;
+    }
+    .param-tpl-hint code{
+      background:#fff;padding:1px 6px;border-radius:4px;color:var(--brand-dark);
+      font-family:ui-monospace,menlo,monospace;
+    }
+    .tool-check{
+      display:flex;align-items:center;gap:8px;padding:8px 12px;
+      border:1px solid var(--line);border-radius:10px;margin-bottom:6px;
+      cursor:pointer;transition:.1s;
+    }
+    .tool-check:hover{background:var(--panel-2)}
+    .tool-check.on{border-color:var(--brand);background:var(--brand-pale)}
+    .tool-check input{margin:0;accent-color:var(--brand)}
+    .tool-check .name{flex:1;font-size:13px;font-weight:600}
+    .tool-check .desc{font-size:11px;color:var(--muted)}
+    .share-box{
+      background:var(--panel);border:1px dashed var(--line-strong);
+      padding:14px;border-radius:12px;text-align:center;
+    }
+    .share-url{
+      background:#fff;padding:10px 12px;border-radius:8px;border:1px solid var(--line);
+      font-family:ui-monospace,menlo,monospace;font-size:11px;
+      color:var(--brand-dark);word-break:break-all;text-align:left;margin-top:12px;
+    }
+    .actions{
+      display:flex;gap:10px;padding:14px 20px;border-top:1px solid var(--line);
+      background:rgba(255,255,255,.6);
+    }
+    .actions .btn{flex:1;height:40px}
+  </style>
+</head>
+<body class="demo-page">
+
+<div class="modal-mask">
+  <div class="mgr-shell" role="dialog" aria-label="能力管理">
+
+    <!-- ═════ Header ═════ -->
+    <div class="modal-header">
+      <span style="font-size:18px">📝</span>
+      <div class="title">编辑能力 · 板块扫描</div>
+      <button class="close" aria-label="关闭">×</button>
+    </div>
+
+    <!-- ═════ Body ═════ -->
+    <div class="mgr-body">
+
+      <!-- Tabs -->
+      <div class="tabs">
+        <div class="tab active">基本信息</div>
+        <div class="tab">参数 <span style="opacity:.6;font-size:11px">3</span></div>
+        <div class="tab">工具与能力</div>
+        <div class="tab">分享</div>
+      </div>
+
+      <!-- ─── Tab 1: 基本信息 ─── -->
+      <div class="tab-panel">
+        <div class="form-row">
+          <div class="label">图标 + 名称</div>
+          <div style="display:flex;gap:8px">
+            <select class="select" style="width:70px;text-align:center">
+              <option>📊</option><option>📈</option><option>🔎</option><option>⚡</option><option>🎯</option>
+            </select>
+            <input class="input" value="板块扫描" placeholder="能力名称,最多 20 字" maxlength="20" />
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="label">提问模板</div>
+          <div class="desc">大括号包裹参数名,如 <code style="background:var(--panel-2);padding:1px 5px;border-radius:4px">{股票}</code>。参数在下面 "参数" 标签页配置。</div>
+          <textarea class="textarea" rows="4">分析 {股票} 在 {日期范围} 内的北向资金流入排位,并结合同板块龙头对比,给出 {风险偏好} 型建议</textarea>
+        </div>
+
+        <div class="param-tpl-hint">
+          <b style="color:var(--text)">检测到 3 个参数：</b>
+          <code>{股票}</code>
+          <code>{日期范围}</code>
+          <code>{风险偏好}</code>
+          <br>
+          用户点这条能力时,会先弹出参数填写卡,确认后再发出提问 —— 比在文本里手动改占位符省事得多。
+        </div>
+      </div>
+
+      <!-- ─── Tab 2: 参数（已切换到示意状态） ─── -->
+      <div class="tab-panel" style="border-top:1px solid var(--line);margin-top:16px;padding-top:16px">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px">
+          <div style="font-size:13px;font-weight:600">参数配置</div>
+          <button class="btn small">+ 手动添加参数</button>
+        </div>
+
+        <div class="param-row" style="font-size:11px;color:var(--muted);margin-bottom:4px">
+          <span></span><span>参数名</span><span>类型</span><span>默认值 / 选项</span><span></span>
+        </div>
+
+        <div class="param-row">
+          <span class="hand">⋮⋮</span>
+          <input class="name-input" value="股票" />
+          <select class="select" style="height:32px;padding:0 8px">
+            <option>股票代码</option><option>文本</option><option>数字</option><option>日期</option><option>枚举</option>
+          </select>
+          <input class="name-input" placeholder="(必填)" value="" />
+          <span class="del" title="删除">×</span>
+        </div>
+
+        <div class="param-row">
+          <span class="hand">⋮⋮</span>
+          <input class="name-input" value="日期范围" />
+          <select class="select" style="height:32px;padding:0 8px">
+            <option>日期范围</option>
+          </select>
+          <input class="name-input" value="近 30 日" />
+          <span class="del" title="删除">×</span>
+        </div>
+
+        <div class="param-row">
+          <span class="hand">⋮⋮</span>
+          <input class="name-input" value="风险偏好" />
+          <select class="select" style="height:32px;padding:0 8px">
+            <option>枚举</option>
+          </select>
+          <input class="name-input" value="稳健|平衡|激进" />
+          <span class="del" title="删除">×</span>
+        </div>
+
+        <div style="font-size:11px;color:var(--muted);margin-top:12px;line-height:1.6">
+          <b>枚举</b>用 <code style="background:var(--panel-2);padding:1px 5px;border-radius:4px">|</code> 分隔选项,如 <code style="background:var(--panel-2);padding:1px 5px;border-radius:4px">稳健|平衡|激进</code>。<br>
+          填了默认值,用户点这条能力时对应选项会被自动预选。
+        </div>
+      </div>
+
+      <!-- ─── Tab 3: 工具与能力（示意） ─── -->
+      <div class="tab-panel" style="border-top:1px solid var(--line);margin-top:16px;padding-top:16px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:10px">建议启用</div>
+
+        <label class="tool-check on">
+          <input type="checkbox" checked />
+          <div style="flex:1">
+            <div class="name">◉ 深度思考</div>
+            <div class="desc">让 AI 用更多 token 推理 · 适合分析类问题 · 慢 20%</div>
+          </div>
+        </label>
+
+        <label class="tool-check on">
+          <input type="checkbox" checked />
+          <div style="flex:1">
+            <div class="name">◎ 联网搜索</div>
+            <div class="desc">允许 AI 补充最新公开信息 · 需要网络类问题必开</div>
+          </div>
+        </label>
+
+        <label class="tool-check">
+          <input type="checkbox" />
+          <div style="flex:1">
+            <div class="name">📊 quote (行情)</div>
+            <div class="desc">强制调用 truesource_get_quote MCP 工具 · 保证有实时数据</div>
+          </div>
+        </label>
+
+        <label class="tool-check">
+          <input type="checkbox" />
+          <div style="flex:1">
+            <div class="name">📈 forecast (预测)</div>
+            <div class="desc">附加 Kronos 时序预测数据</div>
+          </div>
+        </label>
+
+        <div style="font-size:11px;color:var(--muted);margin-top:14px;line-height:1.6">
+          勾选的工具会作为 <code style="background:var(--panel-2);padding:1px 5px;border-radius:4px">tool_hints</code> 传给后端,AI 会优先使用。留空 = AI 自主判断。
+        </div>
+      </div>
+
+      <!-- ─── Tab 4: 分享（示意） ─── -->
+      <div class="tab-panel" style="border-top:1px solid var(--line);margin-top:16px;padding-top:16px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:10px">分享给其他人</div>
+
+        <div class="share-box">
+          <div style="font-size:12px;color:var(--muted);line-height:1.6">
+            <b style="color:var(--text)">生成分享链接后,拿到链接的人可以一键复制这条能力到 TA 的库。</b><br>
+            链接里包含参数结构与提示词,<span style="color:var(--danger)">不含账户信息</span>。
+          </div>
+          <button class="btn primary" style="margin-top:14px">生成分享链接</button>
+          <div class="share-url">
+            https://hunter.agentpit.io/chat?import=eyJuYW1lIjoi5p2/5Z2X5oCn5o..."
+          </div>
+          <div style="display:flex;gap:8px;justify-content:center;margin-top:10px">
+            <button class="btn small">复制链接</button>
+            <button class="btn small">📱 二维码</button>
+            <button class="btn small ghost">撤销分享</button>
+          </div>
+        </div>
+
+        <div style="font-size:11px;color:var(--muted);margin-top:14px;line-height:1.6">
+          分享链接使用 base64 编码,无需服务端存储,不会追踪访问者。撤销分享 = 生成新链接、旧链接失效。
+        </div>
+      </div>
+    </div>
+
+    <!-- ═════ Actions ═════ -->
+    <div class="actions">
+      <button class="btn">取消</button>
+      <button class="btn ghost">删除能力</button>
+      <button class="btn primary">保存修改</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  const goBack = () => { location.href = '/skills/index.html' }
+  document.querySelectorAll('.close').forEach(b => b.addEventListener('click', goBack))
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') goBack() })
+  document.querySelector('.modal-mask')?.addEventListener('click', e => {
+    if (e.target.classList.contains('modal-mask')) goBack()
+  })
+</script>
+
+</body>
+</html>

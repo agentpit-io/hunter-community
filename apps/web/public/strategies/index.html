@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>策略广场 · 猎鹿人 Hunter</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<script src="app.js"></script>
+<script>
+document.body.innerHTML = renderShell('marketplace', '策略广场', '发现好策略 · 一键跟随 · 或自己搭一个', `
+  <a href="/strategies/factors.html" class="btn small">📚 因子广场</a>
+  <a href="/strategies/workbench.html" class="btn small primary">+ 新建策略</a>
+`)
+
+const container = document.getElementById('page-content')
+
+// 官方精选
+const officialHtml = OFFICIAL_STRATEGIES.map(s => `
+  <div class="s-card" data-id="${s.id}">
+    <div class="row1">
+      <div class="icon">${s.icon}</div>
+      <div class="name">${s.name}</div>
+      <span class="chip solid" style="background:var(--brand);color:#fff">官方精选</span>
+    </div>
+    <div class="desc">${s.desc}</div>
+    <div class="factors">
+      ${s.factors.slice(0,4).map(f => `<span>${factorByKey(f.key).name} ${f.w}%</span>`).join('')}
+    </div>
+    <div class="stats">
+      <div><div class="k">年化</div><div class="v pos">${fmtPct(s.metrics.ann_ret)}</div></div>
+      <div><div class="k">夏普</div><div class="v">${s.metrics.sharpe.toFixed(2)}</div></div>
+      <div><div class="k">最大回撤</div><div class="v neg">${fmtPct(s.metrics.max_dd)}</div></div>
+    </div>
+  </div>
+`).join('')
+
+// 我的策略
+const mine = loadMine()
+const mineHtml = mine.length === 0 ? `
+  <div class="empty">
+    <div class="ic">🧩</div>
+    <div class="msg">还没有保存的策略</div>
+    <a href="/strategies/factors.html" class="btn primary">→ 去挑因子搭一个</a>
+  </div>
+` : `
+  <div class="strategy-grid">
+    ${mine.map(m => `
+      <div class="s-card" data-id="${m.id}" data-mine="1">
+        <div class="row1">
+          <div class="icon" style="background:var(--panel);color:var(--muted)">✎</div>
+          <div class="name">${m.name}</div>
+          <span class="chip" style="background:var(--panel-2);color:var(--muted)">我的</span>
+        </div>
+        <div class="desc">${draftFactorNames({factors:m.factors})}</div>
+        <div class="factors">
+          ${m.factors.slice(0,4).map(k => `<span>${factorByKey(k).name} ${m.weights[k]||0}%</span>`).join('')}
+        </div>
+        <div class="stats">
+          <div><div class="k">年化*</div><div class="v pos">${fmtPct(m.metrics_mock.ann_ret)}</div></div>
+          <div><div class="k">夏普*</div><div class="v">${m.metrics_mock.sharpe.toFixed(2)}</div></div>
+          <div><div class="k">最大回撤*</div><div class="v neg">${fmtPct(m.metrics_mock.max_dd)}</div></div>
+        </div>
+      </div>
+    `).join('')}
+  </div>
+`
+
+container.innerHTML = `
+<div style="padding:24px 26px 40px;max-width:1240px;margin:0 auto">
+
+  <!-- 顶部说明条 -->
+  <div class="meta-bar" style="margin-bottom:24px">
+    <span>👋 <b>新用户</b>选一张官方卡片，5 秒看到今日 top 20</span>
+    <span class="sep">·</span>
+    <span>💡 <b>进阶</b>去 <a href="/strategies/factors.html" style="color:var(--brand)">因子广场</a> 挑因子搭组合</span>
+    <span class="sep">·</span>
+    <span>💬 <b>不确定</b>？去 <a href="/chat" style="color:var(--brand)">对话</a> 里问 Hunter 推荐</span>
+  </div>
+
+  <!-- 官方精选 -->
+  <div class="cat-hd">
+    ⭐ 官方精选 <span class="sub">6 个 · 经典组合 · 每季度重审</span>
+  </div>
+  <div class="strategy-grid">${officialHtml}</div>
+
+  <!-- 我的策略 -->
+  <div class="cat-hd" style="margin-top:36px">
+    ✎ 我的策略 <span class="sub">${mine.length ? `${mine.length} 个 · 点击查看回测` : '暂无 · 去工作台搭一个'}</span>
+    ${mine.length ? `<a href="/strategies/workbench.html" style="margin-left:auto;color:var(--brand);font-size:12px">+ 新建</a>` : ''}
+  </div>
+  ${mineHtml}
+</div>
+`
+
+// 卡片点击 → 载入 draft + 跳 backtest
+document.querySelectorAll('.s-card').forEach(card => {
+  card.addEventListener('click', () => {
+    const id = card.dataset.id
+    let strat
+    if (card.dataset.mine) {
+      strat = loadMine().find(m => m.id === id)
+    } else {
+      strat = OFFICIAL_STRATEGIES.find(s => s.id === id)
+    }
+    if (!strat) return
+    // 灌入 draft
+    const draft = {
+      factors: strat.factors ? strat.factors.map(f=>f.key) : strat.factors,
+      weights: strat.factors ? Object.fromEntries(strat.factors.map(f=>[f.key,f.w])) : strat.weights,
+      config: strat.config,
+      name: strat.name,
+      _metrics: strat.metrics || strat.metrics_mock,
+      updated_at: Date.now(),
+    }
+    saveDraft(draft)
+    location.href = '/strategies/backtest.html'
+  })
+})
+</script>
+</body>
+</html>

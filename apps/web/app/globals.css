@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #f5f7fa;
+  --bg-card: #ffffff;
+  --bg-hover: #f0f4f8;
+  --border: #e2e8f0;
+  --text: #1e293b;
+  --text-muted: #64748b;
+  --red: #dc2626;
+  --green: #16a34a;
+  --blue: #2563eb;
+  --yellow: #d97706;
+}
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--text); font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif; font-size: 15px; }
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 2px; }
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* ── 打印模式 · Print as PDF (仅保留 Artifact 内容) ── */
+@media print {
+  @page {
+    size: A4;
+    margin: 18mm 16mm 20mm 16mm;
+  }
+  body { background: #fff !important; }
+  .chat-app-shell,
+  .chat-sidebar,
+  .chat-header,
+  .chat-input-bar,
+  .chat-message-list,
+  .artifact-toolbar,
+  header,
+  nav {
+    display: none !important;
+  }
+  .artifact-panel {
+    position: static !important;
+    width: 100% !important;
+    height: auto !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+  .artifact-body {
+    overflow: visible !important;
+    height: auto !important;
+    padding: 0 !important;
+  }
+  .artifact-body h1 { page-break-after: avoid; }
+  .artifact-body h2, .artifact-body h3 { page-break-after: avoid; break-after: avoid-page; }
+  .artifact-body table, .artifact-body pre, .artifact-body img {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  a { color: #444 !important; text-decoration: none !important; }
+  a::after { content: " (" attr(href) ")"; font-size: 10px; color: #999; }
+}

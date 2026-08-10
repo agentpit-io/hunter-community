@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>策略工作台 · 猎鹿人 Hunter</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<script src="app.js"></script>
+<script>
+document.body.innerHTML = renderShell('workbench', '策略广场 / 策略工作台', '选因子 · 调权重 · 看今日 Top 20 · 一键回测', `
+  <button class="btn small" id="btn-ask">💬 问 Hunter</button>
+  <button class="btn small" id="btn-save">💾 保存</button>
+`)
+
+let draft = loadDraft()
+const container = document.getElementById('page-content')
+
+function renderLeftPanel() {
+  const factorsHtml = draft.factors.length === 0 ? `
+    <div class="empty" style="padding:30px 20px">
+      <div class="ic">🎯</div>
+      <div class="msg" style="font-size:13px">还没选因子</div>
+      <a href="/strategies/factors.html" class="btn small">→ 去因子广场</a>
+    </div>
+  ` : draft.factors.map(k => {
+    const f = factorByKey(k)
+    const w = draft.weights[k] || 0
+    return `
+      <div class="f-pill" data-key="${k}" style="flex-direction:column;align-items:stretch;gap:0;padding:0">
+        <div style="display:flex;align-items:center;gap:8px;padding:10px 10px 4px">
+          <span style="font-size:14px">${f.icon}</span>
+          <span class="name">${f.name}</span>
+          <span class="weight" data-w="${k}">${w}%</span>
+          <span class="close" data-del="${k}">×</span>
+        </div>
+        <div class="slider-row" style="padding:0 10px 8px">
+          <input type="range" min="0" max="100" value="${w}" data-slider="${k}" />
+        </div>
+      </div>
+    `
+  }).join('')
+
+  return `
+    <div class="panel">
+      <div class="p-hd">🎯 选因子与权重 <span class="cnt">已选 ${draft.factors.length}</span></div>
+      <div id="factor-pills">${factorsHtml}</div>
+      <a href="/strategies/factors.html" class="btn" style="width:100%;margin-top:10px">+ 从因子广场加因子</a>
+      <div style="margin-top:14px;padding:10px 12px;background:var(--tag-cool-bg);color:var(--tag-cool-fg);border-radius:8px;font-size:11.5px;line-height:1.6">
+        <b>💡 tip</b> · 权重和不必等于 100%，系统会归一化。<br>
+        <b>价值 40% + 质量 30% + 动量 20% + 低波 10%</b> = Barra 四因子经典配比
+      </div>
+    </div>
+  `
+}
+
+function renderMiddlePanel() {
+  const cfg = draft.config
+  return `
+    <div class="panel" style="padding:0">
+      <div style="padding:16px 18px;border-bottom:1px solid var(--line)">
+        <div class="p-hd" style="margin-bottom:12px">⚙️ 组合配置</div>
+        <div class="field-row">
+          <div class="field" style="margin:0">
+            <div class="lbl">股票池</div>
+            <select data-cfg="universe">
+              <option value="hs300"        ${cfg.universe==='hs300'?'selected':''}>沪深 300（推荐）</option>
+              <option value="zz500"        ${cfg.universe==='zz500'?'selected':''}>中证 500</option>
+              <option value="hs800"        ${cfg.universe==='hs800'?'selected':''}>沪深 800</option>
+              <option value="a_all"        ${cfg.universe==='a_all'?'selected':''}>A 股全市场 · 剔 ST/次新</option>
+              <option value="hk_all"       ${cfg.universe==='hk_all'?'selected':''}>港股通</option>
+              <option value="my_watchlist" ${cfg.universe==='my_watchlist'?'selected':''}>我的自选</option>
+            </select>
+          </div>
+          <div class="field" style="margin:0">
+            <div class="lbl">持仓数量</div>
+            <select data-cfg="top_n">
+              <option value="10" ${cfg.top_n===10?'selected':''}>Top 10</option>
+              <option value="20" ${cfg.top_n===20?'selected':''}>Top 20</option>
+              <option value="30" ${cfg.top_n===30?'selected':''}>Top 30</option>
+              <option value="50" ${cfg.top_n===50?'selected':''}>Top 50</option>
+            </select>
+          </div>
+        </div>
+        <div class="field-row" style="margin-top:12px">
+          <div class="field" style="margin:0">
+            <div class="lbl">换仓频率</div>
+            <select data-cfg="rebalance">
+              <option value="W" ${cfg.rebalance==='W'?'selected':''}>周度</option>
+              <option value="M" ${cfg.rebalance==='M'?'selected':''}>月度（推荐）</option>
+              <option value="Q" ${cfg.rebalance==='Q'?'selected':''}>季度</option>
+              <option value="H" ${cfg.rebalance==='H'?'selected':''}>半年</option>
+            </select>
+          </div>
+          <div class="field" style="margin:0">
+            <div class="lbl">单边成本</div>
+            <select data-cfg="cost_bps">
+              <option value="10" ${cfg.cost_bps===10?'selected':''}>10 bps</option>
+              <option value="15" ${cfg.cost_bps===15?'selected':''}>15 bps（推荐）</option>
+              <option value="25" ${cfg.cost_bps===25?'selected':''}>25 bps</option>
+            </select>
+          </div>
+        </div>
+        <div class="field" style="margin-top:12px;margin-bottom:0">
+          <div class="lbl">基准</div>
+          <select data-cfg="benchmark">
+            <option value="000300" ${cfg.benchmark==='000300'?'selected':''}>沪深 300（000300）</option>
+            <option value="000905" ${cfg.benchmark==='000905'?'selected':''}>中证 500（000905）</option>
+            <option value="399006" ${cfg.benchmark==='399006'?'selected':''}>创业板指（399006）</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- 因子暴露雷达图 · SVG 静态示意 -->
+      <div style="padding:16px 18px;border-bottom:1px solid var(--line)">
+        <div class="p-hd" style="margin-bottom:8px">📊 因子暴露</div>
+        <svg viewBox="0 0 240 200" style="width:100%;height:180px">
+          <polygon points="120,20 200,70 180,170 60,170 40,70" fill="none" stroke="#deddd5" stroke-width="1"/>
+          <polygon points="120,50 176,86 164,146 76,146 64,86" fill="none" stroke="#efeee8" stroke-width="1"/>
+          <polygon points="120,80 152,102 148,122 92,122 88,102" fill="none" stroke="#efeee8" stroke-width="1"/>
+          <polygon points="120,30 190,72 165,145 70,155 55,80" fill="rgba(181,107,45,.2)" stroke="var(--brand)" stroke-width="1.5"/>
+          <circle cx="120" cy="30" r="3" fill="var(--brand)"/>
+          <circle cx="190" cy="72" r="3" fill="var(--brand)"/>
+          <circle cx="165" cy="145" r="3" fill="var(--brand)"/>
+          <circle cx="70" cy="155" r="3" fill="var(--brand)"/>
+          <circle cx="55" cy="80" r="3" fill="var(--brand)"/>
+          <text x="120" y="14" text-anchor="middle" fill="#4b423a" font-size="10">价值</text>
+          <text x="210" y="72" fill="#4b423a" font-size="10">质量</text>
+          <text x="190" y="180" text-anchor="middle" fill="#4b423a" font-size="10">动量</text>
+          <text x="50"  y="180" text-anchor="middle" fill="#4b423a" font-size="10">低波</text>
+          <text x="30"  y="80"  text-anchor="end" fill="#4b423a" font-size="10">成长</text>
+        </svg>
+        <div style="text-align:center;color:var(--muted);font-size:11px;margin-top:-4px">
+          当前偏向 <b style="color:var(--brand-dark)">价值 · 质量</b> · 相对基准超配
+        </div>
+      </div>
+
+      <!-- 跑回测 -->
+      <div style="padding:16px 18px">
+        <button id="btn-backtest" class="btn primary" style="width:100%;height:44px;font-size:14px">
+          ▶ 跑 3 年回测
+        </button>
+        <div style="text-align:center;color:var(--muted);font-size:11px;margin-top:8px">
+          回测区间 2023-08 → 2026-07 · 结果页可改
+        </div>
+        <button class="btn ask-hunter" style="width:100%;margin-top:10px;height:38px" id="btn-ask-2">
+          💬 让 Hunter 解读这个组合
+        </button>
+      </div>
+    </div>
+  `
+}
+
+function renderRightPanel() {
+  return `
+    <div class="panel" style="padding:0;overflow:hidden">
+      <div style="padding:16px 18px 12px;border-bottom:1px solid var(--line)">
+        <div class="p-hd" style="margin-bottom:6px">🎯 今日 Top 20 <span class="cnt">2026-08-06</span></div>
+        <div style="color:var(--muted);font-size:11.5px">
+          改因子/权重时会实时刷新
+        </div>
+      </div>
+      <div style="max-height:calc(100vh - 240px);overflow-y:auto">
+        <table class="holdings-table">
+          <thead><tr><th class="rk">#</th><th>股票</th><th class="num">综合分</th></tr></thead>
+          <tbody>
+            ${TOP_HOLDINGS.map(h => `
+              <tr><td class="rk">${h.rank}</td>
+                  <td><b>${h.name}</b><div class="cd">${h.code}.${h.mkt}</div></td>
+                  <td class="num score">${h.score.toFixed(2)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div style="padding:12px 18px;border-top:1px solid var(--line);background:var(--panel);color:var(--muted);font-size:11px;display:flex;gap:14px">
+        <span>换手率 <b style="color:var(--text)">18%</b></span>
+        <span>与基准重合 <b style="color:var(--text)">14/20</b></span>
+        <span style="margin-left:auto;color:var(--brand);cursor:pointer" id="btn-export">导出 CSV →</span>
+      </div>
+    </div>
+  `
+}
+
+container.innerHTML = `
+<div class="wb-layout">
+  <div id="left-col">${renderLeftPanel()}</div>
+  <div id="mid-col">${renderMiddlePanel()}</div>
+  <div id="right-col">${renderRightPanel()}</div>
+</div>
+`
+
+function bindLeft() {
+  // slider 实时更新
+  document.querySelectorAll('input[data-slider]').forEach(sl => {
+    sl.addEventListener('input', e => {
+      const k = sl.dataset.slider
+      draft.weights[k] = parseInt(sl.value, 10)
+      document.querySelector(`[data-w="${k}"]`).textContent = sl.value + '%'
+      saveDraft(draft)
+    })
+  })
+  // 删除
+  document.querySelectorAll('[data-del]').forEach(x => {
+    x.addEventListener('click', e => {
+      const k = x.dataset.del
+      draft.factors = draft.factors.filter(f => f !== k)
+      delete draft.weights[k]
+      saveDraft(draft)
+      document.getElementById('left-col').innerHTML = renderLeftPanel()
+      bindLeft()
+    })
+  })
+}
+bindLeft()
+
+// 配置 select
+document.querySelectorAll('select[data-cfg]').forEach(sel => {
+  sel.addEventListener('change', e => {
+    const key = sel.dataset.cfg
+    let val = sel.value
+    if (key === 'top_n' || key === 'cost_bps') val = parseInt(val, 10)
+    draft.config[key] = val
+    saveDraft(draft)
+    toast(`已切换 · ${sel.options[sel.selectedIndex].text}`)
+  })
+})
+
+// 顶部 · 问 Hunter
+document.getElementById('btn-ask').addEventListener('click', askHunterFromWorkbench)
+document.getElementById('btn-ask-2').addEventListener('click', askHunterFromWorkbench)
+
+// 顶部 · 保存
+document.getElementById('btn-save').addEventListener('click', () => openSaveDialog())
+
+// 跑回测 · fake loading + 跳转
+document.getElementById('btn-backtest').addEventListener('click', () => {
+  if (draft.factors.length === 0) { toast('先选几个因子', 'warn'); return }
+  const btn = document.getElementById('btn-backtest')
+  btn.classList.add('loading')
+  const stages = [
+    '拉取因子面板 · 沪深 300 × 720 天',
+    '计算横截面 z-score',
+    '按月频构建 top 20 持仓',
+    '回放日收益 · 扣除交易成本',
+    '计算指标与归因',
+  ]
+  let i = 0
+  const t = setInterval(() => {
+    if (i < stages.length) toast(stages[i++], '')
+    else { clearInterval(t); location.href = '/strategies/backtest.html' }
+  }, 350)
+})
+
+// 导出 CSV
+document.getElementById('btn-export').addEventListener('click', () => {
+  const rows = ['rank,code,name,score', ...TOP_HOLDINGS.map(h => `${h.rank},${h.code}.${h.mkt},${h.name},${h.score}`)]
+  const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = `hunter_top20_${new Date().toISOString().slice(0,10)}.csv`
+  a.click()
+  toast('✓ 已导出 CSV', 'success')
+})
+</script>
+</body>
+</html>

@@ -1,0 +1,94 @@
+# Hunter Community Edition · P1 skeleton
+# `docker compose up` boots: postgres + redis + api (minimal) + web
+# opencode service is TODO · pending ghcr.io/agentpit-io/hunter-opencode image (see doc 08)
+#
+# P1 goal: services come up healthy without SaaS deps.
+# P2 will strip SaaS routers and un-set HUNTER_MINIMAL_BOOT.
+
+name: hunter-community
+
+x-restart: &restart
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    <<: *restart
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-hunter}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hunter}
+      POSTGRES_DB: ${POSTGRES_DB:-hunter}
+    volumes:
+      - hunter_pg_data:/var/lib/postgresql/data
+      - ./db/migrations:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "${POSTGRES_HOST_PORT:-5442}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hunter}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    <<: *restart
+    ports:
+      - "${REDIS_HOST_PORT:-6479}:6379"
+    volumes:
+      - hunter_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    <<: *restart
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # P1 · skip heavy startup schedulers so a fresh clone boots healthy
+      HUNTER_MINIMAL_BOOT: "${HUNTER_MINIMAL_BOOT:-1}"
+      DATABASE_URL: postgresql://${POSTGRES_USER:-hunter}:${POSTGRES_PASSWORD:-hunter}@postgres:5432/${POSTGRES_DB:-hunter}
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      # These are placeholders · P4 will introduce provider abstraction
+      LLM_API_BASE: ${LLM_API_BASE:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+    ports:
+      - "${API_HOST_PORT:-8100}:8000"
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    <<: *restart
+    depends_on:
+      - api
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:8100}
+    ports:
+      - "${WEB_HOST_PORT:-3100}:3000"
+
+  # opencode:
+  #   image: ghcr.io/agentpit-io/hunter-opencode:${OPENCODE_TAG:-latest}
+  #   # ← Uncomment once the image is published (Sprint 06 · P3 Day 11).
+  #   # See doc/codex/开源整合方案/08-命名与依赖策略变更.md
+  #   <<: *restart
+  #   environment:
+  #     OPENCODE_SERVER_USERNAME: ${OPENCODE_USER:-opencode}
+  #     OPENCODE_SERVER_PASSWORD: ${OPENCODE_PASS:-changeme}
+  #     JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+  #   ports:
+  #     - "${OPENCODE_HOST_PORT:-3921}:3901"
+
+volumes:
+  hunter_pg_data:
+  hunter_redis_data:

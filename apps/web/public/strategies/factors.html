@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>因子广场 · 猎鹿人 Hunter</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<script src="app.js"></script>
+<script>
+document.body.innerHTML = renderShell('factors', '策略广场 / 因子广场', '20 个因子 · 点击卡片选/取消 · 组合到工作台', `
+  <a href="/strategies/workbench.html" class="btn small primary">→ 打开工作台</a>
+`)
+
+let draft = loadDraft()
+const container = document.getElementById('page-content')
+
+// 按 CAT_ORDER 分组
+const groups = {}
+CAT_ORDER.forEach(c => groups[c] = [])
+FACTORS.forEach(f => { groups[f.cat] = groups[f.cat] || []; groups[f.cat].push(f) })
+
+const catDesc = {
+  '价值': '便宜的股票倾向跑赢',
+  '质量': '赚钱能力强的公司长期跑赢',
+  '成长': '高增长股票牛市弹性大',
+  '动量': '"强者恒强" · 也可反转用',
+  'ML':   '机器学习类因子',
+  '技术': '短周期择时',
+  '资金': 'Hunter 特色因子 · 主力资金追踪',
+  '波动': '低波动 · 防御型稳定收益',
+}
+
+function renderCard(f) {
+  const on = draft.factors.includes(f.key)
+  return `
+    <div class="f-card ${on?'selected':''}" data-key="${f.key}">
+      <button class="plus">${on?'✓':'+'}</button>
+      <div class="head"><span>${f.name}</span><span class="cat">${f.cat}</span></div>
+      <div class="desc">${f.desc}${f.note?` · <b style="color:var(--dn)">${f.note}</b>`:''}</div>
+      <div class="metrics">
+        <div class="metric"><div class="k">IC</div><div class="v ${f.ic>=0?'pos':'neg'}">${(f.ic>=0?'+':'')+f.ic.toFixed(3)}</div></div>
+        <div class="metric"><div class="k">年化</div><div class="v pos">${fmtPct(f.ann)}</div></div>
+        <div class="metric"><div class="k">波动</div><div class="v">${(f.vol*100).toFixed(0)}%</div></div>
+      </div>
+    </div>
+  `
+}
+
+let html = `
+<div style="padding:20px 26px 0;max-width:1240px;margin:0 auto">
+  <div class="meta-bar" style="margin-bottom:20px">
+    <span><b>因子</b>= 挑股票的一把尺子 · 20 个不同角度供你自由组合</span>
+    <span class="sep">·</span>
+    <span><b>IC</b>因子选股与实际收益的相关性</span>
+    <span class="sep">·</span>
+    <span><b>年化</b>单因子等权 top 20 组合的历史年化</span>
+    <span class="sep">·</span>
+    <span>数据回溯 <b>2021-01 → 2026-07</b> · 月频</span>
+  </div>
+
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+    <input id="fsearch" placeholder="搜索因子..." style="flex:1;max-width:280px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;font-size:13px;background:#fff;outline:none" />
+    <span style="color:var(--muted);font-size:12px">按类别浏览 ↓ · 点击卡片 = 选中/取消</span>
+  </div>
+`
+
+CAT_ORDER.forEach(c => {
+  const items = groups[c] || []
+  if (items.length === 0) return
+  html += `
+    <div class="cat-hd" data-cat="${c}">${CAT_ICON[c]} ${c} <span class="sub">共 ${items.length} 个 · ${catDesc[c]||''}</span></div>
+    <div class="factor-grid" data-cat-grid="${c}">${items.map(renderCard).join('')}</div>
+  `
+})
+
+html += `
+  <!-- Sticky CTA · 底部 -->
+  <div class="sticky-cta">
+    <div class="info">
+      <div class="h" id="cta-count">已选 ${draft.factors.length} 个因子</div>
+      <div class="s" id="cta-list">${draft.factors.length ? draft.factors.map(k=>factorByKey(k).name).join(' · ') : '选几个因子开始组合'}</div>
+    </div>
+    <a href="/strategies/workbench.html" class="btn primary" id="cta-btn" style="height:40px;padding:0 20px">
+      → 进入策略工作台
+    </a>
+  </div>
+</div>
+`
+
+container.innerHTML = html
+
+// 卡片 toggle
+document.querySelectorAll('.f-card').forEach(card => {
+  card.addEventListener('click', e => {
+    const key = card.dataset.key
+    const idx = draft.factors.indexOf(key)
+    if (idx >= 0) {
+      // 取消
+      draft.factors.splice(idx, 1)
+      delete draft.weights[key]
+    } else {
+      // 选中 · 默认权重按平均分配
+      draft.factors.push(key)
+      const n = draft.factors.length
+      const equalW = Math.round(100 / n)
+      draft.factors.forEach(k => draft.weights[k] = equalW)
+    }
+    saveDraft(draft)
+    // 局部刷新 · 免整页 rerender 抖动
+    card.classList.toggle('selected')
+    card.querySelector('.plus').textContent = draft.factors.includes(key) ? '✓' : '+'
+    // 更新底部 CTA
+    document.getElementById('cta-count').textContent = `已选 ${draft.factors.length} 个因子`
+    document.getElementById('cta-list').textContent = draft.factors.length
+      ? draft.factors.map(k=>factorByKey(k).name).join(' · ')
+      : '选几个因子开始组合'
+  })
+})
+
+// 搜索过滤
+document.getElementById('fsearch').addEventListener('input', e => {
+  const q = e.target.value.trim().toLowerCase()
+  document.querySelectorAll('.f-card').forEach(card => {
+    const f = factorByKey(card.dataset.key)
+    const hit = !q ||
+      f.name.toLowerCase().includes(q) ||
+      f.desc.toLowerCase().includes(q) ||
+      f.cat.toLowerCase().includes(q) ||
+      f.key.toLowerCase().includes(q)
+    card.style.display = hit ? '' : 'none'
+  })
+  // 隐藏无匹配的分类
+  CAT_ORDER.forEach(c => {
+    const grid = document.querySelector(`[data-cat-grid="${c}"]`)
+    const hd = document.querySelector(`[data-cat="${c}"]`)
+    if (!grid || !hd) return
+    const visible = grid.querySelectorAll('.f-card:not([style*="display: none"])').length
+    hd.style.display = visible ? '' : 'none'
+    grid.style.display = visible ? '' : 'none'
+  })
+})
+</script>
+</body>
+</html>

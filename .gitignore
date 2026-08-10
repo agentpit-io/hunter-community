@@ -39,3 +39,4 @@ coverage/
 # Misc
 tmp/
 .claude/
+tsconfig.tsbuildinfo

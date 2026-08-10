@@ -1,0 +1,35 @@
+{
+  "dependencies": {
+    "@tailwindcss/postcss": "^4.2.4",
+    "echarts": "^6.0.0",
+    "echarts-for-react": "^3.0.6",
+    "highlight.js": "^11.11.1",
+    "html-to-image": "^1.11.13",
+    "html2canvas": "^1.4.1",
+    "isomorphic-dompurify": "^3.19.0",
+    "lucide-react": "^1.14.0",
+    "next": "^15.5.16",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "react-markdown": "^10.1.0",
+    "rehype-highlight": "^7.0.2",
+    "remark-gfm": "^4.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "20.17.6",
+    "@types/react": "19.2.14",
+    "autoprefixer": "^10.5.0",
+    "tailwindcss": "^4.2.4",
+    "typescript": "5.8.2"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start -p 3000"
+  },
+  "pnpm": {
+    "overrides": {
+      "undici": "^7.29.0"
+    }
+  }
+}
