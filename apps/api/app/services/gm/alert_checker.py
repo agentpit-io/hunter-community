@@ -134,9 +134,9 @@ async def run_loop():
             fired = await asyncio.to_thread(_check_once_sync)
             if fired:
                 # P2: wx_push removed · push channel refactor lands in P3
-        async def broadcast(**_kw):
-            log.info("[gm_alerts] would push (P2 stub): %s", _kw.get("title"))
-            return 0
+                async def broadcast(**_kw):
+                    log.info("[gm_alerts] would push (P2 stub): %s", _kw.get("title"))
+                    return 0
                 import os
                 oa = os.getenv("OA_DOMAIN", "https://yiqihecheng.net")
                 for f in fired:
