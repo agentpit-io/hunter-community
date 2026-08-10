@@ -124,7 +124,10 @@ def get_quote(code: str) -> dict | None:
     # No SaaS URL configured → go straight to providers.data_source
     if not _USE_SAAS:
         base = _provider_get_quote_sync(code)
-        if not base:
+        # Provider failed OR returned null price (Yahoo 429 · akshare blocked
+        # from SG etc). Return None so caller shows "数据未就绪" rather than
+        # misleading 0.0 quotes.
+        if not base or base.get("price") is None:
             return None
         stock = STOCK_MAP.get(code) or _dynamic_map.get(code) or {"name": base.get("name") or code, "market": base.get("market") or "A"}
         # Shape-adapt: providers return simple dict · fill bid/ask with zeros
