@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from loguru import logger
 from app.services.database import get_stocks, get_stocks_by_user
-from app.services.finance_data_client import register_stocks, get_reliable_close
+from app.services.finance_data_client import register_stocks, get_reliable_close, get_quote as fd_get_quote
 
 router = APIRouter()
 _redis = redis.Redis.from_url(
@@ -67,8 +67,13 @@ async def get_quote(code: str):
     stock_map = {s["code"]: s for s in stocks}
     if code not in stock_map:
         raise HTTPException(404, f"股票 {code} 不存在")
-    # Cache-miss path · try provider fallback (via finance_data_client's SaaS
-    # or provider bridge · fills cache side-effect free).
+    # Cache-miss path · try live fetch (finance_data_client hits SaaS or
+    # falls back to providers.data_source · either yfinance/akshare).
+    fresh = await asyncio.to_thread(fd_get_quote, code)
+    if fresh:
+        _redis.set(f"quote:{code}", json.dumps(fresh))
+        return JSONResponse(content=fresh, headers=_NO_STORE_HEADERS)
+    # Second attempt · kline-based reliable close (also has provider bridge)
     fresh = await asyncio.to_thread(_kline_refresh, code, today)
     if fresh:
         return JSONResponse(content=fresh, headers=_NO_STORE_HEADERS)
