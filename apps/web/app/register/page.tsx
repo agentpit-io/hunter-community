@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { Activity, Mail, Lock, User, Ticket, Loader2, AlertCircle, Sparkles } from 'lucide-react'
@@ -13,7 +13,16 @@ interface AuthStatus {
   user_count?: number
 }
 
+// Next 15 SSG requires useSearchParams inside a Suspense boundary.
 export default function RegisterPage() {
+  return (
+    <Suspense fallback={<CardShell title="加载中…"><div /></CardShell>}>
+      <RegisterInner />
+    </Suspense>
+  )
+}
+
+function RegisterInner() {
   const router = useRouter()
   const search = useSearchParams()
   const isSetup = search.get('setup') === '1'
