@@ -54,7 +54,7 @@ async def get_current_signals():
     return result
 
 
-_ADMIN_HERMES_UID = os.getenv("ADMIN_HERMES_USER_ID", "cmnhijcdl0000607z6vxzczez")
+_ADMIN_HERMES_UID = os.getenv("ADMIN_HERMES_USER_ID", "")
 
 
 class FireSignalBody(BaseModel):

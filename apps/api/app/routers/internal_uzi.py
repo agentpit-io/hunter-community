@@ -25,7 +25,7 @@ from app.services.online_analysis.llm_client import get_client
 
 router = APIRouter(prefix="/internal", tags=["mcp-bridge"])
 
-_INTERNAL_KEY = os.getenv("HUNTER_INTERNAL_KEY", "hunter-internal-2026")
+_INTERNAL_KEY = os.getenv("HUNTER_INTERNAL_KEY", "")
 _MODEL = os.getenv("AGENT_SUB_UZI_MODEL", "gemini-3.5-flash")
 
 

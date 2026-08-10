@@ -24,7 +24,7 @@ from app.services.database import get_risk_profile, upsert_risk_profile, get_con
 router = APIRouter(prefix="/internal", tags=["mcp-bridge"])
 
 
-_INTERNAL_KEY = os.getenv("HUNTER_INTERNAL_KEY", "hunter-internal-2026")
+_INTERNAL_KEY = os.getenv("HUNTER_INTERNAL_KEY", "")
 
 
 def _auth(request: Request) -> str:

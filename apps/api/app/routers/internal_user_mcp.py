@@ -23,7 +23,7 @@ from app.routers.user_mcp import (_fetch_tools, _forward_call, _redact,
 
 router = APIRouter(prefix="/internal/user_mcp", tags=["user-mcp-bridge"])
 
-_INTERNAL_KEY = os.getenv("HUNTER_INTERNAL_KEY", "hunter-internal-2026")
+_INTERNAL_KEY = os.getenv("HUNTER_INTERNAL_KEY", "")
 
 # 缓存过期时间（tools cache 内存优先，DB 兜底）
 _TOOLS_CACHE_TTL = 900  # 15 min
