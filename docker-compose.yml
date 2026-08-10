@@ -100,9 +100,11 @@ services:
       api:
         condition: service_healthy
     environment:
-      # HTTP Basic Auth in front of opencode's own /session /agent etc endpoints
-      OPENCODE_SERVER_USERNAME: ${OPENCODE_USER:-opencode}
-      OPENCODE_SERVER_PASSWORD: ${OPENCODE_PASS:-changeme}
+      # Basic auth kept OFF by default · hunter-auth plugin is the real gate.
+      # Set both env vars to non-empty to add belt-and-suspenders auth (nginx
+      # would then need to inject Basic + JWT would move to a custom header).
+      OPENCODE_SERVER_USERNAME: ${OPENCODE_USER:-}
+      OPENCODE_SERVER_PASSWORD: ${OPENCODE_PASS:-}
       # Shared with api container · lets hunter-auth plugin verify Bearer JWT locally
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production-please}
       # MCP subprocesses reach the api container via internal docker network
