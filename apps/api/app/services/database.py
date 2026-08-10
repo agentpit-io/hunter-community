@@ -283,6 +283,41 @@ async def init_db():
         # 兼容旧表：补 enabled / asset_type 列
         cur.execute("ALTER TABLE stocks ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT TRUE")
         cur.execute("ALTER TABLE stocks ADD COLUMN IF NOT EXISTS asset_type VARCHAR(8) NOT NULL DEFAULT 'stock'")
+
+        # 多租户迁移 · 幂等版 (对齐 sql/multi_tenant_migration.sql)
+        # stocks/position_thesis/push_tasks 都加 user_id 列,让 _by_user 查询能工作
+        cur.execute("ALTER TABLE stocks           ADD COLUMN IF NOT EXISTS user_id VARCHAR(255) NOT NULL DEFAULT ''")
+        cur.execute("ALTER TABLE position_thesis  ADD COLUMN IF NOT EXISTS user_id VARCHAR(255) NOT NULL DEFAULT ''")
+        cur.execute("ALTER TABLE push_tasks       ADD COLUMN IF NOT EXISTS user_id VARCHAR(255) NOT NULL DEFAULT ''")
+        # 单列主键→复合主键 (仅当当前 pkey 还是 code/单列时才切换 · 幂等)
+        cur.execute("""
+            DO $$
+            BEGIN
+                IF EXISTS (SELECT 1 FROM pg_constraint
+                           WHERE conname = 'stocks_pkey'
+                             AND array_length(conkey, 1) = 1) THEN
+                    ALTER TABLE position_thesis DROP CONSTRAINT IF EXISTS position_thesis_code_fkey;
+                    ALTER TABLE stocks          DROP CONSTRAINT stocks_pkey;
+                    ALTER TABLE stocks          ADD PRIMARY KEY (code, user_id);
+                    ALTER TABLE position_thesis DROP CONSTRAINT IF EXISTS position_thesis_pkey;
+                    ALTER TABLE position_thesis ADD PRIMARY KEY (code, user_id);
+                    ALTER TABLE position_thesis ADD CONSTRAINT position_thesis_code_user_fkey
+                        FOREIGN KEY (code, user_id) REFERENCES stocks(code, user_id) ON DELETE CASCADE;
+                END IF;
+            END $$;
+        """)
+        # push_tasks name unique → (name, user_id) 联合唯一
+        cur.execute("ALTER TABLE push_tasks DROP CONSTRAINT IF EXISTS push_tasks_name_key")
+        cur.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'push_tasks_name_user_key') THEN
+                    ALTER TABLE push_tasks ADD CONSTRAINT push_tasks_name_user_key UNIQUE (name, user_id);
+                END IF;
+            END $$;
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_stocks_user_id     ON stocks(user_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_push_tasks_user_id ON push_tasks(user_id)")
         # 兼容旧 position_thesis 表（如果是从 V0 升级，可能缺新字段）
         cur.execute("ALTER TABLE position_thesis ADD COLUMN IF NOT EXISTS thesis_structured JSONB")
         cur.execute("ALTER TABLE position_thesis ADD COLUMN IF NOT EXISTS status VARCHAR(16) NOT NULL DEFAULT 'active'")
