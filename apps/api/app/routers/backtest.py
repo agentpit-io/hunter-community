@@ -10,6 +10,7 @@
 """
 import asyncio
 import logging
+import os
 from datetime import date
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -172,7 +173,12 @@ def _require_admin(request: Request) -> str:
     try:
         import jwt as jwt_lib
         from app.routers.auth import JWT_SECRET
-        from app.routers.ax_event import _ADMIN_EMAILS
+        # P2: ax_event router deleted · admin list now from env until P3 local auth
+        _ADMIN_EMAILS = set(
+            e.strip().lower()
+            for e in os.getenv("HUNTER_ADMIN_EMAILS", "").split(",")
+            if e.strip()
+        )
         payload = jwt_lib.decode(auth[7:], JWT_SECRET, algorithms=["HS256"])
     except HTTPException:
         raise

@@ -2,14 +2,12 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 from contextlib import asynccontextmanager
-from app.routers import quote, kline, news, fundflow, push, watchlist, alerts, feishu_event, wechat, signals, signal_settings
+from app.routers import quote, kline, news, fundflow, watchlist, alerts, signals, signal_settings
 from app.routers import auth as auth_router
-from app.routers import wx_oauth
 from app.middleware.auth import AuthMiddleware
 from app.services.collector import start_collector, stop_collector
 from app.services.database import init_db, get_stocks
 from app.services.finance_data_client import register_stocks
-from app.services.push_scheduler import start_scheduler, stop_scheduler
 from app.services import signal_monitor
 import asyncio
 import os
@@ -33,7 +31,6 @@ async def lifespan(app: FastAPI):
     await init_db()
     register_stocks(get_stocks())
     await start_collector()
-    await start_scheduler()
     _signal_task = asyncio.create_task(signal_monitor.run_monitors())
     from app.services.gm import alert_checker as gm_alert_checker
     try:
@@ -89,7 +86,6 @@ async def lifespan(app: FastAPI):
     yield
     if HUNTER_MINIMAL_BOOT:
         return
-    await stop_scheduler()
     await stop_collector()
     if _signal_task:
         _signal_task.cancel()
@@ -113,17 +109,11 @@ app.include_router(quote.router, prefix="/api")
 app.include_router(kline.router, prefix="/api")
 app.include_router(news.router, prefix="/api")
 app.include_router(fundflow.router, prefix="/api")
-app.include_router(push.router, prefix="/api")
 app.include_router(watchlist.router, prefix="/api")
 app.include_router(auth_router.router, prefix="/api")
 app.include_router(alerts.router, prefix="/api")
-app.include_router(feishu_event.router, prefix="/api")
-app.include_router(wechat.router, prefix="/api")
-app.include_router(wx_oauth.router, prefix="/api")
 app.include_router(signals.router, prefix="/api")
 app.include_router(signal_settings.router, prefix="/api")
-from app.routers import sso
-app.include_router(sso.router, prefix="/api")
 from app.routers import signal_report
 app.include_router(signal_report.router, prefix="/api")
 from app.routers import online_analysis
@@ -136,8 +126,6 @@ from app.routers import portfolio
 app.include_router(portfolio.router, prefix="/api")
 from app.routers import truesource
 app.include_router(truesource.router, prefix="/api")
-from app.routers import ax_event
-app.include_router(ax_event.router, prefix="/api")
 from app.routers import discover
 app.include_router(discover.router, prefix="/api")
 from app.routers import research_assistant

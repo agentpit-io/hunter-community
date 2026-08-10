@@ -235,10 +235,7 @@ export default function Sidebar() {
           <NavItem href="/signals" icon={<Globe className="w-4 h-4" />} label="信号看板" badge="新" />
           <NavItem href="/event-analysis" icon={<Zap className="w-4 h-4" />} label="事件分析" />
 
-          <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wider mt-3 mb-1"
-            style={{ color: 'var(--text-muted)' }}>推送通知</div>
-          <NavItem href="/push" icon={<Bell className="w-4 h-4" />} label="推送中心" />
-          <NavItem href="/push-manage" icon={<ClipboardList className="w-4 h-4" />} label="推送管理" />
+          {/* P2: /push and /push-manage removed with SaaS strip · P3 will add SMTP/Slack channel UI */}
 
           {isAdmin && (
             <>
@@ -249,10 +246,7 @@ export default function Sidebar() {
               <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wider mt-3 mb-1"
                 style={{ color: 'var(--text-muted)' }}>用户洞察</div>
               <NavItem href="/user-insight" icon={<Users className="w-4 h-4" />} label="用户画像" badge="新" />
-
-              <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wider mt-3 mb-1"
-                style={{ color: 'var(--text-muted)' }}>活动运营</div>
-              <NavItem href="/booth-admin" icon={<Gift className="w-4 h-4" />} label="展位后台" badge="AX" />
+              {/* P2: /booth-admin (AdventureX SaaS) removed */}
             </>
           )}
         </nav>

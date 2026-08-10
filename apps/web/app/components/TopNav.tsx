@@ -104,7 +104,7 @@ export default function TopNav({ active }: NavProps) {
       {/* 一级菜单 · 5 项 · 全部 target=_blank */}
       <NavLink href="/watchlist" icon={<Star size={14} />} label="自选" active={active === 'watchlist'} />
       <NavLink href="/strategies/index.html" icon={<Target size={14} />} label="策略中心" active={active === 'strategies'} />
-      <NavLink href="/push" icon={<Bell size={14} />} label="推送" active={active === 'push'} />
+      {/* P2: /push removed with SaaS strip · P3 will re-add SMTP/Slack channel */}
       <NavLink href="/mcp-config" icon={<Plug size={14} />} label="MCP 组件" active={active === 'mcp'} />
 
       {/* 更多 · 下拉 · 覆盖剩余功能 */}
@@ -137,13 +137,13 @@ export default function TopNav({ active }: NavProps) {
 
             <SectionLabel>持仓与配置</SectionLabel>
             <DropdownLink href="/portfolio" icon={<Target size={13} />} label="持仓报告" />
-            <DropdownLink href="/push-manage" icon={<Settings size={13} />} label="推送管理" />
+            {/* P2: /push-manage removed · P3 re-adds SMTP/Slack channel UI */}
 
             {isAdmin && <>
               <SectionLabel>管理后台</SectionLabel>
               <DropdownLink href="/backtest" icon={<BarChart3 size={13} />} label="回测看板" badge="admin" />
               <DropdownLink href="/user-insight" icon={<Users size={13} />} label="用户画像" badge="admin" />
-              <DropdownLink href="/booth-admin" icon={<Gift size={13} />} label="展位后台" badge="admin" />
+              {/* P2: /booth-admin (AdventureX SaaS) removed */}
             </>}
           </div>
         )}

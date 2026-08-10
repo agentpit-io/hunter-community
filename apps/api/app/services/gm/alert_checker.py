@@ -102,7 +102,10 @@ async def _maybe_push_recaps():
         return
     import os
     from app.routers.gm.recap import build_recap
-    from app.services.wx_push import broadcast
+    # P2: wx_push removed · push channel refactor lands in P3
+    async def broadcast(**_kw):
+        log.info("[gm_recap] would push (P2 stub): %s", _kw.get("title"))
+        return 0
     oa = os.getenv("OA_DOMAIN", "https://yiqihecheng.net")
     users = await asyncio.to_thread(_recap_users)
     sent = 0
@@ -130,7 +133,10 @@ async def run_loop():
             await _maybe_push_recaps()
             fired = await asyncio.to_thread(_check_once_sync)
             if fired:
-                from app.services.wx_push import broadcast
+                # P2: wx_push removed · push channel refactor lands in P3
+        async def broadcast(**_kw):
+            log.info("[gm_alerts] would push (P2 stub): %s", _kw.get("title"))
+            return 0
                 import os
                 oa = os.getenv("OA_DOMAIN", "https://yiqihecheng.net")
                 for f in fired:

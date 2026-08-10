@@ -348,7 +348,7 @@ function NeedLogin() {
         从微信服务号菜单进入可自动登录；<br />
         或先到 A 股端登录后再切换到全球市场。
       </div>
-      <a href="/wx/home" style={{
+      <a href="/" style={{
         display: 'inline-block', marginTop: 18, padding: '8px 22px',
         background: GM.PANEL2, color: GM.TEXT, borderRadius: 999,
         fontSize: 13, textDecoration: 'none', border: `1px solid ${GM.LINE}`,

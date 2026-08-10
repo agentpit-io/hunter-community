@@ -21,7 +21,7 @@ export default function GmProfile() {
 
   const switchToWx = () => {
     try { localStorage.setItem('hunter_default_end', 'wx'); } catch { /* ignore */ }
-    router.push('/wx/home');
+    router.push('/');
   };
 
   const logout = () => {
