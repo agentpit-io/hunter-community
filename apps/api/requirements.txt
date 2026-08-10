@@ -9,6 +9,10 @@ redis==7.4.0
 APScheduler==3.11.2
 loguru==0.7.3
 akshare==1.18.60
+# yfinance is the fallback data source for deployments where akshare's
+# China-only backends are blocked (GCP Singapore etc). Set
+# DATA_SOURCE_PROVIDER=yfinance in .env to activate.
+yfinance==0.2.51
 openai==2.36.0
 # AES-256-GCM · 用户自定义 MCP 的 API key 保护(mcp_crypto.py)
 cryptography==43.0.3
