@@ -1,16 +1,44 @@
-"""finance-data.agentpit.io 中台客户端。
+"""Hunter-compatible aggregate market-data client.
 
-替换 akshare 作为自选股的数据源。
+Historically hits `finance-data.agentpit.io`; in Community it's opt-in via
+`FINANCE_DATA_URL` + `FINANCE_DATA_TOKEN` env. When those are empty (the
+default), calls fall back to `app.providers.data_source` (akshare for A-shares,
+yfinance for US/HK · whichever `DATA_SOURCE_PROVIDER` picks).
+
 symbol 格式映射：hermes code "002595" + exchange "SZ" → "002595.SZ"
 """
+import asyncio
 import os
 import httpx
+from loguru import logger
 from app.config import STOCK_MAP
 
-FINANCE_DATA_URL   = os.getenv("FINANCE_DATA_URL",   "https://finance-data.agentpit.io")
-FINANCE_DATA_TOKEN = os.getenv("FINANCE_DATA_TOKEN", "FinAPI@2026!")
+FINANCE_DATA_URL   = os.getenv("FINANCE_DATA_URL",   "").rstrip("/")
+FINANCE_DATA_TOKEN = os.getenv("FINANCE_DATA_TOKEN", "")
 
-_HEADERS = {"X-Finance-Token": FINANCE_DATA_TOKEN}
+_HEADERS = {"X-Finance-Token": FINANCE_DATA_TOKEN} if FINANCE_DATA_TOKEN else {}
+_USE_SAAS = bool(FINANCE_DATA_URL)
+
+
+def _provider_get_quote_sync(code: str) -> dict | None:
+    """Sync bridge to providers.data_source · caller of this module is sync."""
+    try:
+        from app.providers.data_source import get_data_source
+        ds = get_data_source()
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Called from within an async request handler · spawn thread
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    fut = pool.submit(asyncio.run, ds.get_quote(code))
+                    return fut.result(timeout=15)
+        except RuntimeError:
+            pass  # no loop, fall through
+        return asyncio.run(ds.get_quote(code))
+    except Exception as e:
+        logger.warning("[finance_data_client] provider fallback failed for {}: {}", code, e)
+        return None
 
 # 动态扩展缓存（通过 register_stocks 注入，随 DB 内容增长）
 _dynamic_map: dict = {}
@@ -92,7 +120,35 @@ def _get(path: str, params: dict = None) -> dict | list | None:
 
 
 def get_quote(code: str) -> dict | None:
-    """实时报价快照（含五档盘口）。"""
+    """实时报价快照（含五档盘口）· SaaS or provider fallback."""
+    # No SaaS URL configured → go straight to providers.data_source
+    if not _USE_SAAS:
+        base = _provider_get_quote_sync(code)
+        if not base:
+            return None
+        stock = STOCK_MAP.get(code) or _dynamic_map.get(code) or {"name": base.get("name") or code, "market": base.get("market") or "A"}
+        # Shape-adapt: providers return simple dict · fill bid/ask with zeros
+        return {
+            "code":       code,
+            "name":       base.get("name") or stock["name"],
+            "price":      _f(base.get("price")),
+            "change_pct": _f(base.get("change_pct")),
+            "change_amt": _f(base.get("change_amt")),
+            "open":       _f(base.get("open")),
+            "high":       _f(base.get("high")),
+            "low":        _f(base.get("low")),
+            "prev_close": _f(base.get("prev_close")),
+            "volume":     int(base.get("volume") or 0),
+            "amount":     _f(base.get("amount")),
+            **{f"bid{i}": None for i in range(1, 6)},
+            **{f"bid{i}v": 0 for i in range(1, 6)},
+            **{f"ask{i}": None for i in range(1, 6)},
+            **{f"ask{i}v": 0 for i in range(1, 6)},
+            "ts":     base.get("ts", ""),
+            "market": stock["market"],
+            "asset_type": stock.get("asset_type", "stock"),
+        }
+
     sym = to_symbol(code)
     if not sym:
         return None

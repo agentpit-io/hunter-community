@@ -30,8 +30,8 @@ from .source_registry import (
 
 log = logging.getLogger(__name__)
 
-FINANCE_DATA_URL   = os.getenv("FINANCE_DATA_URL",   "https://finance-data.agentpit.io")
-FINANCE_DATA_TOKEN = os.getenv("FINANCE_DATA_TOKEN", "FinAPI@2026!")
+FINANCE_DATA_URL   = os.getenv("FINANCE_DATA_URL",   "")
+FINANCE_DATA_TOKEN = os.getenv("FINANCE_DATA_TOKEN", "")
 
 _HTTPX_HEADERS = {"X-Finance-Token": FINANCE_DATA_TOKEN}
 _PER_SOURCE_TIMEOUT = 10.0

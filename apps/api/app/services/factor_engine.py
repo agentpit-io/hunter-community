@@ -414,8 +414,8 @@ async def compute_pro_prediction(
     """给定 Kronos 结果，计算多因子综合评分并返回 Pro 预测结果。custom_weights 覆盖默认权重。"""
     from app.services.finance_data_client import get_kline_with_fallback as get_kline, to_symbol
 
-    finance_url   = os.getenv('FINANCE_DATA_URL',   'https://finance-data.agentpit.io')
-    finance_token = os.getenv('FINANCE_DATA_TOKEN', 'FinAPI@2026!')
+    finance_url   = os.getenv('FINANCE_DATA_URL',   '')
+    finance_token = os.getenv('FINANCE_DATA_TOKEN', '')
     sym           = to_symbol(code)
 
     loop = asyncio.get_event_loop()

@@ -87,11 +87,24 @@ jobs:
         run: |
           set -euo pipefail
           BAD=$(grep -rn -iE 'wx_openid|feishu_bindings|booth_admin|ADVENTUREX_' apps/api/app 2>/dev/null || true)
-          # NOTE: feishu still appears in some comments / user_feishu_config
-          # helpers · we only forbid the SaaS-specific tables/env
           if [ -n "$BAD" ]; then
             echo "❌ SaaS leftover found · P2 was supposed to strip:"
             echo "$BAD"
+            exit 1
+          fi
+
+      - name: No hardcoded shared-secret defaults in os.getenv fallbacks
+        run: |
+          set -euo pipefail
+          # Whitelist obviously-safe strings: change-me, placeholder, example, empty, hermes local dev
+          BAD=$(grep -rnE 'os\.getenv\([^)]*,\s*["'\''][A-Za-z0-9@!#_-]{6,}["'\'']' apps/api/ 2>/dev/null \
+            | grep -viE 'change-me|placeholder|example|xxxxx|test-?secret|ci-test|localhost|127\.0\.0\.1|redis://redis|postgres:5432|gpt-4o-mini|claude-|kronos-v1|3600|2592000|1000|noop|akshare|openai_compat|opencode|hunter-community|resend|smtp\.[a-z]+\.com|OA_DOMAIN' \
+            | grep -viE '_TTL|_PORT|_DEFAULT_MODEL|_PROVIDER|REGISTRATION_MODE|MAIL_FROM|MODE=|OK|open|closed|invite|light|dark' \
+            || true)
+          if [ -n "$BAD" ]; then
+            echo "⚠ suspicious hardcoded secret default:"
+            echo "$BAD"
+            echo "If genuinely benign, extend the whitelist in .github/workflows/ci.yml"
             exit 1
           fi
 
