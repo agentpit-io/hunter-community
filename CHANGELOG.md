@@ -30,6 +30,30 @@ First public preview cutting five compressed sprints into `main`.
 - Password reset flow · rate limit · settings account tab
 - Full `docs/01-13` coverage (only 01-02 shipped)
 
+## [0.1.3] - 2026-08-11
+
+### Added
+- **`<AuthGuard>` global 401 interceptor** (`apps/web/app/components/AuthGuard.tsx`)
+  · monkey-patches `window.fetch` at layout mount · on `/api/*` 401 with
+  `needLogin:true` or `INVALID_TOKEN`/`UNAUTHORIZED` error, wipes tokens
+  from `localStorage` and redirects to `/login?return_to=<original>`.
+  Fixes the infinite "初始化 session 失败" console spam when JWT expired
+  or DB volume was wiped. 30+ existing fetch callsites need no change.
+- `login/page.tsx` honors `?return_to=` so re-auth lands where you were.
+
+### Changed
+- fin-r1 demo instance postgres password rotated from default `hunter/hunter`
+  to a random 28-char string (in fin-r1 `.env`, not in git). Applied via
+  `ALTER USER hunter WITH PASSWORD '...'` inside the running container so
+  no data was lost.
+
+### Deferred to v0.2.0 (documented in `doc 13 · opencode-enablement.md`)
+- hunter-opencode GHCR image + docker-compose enable · chat features
+- SaaS data key wiring · needs `hunter.agentpit.io/dev/api-keys` first
+- LLM provider wiring for subagents / online_analysis / agents/graph
+- GM data source refactor to yfinance
+- SMTP/Slack push channels
+
 ## [0.1.2] - 2026-08-11
 
 ### Security
