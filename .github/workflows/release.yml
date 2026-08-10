@@ -1,0 +1,43 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract CHANGELOG for this tag
+        id: notes
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#v}"
+          if awk -v v="$version" '
+              /^## \[/ { in_sec = ($0 ~ "\\["v"\\]"); next }
+              in_sec && /^## \[/ { exit }
+              in_sec { print }
+            ' CHANGELOG.md > release_notes.md && [ -s release_notes.md ]; then
+            echo "Extracted notes for $version from CHANGELOG.md"
+          else
+            echo "No matching CHANGELOG section · falling back to auto notes"
+            echo "See CHANGELOG.md for the full log." > release_notes.md
+          fi
+          echo '---' >> release_notes.md
+          echo "Container images:" >> release_notes.md
+          echo '- `ghcr.io/agentpit-io/hunter-community-api:'"$tag"'`' >> release_notes.md
+          echo '- `ghcr.io/agentpit-io/hunter-community-web:'"$tag"'`' >> release_notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          body_path: release_notes.md
+          prerelease: ${{ contains(github.ref_name, '-alpha') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}

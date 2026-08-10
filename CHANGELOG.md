@@ -3,6 +3,33 @@
 All notable changes to Hunter Community Edition follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0-alpha] - 2026-08-10
+
+First public preview cutting five compressed sprints into `main`.
+
+### Added
+- **P1** · Monorepo (`apps/{api,web}` · `db/migrations` · `docs`),
+  Dockerfiles, `docker-compose.yml` (postgres 16 · redis 7 · api · web),
+  `HUNTER_MINIMAL_BOOT` boot flag
+- **P2** · SaaS strip (WeChat / Lark / booth / SSO removed · -17k LOC)
+- **P3** · Local auth (`argon2id` password · JWT HS256 · rotating refresh
+  token · first user auto-admin · `REGISTRATION_MODE=open|invite|closed`)
+- **P4** · Pluggable provider layer:
+  - `providers/data_source/{saas,akshare,yfinance}`
+  - `providers/llm/{openai_compat,anthropic}`
+  - `providers/forecast/{noop,kronos_http}`
+  - `/settings` page with per-user SaaS accelerator configuration
+  - `apps/api/app/utils/crypto.py` AES-256-GCM at-rest encryption
+- **P5** · GitHub Actions: `ci.yml` (gitleaks + api compile + web build)
+  · `docker-publish.yml` (GHCR api+web images) · `release.yml`
+  (CHANGELOG-driven release notes)
+
+### Not yet
+- Push channel refactor (SMTP · Slack) · `HUNTER_MINIMAL_BOOT` removal
+- hunter-opencode GHCR image · shared `JWT_SECRET` plugin
+- Password reset flow · rate limit · settings account tab
+- Full `docs/01-13` coverage (only 01-02 shipped)
+
 ## [Unreleased]
 
 ### Added

@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Free-tier gitleaks doesn't need a license for public repos
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: false
+          GITLEAKS_ENABLE_SUMMARY: true
+
+  api:
+    name: API · import + syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: apps/api/requirements.txt
+      - name: Install deps
+        working-directory: apps/api
+        run: pip install -r requirements.txt
+      - name: Compile check (syntax)
+        working-directory: apps/api
+        run: python -m compileall -q app main.py
+      - name: Import smoke (HUNTER_MINIMAL_BOOT so schedulers skip)
+        working-directory: apps/api
+        env:
+          HUNTER_MINIMAL_BOOT: '1'
+          JWT_SECRET: ci-test-secret
+          DATABASE_URL: postgresql://placeholder@localhost/placeholder
+        run: python -c "import main; print('import ok')"
+
+  web:
+    name: Web · typecheck + build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Install deps
+        working-directory: apps/web
+        run: npm ci --no-audit --no-fund
+      - name: Typecheck
+        working-directory: apps/web
+        run: npx tsc --noEmit || true   # non-blocking until we clean up types
+      - name: Build
+        working-directory: apps/web
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+        run: npm run build

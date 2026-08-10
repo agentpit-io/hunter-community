@@ -131,6 +131,10 @@ app.include_router(discover.router, prefix="/api")
 from app.routers import research_assistant
 app.include_router(research_assistant.router, prefix="/api")
 
+# P4 · Per-user SaaS accelerator config
+from app.routers import settings as settings_router
+app.include_router(settings_router.router, prefix="/api")
+
 # ── Agent Chat V2 · 主对话多智能体调度 ──
 from app.routers import agent_chat
 app.include_router(agent_chat.router, prefix="/api")

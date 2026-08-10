@@ -2,74 +2,128 @@
 
 > 你的私人金融 AI 团队 · 开源自部署 · 15 分钟起步
 >
-> Your Private Financial AI Team · Open-source · Self-hosted · Ready in 15 minutes
+> Your private financial AI team · self-hosted · ready in 15 minutes.
 
 [![License](https://img.shields.io/badge/license-Apache_2.0-blue)](./LICENSE)
-[![Status](https://img.shields.io/badge/status-preview-orange)]()
+[![CI](https://github.com/agentpit-io/hunter-community/actions/workflows/ci.yml/badge.svg)](https://github.com/agentpit-io/hunter-community/actions/workflows/ci.yml)
+[![Docker](https://img.shields.io/badge/ghcr.io-agentpit--io-blue)](https://github.com/agentpit-io/hunter-community/pkgs/container/hunter-community-api)
+
+Live preview: **[https://hunter-community.agentpit.io](https://hunter-community.agentpit.io)**
+(first-time visitors are prompted to create the initial admin account).
 
 ---
 
-## 🚧 Preview · 敬请期待
+## Highlights
 
-Hunter Community Edition (CE) 是 [Hunter](https://hunter.agentpit.io) 商业 SaaS 的**开源自部署版本**。当前处于筹备期，正式版本将在 Sprint 完成后一次性发布。
-
-**已确认路线**：
-- 📦 完整 chat + 全部 SKILL + MCP 组件 + 多 agent 分析
-- 🐳 单条 `docker compose up` 一键起
-- 🔓 Apache 2.0 · 无付费墙 · 无微信/飞书商业化模块
-- 🔌 可选接入 SaaS API（数据 / LLM / Kronos）加速
-
-**当前状态**：骨架仓库 · 追踪进度请点 Watch。
+- 🎯 **Chat-first UI** · one sentence to call tools + rich cards
+- 🧠 **Pluggable providers** · pick data source (akshare · yfinance · SaaS),
+  LLM (OpenAI-compatible · Anthropic · SaaS Gemini), forecast (noop · Kronos)
+- 🔐 **Local auth** · email + argon2id password + JWT · first user auto-admin
+- 🐳 **`docker compose up` and you're done** · Postgres + Redis + API + Web
+- 🔓 **Apache 2.0 · no paywall · no telemetry**
+- 🚀 **Optional SaaS accelerators** · plug in your own key for data · LLM · Kronos
 
 ---
 
-## 与 SaaS 版差异（预告）
+## 5-minute quickstart
 
-| 功能 | Community | Cloud ([hunter.agentpit.io](https://hunter.agentpit.io)) |
+```bash
+git clone https://github.com/agentpit-io/hunter-community
+cd hunter-community
+cp .env.example .env
+# Edit .env · at minimum set a strong JWT_SECRET
+# (openssl rand -base64 48 | tr -d '=/+' | head -c 60)
+docker compose up -d --build
+open http://localhost:3100
+```
+
+On first visit you'll be routed to `/register` to create the admin account.
+
+Default host ports (change in `.env`):
+- Web · `3100`
+- API · `8100`
+- Postgres · `5442`
+- Redis · `6479`
+
+---
+
+## Provider matrix
+
+| Layer | Env var | Options | Default |
+|---|---|---|---|
+| Data source | `DATA_SOURCE_PROVIDER` | `akshare` · `yfinance` · `saas` | `akshare` |
+| LLM | `LLM_PROVIDER` | `openai_compat` · `anthropic` · `saas_gemini` | `openai_compat` |
+| Forecast | `FORECAST_PROVIDER` | `noop` · `kronos_local` · `kronos_saas` | `noop` |
+
+Every provider has an SaaS alternative that talks to
+[hunter.agentpit.io](https://hunter.agentpit.io) — free tier keys at
+[/dev/api-keys](https://hunter.agentpit.io/dev/api-keys). You pick per
+deployment via `.env` **or** per user via the `/settings` page.
+
+See [docs/02-providers.md](./docs/02-providers.md) for details and shape
+contracts.
+
+---
+
+## Feature comparison · Community vs Cloud
+
+| Feature | Community (self-hosted) | Cloud ([hunter.agentpit.io](https://hunter.agentpit.io)) |
 |---|---|---|
-| Chat + 全部 SKILL | ✅ | ✅ |
-| 自选 / 持仓 / 组合 | ✅ | ✅ |
-| UZI 深度分析 | ✅ | ✅ |
-| Kronos 走势预测 | ✅（需 GPU 或 SaaS Key） | ✅ |
-| 微信推送 | ❌ | ✅ |
-| 飞书 / Lark | ❌ | ✅ |
-| 会员额度 / 计费 | ❌ | ✅ |
-| 官方数据源 | 需申请 Key | ✅ |
+| Chat + full SKILL set | ✅ | ✅ |
+| Watchlist · portfolio · signals | ✅ | ✅ |
+| UZI depth analysis | ✅ | ✅ |
+| Kronos forecast | ✅ (needs GPU or SaaS key) | ✅ |
+| WeChat push | ❌ | ✅ |
+| Lark / 飞书 | ❌ | ✅ |
+| Multi-tenant billing | ❌ | ✅ |
+| First-party market data | needs key | ✅ |
 
 ---
 
-## 底层依赖 · opencode fork
+## Roadmap
 
-Hunter CE 的 chat 引擎基于我们对 [sst/opencode](https://github.com/sst/opencode) 的定制 fork。
-Fork 源码为我们的商业秘密，但**产物（Docker image + npm package）保持公开可用**：
-
-- Docker: `ghcr.io/agentpit-io/hunter-opencode:latest`
-- npm: `@agentpit-io/opencode`（规划中）
-
-Fork 遵循 Apache 2.0 授权，NOTICE 中会明确列出上游归属。
-
----
-
-## 时间线
-
-- **T-14** · 内部 dogfooding · README/文档定稿
-- **T-7** · Discord 建好 · 技术博客准备
-- **T-0** · Show HN · Product Hunt · v0.1.0 发布
-
-具体日程见 `hangeaiagent/hunter` 的 `doc/codex/开源整合方案/06-Sprint计划.md`（内部）。
+- [x] **P1** · Monorepo skeleton + docker-compose + fin-r1 deploy
+- [x] **P2** · SaaS strip (WeChat / Lark / booth / SSO removed)
+- [x] **P3** · Local email + password auth
+- [x] **P4** · Pluggable provider layer (data · LLM · forecast) + per-user settings
+- [ ] **P5** · Push channel refactor to SMTP / Slack
+- [ ] **v1.0** · hunter-opencode GHCR image + SKILL catalog UI
 
 ---
 
-## 保持关注
+## Architecture
 
-- ⭐ Star 这个仓库获取发布通知
-- 💬 Discord（发布日一起公开）
-- 📮 邮件订阅：待定
+```
+             ┌─────────────────────┐
+Browser  →   │  web (Next.js 15)   │ :3100
+             └────────┬────────────┘
+                      │ /api/*
+             ┌────────▼────────────┐
+             │  api (FastAPI)      │ :8100
+             │  · auth (JWT)       │
+             │  · providers layer  │───► SaaS / akshare / yfinance
+             │  · agents           │───► OpenAI / Anthropic / SaaS Gemini
+             │                     │───► Kronos local / SaaS / noop
+             └─┬─────────────┬─────┘
+        Postgres           Redis
+         :5442             :6479
+```
 
 ---
+
+## Contributing
+
+Read [CONTRIBUTING.md](./CONTRIBUTING.md). Pull requests welcome, but the
+codebase is fresh out of an ongoing extraction from a private repo —
+expect churn until v1.0.
+
+## Security
+
+Vulnerabilities: `security@agentpit.io`. See [SECURITY.md](./SECURITY.md).
 
 ## License
 
-Apache License 2.0 · 见 [LICENSE](./LICENSE) 与 [NOTICE](./NOTICE)。
+Apache 2.0 · see [LICENSE](./LICENSE) and [NOTICE](./NOTICE).
 
-商标 **Hunter · AgentPit · 猎鹿人** 归 AgentPit 团队所有 · fork 请自行改名。
+**Hunter · AgentPit · 猎鹿人** are trademarks of the AgentPit team.
+Forks must rename.
