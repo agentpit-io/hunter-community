@@ -1,0 +1,38 @@
+Hunter Community Edition
+Copyright 2026 AgentPit Contributors
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+
+────────────────────────────────────────────────────────────────
+This product includes software developed by third parties:
+────────────────────────────────────────────────────────────────
+
+  * opencode (Apache 2.0)
+      Anomaly Innovations · https://github.com/sst/opencode
+      Consumed as a private fork; see ghcr.io/agentpit-io/hunter-opencode
+
+  * Kronos (Apache 2.0)
+      Tsinghua NLP Lab · https://github.com/shiyu-coder/Kronos
+
+  * TradingAgents (MIT)
+      TauricResearch · https://github.com/TauricResearch/TradingAgents
+
+  * UZI-Skill (MIT)
+      Wang Bohong · https://github.com/wbh604/UZI-Skill
+
+  * akshare (MIT)
+      https://github.com/akfamily/akshare
+
+  * yfinance (Apache 2.0)
+      https://github.com/ranaroussi/yfinance
+
+Full attribution and version details will be maintained in
+docs/attribution.md once Sprint 06 lands.

@@ -1,0 +1,41 @@
+# Env
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Node
+node_modules/
+.next/
+.turbo/
+dist/
+build/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+.zed/
+*.swp
+.DS_Store
+
+# Docker
+.docker-data/
+docker-compose.override.yml
+
+# Test / coverage
+coverage/
+.pytest_cache/
+.nyc_output/
+
+# Misc
+tmp/
+.claude/
