@@ -44,7 +44,8 @@ export default function LoginPage() {
       if (r.ok && (d.access_token || d.token)) {
         localStorage.setItem('hunter_token', d.access_token || d.token)
         if (d.refresh_token) localStorage.setItem('hunter_refresh', d.refresh_token)
-        router.replace('/')
+        const ret = new URLSearchParams(window.location.search).get('return_to')
+        router.replace(ret && ret.startsWith('/') ? ret : '/')
       } else {
         setError(d.detail || d.error || '邮箱或密码错误')
       }

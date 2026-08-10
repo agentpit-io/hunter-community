@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
+import AuthGuard from './components/AuthGuard'
 export const metadata: Metadata = {
   title: '猎鹿人 · Hunter | agentpit.io',
   description: 'agentpit.io 猎鹿人 · Hunter · 实时行情 · 资金流向 · 持仓预警',
@@ -21,6 +22,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="zh-CN">
       <body className="min-h-screen" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
+        <AuthGuard />
         {children}
       </body>
     </html>
