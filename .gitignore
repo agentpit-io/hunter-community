@@ -40,3 +40,7 @@ coverage/
 tmp/
 .claude/
 tsconfig.tsbuildinfo
+
+# 原生模式（scripts/native/start.ps1）下载的运行时与数据，约 2.5G
+# Python / Node / opencode / PostgreSQL 绿色版 + pgdata + 日志，全在这里
+.runtime/
