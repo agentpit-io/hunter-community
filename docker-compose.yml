@@ -82,12 +82,14 @@ services:
     build:
       context: ./apps/web
       dockerfile: Dockerfile
+      args:
+        # 构建期烘进前端产物 · 留空则走同源 /api/*（反代部署）
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
     <<: *restart
     depends_on:
       - api
     environment:
       NODE_ENV: production
-      NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:8100}
       # ── chat 依赖 · web 的 BFF 要反代到 opencode 容器 ──────────────────
       # 这几个都必须传给 web(不只是 opencode)，否则 /chat 起不来：
       #  · OPENCODE_URL 不传 → 代码回落 http://127.0.0.1:3901，在 web 容器内
