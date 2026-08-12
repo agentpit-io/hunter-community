@@ -88,6 +88,18 @@ services:
     environment:
       NODE_ENV: production
       NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:8100}
+      # ── chat 依赖 · web 的 BFF 要反代到 opencode 容器 ──────────────────
+      # 这几个都必须传给 web(不只是 opencode)，否则 /chat 起不来：
+      #  · OPENCODE_URL 不传 → 代码回落 http://127.0.0.1:3901，在 web 容器内
+      #    那是 web 自己 → 三个 chat 端点全 ECONNREFUSED(502)
+      #  · 用户名/密码不传 → BFF 拼出 "opencode:"(空密码)，而 opencode 容器
+      #    要的是 ${OPENCODE_PASS} → 401
+      OPENCODE_URL: http://opencode:3901
+      OPENCODE_SERVER_USERNAME: ${OPENCODE_USER:-}
+      OPENCODE_SERVER_PASSWORD: ${OPENCODE_PASS:-}
+      # BFF 还要回调 api 查会话归属(谁能看哪个 session)。
+      # 不传 → 回落 http://127.0.0.1:8000 → 503 ownership_unavailable
+      HERMES_API_URL: http://api:8000
     ports:
       - "${WEB_HOST_PORT:-3100}:3000"
 
