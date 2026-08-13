@@ -22,7 +22,12 @@ Edit `.env`:
   ```bash
   openssl rand -base64 48 | tr -d '=/+' | head -c 60
   ```
-- `REGISTRATION_MODE` · `open` (anyone can register · first user is admin) ·
+- `HUNTER_SINGLE_USER` · `1` (default) means **no login screen at all** — the
+  frontend silently obtains a session for one built-in local account. Set it to
+  `0` before letting anyone else reach this instance; with it on, any request to
+  `/api/auth/local-session` gets an admin token.
+- `REGISTRATION_MODE` · only applies when `HUNTER_SINGLE_USER=0` ·
+  `open` (anyone can register · first user is admin) ·
   `invite` (needs code from admin · first user still admin) · `closed`
 - Everything else has sensible defaults.
 
@@ -43,8 +48,11 @@ docker compose ps
 # hunter-community-web-1        Up (healthy)
 ```
 
-Open [http://localhost:3100](http://localhost:3100). You'll be redirected
-to `/register?setup=1` to create the initial admin account.
+Open [http://localhost:3100](http://localhost:3100). You land straight in the
+app — no registration, no login (see `HUNTER_SINGLE_USER` above).
+
+With `HUNTER_SINGLE_USER=0` you'll be redirected to `/register?setup=1` instead,
+to create the initial admin account.
 
 ## Behind a reverse proxy (optional)
 
@@ -102,5 +110,8 @@ docker compose up -d --build
 - **`api` restarts continuously** · Check `docker compose logs api` —
   usually a missing env var. `HUNTER_MINIMAL_BOOT=1` (default) tolerates
   most missing config.
+- **Login page keeps appearing** · That means single-user mode is off
+  (`HUNTER_SINGLE_USER=0`) or the api container can't be reached — check
+  `docker compose logs api`.
 - **Register form 400 "该邮箱已注册"** · The email exists. Log in via
   `/login` or reset via `docker compose exec postgres psql -U hunter ...`.

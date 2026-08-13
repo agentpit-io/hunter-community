@@ -3,6 +3,7 @@ import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { Activity, Mail, Lock, User, Ticket, Loader2, AlertCircle, Sparkles } from 'lucide-react'
+import { ensureLocalSession } from '../lib/localSession'
 
 const API = process.env.NEXT_PUBLIC_API_URL || ''
 
@@ -37,8 +38,12 @@ function RegisterInner() {
   const [error, setError] = useState('')
 
   useEffect(() => {
-    fetch(`${API}/api/auth/status`).then(r => r.json()).then(setStatus).catch(() => setStatus({}))
-  }, [])
+    // 单用户模式(开源版默认)根本不需要注册 —— 换到 token 就直接进主页
+    ensureLocalSession().then((token) => {
+      if (token) { router.replace('/'); return }
+      fetch(`${API}/api/auth/status`).then(r => r.json()).then(setStatus).catch(() => setStatus({}))
+    })
+  }, [router])
 
   const mode = status?.registration_mode ?? 'open'
   const isFirst = status?.needs_setup === true

@@ -11,6 +11,7 @@ import SkillManager from './SkillManager'
 import ProfileEditor from './ProfileEditor'
 import { getProfile } from '../lib/profileClient'
 import { getUnlockStatus, onUnlockChange, peekUnlockStatus } from '../lib/unlockClient'
+import { isSingleUser } from '../../lib/localSession'
 import UnlockModal from './UnlockModal'
 
 interface Props {
@@ -612,9 +613,12 @@ function ProfileFooter({
             </div>
           )}
           <MenuItem onClick={() => { setOpen(false); onProfile() }}>我的画像</MenuItem>
-          <MenuItem onClick={() => { setOpen(false); onLogout() }} danger>
-            <LogOut size={12} /> 退出登录
-          </MenuItem>
+          {/* 单用户模式下清了 token 会被立刻换回来,这个入口没有意义,藏掉 */}
+          {!isSingleUser() && (
+            <MenuItem onClick={() => { setOpen(false); onLogout() }} danger>
+              <LogOut size={12} /> 退出登录
+            </MenuItem>
+          )}
         </div>
       )}
     </div>

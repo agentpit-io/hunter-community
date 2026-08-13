@@ -35,6 +35,21 @@ JWT_SECRET = os.environ.get("JWT_SECRET", "")
 JWT_ACCESS_TTL = int(os.getenv("JWT_ACCESS_TTL", "3600"))         # 1h
 JWT_REFRESH_TTL = int(os.getenv("JWT_REFRESH_TTL", "2592000"))    # 30d
 
+# Single-user mode · ON by default.
+#
+# Community Edition runs on your own machine, for you. Making you invent an
+# email and a password before you can look at a stock quote is friction that
+# buys nothing: whoever can open the browser can already read the database.
+# So the frontend silently obtains a session for one built-in local account and
+# never shows a login screen.
+#
+# Turn it OFF (HUNTER_SINGLE_USER=0) the moment the instance is reachable by
+# anyone but you — with it on, *any* request to /api/auth/local-session gets an
+# admin token, and no reverse proxy in front can tell the difference.
+SINGLE_USER = (os.getenv("HUNTER_SINGLE_USER", "1").strip().lower()
+               not in ("0", "false", "no", "off"))
+LOCAL_USER_EMAIL = os.getenv("HUNTER_LOCAL_USER_EMAIL", "local@hunter.local").lower()
+
 # Registration policy · open (default) · invite · closed
 REGISTRATION_MODE = os.getenv("REGISTRATION_MODE", "open").lower()
 if REGISTRATION_MODE not in ("open", "invite", "closed"):
@@ -369,6 +384,53 @@ async def me(request: Request):
     }
 
 
+@router.post("/auth/local-session", response_model=TokenResp)
+async def local_session(request: Request):
+    """Hand out a session for the built-in local account · no credentials.
+
+    This is what removes the login step. The frontend calls it on boot and
+    again whenever a token expires, so the user never sees a form.
+
+    Returns 403 when single-user mode is off — the frontend reads that as
+    "this instance has real accounts" and falls back to the login page.
+    """
+    if not SINGLE_USER:
+        raise HTTPException(403, "该实例已启用多用户登录 · 请用账号密码")
+
+    _ensure_auth_tables()
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT id, role, email, display_name, status
+             FROM users WHERE email_lower=%s""",
+        (LOCAL_USER_EMAIL,),
+    )
+    row = cur.fetchone()
+
+    if row is None:
+        # Password is random and thrown away · this account is unreachable
+        # through /auth/login on purpose. Switching to multi-user mode later
+        # means registering a real account, not guessing this one.
+        cur.execute(
+            """INSERT INTO users (email, email_lower, pw_hash, role, display_name)
+               VALUES (%s, %s, %s, 'admin', %s)
+               RETURNING id, role, email, display_name""",
+            (LOCAL_USER_EMAIL, LOCAL_USER_EMAIL,
+             ph.hash(secrets.token_urlsafe(32)), "本机用户"),
+        )
+        user_id, role, email, display_name = cur.fetchone()
+        conn.commit()
+        logger.info("[auth] single-user mode · created local account {}", LOCAL_USER_EMAIL)
+    else:
+        user_id, role, email, display_name, status_ = row
+        if status_ != "active":
+            conn.close()
+            raise HTTPException(403, "本机账户已停用")
+
+    cur.execute("UPDATE users SET last_login=NOW() WHERE id=%s", (user_id,))
+    return _issue_tokens(str(user_id), role, email, display_name, request, cur, conn)
+
+
 @router.get("/auth/status")
 async def status():
     """Public probe. Frontend uses this to decide whether to route
@@ -388,6 +450,7 @@ async def status():
             "needs_setup": user_count == 0,
             "user_count": user_count,
             "registration_mode": REGISTRATION_MODE,
+            "single_user": SINGLE_USER,
         }
     except Exception as e:
         logger.warning("[auth] status probe failed: {}", e)

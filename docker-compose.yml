@@ -61,6 +61,10 @@ services:
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-3600}
       JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-2592000}
+      # 单用户模式(默认开)· 本机自用不需要账号密码,前端自动换会话不显示登录页
+      # 暴露到公网前务必置 0 —— 开着等于谁都能拿到 admin token
+      HUNTER_SINGLE_USER: ${HUNTER_SINGLE_USER:-1}
+      HUNTER_LOCAL_USER_EMAIL: ${HUNTER_LOCAL_USER_EMAIL:-local@hunter.local}
       REGISTRATION_MODE: ${REGISTRATION_MODE:-open}
       HUNTER_ADMIN_EMAILS: ${HUNTER_ADMIN_EMAILS:-}
       # 平台 key · 解锁左侧全部工具与 SKILL(免费申请 hunter.agentpit.io/dev/api-keys)

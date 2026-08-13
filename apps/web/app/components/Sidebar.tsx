@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { LayoutGrid, Activity, Bell, Plus, X, Loader2, Shield, History, LogOut, ChevronDown, ClipboardList, Globe, Zap, TrendingUp, Settings, Briefcase, Gift, Sparkles, Users } from 'lucide-react'
+import { isSingleUser } from '../lib/localSession'
 
 type Stock = { code: string; name: string; market: string; exchange: string; asset_type?: string }
 
@@ -282,13 +283,16 @@ export default function Sidebar() {
                     <Settings className="w-4 h-4" />
                     投资偏好
                   </Link>
-                  <button
-                    onClick={handleLogout}
-                    className="flex items-center gap-2.5 w-full px-4 py-2.5 text-sm transition-colors"
-                    style={{ color: 'var(--red, #ef4444)' }}>
-                    <LogOut className="w-4 h-4" />
-                    退出登录
-                  </button>
+                  {/* 单用户模式下清了 token 会被立刻换回来,这个入口没有意义,藏掉 */}
+                  {!isSingleUser() && (
+                    <button
+                      onClick={handleLogout}
+                      className="flex items-center gap-2.5 w-full px-4 py-2.5 text-sm transition-colors"
+                      style={{ color: 'var(--red, #ef4444)' }}>
+                      <LogOut className="w-4 h-4" />
+                      退出登录
+                    </button>
+                  )}
                 </div>
               </>
             )}

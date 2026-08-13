@@ -18,6 +18,7 @@ _PUBLIC_PATHS = {
     "/api/auth/refresh",
     "/api/auth/logout",
     "/api/auth/status",
+    "/api/auth/local-session",   # single-user mode · see routers/auth.py
     "/api/agent/health",
 }
 

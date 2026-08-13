@@ -3,16 +3,20 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Activity, Mail, Lock, Loader2, AlertCircle } from 'lucide-react'
+import { ensureLocalSession } from '../lib/localSession'
 
 const API = process.env.NEXT_PUBLIC_API_URL || ''
 
 /**
  * Hunter Community · local login page.
  *
- * On mount checks /api/auth/status:
- *  - If needs_setup=true (fresh install, no admin yet) forwards to /register
- *    where the first user gets auto-admin role.
- *  - Otherwise renders the plain email + password form.
+ * 单用户模式(开源版默认)下这一页**不会被看到**:挂载时先静默换一个 token 然后
+ * 直接跳回去。之所以还留着它,是因为应用里有若干处"没 token 就跳 /login"的检查,
+ * 它们撞过来时这里负责把人送回原页 —— 比逐个改那些检查稳。
+ *
+ * 多用户模式(HUNTER_SINGLE_USER=0)下才是真的登录页:
+ *  - needs_setup=true(全新实例还没有管理员)→ 转 /register,第一个账号自动管理员
+ *  - 否则渲染邮箱 + 密码表单
  */
 export default function LoginPage() {
   const router = useRouter()
@@ -23,11 +27,19 @@ export default function LoginPage() {
   const [checking, setChecking] = useState(true)
 
   useEffect(() => {
-    // SetupWizard · route the very first visitor to /register
-    fetch(`${API}/api/auth/status`).then(r => r.json()).then((s) => {
-      if (s?.needs_setup) router.replace('/register?setup=1')
-      else setChecking(false)
-    }).catch(() => setChecking(false))
+    const back = () => {
+      const ret = new URLSearchParams(window.location.search).get('return_to')
+      router.replace(ret && ret.startsWith('/') ? ret : '/')
+    }
+    // 单用户模式:换到 token 就原路返回,登录表单一眼都不用看
+    ensureLocalSession().then((token) => {
+      if (token) { back(); return }
+      // 多用户模式 · SetupWizard:全新实例先去建管理员
+      fetch(`${API}/api/auth/status`).then(r => r.json()).then((s) => {
+        if (s?.needs_setup) router.replace('/register?setup=1')
+        else setChecking(false)
+      }).catch(() => setChecking(false))
+    })
   }, [router])
 
   const handleLogin = async (e: React.FormEvent) => {
