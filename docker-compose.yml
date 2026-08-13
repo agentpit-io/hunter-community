@@ -70,6 +70,9 @@ services:
       HUNTER_LOCAL_USER_EMAIL: ${HUNTER_LOCAL_USER_EMAIL:-local@hunter.local}
       REGISTRATION_MODE: ${REGISTRATION_MODE:-open}
       HUNTER_ADMIN_EMAILS: ${HUNTER_ADMIN_EMAILS:-}
+      # MCP 回调 /api/internal/* 的共享口令 · **必须与 opencode 容器同值**
+      # 两边都空时恰好也能对上,但那等于没有认证,所以给个默认值
+      HUNTER_INTERNAL_KEY: ${HUNTER_INTERNAL_KEY:-hunter-internal-local}
       # 平台 key · 解锁左侧全部工具与 SKILL(免费申请 hunter.agentpit.io/dev/api-keys)
       # 留空也能跑:聊天用你自己的 LLM key,工具则在 UI 左下角「解锁全部工具」里填 key
       HUNTER_API_KEY: ${HUNTER_API_KEY:-}
@@ -117,6 +120,26 @@ services:
     ports:
       - "${WEB_HOST_PORT:-3100}:3000"
 
+  # opencode 送出的 tool schema 是完整 JSON Schema,Gemini 只认 OpenAPI 子集,
+  # 收到 $schema / additionalProperties 之类会整个请求报错 —— 表现是"一发消息就没回复"。
+  # 这一层只洗 tools[].function.parameters,其余原样转发。见 scripts/llm-shim/shim.py。
+  # 不需要时(provider 本来就吃全量 JSON Schema)设 LLM_SCHEMA_SANITIZE=0,
+  # gen-config 就会让 opencode 直连 LLM_BASE_URL,这个容器空转不影响。
+  llm-shim:
+    image: python:3.12-alpine
+    <<: *restart
+    environment:
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+    volumes:
+      - ./scripts/llm-shim:/app:ro
+    command: ["python3", "/app/shim.py"]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:3999/health',timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
   opencode:
     # Built by huntercode private repo via
     # .github/workflows/hunter-community-publish.yml
@@ -124,6 +147,8 @@ services:
     <<: *restart
     depends_on:
       api:
+        condition: service_healthy
+      llm-shim:
         condition: service_healthy
     environment:
       # Basic auth kept OFF by default · hunter-auth plugin is the real gate.
@@ -137,13 +162,23 @@ services:
       # MCP subprocesses reach the api container via internal docker network
       HERMES_API_URL: http://api:8000
       # Shared secret for /api/internal/* calls
-      HUNTER_INTERNAL_KEY: ${HUNTER_INTERNAL_KEY:-}
+      HUNTER_INTERNAL_KEY: ${HUNTER_INTERNAL_KEY:-hunter-internal-local}
       # LLM · same source of truth as api container
       LLM_PROVIDER: ${LLM_PROVIDER:-openai_compat}
       LLM_BASE_URL: ${LLM_BASE_URL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_DEFAULT_MODEL: ${LLM_DEFAULT_MODEL:-gpt-4o-mini}
       HUNTER_BUDGET_ENABLED: ${HUNTER_BUDGET_ENABLED:-false}
+      # auto = 模型名含 gemini 时才经 shim(见 scripts/opencode/gen-config.py)
+      LLM_SCHEMA_SANITIZE: ${LLM_SCHEMA_SANITIZE:-auto}
+      LLM_SHIM_URL: http://llm-shim:3999/v1
+    # 镜像里插件(plugins/)和 MCP(mcp/)都齐了,唯独没有把它们串起来的 opencode.json,
+    # 而 opencode 只认配置文件里的 provider、不认 LLM_* 环境变量 —— 不生成这个文件
+    # 它会回落到内置的 OpenCode Zen,根本不去调你配的网关。
+    # 所以包一层入口:启动前按 .env 现生成配置。改完 .env 重新 up 即可生效。
+    volumes:
+      - ./scripts/opencode:/opt/hunter-boot:ro
+    entrypoint: ["/bin/sh", "/opt/hunter-boot/entrypoint.sh"]
     ports:
       - "${OPENCODE_HOST_PORT:-3921}:3901"
 

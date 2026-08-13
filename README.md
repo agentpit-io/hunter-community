@@ -94,7 +94,7 @@ docker compose up -d --build
 首次会构建 api / web 镜像并拉取对话引擎，10 分钟左右属正常。看状态：
 
 ```bash
-docker compose ps        # 五个服务都应是 running / healthy
+docker compose ps        # 六个服务都应是 running / healthy
 docker compose logs -f api
 ```
 
@@ -150,6 +150,10 @@ docker compose logs -f api
 **点左侧工具弹"需要 key"**
 这就是设计如此，见上面「两把 key」。申请是免费的。
 
+**问股价时回答"尚未配置 Hunter key"**
+正常，见上面「两把 key」。想先不申请 key 试试基础行情，
+在 `.env` 里设 `DATA_SOURCE_PROVIDER=akshare` 再 `docker compose up -d`。
+
 **填了 key 还是提示未解锁**
 弹窗会告诉你具体原因：key 被吊销了、或连不上 `hunter.agentpit.io`。
 后者多半是本机代理／防火墙，`docker compose exec api curl -I https://hunter.agentpit.io` 验一下。
@@ -173,12 +177,16 @@ docker compose up -d --build
 
 ## Provider 矩阵
 
-不填 Hunter key 也能取到基础行情——A 股走 `akshare`，美股港股走 `yfinance`，
-都不要 key，但覆盖面和数据质量不如平台管道。
+数据源默认走 Hunter 网关（`hunter`）。没配 key 时它会明确回一句"去申请 key"，
+而不是假装数据源出问题——这是有意的。
+
+想完全不用 key 也能取 A 股行情，把 `DATA_SOURCE_PROVIDER` 设成 `akshare`
+（美股港股用 `yfinance`）。两者都免费，但覆盖面和数据质量不如平台管道，
+而且 akshare 在容器里经常连不上境内数据源，失败率不低。
 
 | 层 | 环境变量 | 可选值 | 默认 |
 |---|---|---|---|
-| 数据源 | `DATA_SOURCE_PROVIDER` | `hunter` · `akshare` · `yfinance` · `saas` | 留空自动选：配了 `HUNTER_API_KEY` 走 `hunter`，否则 `akshare` |
+| 数据源 | `DATA_SOURCE_PROVIDER` | `hunter` · `akshare` · `yfinance` · `saas` | 留空 = `hunter` |
 | 大模型 | `LLM_PROVIDER` | `openai_compat` · `anthropic` · `saas_gemini` | `openai_compat` |
 | 预测 | `FORECAST_PROVIDER` | `noop` · `kronos_local` · `kronos_saas` | `noop` |
 
@@ -226,7 +234,11 @@ docker compose up -d --build
              │  · auth (JWT)       │◄───────┤ MCP tools 回调    │
              │  · providers layer  │───► hunter 网关 / akshare / yfinance
              │  · agents           │───► 你的 OpenAI 兼容网关
-             └─┬─────────────┬─────┘
+             └─┬─────────────┬─────┘        └────────┬─────────┘
+                                                     │ tool schema 清洗
+                                          ┌──────────▼─────────┐
+                                          │ llm-shim  :3999    │──► 你的网关
+                                          └────────────────────┘
         Postgres           Redis
          :5442             :6479
 

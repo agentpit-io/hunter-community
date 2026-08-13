@@ -18,10 +18,16 @@ def get_data_source() -> IDataSource:
 
     provider = (os.getenv("DATA_SOURCE_PROVIDER") or "").lower()
     if not provider:
-        # No explicit choice: if a Hunter key is around, the user clearly wants
-        # the unlocked path. Otherwise fall back to akshare (A-shares, no key).
-        from app.services import hunter_key
-        provider = "hunter" if hunter_key.resolve() else "akshare"
+        # Default to the Hunter gateway even with no key configured. Without a
+        # key it raises HunterKeyRequired, which reaches the user as "go apply
+        # for a key" — the honest answer. Silently falling back to akshare here
+        # produced a much worse experience: akshare is frequently unreachable
+        # from inside a container, so the user got "行情暂时无法获取" and had no
+        # idea a free key would fix it.
+        #
+        # akshare / yfinance are still one env var away for anyone who wants
+        # no-key data: DATA_SOURCE_PROVIDER=akshare
+        provider = "hunter"
     logger.info("[providers.data_source] loading provider={}", provider)
 
     if provider == "hunter":

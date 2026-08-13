@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from app.routers import quote, kline, news, fundflow, watchlist, alerts, signals, signal_settings
 from app.routers import auth as auth_router
 from app.middleware.auth import AuthMiddleware
+from app.providers.data_source.hunter_tools import HunterKeyRequired
 from app.services.collector import start_collector, stop_collector
 from app.services.database import init_db, get_stocks
 from app.services.finance_data_client import register_stocks
@@ -113,6 +114,22 @@ app = FastAPI(
     redoc_url="/redoc" if _ENABLE_DOCS else None,
     openapi_url="/openapi.json" if _ENABLE_DOCS else None,
 )
+
+# 「需要 Hunter key」是可预期的业务状态,不是服务器错误。统一在这里翻译成结构化
+# 响应,免得每个用到取数的路由各写一遍 try/except —— 漏一个就是一个裸 500,
+# 而 MCP 把 500 交给模型,模型只会说"服务异常",用户永远不知道差一把免费 key。
+@app.exception_handler(HunterKeyRequired)
+async def _hunter_key_required(request, exc: HunterKeyRequired):
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        status_code=200,   # 200 是有意的:这是给模型看的"结果",不是传输失败
+        content={
+            "error": "hunter_key_required",
+            "message": str(exc),
+            "apply_url": exc.apply_url,
+        },
+    )
+
 
 app.add_middleware(AuthMiddleware)
 app.add_middleware(

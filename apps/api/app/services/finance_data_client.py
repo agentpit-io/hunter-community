@@ -21,7 +21,13 @@ _USE_SAAS = bool(FINANCE_DATA_URL)
 
 
 def _provider_get_quote_sync(code: str) -> dict | None:
-    """Sync bridge to providers.data_source · caller of this module is sync."""
+    """Sync bridge to providers.data_source · caller of this module is sync.
+
+    Swallows provider failures and returns None (callers then show
+    "数据未就绪") — **except** "you need a Hunter key", which is re-raised so
+    the reason survives all the way to the user. Turning that into a generic
+    None is how you get an assistant blaming 网络波动 for a missing free key.
+    """
     try:
         from app.providers.data_source import get_data_source
         ds = get_data_source()
@@ -37,6 +43,11 @@ def _provider_get_quote_sync(code: str) -> dict | None:
             pass  # no loop, fall through
         return asyncio.run(ds.get_quote(code))
     except Exception as e:
+        # 判断放在 except 里而不是提前 import:hunter_tools 只在 provider=hunter
+        # 时才会被加载,顶层 import 会把它变成所有 provider 的硬依赖
+        from app.providers.data_source.hunter_tools import HunterKeyRequired
+        if isinstance(e, HunterKeyRequired):
+            raise
         logger.warning("[finance_data_client] provider fallback failed for {}: {}", code, e)
         return None
 
