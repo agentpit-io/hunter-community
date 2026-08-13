@@ -172,6 +172,10 @@ services:
       # 新镜像认 HUNTER_BUDGET_ENABLED=false;旧镜像不认这个开关(插件里根本没读过),
       # 所以再用它认得的 HUNTER_BUDGET_DAILY 兜一层 —— 否则聊一阵就会撞
       # "已达日 token 上限 500000 · 明日再试",而开关明明是关的,极难排查。
+      # 审计日志默认写 /opt/opencode-audit/,但容器以非 root 跑,在 /opt 下建不了目录。
+      # 旧镜像会因此每写一条就抛 ENOENT 刷一屏堆栈,把真正的报错淹掉;
+      # 指到 /tmp 就没事(新镜像自己会退到 tmp,这行届时是冗余的,留着无害)。
+      HUNTER_AUDIT_PATH: ${HUNTER_AUDIT_PATH:-/tmp/hunter-audit/AUDIT.jsonl}
       HUNTER_BUDGET_ENABLED: ${HUNTER_BUDGET_ENABLED:-false}
       HUNTER_BUDGET_DAILY: ${HUNTER_BUDGET_DAILY:-999999999}
       HUNTER_BUDGET_PER_REQUEST: ${HUNTER_BUDGET_PER_REQUEST:-999999999}

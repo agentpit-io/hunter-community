@@ -4,11 +4,11 @@ import { HUNTER } from '../../lib/hunter-theme'
 import type { Message, MessagePart, MessagePartTool, OpencodeEvent } from '../lib/types'
 import {
   createSession,
-  defaultModelKey,
   getSession,
   listMessages,
   listSessions,
   renameSession,
+  resolveModelKey,
   sendMessage,
   switchSessionAgent,
   switchSessionModel,
@@ -196,15 +196,20 @@ export default function ChatWorkspace({
   const [currentModelKey, setCurrentModelKey] = useState('')
 
   useEffect(() => {
+    // 'build' 曾是我们写死的默认值,不是用户挑的 —— 而它是 opencode 的编程 agent,
+    // 会让"你好"得到"First, I'll search the codebase..."。存量用户一并纠正。
     const savedAgent = localStorage.getItem('hunter_chat_agent')
-    if (savedAgent) setCurrentAgent(savedAgent)
+    if (savedAgent && savedAgent !== 'build') setCurrentAgent(savedAgent)
+    else if (savedAgent === 'build') localStorage.removeItem('hunter_chat_agent')
+
+    // 存的模型可能是老版本写死的 'oneapi/gemini-3.5-flash' —— 那个 provider 在
+    // 开源版根本不存在,发消息必 500。拿实时清单校验,失效就换默认值并覆写。
     const savedModel = localStorage.getItem('hunter_chat_model')
-    if (savedModel) {
-      setCurrentModelKey(savedModel)
-      return
-    }
-    // 没选过 → 用 opencode 自己声明的默认值(来自用户 .env)
-    void defaultModelKey().then((k) => { if (k) setCurrentModelKey(k) })
+    void resolveModelKey(savedModel).then((k) => {
+      if (!k) return
+      setCurrentModelKey(k)
+      if (k !== savedModel) localStorage.setItem('hunter_chat_model', k)
+    })
   }, [])
 
   const { events, status: sseStatus } = useOpencodeSSE(sessionId)

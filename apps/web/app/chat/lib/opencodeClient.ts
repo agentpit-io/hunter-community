@@ -164,6 +164,40 @@ export async function defaultModelKey(): Promise<string> {
   return ''
 }
 
+/**
+ * 校验存在 localStorage 里的模型选择,失效就换成默认值。
+ *
+ * 为什么需要:早期版本默认写死 'oneapi/gemini-3.5-flash'(生产实例的 provider id),
+ * 已经存进老用户浏览器了。改默认值救不了他们 —— 代码只在 localStorage 为空时才用
+ * 新默认。他们每次发消息都是 500 UnknownError,而报错里看不出是模型名对不上,
+ * 只能靠"清浏览器缓存"这种没人猜得到的操作。
+ *
+ * 所以拿实时的 provider 清单校验一遍,对不上就换掉并覆写 localStorage —— 自愈,
+ * 用户无感。
+ */
+export async function resolveModelKey(saved: string | null): Promise<string> {
+  try {
+    const data = await req<any>('GET', '/config/providers')
+    const providers: any[] = data?.providers || []
+    if (saved) {
+      const [pid, ...rest] = saved.split('/')
+      const mid = rest.join('/')
+      const p = providers.find((x) => x.id === pid)
+      if (p && mid && (p.models || {})[mid]) return saved      // 还有效
+    }
+    const def = data?.default
+    if (def && typeof def === 'object') {
+      const ids: string[] = providers.map((p) => p.id)
+      // 'opencode' 是镜像内置的 OpenCode Zen,不是用户配的那个,排在最后
+      const pick = ids.find((id) => id !== 'opencode' && def[id]) || ids.find((id) => def[id])
+      if (pick) return `${pick}/${def[pick]}`
+    }
+  } catch (e) {
+    console.warn('[opencodeClient] resolveModelKey failed:', e)
+  }
+  return ''
+}
+
 export async function listProviders(): Promise<ProviderInfo[]> {
   try {
     const data = await req<any>('GET', '/config/providers')
