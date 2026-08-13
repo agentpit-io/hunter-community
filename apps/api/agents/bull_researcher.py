@@ -71,23 +71,42 @@ def _format_filtered(facts: list) -> str:
 
 def _call_llm(user: str) -> str:
     system = "你是一位专业的多头股票分析师，使用简体中文，直接输出分析文本（非 JSON）。"
+    # ONE_API_* 是内部 SaaS 网关的历史命名 · 开源版用户没那个网关 · 缺 key 时回退到
+    # .env 里统一的 LLM_* 三件套。timeout 60 → 120 因为推理型模型 reasoning tokens 一多就 40-60s+。
+    api_key   = os.getenv("ONE_API_KEY")      or os.getenv("LLM_API_KEY", "")
+    base_url  = os.getenv("ONE_API_BASE_URL") or os.getenv("LLM_BASE_URL", "http://104.197.139.51:3000/v1")
+    model     = os.getenv("ONE_API_MODEL")    or os.getenv("LLM_DEFAULT_MODEL", "gemini-3-flash-preview")
+    if not api_key:
+        logger.warning("bull_researcher: 无可用 key · 请在 .env 里填 LLM_API_KEY(或 ONE_API_KEY)")
+        return "（多头分析暂不可用）"
     try:
-        client = OpenAI(
-            api_key=os.getenv("ONE_API_KEY", ""),
-            base_url=os.getenv("ONE_API_BASE_URL", "http://104.197.139.51:3000/v1"),
-            timeout=60,
-        )
-        model = os.getenv("ONE_API_MODEL", "gemini-3-flash-preview")
+        client = OpenAI(api_key=api_key, base_url=base_url, timeout=120)
         resp  = client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user",   "content": user},
             ],
-            max_tokens=800,
+            # DeepSeek-R1 等推理型模型 reasoning tokens 常 2000-5000+,
+            # 老值 800 全被 reasoning 吃完 · message.content 返空 · 下面
+            # `or fallback` 分支静默触发,日志里看不到任何 warning。抬到 4096
+            # 与 internal_uzi 保持一致,同时补 finish_reason/usage 便于排错。
+            max_tokens=4096,
             temperature=0.7,
         )
-        return resp.choices[0].message.content or "（多头分析暂不可用）"
+        content = resp.choices[0].message.content or ""
+        if not content.strip():
+            finish = resp.choices[0].finish_reason if resp.choices else "unknown"
+            usage  = resp.usage
+            logger.warning(
+                "bull_researcher: content 空 · finish={} tokens_in={} tokens_out={} model={}",
+                finish,
+                usage.prompt_tokens if usage else "?",
+                usage.completion_tokens if usage else "?",
+                model,
+            )
+            return "（多头分析暂不可用）"
+        return content
     except Exception as e:
         logger.warning("bull_researcher LLM call failed: {}", e)
         return "（多头分析暂不可用）"

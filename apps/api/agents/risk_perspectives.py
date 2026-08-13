@@ -19,25 +19,42 @@ from openai import OpenAI
 from agents.state import EnhancedAgentState
 
 
-def _call_llm(system: str, user: str, max_tokens: int = 700) -> str:
+def _call_llm(system: str, user: str, max_tokens: int = 3500) -> str:
     """内部通用 LLM 调用 · 返 plain text · 与 bull/bear_researcher 同构"""
+    # ONE_API_* 是内部 SaaS 网关的历史命名 · 开源版用户没那个网关 · 缺 key 时回退到
+    # .env 里统一的 LLM_* 三件套。timeout 60 → 120 因为推理型模型 reasoning tokens 一多就 40-60s+。
+    api_key   = os.getenv("ONE_API_KEY")      or os.getenv("LLM_API_KEY", "")
+    base_url  = os.getenv("ONE_API_BASE_URL") or os.getenv("LLM_BASE_URL", "http://104.197.139.51:3000/v1")
+    model     = os.getenv("ONE_API_MODEL")    or os.getenv("LLM_DEFAULT_MODEL", "gemini-3-flash-preview")
+    if not api_key:
+        logger.warning("risk_perspective: 无可用 key · 请在 .env 里填 LLM_API_KEY(或 ONE_API_KEY)")
+        return "（风控分析暂不可用）"
     try:
-        client = OpenAI(
-            api_key=os.getenv("ONE_API_KEY", ""),
-            base_url=os.getenv("ONE_API_BASE_URL", "http://104.197.139.51:3000/v1"),
-            timeout=60,
-        )
-        model = os.getenv("ONE_API_MODEL", "gemini-3-flash-preview")
+        client = OpenAI(api_key=api_key, base_url=base_url, timeout=120)
         resp = client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
+            # 默认 3500 是给 DeepSeek-R1 等推理型模型的 reasoning tokens 留余量,
+            # 老值 700 全被 reasoning 吃完 · message.content 返空。
             max_tokens=max_tokens,
             temperature=0.6,
         )
-        return resp.choices[0].message.content or "（分析暂不可用）"
+        content = resp.choices[0].message.content or ""
+        if not content.strip():
+            finish = resp.choices[0].finish_reason if resp.choices else "unknown"
+            usage  = resp.usage
+            logger.warning(
+                "risk_perspective: content 空 · finish={} tokens_in={} tokens_out={} model={}",
+                finish,
+                usage.prompt_tokens if usage else "?",
+                usage.completion_tokens if usage else "?",
+                model,
+            )
+            return "（风控分析暂不可用）"
+        return content
     except Exception as e:
         logger.warning("risk_perspective LLM call failed: {}", e)
         return "（风控分析暂不可用）"

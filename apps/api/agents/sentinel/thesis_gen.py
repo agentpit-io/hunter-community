@@ -12,10 +12,11 @@ from openai import OpenAI
 from .prompts import THESIS_GEN_SYSTEM, build_thesis_user_prompt
 
 
-_BASE_URL = os.getenv("ONE_API_BASE_URL", "http://104.197.139.51:3000/v1")
-_API_KEY  = os.getenv("ONE_API_KEY",      "")
-_MODEL    = os.getenv("ONE_API_MODEL",    "gemini-3-flash-preview")
-_TIMEOUT  = 30
+# 与 sentinel/llm_client.py 保持一致 · ONE_API_* 缺席时回退 LLM_* 三件套。
+_BASE_URL = os.getenv("ONE_API_BASE_URL") or os.getenv("LLM_BASE_URL", "http://104.197.139.51:3000/v1")
+_API_KEY  = os.getenv("ONE_API_KEY")     or os.getenv("LLM_API_KEY", "")
+_MODEL    = os.getenv("ONE_API_MODEL")   or os.getenv("LLM_DEFAULT_MODEL", "gemini-3-flash-preview")
+_TIMEOUT  = 120
 
 
 async def generate_thesis(stock_code: str, stock_name: str) -> dict:

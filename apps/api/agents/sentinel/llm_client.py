@@ -15,18 +15,33 @@ from openai import OpenAI
 from .prompts import parse_llm_json
 
 
-_BASE_URL    = os.getenv("ONE_API_BASE_URL", "http://104.197.139.51:3000/v1")
-_API_KEY     = os.getenv("ONE_API_KEY",      "")
-_MODEL       = os.getenv("ONE_API_MODEL",    "gemini-3-flash-preview")
+# ONE_API_* 是内部 SaaS 网关的历史命名,开源版用户没有那个网关。
+# 缺 ONE_API_KEY 时回退到 .env 里统一的 LLM_* 三件套 —— chat 走通,深度分析
+# (MarketAnalyst / Sentinel / ComprehensiveJudge / FinalRiskJudge / ExitStrategy)
+# 也跟着走通,不需要用户再单独维护一套 key。
+# 注:online_analysis/llm_client.py 里已做过同样的 fallback,这里补齐 agents/ 侧。
+_BASE_URL    = os.getenv("ONE_API_BASE_URL") or os.getenv("LLM_BASE_URL", "http://104.197.139.51:3000/v1")
+_API_KEY     = os.getenv("ONE_API_KEY")     or os.getenv("LLM_API_KEY", "")
+_MODEL       = os.getenv("ONE_API_MODEL")   or os.getenv("LLM_DEFAULT_MODEL", "gemini-3-flash-preview")
 # Deep Think 用 · 综合判官 + 风控裁判走此模型 · 决策质量优先于速度/成本
-# 若未配则 fallback 到 _MODEL (Flash) · 保证向后兼容
-_DEEP_MODEL  = os.getenv("ONE_API_DEEP_MODEL", "gemini-3.1-pro-preview")
-_TIMEOUT     = 45   # Pro Deep Think 比 Flash 慢 · 从 30 加到 45
+# 若未配 ONE_API_DEEP_MODEL 则依次回退:LLM_DEEP_MODEL → LLM_DEFAULT_MODEL → _MODEL。
+# 开源版用户只有一个 LLM_DEFAULT_MODEL 时,深浅走同模型也能跑通;不至于因为
+# 硬写 gemini-3.1-pro-preview 而在 DeepSeek/OpenAI 网关上撞 model-not-found。
+_DEEP_MODEL  = (
+    os.getenv("ONE_API_DEEP_MODEL")
+    or os.getenv("LLM_DEEP_MODEL")
+    or os.getenv("LLM_DEFAULT_MODEL")
+    or _MODEL
+)
+# 30-45s 对推理型模型 + 长上下文经常不够(reasoning tokens 一多就到 40-60s),
+# 抬到 120s 避免 APITimeoutError 把整条辩论链吞成"暂不可用"。上游 SSE 有自己
+# 的心跳,不会因为这里等长而无限阻塞前端。
+_TIMEOUT     = 120
 
 
 def get_client() -> OpenAI | None:
     if not _API_KEY:
-        logger.warning("online_analysis llm: ONE_API_KEY 未配置")
+        logger.warning("agents.sentinel llm: 无可用 key · 请在 .env 里填 LLM_API_KEY(或 ONE_API_KEY)")
         return None
     return OpenAI(api_key=_API_KEY, base_url=_BASE_URL, timeout=_TIMEOUT)
 

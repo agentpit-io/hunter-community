@@ -55,7 +55,7 @@ from app.services.chat_debate.report_composer import compose_debate_report
 from app.services.database import get_conn
 
 _CST = timezone(timedelta(hours=8))
-_DEBATE_ROUNDS = 2
+_DEBATE_ROUNDS = 1    # depth 未识别时的兜底 · quick(1) 与前端默认对齐
 _RATE_LIMIT_WINDOW_SEC = 30 * 60   # 30 min
 _RATE_LIMIT_MAX = 3                # 单用户 30 min 内最多 3 次
 _TASK_TTL_SEC = 15 * 60            # 任务队列存活 15 min

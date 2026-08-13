@@ -32,7 +32,9 @@ function ChatPageInner() {
   /** 记录用户上一次点的 SKILL key · 供 ChatWorkspace 判断"下条 send 要走特殊 handler"
    *  只有 debate 需要特殊处理 · 其他 SKILL 走普通对话 */
   const [pendingSkillKey, setPendingSkillKey] = useState<string | null>(null)
-  const [debateDepth, setDebateDepth] = useState<DebateDepth>('normal')
+  // 默认 quick(1 轮) · 45s 出结果 · 用户在 DepthPicker 里可主动升到 normal/deep。
+  // 老的 normal(2 轮) ~90s + reasoning 型模型常态 40-60s/轮,一次要等 2-3 分钟太糟。
+  const [debateDepth, setDebateDepth] = useState<DebateDepth>('quick')
   const [depthPickerOpen, setDepthPickerOpen] = useState(false)
   /** 深度选择完后暂存 SKILL 模板 · 等待 depth 确认后再灌 draft */
   const [pendingDebateTpl, setPendingDebateTpl] = useState<string | null>(null)
