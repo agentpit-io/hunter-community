@@ -1,7 +1,8 @@
 """Data source provider factory · env-driven singleton.
 
-Set DATA_SOURCE_PROVIDER to one of: saas · akshare · yfinance
-Default: akshare (works out-of-box for A-shares · no key needed).
+Set DATA_SOURCE_PROVIDER to one of: hunter · saas · akshare · yfinance
+Leave it unset and we pick for you: "hunter" when a platform key is configured
+(see app.services.hunter_key), else "akshare" (A-shares out-of-box, no key).
 """
 import os
 from loguru import logger
@@ -15,10 +16,18 @@ def get_data_source() -> IDataSource:
     if _INSTANCE is not None:
         return _INSTANCE
 
-    provider = (os.getenv("DATA_SOURCE_PROVIDER") or "akshare").lower()
+    provider = (os.getenv("DATA_SOURCE_PROVIDER") or "").lower()
+    if not provider:
+        # No explicit choice: if a Hunter key is around, the user clearly wants
+        # the unlocked path. Otherwise fall back to akshare (A-shares, no key).
+        from app.services import hunter_key
+        provider = "hunter" if hunter_key.resolve() else "akshare"
     logger.info("[providers.data_source] loading provider={}", provider)
 
-    if provider == "saas":
+    if provider == "hunter":
+        from .hunter_tools import HunterToolsDataSource
+        _INSTANCE = HunterToolsDataSource()
+    elif provider == "saas":
         url = os.getenv("HUNTER_SAAS_DATA_URL", "")
         key = os.getenv("HUNTER_SAAS_DATA_KEY", "")
         if not url:
@@ -37,7 +46,7 @@ def get_data_source() -> IDataSource:
     else:
         raise RuntimeError(
             f"unknown DATA_SOURCE_PROVIDER={provider!r} · "
-            "expected one of: saas | akshare | yfinance"
+            "expected one of: hunter | saas | akshare | yfinance"
         )
     return _INSTANCE
 

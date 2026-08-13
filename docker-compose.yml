@@ -63,8 +63,13 @@ services:
       JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-2592000}
       REGISTRATION_MODE: ${REGISTRATION_MODE:-open}
       HUNTER_ADMIN_EMAILS: ${HUNTER_ADMIN_EMAILS:-}
+      # 平台 key · 解锁左侧全部工具与 SKILL(免费申请 hunter.agentpit.io/dev/api-keys)
+      # 留空也能跑:聊天用你自己的 LLM key,工具则在 UI 左下角「解锁全部工具」里填 key
+      HUNTER_API_KEY: ${HUNTER_API_KEY:-}
+      HUNTER_UPSTREAM_URL: ${HUNTER_UPSTREAM_URL:-https://hunter.agentpit.io}
       # P4 · pluggable providers
-      DATA_SOURCE_PROVIDER: ${DATA_SOURCE_PROVIDER:-akshare}
+      # 默认留空 = 自动选:配了 key 走 hunter 网关,没配则 akshare(A股免 key)
+      DATA_SOURCE_PROVIDER: ${DATA_SOURCE_PROVIDER:-}
       HUNTER_SAAS_DATA_URL: ${HUNTER_SAAS_DATA_URL:-}
       HUNTER_SAAS_DATA_KEY: ${HUNTER_SAAS_DATA_KEY:-}
       LLM_PROVIDER: ${LLM_PROVIDER:-openai_compat}

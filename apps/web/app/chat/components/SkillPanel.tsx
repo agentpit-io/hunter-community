@@ -9,6 +9,10 @@
 // 为什么不直接列 MCP 工具名:技术上底层是 truesource_get_quote / kronos_kronos_forecast 之类,
 // 用户看不懂也不知道能拿它干嘛。这里展示的是用用户语言写的能力卡,
 // 点一下把提问模板填进输入框,光标停在 {股票} 上直接打名字。
+//
+// 【未解锁时的行为】能力卡**照常全部显示**,只是标一把小锁;点下去弹申请引导。
+// 藏起来会让用户以为开源版没这些能力 —— 恰恰相反,我们要让他看见再去拿 key。
+// 自建能力(custom:)不门控:那是用户自己接的数据源,与平台 key 无关。
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
@@ -28,9 +32,12 @@ import {
   X,
   Star,
   Settings2,
+  Lock,
 } from 'lucide-react'
 import { HUNTER } from '../../lib/hunter-theme'
 import { listSkills, type SkillItem } from '../lib/skillClient'
+import { getUnlockStatus, onUnlockChange, peekUnlockStatus } from '../lib/unlockClient'
+import UnlockModal from './UnlockModal'
 
 // SKILL key → 细线 outline 图标 · 对齐设计稿的灰色单色风格 · 后端 emoji 只作兜底
 const SKILL_ICON: Record<string, LucideIcon> = {
@@ -87,6 +94,11 @@ export default function SkillPanel({ onPick, onManage, refreshKey = 0 }: Props) 
   const [loading, setLoading] = useState(true)
   const [failed, setFailed] = useState(false)
   const [drawer, setDrawer] = useState(false)
+  // null = 还没问出来 · 此时不拦,避免网络慢时误挡住能用的用户
+  const [unlocked, setUnlocked] = useState<boolean | null>(
+    peekUnlockStatus()?.unlocked ?? null,
+  )
+  const [gate, setGate] = useState<string | null>(null)   // 被拦下的能力名 · 非空则弹窗
 
   const load = useCallback(async () => {
     try {
@@ -105,18 +117,33 @@ export default function SkillPanel({ onPick, onManage, refreshKey = 0 }: Props) 
     void load()
   }, [load, refreshKey])
 
+  // 解锁状态:自己拉一次 + 订阅别处(左下角按钮弹窗)保存 key 后的变化
+  useEffect(() => {
+    void getUnlockStatus().then((st) => setUnlocked(st.unlocked))
+    return onUnlockChange((st) => setUnlocked(st.unlocked))
+  }, [])
+
   // 拆分常用 vs 全部
   const favorites = useMemo(() => {
     const byKey = new Map(items.map((s) => [s.key, s]))
     return FAVORITE_KEYS.map((k) => byKey.get(k)).filter(Boolean) as SkillItem[]
   }, [items])
 
+  const locked = unlocked === false
+
   const handlePick = useCallback(
     (tpl: string, key: string) => {
+      // 内置能力要平台 key;自建的是用户自己的数据源,放行
+      if (locked && !key.startsWith('custom:')) {
+        const name = items.find((x) => x.key === key)?.name || ''
+        setDrawer(false)
+        setGate(name)
+        return
+      }
       setDrawer(false)
       onPick(tpl, key)
     },
-    [onPick],
+    [onPick, locked, items],
   )
 
   if (loading || failed || items.length === 0) return null
@@ -174,6 +201,10 @@ export default function SkillPanel({ onPick, onManage, refreshKey = 0 }: Props) 
                   {Icon ? <Icon size={14} strokeWidth={1.5} /> : <span style={{ fontSize: 13 }}>{s.icon}</span>}
                 </span>
                 <span style={favName}>{s.name}</span>
+                {locked && (
+                  <Lock size={10} strokeWidth={1.6}
+                    style={{ color: HUNTER.SOFT, flexShrink: 0 }} />
+                )}
               </button>
             )
           })}
@@ -188,7 +219,12 @@ export default function SkillPanel({ onPick, onManage, refreshKey = 0 }: Props) 
 
       {/* 抽屉 · 全部工具（右滑） */}
       {drawer && (
-        <SkillDrawer items={items} onClose={() => setDrawer(false)} onPick={handlePick} onManage={onManage} />
+        <SkillDrawer items={items} locked={locked} onClose={() => setDrawer(false)}
+          onPick={handlePick} onManage={onManage} />
+      )}
+
+      {gate !== null && (
+        <UnlockModal triggeredBy={gate || undefined} onClose={() => setGate(null)} />
       )}
     </>
   )
@@ -197,11 +233,13 @@ export default function SkillPanel({ onPick, onManage, refreshKey = 0 }: Props) 
 /** 全部工具抽屉 · 分类展示 · 覆盖 sidebar 之上 */
 function SkillDrawer({
   items,
+  locked,
   onClose,
   onPick,
   onManage,
 }: {
   items: SkillItem[]
+  locked: boolean
   onClose: () => void
   onPick: (tpl: string, key: string) => void
   onManage: () => void
@@ -223,7 +261,7 @@ function SkillDrawer({
           <div>
             <div style={{ fontSize: 15, fontWeight: 650, color: HUNTER.INK }}>全部分析工具</div>
             <div style={{ fontSize: 11.5, color: HUNTER.INK_F, marginTop: 2 }}>
-              {items.length} 个能力 · 点击填入输入框
+              {items.length} 个能力 · {locked ? '点击了解如何解锁' : '点击填入输入框'}
             </div>
           </div>
           <button onClick={onClose} style={closeBtn} aria-label="关闭">
@@ -269,9 +307,12 @@ function SkillDrawer({
                             )}
                           </span>
                           <span style={drawerCardName}>{s.name}</span>
-                          {FAVORITE_KEYS.includes(s.key) && (
+                          {locked && !s.key.startsWith('custom:') ? (
+                            <Lock size={10} strokeWidth={1.6}
+                              style={{ color: HUNTER.SOFT, marginLeft: 'auto' }} />
+                          ) : FAVORITE_KEYS.includes(s.key) ? (
                             <Star size={10} strokeWidth={1.5} style={{ color: HUNTER.THEME, marginLeft: 'auto' }} />
-                          )}
+                          ) : null}
                         </div>
                         {s.hint && <div style={drawerCardHint}>{s.hint}</div>}
                       </button>

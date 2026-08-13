@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Plus, MessageSquare, LogOut, ChevronDown, PanelLeftClose } from 'lucide-react'
+import { ArrowLeft, Plus, MessageSquare, LogOut, ChevronDown, PanelLeftClose, Unlock, ShieldCheck } from 'lucide-react'
 import { HUNTER, HUNTER_LOGO } from '../../lib/hunter-theme'
 import type { Session } from '../lib/types'
 import { listSessions, createSession } from '../lib/opencodeClient'
@@ -10,6 +10,8 @@ import SkillPanel from './SkillPanel'
 import SkillManager from './SkillManager'
 import ProfileEditor from './ProfileEditor'
 import { getProfile } from '../lib/profileClient'
+import { getUnlockStatus, onUnlockChange, peekUnlockStatus } from '../lib/unlockClient'
+import UnlockModal from './UnlockModal'
 
 interface Props {
   currentSessionId: string | null
@@ -75,6 +77,14 @@ export default function ChatSidebar({ currentSessionId, onSelectSession, onNewSe
   const [userInitial, setUserInitial] = useState('U')
   const [userEmail, setUserEmail] = useState('')
   const [isAdmin, setIsAdmin] = useState(false)
+  const [showUnlock, setShowUnlock] = useState(false)
+  const [unlocked, setUnlocked] = useState(peekUnlockStatus()?.unlocked ?? false)
+
+  // 解锁状态 · 与 SkillPanel 共用同一份缓存,弹窗里存完 key 两边同时变
+  useEffect(() => {
+    void getUnlockStatus().then((st) => setUnlocked(st.unlocked))
+    return onUnlockChange((st) => setUnlocked(st.unlocked))
+  }, [])
 
   const load = async () => {
     setLoading(true)
@@ -370,6 +380,34 @@ export default function ChatSidebar({ currentSessionId, onSelectSession, onNewSe
         )}
       </div>
 
+      {/* 平台 key 入口 · 未解锁时这是整个侧栏最该被看见的一行
+          —— 左侧那些工具与 SKILL 都要它,所以给整行宽度 + 铜色描边,
+          解锁后退回一行安静的状态显示。 */}
+      <div style={{ padding: '6px 10px 0' }}>
+        <button
+          onClick={() => setShowUnlock(true)}
+          title={unlocked ? '已接入 Hunter 服务 · 全部工具可用' : '申请免费 key · 解锁全部工具与 SKILL'}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+            width: '100%',
+            padding: '8px 6px',
+            background: unlocked ? HUNTER.TAG_OK_BG : HUNTER.BRAND_PALE,
+            border: `1px solid ${unlocked ? '#BFD8CC' : HUNTER.THEME}`,
+            borderRadius: 8,
+            color: unlocked ? HUNTER.TAG_OK_FG : HUNTER.COPPER3,
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: 'pointer',
+          }}
+        >
+          {unlocked ? <ShieldCheck size={13} strokeWidth={1.8} /> : <Unlock size={13} strokeWidth={1.8} />}
+          <span>{unlocked ? '已解锁全部工具' : '申请 Key · 解锁全部工具'}</span>
+        </button>
+      </div>
+
       {/* 底部工具入口 · MCP 组件 + 策略中心 · 合并为一行两 icon 节省纵向 */}
       <div
         style={{
@@ -463,6 +501,8 @@ export default function ChatSidebar({ currentSessionId, onSelectSession, onNewSe
       {showProfile && (
         <ProfileEditor wizard={wizard} onClose={() => { setShowProfile(false); setWizard(false) }} />
       )}
+
+      {showUnlock && <UnlockModal onClose={() => setShowUnlock(false)} />}
     </aside>
   )
 }
