@@ -29,7 +29,8 @@ export function AgentPicker({ value, onChange }: AgentPickerProps) {
     return () => document.removeEventListener('mousedown', onClick)
   }, [open])
 
-  const current = agents.find((a) => a.name === value) || { name: value }
+  // value 为空 = 没显式选过,走 opencode 默认 —— 显示"默认"而不是空白
+  const current = agents.find((a) => a.name === value) || { name: value || '默认' }
 
   return (
     <div ref={ref} style={{ position: 'relative' }}>

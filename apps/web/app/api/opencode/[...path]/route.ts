@@ -406,7 +406,20 @@ async function handle(req: Request, segs: string[]): Promise<Response> {
       try {
         const raw = await req.text()
         const body = raw ? JSON.parse(raw) : {}
+
+        // token 必须塞进 **parts[0].metadata**,不能只放 body 顶层 ——
+        // opencode 的 PromptInput schema 没有顶层 metadata 字段,会被直接剥掉,
+        // hunter-auth plugin 因此永远读不到,日志刷"无 hermes_token",
+        // 下游所有 hunter tool 退化到 fallback_user_id(开源版没有这个值)→
+        // 自选股/持仓类工具全部拿不到用户身份。
+        // TextPartInput.metadata 是 Record<String, Any>,自定义键能活下来。
+        // (plugin 侧取值顺序见 huntercode plugins/hunter-auth.ts 的 chat.message)
         body.metadata = { ...(body.metadata || {}), hermes_token: token }
+        if (Array.isArray(body.parts) && body.parts.length > 0) {
+          body.parts = body.parts.map((p: any, i: number) =>
+            i === 0 ? { ...p, metadata: { ...(p?.metadata || {}), hermes_token: token } } : p,
+          )
+        }
 
         // 注入用户画像作 system prompt —— 这是"记忆体"真正起作用的地方。
         // 走 system 字段而不是塞进 parts:后者会出现在可见对话里,既难看又会被

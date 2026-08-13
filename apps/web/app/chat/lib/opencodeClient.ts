@@ -138,6 +138,32 @@ export interface ProviderInfo {
   models: Record<string, { id?: string; name?: string; [k: string]: any }>
 }
 
+/**
+ * opencode 自己声明的默认模型 · 形如 {"hunter-llm": "gemini-3-flash-preview"}。
+ *
+ * 开源版的 provider id 和模型名都由用户的 .env 决定(见 scripts/opencode/gen-config.py),
+ * 前端不能硬编码 —— 猜错了发消息就是 500 UnknownError,而且报错里完全看不出
+ * 是模型名对不上。所以问 opencode 要。
+ *
+ * 返回 "providerID/modelID";拿不到返回空串,调用方此时**不要**传 model 字段,
+ * 让 opencode 用配置文件里的默认值。
+ */
+export async function defaultModelKey(): Promise<string> {
+  try {
+    const data = await req<any>('GET', '/config/providers')
+    const def = data?.default
+    if (def && typeof def === 'object') {
+      const ids: string[] = (data.providers || []).map((p: any) => p.id)
+      // 优先我们自己配的那个 · 'opencode' 是镜像内置的 OpenCode Zen,不是用户想要的
+      const pick = ids.find((id) => id !== 'opencode' && def[id]) || ids.find((id) => def[id])
+      if (pick) return `${pick}/${def[pick]}`
+    }
+  } catch (e) {
+    console.warn('[opencodeClient] defaultModelKey failed:', e)
+  }
+  return ''
+}
+
 export async function listProviders(): Promise<ProviderInfo[]> {
   try {
     const data = await req<any>('GET', '/config/providers')

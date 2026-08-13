@@ -4,6 +4,7 @@ import { HUNTER } from '../../lib/hunter-theme'
 import type { Message, MessagePart, MessagePartTool, OpencodeEvent } from '../lib/types'
 import {
   createSession,
+  defaultModelKey,
   getSession,
   listMessages,
   listSessions,
@@ -185,14 +186,25 @@ export default function ChatWorkspace({
   const [htmlArtifacts, setHtmlArtifacts] = useState<Record<string, { html: string; title: string }>>({})
 
   // Agent · Model state · 持久 localStorage
-  const [currentAgent, setCurrentAgent] = useState('build')
-  const [currentModelKey, setCurrentModelKey] = useState('oneapi/gemini-3.5-flash')
+  // 空串 = 不指定 agent,让 opencode 用默认的,BFF 注入的金融助手 system prompt 才生效。
+  // **别默认成 'build'**:那是 opencode 内置的编程 agent,它自己的 prompt 会盖过我们的,
+  // 于是用户问"你好"会得到"First, I'll search for 'foo' in the codebase..."这种回答。
+  const [currentAgent, setCurrentAgent] = useState('')
+  // 空串 = 还不知道,此时发消息不带 model 字段,让 opencode 用配置里的默认值。
+  // 千万别硬编码具体模型:开源版的 provider id 和模型名由用户 .env 决定,
+  // 猜错了发消息直接 500 UnknownError,报错里还看不出是模型名对不上。
+  const [currentModelKey, setCurrentModelKey] = useState('')
 
   useEffect(() => {
     const savedAgent = localStorage.getItem('hunter_chat_agent')
     if (savedAgent) setCurrentAgent(savedAgent)
     const savedModel = localStorage.getItem('hunter_chat_model')
-    if (savedModel) setCurrentModelKey(savedModel)
+    if (savedModel) {
+      setCurrentModelKey(savedModel)
+      return
+    }
+    // 没选过 → 用 opencode 自己声明的默认值(来自用户 .env)
+    void defaultModelKey().then((k) => { if (k) setCurrentModelKey(k) })
   }, [])
 
   const { events, status: sseStatus } = useOpencodeSSE(sessionId)
@@ -431,7 +443,7 @@ export default function ChatWorkspace({
       await sendMessage({
         sessionId,
         text,
-        agent: currentAgent,
+        agent: currentAgent || undefined,
         model: providerID && modelID ? { providerID, modelID } : undefined,
       })
 

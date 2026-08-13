@@ -20,6 +20,21 @@ from app.services import hunter_key
 from .base import IDataSource
 
 
+# 这段文字会被 MCP 原样交给模型,所以它同时是**给模型的指令**,不只是给人看的提示。
+#
+# 最后那句禁止不是客套:实测 gemini-3-flash-preview 收到"需要 key"之后,
+# 照样编出了完整行情 —— 价格 16.85 元、跌 2.43%、成交额 24.87 亿、52 周区间、
+# 连"数据更新于 2026-08-13 14:15:22"都编得有鼻子有眼。财经产品里这是最危险的
+# 失败模式:用户完全看不出这是假的。
+NEED_KEY_MSG = (
+    "【工具不可用】尚未配置 Hunter key,无法获取任何真实行情数据。\n"
+    "【必须这样回复用户】告诉他:点页面左下角「解锁全部工具」免费申请 Hunter key,"
+    "填入后即可查询实时行情。\n"
+    "【严禁】编造价格、涨跌幅、成交额、52 周区间、时间戳等任何数字。"
+    "你手上没有这只股票的任何数据,一个数字都不许写。"
+)
+
+
 class HunterKeyRequired(RuntimeError):
     """Raised when no key is configured, or the configured key was rejected.
 
@@ -40,10 +55,7 @@ class HunterToolsDataSource(IDataSource):
     async def _post(self, tool: str, payload: dict):
         key = hunter_key.resolve()
         if not key:
-            raise HunterKeyRequired(
-                "尚未配置 Hunter key，工具不可用。点左下角「解锁全部工具」申请并填入。",
-                hunter_key.APPLY_URL,
-            )
+            raise HunterKeyRequired(NEED_KEY_MSG, hunter_key.APPLY_URL)
         async with httpx.AsyncClient(timeout=self._timeout) as c:
             r = await c.post(
                 f"{self._base}/api/saas/tools/{tool}",

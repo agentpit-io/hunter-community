@@ -127,6 +127,8 @@ async def _hunter_key_required(request, exc: HunterKeyRequired):
             "error": "hunter_key_required",
             "message": str(exc),
             "apply_url": exc.apply_url,
+            # 冗余一份禁令:模型有时只读 message、有时扫全字段,两边都放命中率更高
+            "must_not": "禁止编造任何价格/涨跌幅/成交额/时间戳,你没有这只股票的数据",
         },
     )
 

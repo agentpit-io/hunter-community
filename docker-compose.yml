@@ -168,7 +168,13 @@ services:
       LLM_BASE_URL: ${LLM_BASE_URL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_DEFAULT_MODEL: ${LLM_DEFAULT_MODEL:-gpt-4o-mini}
+      # 自部署用户付的是自己的 LLM 账单,不该被我们限额。
+      # 新镜像认 HUNTER_BUDGET_ENABLED=false;旧镜像不认这个开关(插件里根本没读过),
+      # 所以再用它认得的 HUNTER_BUDGET_DAILY 兜一层 —— 否则聊一阵就会撞
+      # "已达日 token 上限 500000 · 明日再试",而开关明明是关的,极难排查。
       HUNTER_BUDGET_ENABLED: ${HUNTER_BUDGET_ENABLED:-false}
+      HUNTER_BUDGET_DAILY: ${HUNTER_BUDGET_DAILY:-999999999}
+      HUNTER_BUDGET_PER_REQUEST: ${HUNTER_BUDGET_PER_REQUEST:-999999999}
       # auto = 模型名含 gemini 时才经 shim(见 scripts/opencode/gen-config.py)
       LLM_SCHEMA_SANITIZE: ${LLM_SCHEMA_SANITIZE:-auto}
       LLM_SHIM_URL: http://llm-shim:3999/v1
