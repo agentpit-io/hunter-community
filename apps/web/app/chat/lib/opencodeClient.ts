@@ -44,10 +44,11 @@ async function req<T = any>(method: string, path: string, body?: any): Promise<T
       if (j?.error === 'upstream_timeout') {
         const sec = Math.round((j.duration_ms || 0) / 1000)
         friendly = `处理超时(${sec} 秒 · 上限 10 分钟)· 请拆分或简化问题后重试`
-      } else if (j?.error === 'upstream_unreachable') {
-        friendly = '会话服务暂不可用 · 请稍后重试'
-      } else if (j?.error === 'ownership_unavailable') {
-        friendly = '会话服务暂不可用 · 请稍后重试'
+      } else if (j?.error === 'upstream_unreachable' || j?.error === 'ownership_unavailable') {
+        // 502 · opencode 容器不通。绝大多数是 .env 里 LLM_* 三项少填导致 opencode
+        // 拒启动(见 scripts/opencode/gen-config.py),用户看到 "稍后重试" 会一直等,
+        // 所以明确指路 —— 让人知道要去看 opencode 日志、去补 .env,而不是刷新页面。
+        friendly = '对话引擎(opencode)未就绪 · 常见是 .env 里 LLM_API_KEY / LLM_BASE_URL / LLM_DEFAULT_MODEL 少填 · 详见 docker compose logs opencode,补齐后 docker compose up -d'
       } else if (j?.error === 'forbidden') {
         friendly = j?.message || '无权访问该对话'
       } else if (j?.error === 'unauthorized') {

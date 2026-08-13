@@ -188,6 +188,14 @@ services:
     # 所以包一层入口:启动前按 .env 现生成配置。改完 .env 重新 up 即可生效。
     volumes:
       - ./scripts/opencode:/opt/hunter-boot:ro
+      # 覆盖镜像自带的 watchlist_mcp.py · 加了 watchlist_add tool 让 chat NL
+      # 「加XX到自选」能直接落库,而不是回落到"点击左侧菜单"的文本兜底。
+      # 详见 scripts/opencode-mcp/watchlist_mcp.py 文件头注释。
+      - ./scripts/opencode-mcp/watchlist_mcp.py:/opt/opencode-workspace/mcp/watchlist_mcp.py:ro
+      # 覆盖镜像自带的 hunter-mcp-context.ts · HUNTER_TOOLS Set 里加了 watchlist_add,
+      # 不然 tool.execute.before hook 不注入 _hermes_user_id · api 收不到
+      # X-Hunter-User-Id → 401 unauthorized · LLM 会告诉用户"请登录",很误导。
+      - ./scripts/opencode-mcp/plugins/hunter-mcp-context.ts:/opt/opencode-workspace/plugins/hunter-mcp-context.ts:ro
     entrypoint: ["/bin/sh", "/opt/hunter-boot/entrypoint.sh"]
     ports:
       - "${OPENCODE_HOST_PORT:-3921}:3901"

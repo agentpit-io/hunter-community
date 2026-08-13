@@ -69,6 +69,24 @@ def clean(node):
     return node
 
 
+def _ensure_object_schema(schema):
+    """DeepSeek / OpenAI 严格模式要求 tool 的 parameters 必须是 type=object 的
+    JSON Schema。opencode 打包某些 MCP tool 时(比如 github-pr-search)会送来
+    `null` 或 `{"type": "null"}`,DeepSeek 会直接 400:
+        Invalid schema for function 'xxx': schema must be a JSON Schema
+        of 'type: "object"', got 'type: "null"'.
+    这里统一兜底成合法 object schema,保留其它字段(description 等)。
+    """
+    if not isinstance(schema, dict):
+        return {"type": "object", "properties": {}}
+    t = schema.get("type")
+    if t is None or t in ("null", "None"):
+        schema = {**schema, "type": "object"}
+    if schema.get("type") == "object" and "properties" not in schema:
+        schema["properties"] = {}
+    return schema
+
+
 def sanitize_body(body_bytes: bytes) -> bytes:
     try:
         obj = json.loads(body_bytes.decode())
@@ -78,8 +96,7 @@ def sanitize_body(body_bytes: bytes) -> bytes:
         for t in obj["tools"]:
             fn = t.get("function") if isinstance(t.get("function"), dict) else None
             if fn and "parameters" in fn:
-                fn["parameters"] = clean(fn["parameters"]) or {
-                    "type": "object", "properties": {}}
+                fn["parameters"] = _ensure_object_schema(clean(fn["parameters"]))
     return json.dumps(obj).encode()
 
 

@@ -56,6 +56,30 @@ For `anthropic`:
 - `LLM_API_KEY`
 - `LLM_DEFAULT_MODEL` (default `claude-sonnet-4-6`)
 
+### Tool-schema shim · `LLM_SCHEMA_SANITIZE`
+
+`opencode` 打包 MCP tool schema 时会送 `$schema` / `additionalProperties` / `anyOf`,
+以及某些工具的 `parameters: null` —— 严格的 OpenAI 兼容网关会直接 400。项目自带
+一个 `llm-shim` 服务(`scripts/llm-shim/shim.py`)在中间清洗。
+
+| `LLM_SCHEMA_SANITIZE` | 行为 |
+|---|---|
+| `auto`(默认) | 只对模型名含 `gemini` 的开 shim,其余直连 |
+| `1` / `true` | 全部走 shim,任何模型都清洗一遍 |
+| `0` / `false` | 从不走 shim |
+
+**实测需要开 `1` 的模型 / 网关**:
+- `deepseek-v4-flash` · `deepseek-v4-pro`(官方 `api.deepseek.com`)—— 不开会报
+  `Invalid schema for function 'github-pr-search': schema must be a JSON Schema
+  of 'type: "object"', got 'type: "null"'`。shim 的 `_ensure_object_schema()`
+  会把 null 参数 schema 兜底成 `{type:"object", properties:{}}`。
+- 任何 Gemini 系模型
+- OneAPI / New API 之类严格代理下的部分模型
+
+改动 `LLM_SCHEMA_SANITIZE` 后要 `docker compose up -d`(env 变更 · opencode 会重
+生成 config)。改动 `shim.py` 本身要额外 `docker compose restart llm-shim`
+(bind mount 的脚本 · Python 进程需要重启才读新代码)。
+
 Interface (`apps/api/app/providers/llm/base.py`):
 
 ```python

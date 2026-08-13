@@ -1,6 +1,7 @@
 ﻿'use client'
 import { useEffect, useState } from 'react'
 import { Trash2, Loader2, Sparkles, CalendarDays, Hash, Wallet, Info } from 'lucide-react'
+import Sidebar from '../components/Sidebar'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || ''
 
@@ -61,7 +62,11 @@ export default function WatchlistManagePage() {
   }
 
   return (
-    <div className="ml-52 min-h-screen" style={{ background: 'var(--bg)' }}>
+    <div className="flex min-h-screen" style={{ background: 'var(--bg)' }}>
+      {/* 侧栏含 "+ 添加自选股" 按钮 · 页面下方两处引导文案指向它,
+          之前忘渲染 Sidebar,用户看到 ml-52 空白 + "点左侧菜单"却找不到菜单。 */}
+      <Sidebar />
+      <div className="flex-1 ml-52">
       <div className="px-10 py-8 border-b" style={{ borderColor: 'var(--border)' }}>
         <h1 className="text-2xl font-bold" style={{ color: 'var(--text)' }}>自选股管理</h1>
         <p className="text-sm mt-1.5" style={{ color: 'var(--text-muted)' }}>
@@ -98,6 +103,7 @@ export default function WatchlistManagePage() {
           onCancel={() => setConfirmDel(null)}
           onConfirm={handleHardDelete} />
       )}
+      </div>
     </div>
   )
 }

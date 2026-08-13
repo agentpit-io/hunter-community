@@ -77,6 +77,79 @@ async def _api_digest(body: DigestIn, request: Request):
     return await _digest(user_id, top_n)
 
 
+class AddIn(BaseModel):
+    query: str
+
+
+@router.post("/watchlist/watchlist_add")
+async def _api_add(body: AddIn, request: Request):
+    """把用户口述的股票加自选。query 可以是名称、代码,中英文皆可。
+
+    复用现有 search_stocks(东方财富 suggest) 拿完整字段,取第一个命中直接落库。
+    命中 0 条则返回 not_found;命中已存在 watchlist 也算成功(自愈,幂等)。
+    """
+    user_id = _auth(request)
+    if not user_id:
+        return {"type": "watchlist_add", "success": False,
+                "error": "unauthorized",
+                "message": "请先在网页登录后再让我帮你加自选。"}
+
+    q = (body.query or "").strip()
+    if not q:
+        return {"type": "watchlist_add", "success": False,
+                "error": "empty_query",
+                "message": "请告诉我股票名字或代码,比如 '紫金矿业' 或 '601899'。"}
+
+    # 复用 search 端点的实现 · 不新起 HTTP 调用
+    from app.routers.watchlist import search_stocks
+    from app.services.database import add_stock_by_user
+    from app.services.finance_data_client import subscribe as fd_subscribe
+
+    result = await search_stocks(q=q, limit=5)
+    items = result.get("items") if isinstance(result, dict) else []
+    if not items:
+        return {"type": "watchlist_add", "success": False,
+                "error": "not_found",
+                "query": q,
+                "message": f"没找到匹配 '{q}' 的股票/ETF/基金,试试完整名字或代码?"}
+
+    top = items[0]
+    try:
+        added = add_stock_by_user(
+            top["code"], top["name"], top["market"],
+            top["exchange"], top["asset_type"], user_id,
+        )
+        # finance-data 订阅失败不影响主流程,静默忽略
+        try:
+            fd_subscribe(top["code"], top["name"], top["market"],
+                         top["exchange"], top["asset_type"])
+        except Exception:
+            pass
+    except Exception as e:
+        logger.exception("[internal.watchlist_add] db insert failed: {}", e)
+        return {"type": "watchlist_add", "success": False,
+                "error": "db_error",
+                "message": f"落库失败: {type(e).__name__}"}
+
+    return {
+        "type": "watchlist_add",
+        "success": True,
+        "already_added": not added,
+        "item": {
+            "code": top["code"], "name": top["name"],
+            "market": top["market"], "exchange": top["exchange"],
+            "asset_type": top["asset_type"],
+        },
+        # 前 5 条一起回,让 LLM 在有多个匹配时(比如"东方"这种模糊词)可以追问
+        "candidates": items[:5],
+        "message": (
+            f"已把 {top['name']} ({top['code']}) 加入你的自选。"
+            if added else
+            f"{top['name']} ({top['code']}) 已经在你的自选里了,无需重复添加。"
+        ),
+    }
+
+
 # ─────────────────────────────────────────────────────────────────────
 # Portfolio · 3 tool
 # ─────────────────────────────────────────────────────────────────────

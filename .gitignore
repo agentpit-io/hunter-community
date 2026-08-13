@@ -24,6 +24,8 @@ venv/
 .vscode/
 .idea/
 .zed/
+.cursorindexingignore
+.specstory/
 *.swp
 .DS_Store
 

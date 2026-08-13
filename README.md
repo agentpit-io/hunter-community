@@ -34,8 +34,8 @@ Live preview: **[https://hunter-community.agentpit.io](https://hunter-community.
 ### 0. 前置
 
 - Docker Desktop（Windows / macOS）或 Docker Engine + Compose v2（Linux）
-- 磁盘留 5 GB，内存留 4 GB
-- 能访问 `ghcr.io`（对话引擎镜像从这里拉）
+- 磁盘留 20 GB（opencode 引擎镜像解压后 ~7.5 GB 是大头 · web/api 各 ~1.5 GB · 加 Postgres 数据卷），内存留 4 GB
+- 能访问 `ghcr.io`（对话引擎镜像从这里拉，压缩包 ~1.7 GB，国内首拉 10 分钟起步）
 
 ### 1. 拉代码
 
@@ -74,10 +74,17 @@ sed -i.bak "s|^JWT_SECRET=.*|JWT_SECRET=$(openssl rand -base64 48 | tr -d '=/+' 
 然后编辑 `.env` 填大模型：
 
 ```bash
-# ② 你自己的大模型 · 聊天靠它
+# ② 你自己的大模型 · 聊天靠它 · 三项都必填
+# 少任何一项 opencode 容器会拒启动(状态 Restarting),日志里会明说少的是哪个 ——
+# 这是故意的:留空的话上游会 401,opencode 又会把错误吞成一条空消息,
+# 前端只显示"深度思考完成"却什么都没答,谁也看不出是 key 没填。
 LLM_BASE_URL=https://api.openai.com/v1
 LLM_API_KEY=sk-<你的 key>
 LLM_DEFAULT_MODEL=gpt-4o-mini
+
+# 用 DeepSeek(deepseek-v4-flash / deepseek-v4-pro)?加一行:
+#   LLM_SCHEMA_SANITIZE=1
+# 不然对话会 400「Invalid schema ... type: 'null'」。详见 docs/02-providers.md。
 
 # ③ Hunter 平台 key · 解锁工具与 SKILL（可以先留空，之后在网页里填）
 # HUNTER_API_KEY=hunt_tools_xxxxxxxx
@@ -163,9 +170,46 @@ docker compose logs -f api
 少了会变成"服务起得来但对话莫名 401"的哑故障，不如启动时就说清楚。
 回到第 2 步跑一遍生成命令即可。
 
+**`docker compose ps` 里 opencode 一直 `Restarting`**
+`.env` 里 `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_DEFAULT_MODEL` 至少缺一个 ——
+`docker compose logs opencode` 会明说缺哪个。同 `JWT_SECRET` 一个道理：留空的话
+上游 401,opencode 会把错误吞成一条空消息,前端只显示"深度思考完成"没有内容,
+根本看不出是 key 没填,所以启动阶段直接拒掉。补上再 `docker compose up -d`。
+
+**发第一条对话报 `Invalid schema for function ... type: "null"`**
+用了 DeepSeek(或其它对 tool schema 严格的 OpenAI 兼容网关)。opencode 打包
+MCP 工具时会送 `parameters: null` 的 schema,DeepSeek 直接 400 —— 前端表现是
+气泡里只有"深度思考完成"没有正文。修法:`.env` 加 `LLM_SCHEMA_SANITIZE=1`
+让请求过一遍 `llm-shim` 自动清洗,再 `docker compose up -d`。
+细节和适用列表见 [docs/02-providers.md](./docs/02-providers.md)。
+
+**首次发消息像卡了 30-40 秒**
+opencode 冷启动要下 `@ai-sdk/openai-compatible` npm 包 + 初始化 provider,
+第一次 chat/session 创建就是这么慢。第二次开始秒回。docker restart 后同样。
+
 **改了 `.env` 没生效**
 `docker compose restart` 不会重读 env，用 `docker compose up -d`。
 `NEXT_PUBLIC_*` 是构建期烘进前端的，改它要 `docker compose up -d --build`。
+
+**首次 `docker compose up` 十几分钟没输出，是不是卡了**
+大概率没卡，是 compose 在非 TTY 下几乎不打印进度。opencode 引擎镜像压缩包
+1.7 GB / 解压后 7.5 GB，国内网络下就是这个体感。判断标准：`docker system df`
+里 `SIZE` 有没有持续涨，或者单独 `docker pull ghcr.io/agentpit-io/hunter-opencode:latest`
+拿实时进度看。
+
+**api build 报 `HASHES FROM THE REQUIREMENTS FILE` / `unknown package`**
+`requirements.txt` 里没手写 hash，是 pip 校验 PyPI 元数据 sha256 时下载损坏，
+PyPI CDN 偶发抖动就会中一次。修法：
+```bash
+docker compose build --no-cache api && docker compose up -d
+```
+重来一遍基本就过了。
+
+**Hunter 平台 key（`hunt_tools_*`）能顺便当大模型 key 用吗**
+不能。`saas_gemini` provider 指向的 `oneapi.hermes.agentpit.io` 是 Hunter 内网机器，
+公网 DNS 查不到。**两把 key 各管各的**（见开头「先搞清楚两把 key」）：Hunter key
+只解锁工具，聊天还是要你自己出一把 OpenAI 兼容 key（DeepSeek 最便宜、OpenRouter
+最灵活、也可以对着你自己的网关）。
 
 **想从头再来**
 ```bash

@@ -46,12 +46,26 @@ def _use_shim(model: str) -> bool:
 
 
 def main() -> int:
-    if not BASE_URL or not MODEL:
+    missing = [
+        name for name, val in (
+            ("LLM_BASE_URL", BASE_URL),
+            ("LLM_API_KEY", API_KEY),
+            ("LLM_DEFAULT_MODEL", MODEL),
+        ) if not val
+    ]
+    if missing:
         # Refuse to write a half-configured file: opencode would start, accept
-        # messages, and fail on the first one. Failing here puts the reason in
+        # messages, and either 401 on the first LLM call or silently return an
+        # empty assistant bubble (upstream key missing → opencode swallows the
+        # error → 前端 MessageList 只按时间戳打出「深度思考完成」一行,一片空白,
+        # 完全看不出是 key 没填). Failing here puts the reason in
         # `docker compose logs opencode` where someone will actually read it.
-        print("[gen-config] LLM_BASE_URL / LLM_DEFAULT_MODEL 未设置 —— "
-              "请在 .env 里填好再 `docker compose up -d`", file=sys.stderr)
+        print(
+            f"[gen-config] {' / '.join(missing)} 未设置 —— "
+            "请在 .env 里填好再 `docker compose up -d`。"
+            "留空会导致 opencode 收到 401 后返回空消息、前端看不到任何报错。",
+            file=sys.stderr,
+        )
         return 1
 
     via_shim = _use_shim(MODEL)
