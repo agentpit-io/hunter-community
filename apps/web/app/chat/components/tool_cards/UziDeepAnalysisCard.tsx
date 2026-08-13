@@ -35,8 +35,14 @@ const DIM_LABEL: Record<string, string> = {
 export default function UziDeepAnalysisCard({ data }: { data: UziData }) {
   const [copied, setCopied] = useState(false)
 
-  const coverage = data.dims_covered.length + data.dims_missing.length > 0
-    ? Math.round((data.dims_covered.length / (data.dims_covered.length + data.dims_missing.length)) * 100)
+  // 老 session 里可能存的是缺少覆盖度字段的 output（早期 tool schema · 或只回了 markdown）,
+  // 不兜底会 undefined.length 直接把整个 /chat 页崩成白屏 —— 上层 tryRenderRichCard
+  // 的 try/catch 只包了 JSX 创建,catch 不到子组件里的 render 异常。
+  const dimsCovered = Array.isArray(data.dims_covered) ? data.dims_covered : []
+  const dimsMissing = Array.isArray(data.dims_missing) ? data.dims_missing : []
+
+  const coverage = dimsCovered.length + dimsMissing.length > 0
+    ? Math.round((dimsCovered.length / (dimsCovered.length + dimsMissing.length)) * 100)
     : 0
 
   const copyMarkdown = async () => {
@@ -86,7 +92,7 @@ export default function UziDeepAnalysisCard({ data }: { data: UziData }) {
         borderBottom: `1px solid ${HUNTER.LINE}`,
         background: HUNTER.PAPER2,
       }}>
-        {data.dims_covered.map(d => (
+        {dimsCovered.map(d => (
           <span key={d} title="数据已 seed" style={{
             display: 'inline-flex', alignItems: 'center', gap: 3,
             padding: '2px 7px', borderRadius: 4, fontSize: 10.5,
@@ -95,7 +101,7 @@ export default function UziDeepAnalysisCard({ data }: { data: UziData }) {
             <CheckCircle2 size={10} /> {DIM_LABEL[d] || d}
           </span>
         ))}
-        {data.dims_missing.map(d => (
+        {dimsMissing.map(d => (
           <span key={d} title="数据未 seed（akshare backfill 中）" style={{
             display: 'inline-flex', alignItems: 'center', gap: 3,
             padding: '2px 7px', borderRadius: 4, fontSize: 10.5,

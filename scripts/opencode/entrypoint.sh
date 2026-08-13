@@ -31,4 +31,30 @@ fi
 
 python3 /opt/hunter-boot/gen-config.py
 
+# ③ MCP 超时兜底(两层)
+#
+#    层 A · uzi_mcp.py 里 httpx 客户端写死 timeout=25.0 →
+#            后端 finance-data 7 路抓 + LLM 合成 22-30s 起步,25s 极易踩线,
+#            超时后 tool 返 ReadTimeout,LLM 就说"深度分析服务不可用"。
+#            in-place 拉到 120s。
+#
+#    层 B · opencode 自己 .opencode/opencode.jsonc 里所有 MCP 都 "timeout": 30000 ms →
+#            即使层 A 抬到 120s,opencode 也会在 30s 时把 tool 掐掉、直接
+#            "(pending / no output)" 回给 LLM(见 packages/opencode/src/mcp/index.ts
+#            DEFAULT_TIMEOUT = 30_000)。开源版深度分析 62s、组合建议 45s+ 都要它。
+#            统一抬到 180000(3 分钟),给一切工具留缓冲。
+#
+#    镜像修好后可删。
+UZI_MCP=/opt/opencode-workspace/mcp/uzi_mcp.py
+if [ -w "$UZI_MCP" ] && grep -q "timeout=25.0" "$UZI_MCP" 2>/dev/null; then
+    sed -i 's/timeout=25\.0/timeout=120.0/g' "$UZI_MCP" \
+        && echo "[boot] uzi_mcp httpx timeout 25s → 120s"
+fi
+
+MCP_CFG=/opt/opencode-workspace/.opencode/opencode.jsonc
+if [ -w "$MCP_CFG" ] && grep -q '"timeout": 30000' "$MCP_CFG" 2>/dev/null; then
+    sed -i 's/"timeout": 30000/"timeout": 180000/g' "$MCP_CFG" \
+        && echo "[boot] opencode MCP timeout 30s → 180s(否则 opencode 会在 30s 掐 tool → 前端显示'no output')"
+fi
+
 exec bun run packages/opencode/src/index.ts serve --hostname 0.0.0.0 --port 3901

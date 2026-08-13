@@ -26,7 +26,187 @@ from app.services.online_analysis.llm_client import get_client
 router = APIRouter(prefix="/internal", tags=["mcp-bridge"])
 
 _INTERNAL_KEY = os.getenv("HUNTER_INTERNAL_KEY", "")
-_MODEL = os.getenv("AGENT_SUB_UZI_MODEL", "gemini-3.5-flash")
+# AGENT_SUB_UZI_MODEL 是内部部署里指定 Gemini 变体用的,开源版跟随 .env 的 LLM_DEFAULT_MODEL,
+# 否则用户配了 DeepSeek 却在这里请求 gemini-3.5-flash 会直接 502 UnknownModel。
+_MODEL = os.getenv("AGENT_SUB_UZI_MODEL") or os.getenv("LLM_DEFAULT_MODEL", "gemini-3.5-flash")
+
+
+# ── akshare A 股兜底 ─────────────────────────────────────────────
+# 开源版 finance-data 只 seed 了 quote 一维,其余 7 项(kline/财务/龙虎榜/十大股东/
+# 治理/新闻/研报)都空,LLM 拿到 1/8 数据合成的报告没法看。
+# 生产 SaaS 用的是订阅制 finance-data,拉哪个股哪个股全维 —— 社区版没这条件,
+# 补 akshare 兜底,任意 A 股都能出 kline/financials/news/lhb/research 5 项,
+# 覆盖率从 12% 提到 ~75%,报告质量陡升 · 无需付费数据源。
+
+
+def _ak_market_prefix(bare: str) -> str:
+    """A 股代码 → 交易所前缀,给 akshare 腾讯通道用。"""
+    b = bare.lstrip("0")[:1] if bare.startswith("00") else bare[:1]
+    if bare.startswith(("60", "68", "69")): return "sh"
+    if bare.startswith(("00", "30", "20")): return "sz"
+    if bare.startswith(("8", "43", "83", "87", "88")): return "bj"
+    return "sh"  # 兜底
+
+
+def _akshare_kline(bare: str, days: int = 30) -> list[dict]:
+    """akshare 日线 K 线 · 返 list 兼容 _fmt_kline_summary 期望的 {ts,open,high,low,close,volume}。
+
+    双通道:优先腾讯(响应快 · 少限流),失败回退东财(数据更全但连接常抖)。
+    生产 finance-data 稳定时不会走这里 —— 只在开源版无订阅时兜底。
+    """
+    import akshare as ak
+    from datetime import datetime, timedelta
+    end = datetime.now().strftime("%Y%m%d")
+    start = (datetime.now() - timedelta(days=days * 2)).strftime("%Y%m%d")  # ×2 兜非交易日
+
+    # 通道 1:腾讯
+    try:
+        sym = f"{_ak_market_prefix(bare)}{bare}"
+        df = ak.stock_zh_a_hist_tx(symbol=sym, start_date=start, end_date=end, adjust="qfq")
+        if df is not None and not df.empty:
+            out: list[dict] = []
+            for r in df.tail(days).to_dict(orient="records"):
+                try:
+                    out.append({
+                        "ts":     str(r.get("date") or "")[:10],
+                        "open":   float(r.get("open") or 0),
+                        "high":   float(r.get("high") or 0),
+                        "low":    float(r.get("low") or 0),
+                        "close":  float(r.get("close") or 0),
+                        # 腾讯通道 amount 单位=元(不是"手"),这里不换算,只做数量级参考
+                        "volume": int(float(r.get("amount") or 0)),
+                    })
+                except (TypeError, ValueError):
+                    continue
+            if out:
+                return out
+    except Exception as e:
+        logger.warning("[uzi] akshare kline tx failed code={} err={}", bare, e)
+
+    # 通道 2:东财兜底
+    try:
+        df = ak.stock_zh_a_hist(symbol=bare, period="daily", start_date=start, end_date=end, adjust="qfq")
+    except Exception as e:
+        logger.warning("[uzi] akshare kline em failed code={} err={}", bare, e)
+        return []
+    if df is None or df.empty:
+        return []
+    out = []
+    for r in df.tail(days).to_dict(orient="records"):
+        try:
+            out.append({
+                "ts":     str(r.get("日期") or "")[:10],
+                "open":   float(r.get("开盘") or 0),
+                "high":   float(r.get("最高") or 0),
+                "low":    float(r.get("最低") or 0),
+                "close":  float(r.get("收盘") or 0),
+                "volume": int(r.get("成交量") or 0),
+            })
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _akshare_financials(bare: str) -> dict | None:
+    """akshare 财务摘要 · 返 dict 兼容 _fmt_financials 期望的字段名。"""
+    try:
+        import akshare as ak
+        df = ak.stock_financial_abstract(symbol=bare)
+    except Exception as e:
+        logger.warning("[uzi] akshare financials fallback failed code={} err={}", bare, e)
+        return None
+    if df is None or df.empty:
+        return None
+    date_cols = [c for c in df.columns if str(c).isdigit() and len(str(c)) == 8]
+    if not date_cols:
+        return None
+    date_cols.sort(reverse=True)
+    latest = date_cols[0]
+    mapping = {
+        "基本每股收益":         "s_fa_eps_basic",
+        "每股净资产":           "s_fa_bps",
+        "净资产收益率(ROE)":    "du_return_on_equity",
+        "毛利率":               "sales_gross_profit",
+    }
+    out: dict = {"m_timetag": latest}
+    for _, row in df.iterrows():
+        name = str(row.get("指标", "")).strip()
+        if name in mapping:
+            v = row.get(latest)
+            if v is not None and str(v).strip() and str(v) != "nan":
+                try:
+                    out[mapping[name]] = round(float(v), 4)
+                except (TypeError, ValueError):
+                    pass
+    return out if len(out) > 1 else None
+
+
+def _akshare_news(bare: str, limit: int = 8) -> list[dict]:
+    """akshare 新闻 · 返 list 兼容 _fmt_news 期望的 {title, publish_date}。"""
+    try:
+        import akshare as ak
+        df = ak.stock_news_em(symbol=bare)
+    except Exception as e:
+        logger.warning("[uzi] akshare news fallback failed code={} err={}", bare, e)
+        return []
+    if df is None or df.empty:
+        return []
+    rows = df.head(limit).to_dict(orient="records")
+    return [{
+        "title":        r.get("新闻标题") or "",
+        "publish_date": str(r.get("发布时间") or "")[:10],
+        "source":       r.get("文章来源") or "",
+        "url":          r.get("新闻链接") or "",
+    } for r in rows]
+
+
+def _akshare_research(bare: str, limit: int = 10) -> list[dict]:
+    """akshare 券商研报 · 东财 stock_research_report_em · 返 list。"""
+    try:
+        import akshare as ak
+        df = ak.stock_research_report_em(symbol=bare)
+    except Exception as e:
+        logger.warning("[uzi] akshare research fallback failed code={} err={}", bare, e)
+        return []
+    if df is None or df.empty:
+        return []
+    rows = df.head(limit).to_dict(orient="records")
+    out = []
+    for r in rows:
+        out.append({
+            "title":        r.get("报告名称") or r.get("研报标题") or "",
+            "org":          r.get("机构") or r.get("研究机构") or "",
+            "rating":       r.get("最新评级") or r.get("评级") or "",
+            "publish_date": str(r.get("日期") or r.get("发布日期") or "")[:10],
+        })
+    return out
+
+
+def _akshare_lhb(bare: str, days: int = 30) -> list[dict]:
+    """akshare 龙虎榜 · 东财 stock_lhb_detail_em · 只挑近 days 天含本股的记录。"""
+    try:
+        import akshare as ak
+        from datetime import datetime, timedelta
+        end = datetime.now().strftime("%Y%m%d")
+        start = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
+        df = ak.stock_lhb_detail_em(start_date=start, end_date=end)
+    except Exception as e:
+        logger.warning("[uzi] akshare lhb fallback failed code={} err={}", bare, e)
+        return []
+    if df is None or df.empty:
+        return []
+    # 只留本股
+    code_col = "代码" if "代码" in df.columns else ("股票代码" if "股票代码" in df.columns else None)
+    if code_col:
+        df = df[df[code_col].astype(str).str.contains(bare, na=False)]
+    if df.empty:
+        return []
+    rows = df.head(20).to_dict(orient="records")
+    return [{
+        "trade_date": str(r.get("上榜日") or r.get("交易日期") or "")[:10],
+        "reason":     r.get("上榜原因") or "",
+        "net_buy":    r.get("龙虎榜净买额") or r.get("净买额") or 0,
+    } for r in rows]
 
 
 def _auth(request: Request) -> str:
@@ -346,10 +526,42 @@ async def deep_analysis(body: DeepAnalysisIn, request: Request):
         "research": research,
     }
 
+    # akshare 兜底 · 只针对 A 股 · finance-data 没订阅时 5/8 维度会空,
+    # 用东财公开接口补 kline/financials/news/research/lhb。港股/美股无此路径。
+    _bare = code.split(".")[0]
+    _is_a_stock = _bare.isdigit() and len(_bare) == 6
+    if _is_a_stock:
+        fb_tasks: list = []
+        fb_slots: list[str] = []
+        if not bundle.get("kline"):
+            fb_tasks.append(asyncio.to_thread(_akshare_kline, _bare, 30))
+            fb_slots.append("kline")
+        if not bundle.get("financials"):
+            fb_tasks.append(asyncio.to_thread(_akshare_financials, _bare))
+            fb_slots.append("financials")
+        if not bundle.get("news"):
+            fb_tasks.append(asyncio.to_thread(_akshare_news, _bare, 8))
+            fb_slots.append("news")
+        if not bundle.get("research"):
+            fb_tasks.append(asyncio.to_thread(_akshare_research, _bare, 10))
+            fb_slots.append("research")
+        if not bundle.get("lhb"):
+            fb_tasks.append(asyncio.to_thread(_akshare_lhb, _bare, 30))
+            fb_slots.append("lhb")
+        if fb_tasks:
+            fb_results = await asyncio.gather(*fb_tasks, return_exceptions=True)
+            filled: list[str] = []
+            for slot, r in zip(fb_slots, fb_results):
+                if isinstance(r, Exception) or not r:
+                    continue
+                bundle[slot] = r
+                filled.append(slot)
+            logger.info("[uzi] akshare fallback code={} tried={} filled={}", code, fb_slots, filled)
+
     # 走 OneAPI Gemini 合成
     client = get_client()
     if client is None:
-        raise HTTPException(503, "LLM 客户端不可用 · 检查 OPENAI_BASE_URL / OPENAI_API_KEY")
+        raise HTTPException(503, "LLM 客户端不可用 · 检查 .env 里 LLM_API_KEY / LLM_BASE_URL / LLM_DEFAULT_MODEL")
 
     system_msg = (
         "你是一位专业的 A 股 / 港股 / 美股深度分析师。"
@@ -367,9 +579,23 @@ async def deep_analysis(body: DeepAnalysisIn, request: Request):
                 {"role": "user", "content": user_msg},
             ],
             temperature=0.35,
-            max_tokens=1200,
+            # 原来是 1200 · 但社区版常用 deepseek-v4-pro 这类**推理型模型**,
+            # 内部会先跑一大段 reasoning 再输出正文,1200 全被 reasoning 吃掉,
+            # message.content 返回空串,前端就看到"深度分析报告仍为空"。
+            # 提到 4096 给正文留足空间,非推理模型也不会浪费(只按实际生成计费)。
+            max_tokens=4096,
         )
         markdown = (resp.choices[0].message.content or "").strip()
+        # 空返回时把 usage 打进日志,方便判断是"tokens 耗尽"还是"模型拒答"
+        if not markdown:
+            usage = getattr(resp, "usage", None)
+            finish = resp.choices[0].finish_reason if resp.choices else "?"
+            logger.warning(
+                "[uzi] LLM 返回空 markdown · code={} finish={} usage={}",
+                code, finish,
+                {"prompt": getattr(usage, "prompt_tokens", None),
+                 "completion": getattr(usage, "completion_tokens", None)} if usage else None,
+            )
         markdown = _clean_llm_markdown(markdown)
     except Exception as e:
         logger.exception("[uzi] LLM 失败 code=%s", code)

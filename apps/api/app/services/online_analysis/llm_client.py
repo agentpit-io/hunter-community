@@ -15,15 +15,20 @@ from openai import OpenAI
 from .prompts import parse_llm_json
 
 
-_BASE_URL    = os.getenv("ONE_API_BASE_URL", "http://104.197.139.51:3000/v1")
-_API_KEY     = os.getenv("ONE_API_KEY",      "")
-_MODEL       = os.getenv("ONE_API_MODEL",    "gemini-3-flash-preview")
-_TIMEOUT     = 30
+# ONE_API_* 是内部 SaaS 网关的历史命名,开源版用户没有那个网关。
+# 缺 ONE_API_KEY 时自动退回到 .env 里的统一 LLM_* 三件套 —— 这样 chat 走通了
+# 深度分析也就跟着走通,不需要用户再单独维护一套 key。
+_BASE_URL = os.getenv("ONE_API_BASE_URL") or os.getenv("LLM_BASE_URL", "http://104.197.139.51:3000/v1")
+_API_KEY  = os.getenv("ONE_API_KEY")     or os.getenv("LLM_API_KEY", "")
+_MODEL    = os.getenv("ONE_API_MODEL")   or os.getenv("LLM_DEFAULT_MODEL", "gemini-3-flash-preview")
+# 30s 对 DeepSeek/Kimi 等推理型模型 + 长上下文经常不够(reasoning tokens 一多就到 40-60s),
+# 抬到 120s 避免 APITimeoutError 把结果吞成 502。上游本身也有超时兜底,不会无限阻塞。
+_TIMEOUT  = 120
 
 
 def get_client() -> OpenAI | None:
     if not _API_KEY:
-        logger.warning("online_analysis llm: ONE_API_KEY 未配置")
+        logger.warning("online_analysis llm: 无可用 key · 请在 .env 里填 LLM_API_KEY(或 ONE_API_KEY)")
         return None
     return OpenAI(api_key=_API_KEY, base_url=_BASE_URL, timeout=_TIMEOUT)
 
