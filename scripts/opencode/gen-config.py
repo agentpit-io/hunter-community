@@ -1,40 +1,30 @@
 #!/usr/bin/env python3
-"""Generate opencode.json from environment · runs inside the opencode container.
+"""写 opencode 的 provider 配置 · 在 opencode 容器里启动前跑。
 
-Why this exists: the hunter-opencode image ships everything it needs —
-5 plugins in /opt/opencode-workspace/plugins, 4 MCP servers in
-/opt/opencode-workspace/mcp — but **no opencode.json to wire them together**.
-opencode reads its provider config from a file, not from LLM_* env vars, so a
-container started with only env set falls back to the built-in "OpenCode Zen"
-provider and never talks to your gateway. This script closes that gap.
+**只写 provider,别的一概不碰。** 镜像已经用 .opencode/opencode.jsonc 把 4 个 MCP
+注册好了,plugins/*.ts 也由 opencode 的插件扫描器自动发现 —— 唯独 provider 是
+`{}`,因为它要 API key,只能运行时给。opencode 会把两份配置合并,所以这里补齐
+provider 就够了。
 
-Reference: the production instance's config (hunter.agentpit.io) has the same
-shape — provider + mcp + plugin. The differences here are paths (community
-image keeps everything under /opt/opencode-workspace instead of /mcp and
-/root/.config/opencode) and the api hostname (docker-compose service name).
+(踩过的坑:最初这里连 mcp 也写了一遍,结果 hunter_user_mcp.py 被起了两次 ——
+镜像叫它 hunter_user、我叫它 usermcp,名字不同就没去重。)
 
-Reads:
-  LLM_BASE_URL · LLM_API_KEY · LLM_DEFAULT_MODEL   provider block
-  HERMES_API_URL · HUNTER_INTERNAL_KEY              MCP → api callbacks
-  HUNTER_BUDGET_ENABLED                             include budget plugin
-Writes: $OPENCODE_CONFIG_DIR/opencode.json (default /opt/opencode-workspace)
+为什么非要生成文件:opencode 只从配置文件读 provider,不认 LLM_* 环境变量。
+不写的话它会回落到内置的 OpenCode Zen,你在 .env 里填的网关根本不会被调用,
+现象是"能聊天但答得驴唇不对马嘴"。
+
+Reads:  LLM_BASE_URL · LLM_API_KEY · LLM_DEFAULT_MODEL · LLM_SCHEMA_SANITIZE
+Writes: $OPENCODE_CONFIG_DIR/opencode.json (默认 /opt/opencode-workspace)
 """
 import json
 import os
 import sys
 
 WORKSPACE = os.environ.get("OPENCODE_CONFIG_DIR", "/opt/opencode-workspace")
-MCP_DIR = os.path.join(WORKSPACE, "mcp")
-PLUGIN_DIR = os.path.join(WORKSPACE, "plugins")
 
 BASE_URL = (os.environ.get("LLM_BASE_URL") or "").strip().rstrip("/")
 API_KEY = (os.environ.get("LLM_API_KEY") or "").strip()
 MODEL = (os.environ.get("LLM_DEFAULT_MODEL") or "").strip()
-
-HERMES_API = os.environ.get("HERMES_API_URL", "http://api:8000")
-INTERNAL_KEY = os.environ.get("HUNTER_INTERNAL_KEY", "")
-BUDGET_ON = (os.environ.get("HUNTER_BUDGET_ENABLED", "false").lower()
-             in ("1", "true", "yes", "on"))
 
 PROVIDER_ID = "hunter-llm"
 
@@ -53,22 +43,6 @@ def _use_shim(model: str) -> bool:
     if SANITIZE in ("0", "false", "no", "off"):
         return False
     return "gemini" in model.lower()
-
-# MCP server name → script file. Only those that exist in the image are
-# registered, so a slimmer image doesn't produce a config full of dead entries.
-MCP_SERVERS = {
-    "watchlist": "watchlist_mcp.py",   # 自选股速查 / 新闻 / 日报
-    "portfolio": "portfolio_mcp.py",   # 组合调仓 / 情景模拟 / 风险画像
-    "uzi": "uzi_mcp.py",               # 深度分析
-    "usermcp": "hunter_user_mcp.py",   # 用户在 /mcp-config 里接的第三方数据源
-}
-
-# Loaded in this order. budget is opt-in — it caps per-request LLM spend, which
-# a self-hosted user paying their own LLM bill usually doesn't want.
-PLUGINS = ["hunter-auth.ts", "hunter-audit.ts", "hunter-guard.ts",
-           "hunter-mcp-context.ts"]
-if BUDGET_ON:
-    PLUGINS.append("hunter-budget.ts")
 
 
 def main() -> int:
@@ -99,31 +73,6 @@ def main() -> int:
         "model": f"{PROVIDER_ID}/{MODEL}",
     }
 
-    mcp = {}
-    for name, script in MCP_SERVERS.items():
-        path = os.path.join(MCP_DIR, script)
-        if not os.path.exists(path):
-            print(f"[gen-config] 跳过 {name}:镜像里没有 {script}", file=sys.stderr)
-            continue
-        mcp[name] = {
-            "type": "local",
-            "command": ["python3", path],
-            "enabled": True,
-            # These MCP servers call back into the api container; without the
-            # env they'd default to localhost and hit themselves.
-            "environment": {
-                "HERMES_API_URL": HERMES_API,
-                "HUNTER_INTERNAL_KEY": INTERNAL_KEY,
-            },
-        }
-    if mcp:
-        cfg["mcp"] = mcp
-
-    plugins = [f"file://{os.path.join(PLUGIN_DIR, p)}"
-               for p in PLUGINS if os.path.exists(os.path.join(PLUGIN_DIR, p))]
-    if plugins:
-        cfg["plugin"] = plugins
-
     out = os.path.join(WORKSPACE, "opencode.json")
     with open(out, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
@@ -132,8 +81,7 @@ def main() -> int:
     print(f"[gen-config]   provider {PROVIDER_ID} → {upstream}"
           f"{' (经 schema shim → ' + BASE_URL + ')' if via_shim else ''}"
           f" · model {MODEL} · apiKey {'有' if API_KEY else '无'}", file=sys.stderr)
-    print(f"[gen-config]   mcp {sorted(mcp)}", file=sys.stderr)
-    print(f"[gen-config]   plugin {[os.path.basename(p) for p in plugins]}",
+    print("[gen-config]   mcp / plugin 由镜像自带配置负责,这里不重复注册",
           file=sys.stderr)
     return 0
 
