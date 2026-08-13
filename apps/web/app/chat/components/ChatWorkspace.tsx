@@ -13,6 +13,7 @@ import {
   switchSessionModel,
 } from '../lib/opencodeClient'
 import { useOpencodeSSE } from '../lib/useSSE'
+import { ensureLocalSession } from '../../lib/localSession'
 import { condenseMemory } from '../lib/profileClient'
 import MessageList from './MessageList'
 import InputBox from './InputBox'
@@ -196,23 +197,51 @@ export default function ChatWorkspace({
 
   const { events, status: sseStatus } = useOpencodeSSE(sessionId)
 
+  // 首屏拉会话 · 必须带重试
+  //
+  // 典型场景:用户 `docker compose up -d` 之后立刻打开浏览器,此时 api/opencode
+  // 可能还在预热,BFF 拿不到归属就回 503。原来这里是一次性调用,失败就把
+  // 「初始化 session 失败: HTTP 503」钉在页面顶部,用户只能手动刷新 —— 而其实
+  // 再等两秒就好了。第一次用就看到红条,观感极差。
+  //
+  // 重试期间不显示错误,退避约 12 秒后仍失败才报 —— 那时候确实是真出问题了。
   useEffect(() => {
     if (sessionId) return
+    let cancelled = false
+    const RETRY_MS = [600, 1200, 2000, 3000, 5000]
+
     ;(async () => {
-      try {
-        const list = await listSessions()
-        const latest = list.sort(
-          (a, b) => (b.time?.updated || b.time?.created || 0) - (a.time?.updated || a.time?.created || 0),
-        )[0]
-        if (latest) onSessionCreated(latest.id)
-        else {
-          const s = await createSession('新对话')
-          onSessionCreated(s.id)
+      // 单用户模式下 AuthGuard 是异步换 token 的,首屏可能早于它完成。
+      // 不先等一下会白白浪费一次重试(401)。
+      await ensureLocalSession()
+
+      for (let attempt = 0; !cancelled; attempt++) {
+        try {
+          const list = await listSessions()
+          if (cancelled) return
+          const latest = list.sort(
+            (a, b) => (b.time?.updated || b.time?.created || 0) - (a.time?.updated || a.time?.created || 0),
+          )[0]
+          if (latest) onSessionCreated(latest.id)
+          else {
+            const s = await createSession('新对话')
+            if (cancelled) return
+            onSessionCreated(s.id)
+          }
+          setError('')
+          return
+        } catch (e: any) {
+          if (cancelled) return
+          if (attempt >= RETRY_MS.length) {
+            setError(`初始化 session 失败: ${e?.message || e}`)
+            return
+          }
+          await new Promise((r) => setTimeout(r, RETRY_MS[attempt]))
         }
-      } catch (e: any) {
-        setError(`初始化 session 失败: ${e?.message || e}`)
       }
     })()
+
+    return () => { cancelled = true }
   }, [sessionId, onSessionCreated])
 
   useEffect(() => {
