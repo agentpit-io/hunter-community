@@ -9,7 +9,7 @@
 [![Docker](https://img.shields.io/badge/ghcr.io-agentpit--io-blue)](https://github.com/agentpit-io/hunter-community/pkgs/container/hunter-community-api)
 
 Live preview: **[https://hunter-community.agentpit.io](https://hunter-community.agentpit.io)**
-（首次访问会引导你创建管理员账号）
+（演示站开了多用户，首次访问会引导你注册；自己 clone 下来跑是不需要账号的）
 
 ---
 
@@ -47,11 +47,33 @@ cp .env.example .env
 
 ### 2. 改 `.env` 三处
 
-```bash
-# ① 签名密钥 · 必改，别用默认值
-#    生成：openssl rand -base64 48
-JWT_SECRET=<粘贴生成的随机串>
+先生成签名密钥（**直接复制整行执行**，会自动写进 `.env`）：
 
+```powershell
+# Windows PowerShell
+$b=New-Object byte[] 48;[Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b)
+$s=([Convert]::ToBase64String($b) -replace '[=/+]','').Substring(0,60)
+(Get-Content .env -Raw) -replace '(?m)^JWT_SECRET=.*$',"JWT_SECRET=$s" | Set-Content .env -NoNewline
+```
+
+```bash
+# Linux / macOS
+sed -i.bak "s|^JWT_SECRET=.*|JWT_SECRET=$(openssl rand -base64 48 | tr -d '=/+' | head -c 60)|" .env && rm .env.bak
+```
+
+<details>
+<summary>这是什么？为什么不能用默认值？</summary>
+
+它是签名密钥：登录凭证（JWT）用它签名，服务端再用它验签。本机自用时被人伪造凭证的
+风险很低，**真正的理由是它还兼了第二份工** —— 你的 Hunter 平台 key 和第三方 MCP
+凭证是用它派生出的密钥加密存在数据库里的（`apps/api/app/utils/crypto.py`）。
+以后再改它，那些已存的东西就解不开了，得重填一遍。所以现在设一次最省事。
+
+</details>
+
+然后编辑 `.env` 填大模型：
+
+```bash
 # ② 你自己的大模型 · 聊天靠它
 LLM_BASE_URL=https://api.openai.com/v1
 LLM_API_KEY=sk-<你的 key>
@@ -131,6 +153,11 @@ docker compose logs -f api
 **填了 key 还是提示未解锁**
 弹窗会告诉你具体原因：key 被吊销了、或连不上 `hunter.agentpit.io`。
 后者多半是本机代理／防火墙，`docker compose exec api curl -I https://hunter.agentpit.io` 验一下。
+
+**启动报 `JWT_SECRET` 相关的错，直接起不来**
+`.env` 里少了 `JWT_SECRET` 这一行。这是故意拦的：api 和 opencode 必须共用同一个值，
+少了会变成"服务起得来但对话莫名 401"的哑故障，不如启动时就说清楚。
+回到第 2 步跑一遍生成命令即可。
 
 **改了 `.env` 没生效**
 `docker compose restart` 不会重读 env，用 `docker compose up -d`。

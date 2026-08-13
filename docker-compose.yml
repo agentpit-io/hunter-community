@@ -58,7 +58,10 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-hunter}:${POSTGRES_PASSWORD:-hunter}@postgres:5432/${POSTGRES_DB:-hunter}
       REDIS_URL: redis://redis:6379/0
       # Local auth (P3) · JWT signing + registration policy
-      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      # api 和 opencode 必须用**同一个** JWT_SECRET:api 签发的 token 要由
+      # opencode 的 hunter-auth 插件验签才能认出用户。两边取值不同的话服务照常
+      # 启动,只是对话莫名 401 —— 与其留这种哑故障,不如缺了就拒绝启动。
+      JWT_SECRET: ${JWT_SECRET:?请在 .env 里设置 JWT_SECRET · 生成方法见 README「跑起来」第 2 步}
       JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-3600}
       JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-2592000}
       # 单用户模式(默认开)· 本机自用不需要账号密码,前端自动换会话不显示登录页
@@ -129,7 +132,8 @@ services:
       OPENCODE_SERVER_USERNAME: ${OPENCODE_USER:-}
       OPENCODE_SERVER_PASSWORD: ${OPENCODE_PASS:-}
       # Shared with api container · lets hunter-auth plugin verify Bearer JWT locally
-      JWT_SECRET: ${JWT_SECRET:-change-me-in-production-please}
+      # 与 api 容器同源 · 见上面 api 服务处的说明
+      JWT_SECRET: ${JWT_SECRET:?请在 .env 里设置 JWT_SECRET · 生成方法见 README「跑起来」第 2 步}
       # MCP subprocesses reach the api container via internal docker network
       HERMES_API_URL: http://api:8000
       # Shared secret for /api/internal/* calls
