@@ -1,0 +1,19 @@
+# Windows 上 git 默认 core.autocrlf=true,检出时会把 LF 换成 CRLF。
+# 对进容器执行的文件是致命的:sh 读到 `set -e\r` 直接报
+#   entrypoint.sh: set: line 20: illegal option -
+# 然后容器反复重启。这个坑只在 Windows 用户 clone 后才出现,
+# Linux/macOS 开发时完全看不见 —— 所以必须在仓库里定死。
+
+# 进 Linux 容器执行的脚本 · 一律 LF
+*.sh            text eol=lf
+scripts/**      text eol=lf
+
+# Dockerfile / compose / env 模板同样会被容器或 shell 读
+Dockerfile      text eol=lf
+*.Dockerfile    text eol=lf
+docker-compose*.yml text eol=lf
+.env.example    text eol=lf
+
+# Python 本身两种换行都能跑,但容器里可能被直接 ./xxx.py 执行,
+# shebang 带 \r 一样会挂
+*.py            text eol=lf
