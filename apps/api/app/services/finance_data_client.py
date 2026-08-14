@@ -49,6 +49,28 @@ def _use_saas() -> bool:
     return _auth.use_saas()
 
 
+def __getattr__(name: str):
+    """兼容旧的模块级常量名(_HEADERS / _USE_SAAS / _IS_GATEWAY / FINANCE_DATA_TOKEN)。
+
+    这些原来是 import 时算好的常量,收敛到 finance_data_auth 并改成调用时求值之后
+    就不存在了。但交接文档 §7 的排错命令是直接 import 它们的:
+
+        from app.services.finance_data_client import FINANCE_DATA_URL, _HEADERS, ...
+
+    直接删掉会让那条命令 ImportError,排错的人第一步就卡住。用 PEP 562 的模块级
+    __getattr__ 在被访问时现算 —— 老命令照跑,拿到的还是当前真实值。
+    """
+    if name == "_HEADERS":
+        return _auth.data_headers()
+    if name == "_USE_SAAS":
+        return _auth.use_saas()
+    if name == "_IS_GATEWAY":
+        return _auth.is_gateway()
+    if name == "FINANCE_DATA_TOKEN":
+        return _auth.data_token()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 def _provider_get_quote_sync(code: str) -> dict | None:
     """Sync bridge to providers.data_source · caller of this module is sync.
 

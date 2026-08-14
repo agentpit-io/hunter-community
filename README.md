@@ -149,18 +149,30 @@ docker compose logs -f api
 
 至此左侧工具的小锁消失，「行情速查」「Kronos 走势预测」等能力全部可用。
 
-### 6. 深度分析的数据源(§5 填了 key 就自动开)
+### 6. 一把 key 覆盖了什么(§5 填完就全开)
 
-§5 填的 `HUNTER_API_KEY` **同时授权**深度分析的 finance-data 数据源 · 不需要
-再申请第二把 key,也不需要在 `.env` 里加额外一行。客户端默认走
-`hunter.agentpit.io/api/saas/data/*` 网关中转 · 由服务端替你完成 finance-data
-内部鉴权。
+§5 那把 `HUNTER_API_KEY` 是**唯一**要填的平台 key。所有需要我们服务端的能力都走
+`hunter.agentpit.io/api/saas/*` 网关中转 —— 网关校验你的 key、替你完成上游内部
+鉴权、并记一笔用量。上游地址对你完全隐藏,我们换机器你不用改任何配置。
+
+| 能力 | 网关路径 | 上游 | 没填 key 会怎样 |
+|---|---|---|---|
+| 工具 / SKILL(行情·K线·财报) | `/api/saas/tools/*` | hunter 自有 | 点了提示去申请 |
+| 深度分析数据基座(新闻·公告·龙虎榜) | `/api/saas/data/*` | finance-data | 静默降级到 akshare 免费源,报告很空 |
+| Kronos 走势预测 | `/api/saas/kronos/*` | kronos.agentpit.io | 401 + 申请引导 |
+| 发现页 · Scout 情报 | `/api/saas/truesource/*` | truesource.agentpit.io | 401 + 申请引导 |
+
+不需要 `hunt_data_` / `hunt_kron_` 之类的第二把 key —— **平台从来没签发过这些前缀**,
+早期文档里出现过是笔误,照着填只会白费功夫。
 
 **验证生效**:
 ```bash
-# 网关探活(无需 key)
-docker compose exec api curl -s https://hunter.agentpit.io/api/saas/data/_ping
-# 期望:{"ok":true,"gateway":"saas-data","upstream":"https://finance-data.agentpit.io"}
+# 四个网关探活(都无需 key)
+for gw in tools data kronos truesource; do
+  docker compose exec api curl -s https://hunter.agentpit.io/api/saas/$gw/_ping; echo
+done
+# 期望每行都是 {"ok":true,"gateway":"saas-xxx","upstream":"..."}
+# (tools 网关没有 _ping,用 /manifest 代替)
 
 # 带自己的 key 拉一条新闻
 docker compose exec api python -c "
@@ -306,6 +318,7 @@ docker compose up -d --build
 | 左侧工具与 SKILL | ✅ 需平台 key（免费申请） | ✅ |
 | UZI 深度分析 | ✅ 需平台 key | ✅ |
 | Kronos 走势预测 | ✅ 需平台 key（或自建 GPU） | ✅ |
+| 发现页 · Scout 情报 | ✅ 需平台 key | ✅ |
 | 自选 · 持仓 · 信号 | ✅ | ✅ |
 | 接入你自己的 MCP 数据源 | ✅ 不需要平台 key | ✅ |
 | 微信推送 | ❌ | ✅ |

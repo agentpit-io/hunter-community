@@ -5,12 +5,13 @@ GET /api/discover/opportunities
 """
 import os
 import httpx
+from app.services import saas_gateway as _gw
 from fastapi import APIRouter, Request, HTTPException
 from loguru import logger
 
 router = APIRouter()
 
-TRUESOURCE_BASE = os.environ.get("TRUESOURCE_API_URL", "http://34.92.72.140:8000")
+# 走 hunter 网关 · 同 truesource.py · 见 app/services/saas_gateway.py
 
 # 前端 focus 标识符 → 中文 sector 集合映射
 # 用于把画像里的英文 focus_sectors（tech/consumer/...）展开成 chain.sectors 里的中文标签
@@ -380,8 +381,9 @@ async def get_opportunities(request: Request):
     try:
         async with httpx.AsyncClient(timeout=15.0) as c:
             r = await c.get(
-                f"{TRUESOURCE_BASE}/api/hunter/daily-brief",
+                f"{_gw.truesource_url()}/api/hunter/daily-brief",
                 params={"symbols": ",".join(all_symbols)},
+                headers=_gw.truesource_headers(),
             )
             if r.status_code == 200:
                 for stk in r.json().get("stocks", []):

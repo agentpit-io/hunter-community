@@ -2,6 +2,7 @@ import asyncio
 import os
 from typing import Optional
 import httpx
+from app.services import saas_gateway as _gw
 from fastapi import APIRouter, HTTPException, Request
 from loguru import logger
 
@@ -406,7 +407,8 @@ async def _compute_no_kronos_prediction(
     return pro_result
 
 
-KRONOS_URL = os.getenv("KRONOS_URL", "http://136.110.39.14:8000")
+# 默认走 hunter 网关(裸 IP 对用户隐藏 · 一 key 通用)· 见 app/services/saas_gateway.py
+# 老 env KRONOS_URL 仍然最高优先级,可用它一键回退直连。
 
 
 def _optional_user_id(request: Request | None) -> str | None:
@@ -433,8 +435,9 @@ async def get_kpred(code: str, days: int = 10, request: Request = None):
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(connect=3.0, read=30.0, write=5.0, pool=3.0)) as client:
             r = await client.post(
-                f"{KRONOS_URL}/predict",
+                f"{_gw.kronos_url()}/predict",
                 json={"symbol": code, "pred_len": days},
+                headers=_gw.kronos_headers(),
             )
         if r.status_code != 200:
             raise HTTPException(502, f"Kronos 服务错误: {r.text[:200]}")
@@ -524,8 +527,9 @@ async def get_kpred_pro(
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(connect=3.0, read=30.0, write=5.0, pool=3.0)) as client:
             r = await client.post(
-                f"{KRONOS_URL}/predict",
+                f"{_gw.kronos_url()}/predict",
                 json={"symbol": code, "pred_len": days},
+                headers=_gw.kronos_headers(),
             )
         if r.status_code != 200:
             body_text = r.text[:200]

@@ -15,6 +15,7 @@ import os
 from datetime import date, datetime, timedelta, timezone
 
 import httpx
+from app.services import saas_gateway as _gw
 
 from app.services.backtest import store
 from app.services.factor_engine import WEIGHTS, FACTOR_LABELS, compute_pro_prediction
@@ -22,7 +23,7 @@ from app.services.factor_engine import WEIGHTS, FACTOR_LABELS, compute_pro_predi
 log = logging.getLogger(__name__)
 
 CST = timezone(timedelta(hours=8))   # 服务器系统时区是 UTC, 一律显式转北京时间
-KRONOS_URL = os.getenv("KRONOS_URL", "http://136.110.39.14:8000")
+# 走 hunter 网关 · 同 kpred.py · 老 env KRONOS_URL 可回退直连
 _CFG_CACHE: dict = {}                # 本轮运行的配置快照(供 _predict_one 内部读取)
 
 # 以下为兜底默认值; 实际运行时从 backtest_config 表读取(admin 后台可改)
@@ -47,8 +48,9 @@ async def _predict_one(client: httpx.AsyncClient, code: str) -> list[dict] | Non
     kronos_result = None
     for attempt in range(retry + 1):
         try:
-            r = await client.post(f"{KRONOS_URL}/predict",
-                                  json={"symbol": code, "pred_len": pred_len})
+            r = await client.post(f"{_gw.kronos_url()}/predict",
+                                  json={"symbol": code, "pred_len": pred_len},
+                                  headers=_gw.kronos_headers())
             if r.status_code == 200:
                 kronos_result = r.json()
                 break

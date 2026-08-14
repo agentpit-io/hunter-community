@@ -16,21 +16,23 @@ TrueSource 数据代理路由
 """
 import os
 import httpx
+from app.services import saas_gateway as _gw
 from fastapi import APIRouter, HTTPException, Query, Request
 from loguru import logger
 
 router = APIRouter()
 
-TRUESOURCE_BASE = os.environ.get("TRUESOURCE_API_URL", "http://34.92.72.140:8000")
+# 走 hunter 网关 · 裸 IP 对用户隐藏 · 见 app/services/saas_gateway.py
+# 老 env TRUESOURCE_API_URL 仍最高优先级,可回退直连
 _TIMEOUT = 15.0
 
 
 async def _proxy_post(path: str, params: dict | None = None, timeout: float = 70.0) -> dict:
     """POST 转发到 TrueSource，供主动采集类接口使用（耗时 30-60s）。"""
-    url = f"{TRUESOURCE_BASE}{path}"
+    url = f"{_gw.truesource_url()}{path}"
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(connect=5.0, read=timeout, write=5.0, pool=5.0)) as client:
-            r = await client.post(url, params=params or {})
+            r = await client.post(url, params=params or {}, headers=_gw.truesource_headers())
             r.raise_for_status()
             return r.json()
     except httpx.TimeoutException:
@@ -46,10 +48,10 @@ async def _proxy_post(path: str, params: dict | None = None, timeout: float = 70
 
 async def _proxy(path: str, params: dict | None = None) -> dict:
     """转发请求到 TrueSource，统一错误处理。"""
-    url = f"{TRUESOURCE_BASE}{path}"
+    url = f"{_gw.truesource_url()}{path}"
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            r = await client.get(url, params=params or {})
+            r = await client.get(url, params=params or {}, headers=_gw.truesource_headers())
             r.raise_for_status()
             return r.json()
     except httpx.TimeoutException:
