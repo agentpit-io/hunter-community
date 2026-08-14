@@ -202,7 +202,12 @@ async def _fetch_cninfo(client: httpx.AsyncClient, symbol: str, days: int) -> li
 # ─── akshare 源（同步包到线程池）────────────────────────────────────────
 
 def _akshare_safe(fn_name: str, *args, **kwargs):
-    """同步调用 akshare，统一 try/except"""
+    """同步调用 akshare，统一 try/except。
+
+    新版 akshare(1.14+)偶发改函数签名(如 stock_news_main_cx 去掉了 symbol 参数),
+    捕到 TypeError: unexpected keyword argument 时自动 retry 一次不带 kwargs,
+    这样接口调整不会让一整路数据源直接死掉。
+    """
     try:
         import akshare as ak
     except ImportError:
@@ -210,7 +215,22 @@ def _akshare_safe(fn_name: str, *args, **kwargs):
         return None
     try:
         fn = getattr(ak, fn_name)
+    except AttributeError as e:
+        log.warning("akshare.%s missing: %s", fn_name, e)
+        return None
+    try:
         return fn(*args, **kwargs)
+    except TypeError as e:
+        # 参数签名变了(常见:symbol 被移除)· retry 一次不传 kwargs
+        if "unexpected keyword" in str(e) or "positional" in str(e):
+            log.warning("akshare.%s signature changed (%s) · retry without kwargs", fn_name, e)
+            try:
+                return fn(*args)
+            except Exception as e2:
+                log.warning("akshare.%s retry-no-kwargs also failed: %s", fn_name, e2)
+                return None
+        log.warning("akshare.%s failed: %s", fn_name, e)
+        return None
     except Exception as e:
         log.warning("akshare.%s failed: %s", fn_name, e)
         return None

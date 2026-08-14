@@ -488,6 +488,64 @@ async def init_db():
             )
         """)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_uml_user ON user_memory_log (user_id, created_at DESC)")
+
+        # ── chat_debate 多专家辩论报告持久化 · DDL 同 sql/20260807_chat_debate_reports.sql
+        # 没建表的话:_save_report 每次 UndefinedTable · 用户刷新页面就丢辩论
+        # /api/chat/debate/session_reports 也没数据返 · 前端复现历史失败
+        cur.execute("CREATE SCHEMA IF NOT EXISTS chat_debate")
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS chat_debate.reports (
+                id           BIGSERIAL PRIMARY KEY,
+                task_id      TEXT NOT NULL UNIQUE,
+                user_id      TEXT NOT NULL,
+                session_id   TEXT,
+                stock_code   TEXT NOT NULL,
+                stock_name   TEXT NOT NULL,
+                decision     TEXT NOT NULL,
+                confidence   NUMERIC(4,2) NOT NULL,
+                content_md   TEXT NOT NULL,
+                report_json  JSONB DEFAULT '{}'::jsonb,
+                elapsed_sec  INT,
+                question     TEXT,
+                created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS ix_debate_reports_user_time "
+                    "ON chat_debate.reports (user_id, created_at DESC)")
+        cur.execute("CREATE INDEX IF NOT EXISTS ix_debate_reports_session "
+                    "ON chat_debate.reports (session_id, created_at) "
+                    "WHERE session_id IS NOT NULL")
+
+        # ── hunter_artifacts.published_artifact · Artifact 发布公开链接 · DDL 同
+        # sql/20260807_hunter_artifacts.sql
+        # 没建表的话:GET /api/artifacts/status 500(UndefinedTable) · publish 报错
+        cur.execute("CREATE SCHEMA IF NOT EXISTS hunter_artifacts")
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS hunter_artifacts.published_artifact (
+                id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                short_id          TEXT NOT NULL UNIQUE,
+                owner_user_id     TEXT NOT NULL,
+                session_id        TEXT,
+                source_message_id TEXT,
+                title             TEXT NOT NULL,
+                content_md        TEXT NOT NULL,
+                view_count        INT NOT NULL DEFAULT 0,
+                is_published      BOOLEAN NOT NULL DEFAULT true,
+                published_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                unpublished_at    TIMESTAMPTZ,
+                metadata          JSONB DEFAULT '{}'::jsonb,
+                created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS ix_artifact_owner "
+                    "ON hunter_artifacts.published_artifact (owner_user_id, published_at DESC)")
+        cur.execute("CREATE INDEX IF NOT EXISTS ix_artifact_short "
+                    "ON hunter_artifacts.published_artifact (short_id) "
+                    "WHERE is_published = true")
+        cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_artifact_source "
+                    "ON hunter_artifacts.published_artifact (owner_user_id, source_message_id) "
+                    "WHERE source_message_id IS NOT NULL")
+
         conn.commit()
         conn.close()
         logger.info("Database initialized")

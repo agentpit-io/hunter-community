@@ -103,10 +103,11 @@ async def reason_attribution(stock_name: str, change_pct: float,
     )
 
     import asyncio
+    # max_tokens 4000 → 8192 · reasoning 型模型下 4000 仍有可能被推理吃完(见 llm_client 修复)
     parsed, meta = await asyncio.to_thread(
         llm_json_call,
         ATTRIBUTION_REASONING_SYSTEM, user_prompt,
-        max_tokens=4000, temperature=0.3,
+        max_tokens=8192, temperature=0.3,
     )
 
     if parsed is None:

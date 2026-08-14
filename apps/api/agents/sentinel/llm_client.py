@@ -49,7 +49,7 @@ def get_client() -> OpenAI | None:
 def llm_json_call(system: str, user: str, *,
                   model: str | None = None,
                   deep: bool = False,
-                  max_tokens: int = 2000,
+                  max_tokens: int = 8192,
                   temperature: float = 0.3,
                   retry_on_parse_fail: bool = True) -> tuple[dict | None, dict]:
     """统一 LLM JSON 调用。
@@ -71,6 +71,10 @@ def llm_json_call(system: str, user: str, *,
 
     use_model = model or (_DEEP_MODEL if deep else _MODEL)
     t0 = time.time()
+    # 不用 response_format={"type":"json_object"} · DeepSeek V4-pro / R1 等
+    # thinking-型模型开启 json 强制模式后,thinking token 仍会漏进 content,
+    # 或者提前 EOS 只吐 `{` 就结束 · 反而更难 parse。改成靠 prompt 约束 +
+    # parse_llm_json 5+1 层兜底(含剥 <think>) · 实测 DeepSeek 稳定通过。
     try:
         completion = client.chat.completions.create(
             model=use_model,
@@ -80,41 +84,46 @@ def llm_json_call(system: str, user: str, *,
             ],
             max_tokens=max_tokens,
             temperature=temperature,
-            response_format={"type": "json_object"},
         )
     except Exception as e:
-        logger.warning("llm_json_call (json_object mode) failed: {}, fallback to plain", e)
-        # 退回普通模式（网关不支持 response_format 时）
-        try:
-            completion = client.chat.completions.create(
-                model=use_model,
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user",   "content": user},
-                ],
-                max_tokens=max_tokens,
-                temperature=temperature,
-            )
-        except Exception as e2:
-            return None, {"error": str(e2), "tokens_in": 0, "tokens_out": 0,
-                          "latency_ms": int((time.time()-t0)*1000)}
+        return None, {"error": str(e), "tokens_in": 0, "tokens_out": 0,
+                      "latency_ms": int((time.time()-t0)*1000)}
 
     raw   = completion.choices[0].message.content or ""
     usage = completion.usage
+    finish = completion.choices[0].finish_reason if completion.choices else "unknown"
     meta = {
         "model":      use_model,
         "tokens_in":  usage.prompt_tokens if usage else 0,
         "tokens_out": usage.completion_tokens if usage else 0,
         "latency_ms": int((time.time() - t0) * 1000),
         "raw_text":   raw,
+        "finish_reason": finish,
         "error":      None,
     }
+    # content 为空 = 上游多半是 reasoning 型模型把 max_tokens 全吃在推理里。
+    # 上一次踩坑 bull/bear 也是这个症状,但那时只在 bull/bear/risk 里加了保护,
+    # 忘了 llm_json_call。这里把 finish_reason / tokens_out / model 打出来,
+    # length=耗尽 · stop=模型真的返空 · content_filter=被拒。
+    if not raw.strip():
+        logger.warning(
+            "llm_json_call: content 空 · finish={} tokens_in={} tokens_out={} model={} max_tokens={}",
+            finish, meta["tokens_in"], meta["tokens_out"], use_model, max_tokens,
+        )
 
     parsed = parse_llm_json(raw)
     if parsed is None and retry_on_parse_fail:
-        # 一次重试：明确指出 JSON 格式要求
-        logger.warning("llm_json_call parse failed, retrying with stricter prompt")
-        strict_system = system + "\n\n严格要求：你的整个回答必须是合法 JSON。第一个字符必须是 {，最后一个字符必须是 }。不要添加任何 markdown 包装或解释。"
+        # 一次重试：明确指出 JSON 格式要求 · 且明说"不要 <think>"以打断 thinking 型模型
+        logger.warning(
+            "llm_json_call parse failed, retrying · finish={} tokens_out={} raw_head={!r}",
+            finish, meta["tokens_out"], raw[:120],
+        )
+        strict_system = system + (
+            "\n\n严格要求："
+            "你的整个回答必须是合法 JSON。第一个字符必须是 {，最后一个字符必须是 }。"
+            "不要输出 <think>...</think>、reasoning 前言、markdown 包装、解释。"
+            "如果你需要推理,请在心里推理,直接给结果。"
+        )
         try:
             completion = client.chat.completions.create(
                 model=use_model,
@@ -124,7 +133,6 @@ def llm_json_call(system: str, user: str, *,
                 ],
                 max_tokens=max_tokens,
                 temperature=0.1,    # 更严格
-                response_format={"type": "json_object"},
             )
             raw2   = completion.choices[0].message.content or ""
             usage2 = completion.usage

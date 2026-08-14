@@ -301,22 +301,40 @@ async def _worker(
                 ticker = f"{ticker}.BJ"
 
         trade_date = datetime.now(_CST).strftime("%Y-%m-%d")
+
+        # 拉实时行情 · 别硬编码 0.0(报告里"当日涨跌 +0.00%"是这里造成的)
+        # 用户看到 -4.08% 却报告 +0.00% · 严重不专业 · 也让判官/风控做不到"结合当日走势"。
+        # 失败静默,退回 0.0 · 主流程照跑。
+        current_price: float | None = None
+        change_pct: float = 0.0
+        try:
+            from app.services.finance_data_client import get_quote
+            q = await asyncio.to_thread(get_quote, code)
+            if q:
+                current_price = float(q.get("price") or 0) or None
+                change_pct = float(q.get("change_pct") or 0.0)
+        except Exception as e:
+            logger.warning("[chat_debate:{}] get_quote({}) 失败,change_pct=0: {}", task_id, code, e)
+
         state = EnhancedAgentState(
             ticker=ticker,
             stock_name=name,
             trade_date=trade_date,
-            change_pct=0.0,
+            change_pct=change_pct,
             trigger_desc=question or f"用户在 chat 里主动请求对 {name} 做多空辩论",
             thesis_text="",
             kill_conditions=[],
         )
 
         # ── Phase 1 · 并行 · 技术面 + 新闻情报 ─────────────
-        await emit("technical", 5, f"启动 {name}({code}) 多专家辩论 · 6 位分析师就绪")
+        await emit("technical", 5,
+                   f"启动 {name}({code}) 多专家辩论 · 6 位分析师就绪"
+                   + (f" · 现价 {current_price:.2f} 涨跌 {change_pct:+.2f}%" if current_price else ""))
         await emit("technical", 15, f"[1/6] 技术面分析师 · 正在拉取 {name} K 线 + 指标...")
 
-        market_task = run_market_analyst(ticker, name, 0.0, trade_date)
-        sentinel_task = run_sentinel_news_agent(ticker, name, 0.0, "", [])
+        # market_analyst 支持 current_price 兜底 · akshare 双通道全挂时至少能锚定实时价
+        market_task = run_market_analyst(ticker, name, change_pct, trade_date, current_price=current_price)
+        sentinel_task = run_sentinel_news_agent(ticker, name, change_pct, "", [])
 
         market_report, sentinel_result = await asyncio.gather(
             market_task, sentinel_task, return_exceptions=True
@@ -365,18 +383,26 @@ async def _worker(
         # ── Phase 4 · 3 方风控辩论 (Sprint B3) ─────────
         await emit("risk", 78, "[6/8] 风控·激进派意见中...")
         risk_agg = await asyncio.to_thread(run_risk_aggressive, state, judgment)
+        logger.info("[chat_debate:{}] risk_agg len={} head={!r}",
+                    task_id, len(risk_agg or ""), (risk_agg or "")[:80])
 
         await emit("risk", 84, "[7/8] 风控·中性派意见中...")
         risk_neu = await asyncio.to_thread(
             run_risk_neutral, state, judgment,
             prior_debate=f"【激进派】{risk_agg}"
         )
+        logger.info("[chat_debate:{}] risk_neu len={} head={!r}",
+                    task_id, len(risk_neu or ""), (risk_neu or "")[:80])
 
         await emit("risk", 90, "[8/8] 风控·保守派意见中...")
         risk_con = await asyncio.to_thread(
             run_risk_conservative, state, judgment,
             prior_debate=f"【激进派】{risk_agg}\n\n【中性派】{risk_neu}"
         )
+        # 定位"保守派报告里缺失/被合并到中性派"问题的临时日志 · 拿到证据后可删。
+        # 关注三点:len 是否 0 / 是否等于 fallback 文案 / head 是否被 UTF-8 截断成 �。
+        logger.info("[chat_debate:{}] risk_con len={} head={!r}",
+                    task_id, len(risk_con or ""), (risk_con or "")[:80])
 
         # ── 风控最终裁决 · Deep Think ─────────────
         await emit("risk", 96, "风控委员会综合裁决中...")

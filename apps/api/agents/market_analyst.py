@@ -36,8 +36,11 @@ async def run_market_analyst(
 
     # llm_json_call 是同步阻塞调用，放入线程池避免阻塞 asyncio 事件循环
     # （事件循环被阻塞时 SSE 心跳无法发送，移动端会超时断线）
+    # max_tokens 2000 → 8192 · DeepSeek V4 Pro / R1 类 thinking 型模型
+    # reasoning tokens 常 3000-8000+,老值全被吃完 · content 返空 · fallback
+    # 就是"技术分析 AI 暂不可用",跟这次紫金 601899 报告里那句一模一样。
     parsed, _ = await asyncio.to_thread(
-        llm_json_call, system, user, max_tokens=2000, temperature=0.3
+        llm_json_call, system, user, max_tokens=8192, temperature=0.3
     )
     if parsed:
         report   = parsed.get("report", "")
@@ -53,33 +56,20 @@ async def _fetch_market_data(
     current_price: float | None = None,
     change_pct: float | None = None,
 ) -> str:
-    """用 akshare 拉近 20 日数据，失败时用 TrueSource 当前价格兜底"""
+    """拉近 20 日日 K · 走共享 akshare_kline 双通道(腾讯→东财)· 失败用当前价兜底。
+
+    原来这里只有单路东财 · 断线就整段技术面空 · 报告开头就是"因近20日日K
+    数据获取失败,无法进行完整技术分析" · 观感是深度分析等于没做。
+    """
+    from agents.data_sources.akshare_kline import fetch_kline, format_kline_for_llm
     code = ticker.split(".")[0]
 
     def _blocking():
-        try:
-            import akshare as ak
-            df = ak.stock_zh_a_hist(symbol=code, period="daily", adjust="qfq")
-            if df is None or df.empty:
-                return None
-            df = df.tail(20).copy()
-            df.columns = [str(c) for c in df.columns]
-            lines = []
-            for _, row in df.iterrows():
-                d     = row.to_dict()
-                date  = str(d.get("日期", d.get("date", "")))
-                close = d.get("收盘", d.get("close", 0))
-                pct   = d.get("涨跌幅", d.get("pct_chg", 0))
-                vol   = d.get("成交量", d.get("volume", 0))
-                amt   = d.get("成交额", d.get("amount", 0))
-                lines.append(
-                    f"{date}: 收盘={float(close):.2f} 涨跌={float(pct):+.2f}% "
-                    f"成交量={int(float(vol))} 成交额={float(amt)/1e8:.2f}亿"
-                )
-            return "\n".join(lines)
-        except Exception as e:
-            logger.warning("akshare stock_zh_a_hist({}) failed: {}", code, e)
+        rows = fetch_kline(code, days=20)
+        if not rows:
+            logger.warning("akshare kline 双通道全失败 · code={}", code)
             return None
+        return format_kline_for_llm(rows)
 
     result = await asyncio.to_thread(_blocking)
     if result:

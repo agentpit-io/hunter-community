@@ -52,10 +52,12 @@ async def run_naive_pipeline(stock_name: str, change_pct: float,
     # 真实 LLM 调用（放入线程池，避免同步调用阻塞 asyncio 事件循环）
     import asyncio
     user_prompt = build_naive_user_prompt(stock_name, change_pct, news_dicts)
+    # max_tokens 1500 → 8192 · reasoning 型模型下常态 3000-8000 reasoning tokens,
+    # 老值几乎必被吃完 · content 空 · Sentinel 综合研判就完全失效。
     parsed, meta = await asyncio.to_thread(
         llm_json_call,
         NAIVE_SYSTEM, user_prompt,
-        max_tokens=1500, temperature=0.5,
+        max_tokens=8192, temperature=0.5,
     )
 
     # 套壳 prompt 没要求 JSON 输出，所以 parsed 可能为 None

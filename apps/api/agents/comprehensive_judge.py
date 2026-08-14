@@ -52,7 +52,8 @@ def run_comprehensive_judge(state: EnhancedAgentState) -> dict:
     )
 
     # Deep Think · 综合判官是决策关键点 · 用 Pro 模型换 8-15s 换更好判断质量
-    parsed, meta = llm_json_call(system, user, deep=True, max_tokens=2500, temperature=0.4)
+    # max_tokens 2500 → 8192 · reasoning 型模型下 2500 不够(见 llm_client 修复)
+    parsed, meta = llm_json_call(system, user, deep=True, max_tokens=8192, temperature=0.4)
     if parsed:
         return parsed
 

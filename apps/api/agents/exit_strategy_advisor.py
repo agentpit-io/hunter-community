@@ -38,7 +38,8 @@ def run_exit_strategy_advisor(state: EnhancedAgentState) -> dict:
         "基于以上信息，推荐最优退出策略并给出具体操作建议。"
     )
 
-    parsed, meta = llm_json_call(system, user, max_tokens=1000, temperature=0.3)
+    # max_tokens 1000 → 8192 · reasoning 型模型下 1000 不够(见 llm_client 修复)
+    parsed, meta = llm_json_call(system, user, max_tokens=8192, temperature=0.3)
     if parsed:
         return parsed
 

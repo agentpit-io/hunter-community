@@ -347,10 +347,17 @@ import re
 
 
 def parse_llm_json(text: str) -> dict | None:
-    """4 层 JSON 解析兜底，对应 attribution.py 已踩过的坑"""
+    """6 层 JSON 解析兜底,对应 attribution.py 已踩过的坑 + DeepSeek thinking 泄漏"""
     if not text:
         return None
     text = text.strip()
+
+    # Fallback 0: DeepSeek V4-pro / R1 等 thinking 模型可能把 reasoning 包在
+    #   <think>...</think> 里,或以纯自然语言前言开头再吐 JSON。先把 thinking
+    #   段剥掉,给下面 5 层减负。这一层放最前面 · 剥了什么都没影响后续。
+    think_stripped = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    think_stripped = re.sub(r"<thinking>.*?</thinking>", "", think_stripped, flags=re.DOTALL | re.IGNORECASE)
+    text = think_stripped.strip() or text  # 全剥没了就用原文
 
     # Fallback 1: 直接 loads
     try:

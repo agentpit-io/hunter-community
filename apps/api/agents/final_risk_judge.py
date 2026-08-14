@@ -67,7 +67,8 @@ def run_final_risk_judge(
     )
 
     # Deep Think · 最终裁决走 Pro 模型 · 决策质量优先
-    parsed, meta = llm_json_call(system, user, deep=True, max_tokens=1500, temperature=0.3)
+    # max_tokens 1500 → 8192 · reasoning 型模型下 1500 不够(见 llm_client 修复)
+    parsed, meta = llm_json_call(system, user, deep=True, max_tokens=8192, temperature=0.3)
 
     # ── fallback · LLM 失败时回退到 rule-based ──
     if not parsed:

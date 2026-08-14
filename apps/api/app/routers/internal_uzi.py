@@ -54,57 +54,10 @@ def _akshare_kline(bare: str, days: int = 30) -> list[dict]:
     双通道:优先腾讯(响应快 · 少限流),失败回退东财(数据更全但连接常抖)。
     生产 finance-data 稳定时不会走这里 —— 只在开源版无订阅时兜底。
     """
-    import akshare as ak
-    from datetime import datetime, timedelta
-    end = datetime.now().strftime("%Y%m%d")
-    start = (datetime.now() - timedelta(days=days * 2)).strftime("%Y%m%d")  # ×2 兜非交易日
-
-    # 通道 1:腾讯
-    try:
-        sym = f"{_ak_market_prefix(bare)}{bare}"
-        df = ak.stock_zh_a_hist_tx(symbol=sym, start_date=start, end_date=end, adjust="qfq")
-        if df is not None and not df.empty:
-            out: list[dict] = []
-            for r in df.tail(days).to_dict(orient="records"):
-                try:
-                    out.append({
-                        "ts":     str(r.get("date") or "")[:10],
-                        "open":   float(r.get("open") or 0),
-                        "high":   float(r.get("high") or 0),
-                        "low":    float(r.get("low") or 0),
-                        "close":  float(r.get("close") or 0),
-                        # 腾讯通道 amount 单位=元(不是"手"),这里不换算,只做数量级参考
-                        "volume": int(float(r.get("amount") or 0)),
-                    })
-                except (TypeError, ValueError):
-                    continue
-            if out:
-                return out
-    except Exception as e:
-        logger.warning("[uzi] akshare kline tx failed code={} err={}", bare, e)
-
-    # 通道 2:东财兜底
-    try:
-        df = ak.stock_zh_a_hist(symbol=bare, period="daily", start_date=start, end_date=end, adjust="qfq")
-    except Exception as e:
-        logger.warning("[uzi] akshare kline em failed code={} err={}", bare, e)
-        return []
-    if df is None or df.empty:
-        return []
-    out = []
-    for r in df.tail(days).to_dict(orient="records"):
-        try:
-            out.append({
-                "ts":     str(r.get("日期") or "")[:10],
-                "open":   float(r.get("开盘") or 0),
-                "high":   float(r.get("最高") or 0),
-                "low":    float(r.get("最低") or 0),
-                "close":  float(r.get("收盘") or 0),
-                "volume": int(r.get("成交量") or 0),
-            })
-        except (TypeError, ValueError):
-            continue
-    return out
+    # 走共享 agents/data_sources/akshare_kline.fetch_kline · 双通道逻辑一处维护
+    # market_analyst 也用它 · 以后加网易/新浪也统一在 shared 模块加。
+    from agents.data_sources.akshare_kline import fetch_kline
+    return fetch_kline(bare, days=days)
 
 
 def _akshare_financials(bare: str) -> dict | None:
