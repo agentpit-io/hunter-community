@@ -25,6 +25,15 @@ MAX_CUSTOM = 20          # 每人自建上限,防滥用
 MAX_TPL_LEN = 500        # 模板长度上限
 
 # 内置能力。key 一旦发布不要改(用户的覆盖记录靠它关联)。
+#
+# ⚠️ tools 字段只能填**本部署实际存在**的 MCP 工具名。开源版镜像当前有 10 个:
+#   watchlist_stock_quickview / _stock_news / _watchlist_digest / _watchlist_add
+#   portfolio_portfolio_rebalance / _portfolio_stress / _update_risk_profile
+#   uzi_stock_deep_analysis
+#   hunter_user_list_my_sources / _invoke
+# 2026-08-14 清理过一次:曾有 6 个 SKILL 写着 truesource_* / kronos_* / debate_*,
+# 那是**生产环境**的命名被原样抄了过来,开源版根本没有 —— 模型照着调必然失败。
+# 校验脚本见 scripts/check_skill_tools.py。
 # {股票} 是占位符,前端填入后光标停在这里。
 #
 # 2026-08-10 扩展：加 brand / source_url / long_desc / tools 4 字段
@@ -40,7 +49,7 @@ BUILTINS: list[dict] = [
         "prompt_tpl": "查 {股票} 最新股价",
         "hint": "实时开高低收 · 成交量 · 五档盘口",
         "long_desc": "调用 finance-data 数据源获取 A 股/港股实时行情，包含开高低收、涨跌幅、成交量与五档盘口。数据延迟 <3 秒，交易时段每 30 秒滚动更新。适合决策前快速核对当前价位。",
-        "tools": ["truesource_get_quote"],
+        "tools": ["watchlist_stock_quickview"],
         "category": "快速判断",
     },
     {
@@ -52,7 +61,7 @@ BUILTINS: list[dict] = [
         "prompt_tpl": "用 Kronos 预测 {股票} 未来 5 天走势",
         "hint": "清华 Kronos 金融时序大模型",
         "long_desc": "清华大学开源的金融时序 Transformer 模型，直接对 K 线序列建模，输出未来 N 天开高低收预测与置信区间。擅长捕捉短期动量与技术图形的续接概率，作辅助判断而非交易信号。",
-        "tools": ["kronos_kronos_forecast"],
+        "tools": [],
         "category": "快速判断",
     },
     {
@@ -64,7 +73,7 @@ BUILTINS: list[dict] = [
         "prompt_tpl": "{股票} 最新财报要点,3 条",
         "hint": "利润表 · 资产负债表 · 现金流量表",
         "long_desc": "拉取最新披露的三大报表关键指标（营收/净利润/毛利率/资产负债率/经营现金流），LLM 提炼 3 条要点。适合快速了解近期基本面变化，不做深度财务模型。",
-        "tools": ["truesource_get_financials"],
+        "tools": ["uzi_stock_deep_analysis"],
         "category": "投研报告",
     },
     {
@@ -76,7 +85,7 @@ BUILTINS: list[dict] = [
         "prompt_tpl": "对比 {股票A} 和 {股票B} 的最新股价与 30 日振幅",
         "hint": "多只股票横向比较",
         "long_desc": "多只股票横向比较：最新价、涨跌幅、成交量、30 日振幅、市值。适合做同业挑选或替代品判断。",
-        "tools": ["truesource_get_quote"],
+        "tools": ["watchlist_stock_quickview"],
         "category": "快速判断",
     },
     {
@@ -100,7 +109,7 @@ BUILTINS: list[dict] = [
         "prompt_tpl": "对 {股票} 做多空辩论 · 给出买卖决策",
         "hint": "6 位分析师 · 2 轮辩论 · 60-90s 出深度报告",
         "long_desc": "TauricResearch 开源的多智能体金融辩论框架，模拟 6 位分析师从技术面/基本面/资金面/新闻/风险等角度多轮对话，汇聚成买/卖/持决策与置信度。适合争议股或大仓位决策前作压力测试。",
-        "tools": ["debate_start", "debate_get_report"],
+        "tools": [],
         "category": "综合分析",
     },
     # ─── UZI 深度分析（Sprint 3 P2 · Phase 1 MVP · 2026-08-10 补入能力管理） ───
@@ -126,7 +135,7 @@ BUILTINS: list[dict] = [
         "prompt_tpl": "{股票} 最近有什么关键新闻?",
         "hint": "5 条精选 · 每条 AI 影响短评（利好/利空/中性/强利好）",
         "long_desc": "抓取近 7 天该股相关新闻，去重后 LLM 精选 5 条并逐条打影响标签（利好/利空/中性/强利好）。适合快速摸清市场情绪与近期催化。",
-        "tools": ["truesource_get_news"],
+        "tools": ["watchlist_stock_news"],
         "category": "事件与筛选",
     },
     {
