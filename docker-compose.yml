@@ -86,7 +86,11 @@ services:
       LLM_BASE_URL: ${LLM_BASE_URL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_DEFAULT_MODEL: ${LLM_DEFAULT_MODEL:-gpt-4o-mini}
-      FORECAST_PROVIDER: ${FORECAST_PROVIDER:-noop}
+      # 默认留空,让代码去决定(app/providers/forecast/__init__.py → kronos_saas)。
+      # **别在这里写 noop** —— compose 的 :- 对"未设"和"设为空"一视同仁,
+      # 用户 .env 里留空时这里会把 noop 塞进容器,代码层的默认值永远轮不到生效,
+      # 表现是"改了默认值却不起作用",极难排查。
+      FORECAST_PROVIDER: ${FORECAST_PROVIDER:-}
       KRONOS_LOCAL_URL: ${KRONOS_LOCAL_URL:-}
       HUNTER_SAAS_KRONOS_URL: ${HUNTER_SAAS_KRONOS_URL:-}
       HUNTER_SAAS_KRONOS_KEY: ${HUNTER_SAAS_KRONOS_KEY:-}
