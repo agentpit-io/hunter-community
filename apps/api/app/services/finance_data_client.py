@@ -12,6 +12,7 @@ import os
 import httpx
 from loguru import logger
 from app.config import STOCK_MAP
+from app.services import finance_data_auth as _auth
 
 # 双模式 · 让用户"一 key 通用" · 也保留私有部署直连能力
 #
@@ -31,29 +32,21 @@ from app.config import STOCK_MAP
 #   FINANCE_DATA_URL(显式)→ HUNTER_SAAS_DATA_URL(显式)→ 默认 hunter gateway
 # Token 解析优先级:
 #   FINANCE_DATA_TOKEN(显式) → HUNTER_SAAS_DATA_KEY(显式) → HUNTER_API_KEY(兜底)
-_DEFAULT_GATEWAY_URL = "https://hunter.agentpit.io/api/saas/data"
-FINANCE_DATA_URL = (
-    os.getenv("FINANCE_DATA_URL")
-    or os.getenv("HUNTER_SAAS_DATA_URL")
-    or _DEFAULT_GATEWAY_URL
-).rstrip("/")
-FINANCE_DATA_TOKEN = (
-    os.getenv("FINANCE_DATA_TOKEN")
-    or os.getenv("HUNTER_SAAS_DATA_KEY")
-    or os.getenv("HUNTER_API_KEY", "")
-)
+# URL/TOKEN 的解析全部收敛到 app.services.finance_data_auth · 那里是唯一入口。
+# 收敛的原因见该文件顶部注释:抄成四份之后,网页里填的 key(存数据库)喂不到这条路,
+# 表现是"行情有数据、深度分析没有"且不报错。
+#
+# 这里保留模块级 FINANCE_DATA_URL 只为兼容老代码引用 —— URL 只来自 env,不会变。
+# **TOKEN 与 headers 一律调用时求值**,否则网页填完 key 还得重启容器。
+FINANCE_DATA_URL = _auth.data_url()
 
-# 判断走网关还是直连 · 决定用哪种 auth 头
-_IS_GATEWAY = "/api/saas/data" in FINANCE_DATA_URL
 
-if _IS_GATEWAY and FINANCE_DATA_TOKEN:
-    _HEADERS = {"Authorization": f"Bearer {FINANCE_DATA_TOKEN}"}
-elif FINANCE_DATA_TOKEN:
-    _HEADERS = {"X-Finance-Token": FINANCE_DATA_TOKEN}
-else:
-    _HEADERS = {}
+def _headers() -> dict:
+    return _auth.data_headers()
 
-_USE_SAAS = bool(FINANCE_DATA_TOKEN)   # 有 token 就试 · 网关和直连都算 SaaS 路径
+
+def _use_saas() -> bool:
+    return _auth.use_saas()
 
 
 def _provider_get_quote_sync(code: str) -> dict | None:
@@ -143,7 +136,7 @@ def subscribe(code: str, name: str, market: str, exchange: str, asset_type: str 
                 "market": market, "exchange": exchange,
                 "asset_type": asset_type,
             },
-            headers=_HEADERS,
+            headers=_headers(),
             timeout=10.0,
         )
         r.raise_for_status()
@@ -157,7 +150,7 @@ def _get(path: str, params: dict = None) -> dict | list | None:
         r = httpx.get(
             f"{FINANCE_DATA_URL}{path}",
             params=params or {},
-            headers=_HEADERS,
+            headers=_headers(),
             timeout=10.0,
         )
         r.raise_for_status()
@@ -169,7 +162,7 @@ def _get(path: str, params: dict = None) -> dict | list | None:
 def get_quote(code: str) -> dict | None:
     """实时报价快照（含五档盘口）· SaaS or provider fallback."""
     # No SaaS URL configured → go straight to providers.data_source
-    if not _USE_SAAS:
+    if not _use_saas():
         base = _provider_get_quote_sync(code)
         # Provider failed OR returned null price (Yahoo 429 · akshare blocked
         # from SG etc). Return None so caller shows "数据未就绪" rather than
@@ -506,7 +499,7 @@ def save_analysis_report(report: dict) -> int:
                 "final_conclusion": report.get("final_conclusion", {}),
                 "duration_ms":      report.get("duration_ms"),
             },
-            headers=_HEADERS,
+            headers=_headers(),
             timeout=10.0,
         )
         r.raise_for_status()

@@ -37,16 +37,10 @@ def get_data_source() -> IDataSource:
         # URL/KEY 三级 fallback · 与 finance_data_client / unified_fetcher 一致。
         # 只填 HUNTER_API_KEY 就自动通往官方 finance-data.agentpit.io。
         _DEFAULT_SAAS_URL = "https://finance-data.agentpit.io"
-        url = (
-            os.getenv("HUNTER_SAAS_DATA_URL")
-            or os.getenv("FINANCE_DATA_URL")
-            or _DEFAULT_SAAS_URL
-        )
-        key = (
-            os.getenv("HUNTER_SAAS_DATA_KEY")
-            or os.getenv("FINANCE_DATA_TOKEN")
-            or os.getenv("HUNTER_API_KEY", "")
-        )
+        # 与 finance_data_client / sentinel 同一个入口 · 含数据库里网页填的 key
+        from app.services import finance_data_auth as _auth
+        url = _auth.data_url()
+        key = _auth.data_token()
         if not key:
             raise RuntimeError(
                 "DATA_SOURCE_PROVIDER=saas requires a key. "

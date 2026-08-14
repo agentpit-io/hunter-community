@@ -16,6 +16,8 @@ hermes 在线分析 / 持仓哨兵 V1 都消费此 fetcher。
 import asyncio
 import logging
 import os
+
+from app.services import finance_data_auth as _auth
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta
 from typing import Any
@@ -30,10 +32,15 @@ from .source_registry import (
 
 log = logging.getLogger(__name__)
 
-FINANCE_DATA_URL   = os.getenv("FINANCE_DATA_URL",   "")
-FINANCE_DATA_TOKEN = os.getenv("FINANCE_DATA_TOKEN", "")
+# 与另外三处统一走 app.services.finance_data_auth · 调用时求值 ·
+# 认 env 也认数据库里网页填的 key。原来这里只读 FINANCE_DATA_TOKEN 一个变量,
+# 连老板加的 HUNTER_SAAS_DATA_KEY / HUNTER_API_KEY 两级 fallback 都没有,
+# 是四处里最落后的一份。
+FINANCE_DATA_URL = _auth.data_url()
 
-_HTTPX_HEADERS = {"X-Finance-Token": FINANCE_DATA_TOKEN}
+
+def _httpx_headers() -> dict:
+    return _auth.data_headers()
 _PER_SOURCE_TIMEOUT = 10.0
 _GLOBAL_TIMEOUT = 30.0
 
@@ -112,7 +119,7 @@ async def _fetch_finance_data_news(client: httpx.AsyncClient, symbol: str,
     r = await client.get(
         f"{FINANCE_DATA_URL}/api/v1/news/articles",
         params={"symbol": symbol, "hours": hours, "min_weight": min_weight, "limit": 100},
-        headers=_HTTPX_HEADERS,
+        headers=_httpx_headers(),
         timeout=_PER_SOURCE_TIMEOUT,
     )
     r.raise_for_status()
@@ -169,7 +176,7 @@ async def _fetch_cninfo(client: httpx.AsyncClient, symbol: str, days: int) -> li
     r = await client.get(
         f"{FINANCE_DATA_URL}/api/v1/cninfo/announcements",
         params={"symbol": symbol, "days": days, "limit": 30},
-        headers=_HTTPX_HEADERS,
+        headers=_httpx_headers(),
         timeout=_PER_SOURCE_TIMEOUT,
     )
     r.raise_for_status()
