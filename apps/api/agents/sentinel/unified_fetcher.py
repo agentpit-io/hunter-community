@@ -30,8 +30,19 @@ from .source_registry import (
 
 log = logging.getLogger(__name__)
 
-FINANCE_DATA_URL   = os.getenv("FINANCE_DATA_URL",   "")
-FINANCE_DATA_TOKEN = os.getenv("FINANCE_DATA_TOKEN", "")
+# 三级 fallback · 与 finance_data_client.py 保持一致 · 见那里的详细注释。
+# 统一优先级:显式独立 → 显式 SaaS → 统一 HUNTER_API_KEY 兜底。
+_DEFAULT_SAAS_URL = "https://finance-data.agentpit.io"
+FINANCE_DATA_URL = (
+    os.getenv("FINANCE_DATA_URL")
+    or os.getenv("HUNTER_SAAS_DATA_URL")
+    or (_DEFAULT_SAAS_URL if (os.getenv("HUNTER_API_KEY") or os.getenv("HUNTER_SAAS_DATA_KEY") or os.getenv("FINANCE_DATA_TOKEN")) else "")
+)
+FINANCE_DATA_TOKEN = (
+    os.getenv("FINANCE_DATA_TOKEN")
+    or os.getenv("HUNTER_SAAS_DATA_KEY")
+    or os.getenv("HUNTER_API_KEY", "")
+)
 
 _HTTPX_HEADERS = {"X-Finance-Token": FINANCE_DATA_TOKEN}
 _PER_SOURCE_TIMEOUT = 10.0

@@ -13,8 +13,32 @@ import httpx
 from loguru import logger
 from app.config import STOCK_MAP
 
-FINANCE_DATA_URL   = os.getenv("FINANCE_DATA_URL",   "").rstrip("/")
-FINANCE_DATA_TOKEN = os.getenv("FINANCE_DATA_TOKEN", "")
+# 三级 fallback · 让用户可以只填一把 HUNTER_API_KEY 就解锁全部服务,
+# 也可以为高流量场景单独申请 hunt_data_ key 隔离配额。
+#
+# URL 三级:
+#   FINANCE_DATA_URL      (显式老名字 · 内部同事最熟)
+#   → HUNTER_SAAS_DATA_URL (显式对外新名字)
+#   → 默认 https://finance-data.agentpit.io (Hunter 官方地址 · 大多数用户就是这个)
+#
+# TOKEN 三级:
+#   FINANCE_DATA_TOKEN         (显式老名字)
+#   → HUNTER_SAAS_DATA_KEY     (显式独立数据 key · 想隔离配额时用)
+#   → HUNTER_API_KEY           (统一 key · 也能访问所有 Hunter 服务)
+#
+# 平台设计允许一把 HUNTER_API_KEY 通用于 tools/data/kronos · 所以只有需要
+# 精细分账/额度隔离时才独立申请 hunt_data_,一般用户只填 HUNTER_API_KEY 即可。
+_DEFAULT_SAAS_URL = "https://finance-data.agentpit.io"
+FINANCE_DATA_URL   = (
+    os.getenv("FINANCE_DATA_URL")
+    or os.getenv("HUNTER_SAAS_DATA_URL")
+    or (_DEFAULT_SAAS_URL if (os.getenv("HUNTER_API_KEY") or os.getenv("HUNTER_SAAS_DATA_KEY") or os.getenv("FINANCE_DATA_TOKEN")) else "")
+).rstrip("/")
+FINANCE_DATA_TOKEN = (
+    os.getenv("FINANCE_DATA_TOKEN")
+    or os.getenv("HUNTER_SAAS_DATA_KEY")
+    or os.getenv("HUNTER_API_KEY", "")
+)
 
 _HEADERS = {"X-Finance-Token": FINANCE_DATA_TOKEN} if FINANCE_DATA_TOKEN else {}
 _USE_SAAS = bool(FINANCE_DATA_URL)
