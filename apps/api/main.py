@@ -233,6 +233,11 @@ app.include_router(user_mcp_router.router, prefix="/api")
 app.include_router(internal_user_mcp_router.router, prefix="/api")
 
 # ── hunter-UZI-Skill 集成 · Sprint 3 P2 · chat 深度分析 tool ──
+# 平台自有能力的 MCP 桥接(_12 Step 3)· K线预测/情报 等原来只有 HTTP 接口、
+# 模型够不着的能力,经这里暴露成 /api/internal/cap/* 再包成 MCP
+from app.routers import internal_capabilities as internal_cap_router
+app.include_router(internal_cap_router.router, prefix="/api")
+
 from app.routers import internal_uzi as internal_uzi_router
 app.include_router(internal_uzi_router.router, prefix="/api")
 

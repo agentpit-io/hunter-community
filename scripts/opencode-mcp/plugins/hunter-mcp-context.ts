@@ -54,6 +54,12 @@ const HUNTER_TOOLS = new Set([
   "update_risk_profile",
   // uzi_mcp · Sprint 3 P2 · hunter-UZI-Skill 深度分析
   "stock_deep_analysis",
+  // hunter_capability_mcp(_12 Step 3)· 把原来只有 HTTP 接口、模型够不着的
+  // 自有能力包成了 MCP。同样必须进这个 Set —— 不然 /api/internal/cap/* 拿不到
+  // X-Hunter-User-Id,日志里是 user_id=(none),后续要按用户计量就没抓手。
+  "kpred",
+  "truesource_brief",
+  "truesource_scout",
   // hunter_user_mcp · 用户自定义 MCP 的两个壳工具
   // 不注入 user_id 的话桥接器拿不到身份, 用户配的数据源等于不存在
   "list_my_sources",
@@ -62,7 +68,10 @@ const HUNTER_TOOLS = new Set([
 
 // 有些 MCP host 会把 tool 名前缀化成 "{server}_{tool}"（opencode 默认加，前缀剥离）
 function stripServerPrefix(name: string): string {
-  for (const prefix of ["watchlist_", "portfolio_", "uzi_", "usermcp_"]) {
+  // hunter_cap_ 是 _12 Step 3 新加的 MCP(gen-config.py 里注册成 hunter_cap)。
+  // 漏了它的话 hunter_cap_kpred 剥不掉前缀 → 匹配不到白名单 → 不注入身份,
+  // api 侧日志是 user_id=(none)。加白名单和加前缀**两处都要改**,少一处都不生效。
+  for (const prefix of ["watchlist_", "portfolio_", "uzi_", "usermcp_", "hunter_cap_"]) {
     if (name.startsWith(prefix)) {
       const rest = name.slice(prefix.length)
       // watchlist_stock_quickview → stock_quickview（如果剥掉后依然命中，采用短名）

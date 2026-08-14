@@ -87,6 +87,22 @@ def main() -> int:
         "model": f"{PROVIDER_ID}/{MODEL}",
     }
 
+    # 只注册**镜像里没有**的那个 MCP。镜像自带的 .opencode/opencode.jsonc 已经
+    # 注册了 watchlist/portfolio/uzi/hunter_user 四个,两份配置会合并 ——
+    # 在这里重复写会让同一个脚本被起两次(2026-08-14 踩过,见 cd427bf)。
+    extra = os.environ.get("HUNTER_EXTRA_MCP_DIR", "/opt/hunter-mcp")
+    cap = os.path.join(extra, "hunter_capability_mcp.py")
+    if os.path.exists(cap):
+        cfg["mcp"] = {
+            "hunter_cap": {
+                "type": "local",
+                "command": ["python3", cap],
+                "enabled": True,
+                # kpred 是 GPU 推理、scout 是 30-60s 主动采集,30s 默认会被掐断
+                "timeout": 180000,
+            }
+        }
+
     out = os.path.join(WORKSPACE, "opencode.json")
     with open(out, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
@@ -95,8 +111,11 @@ def main() -> int:
     print(f"[gen-config]   provider {PROVIDER_ID} → {upstream}"
           f"{' (经 schema shim → ' + BASE_URL + ')' if via_shim else ''}"
           f" · model {MODEL} · apiKey {'有' if API_KEY else '无'}", file=sys.stderr)
-    print("[gen-config]   mcp / plugin 由镜像自带配置负责,这里不重复注册",
-          file=sys.stderr)
+    if "mcp" in cfg:
+        print("[gen-config]   额外注册 mcp: hunter_cap(镜像自带的 4 个不重复注册)",
+              file=sys.stderr)
+    else:
+        print("[gen-config]   mcp / plugin 全部由镜像自带配置负责", file=sys.stderr)
     return 0
 
 
