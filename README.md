@@ -59,8 +59,17 @@ cp .env.example .env
 # Windows PowerShell
 $b=New-Object byte[] 48;[Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b)
 $s=([Convert]::ToBase64String($b) -replace '[=/+]','').Substring(0,60)
-(Get-Content .env -Raw) -replace '(?m)^JWT_SECRET=.*$',"JWT_SECRET=$s" | Set-Content .env -NoNewline
+$u=New-Object Text.UTF8Encoding $false
+$c=[IO.File]::ReadAllText("$PWD\.env",$u) -replace '(?m)^JWT_SECRET=.*$',"JWT_SECRET=$s"
+[IO.File]::WriteAllText("$PWD\.env",$c,$u)
 ```
+
+> 上面第 3、4 行必须**显式指定 UTF-8**,不能图省事写成
+> `(Get-Content .env -Raw) ... | Set-Content .env`。
+> 中文版 Windows 的默认代码页是 GBK,那样读会把 `.env` 里的中文注释拆坏、
+> 连带吃掉换行符 —— 实测 25 个变量里有 4 个(`LLM_PROVIDER` /
+> `NEXT_PUBLIC_API_URL` / `DATA_SOURCE_PROVIDER` / `FORECAST_PROVIDER`)
+> 会被并进上一行注释里,等于被注释掉,而且**看不出任何报错**。
 
 ```bash
 # Linux / macOS
