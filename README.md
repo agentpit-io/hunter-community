@@ -22,11 +22,11 @@ Live preview: **[https://hunter-community.agentpit.io](https://hunter-community.
 | **① 大模型 key** | 你自己的（OpenAI / OpenRouter / 任意 OpenAI 兼容网关） | 驱动对话本身 | 聊天不可用 |
 | **② Hunter 平台 key** (`hunt_tools_...` 或 `hunt_data_...`) | 我们签发的，[免费申请](https://hunter.agentpit.io/dev/api-keys) | 解锁左侧**工具/SKILL**(行情/K线/财报/UZI/Kronos)**+** 深度分析的**数据基座**(巨潮/龙虎榜/北向/finance-data 聚合新闻 15+ 路) | 聊天照常，工具会提示"去申请"；深度分析报告 Sentinel 只能靠 akshare 免费源，常态**抓 14 条 / 保留 0 条**，基本是 LLM 空谈 |
 
-**Hunter 平台 key · 当前需要两把,客户端配置只填一处**:
-- `hunt_tools_...` 授权工具网关(hunter.agentpit.io/api/saas/tools/*)
-- `hunt_data_...`  授权数据服务(finance-data.agentpit.io/api/v1/*)· 是**独立的 key**,需另申请
-- 客户端做了 fallback 链:填 `HUNTER_API_KEY=hunt_tools_...` 解锁工具 + 填 `HUNTER_SAAS_DATA_KEY=hunt_data_...` 解锁数据 · 两把 key 各归其位,不会互相污染
-- 只填 `HUNTER_API_KEY` 而没填数据 key → 工具能用,但深度分析 Sentinel 会 `401 Invalid token`(日志可见),报告仍是"抓 14 条 / 保留 0 条"
+**Hunter 平台 key · 一 key 通用**:
+一把 `hunt_tools_...` 同时解锁**工具**(sidebar SKILL)+ **数据源**(深度分析
+Sentinel 用的 finance-data)· 只需填 `HUNTER_API_KEY` 一处。数据访问走
+`hunter.agentpit.io/api/saas/data/*` 网关中转(2026-08-14 起) · 服务端替你完成
+finance-data 内部鉴权 · 用户侧只管填一把 key。
 
 为什么工具要我们的 key：这些能力背后是我们持续维护的数据管道和模型服务，
 在 Hunter 服务器上执行，不在你的机器上。产物免费给你用，用量按 key 记账。
@@ -92,34 +92,25 @@ LLM_DEFAULT_MODEL=gpt-4o-mini
 #   LLM_SCHEMA_SANITIZE=1
 # 不然对话会 400「Invalid schema ... type: 'null'」。详见 docs/02-providers.md。
 
-# ③ Hunter 工具 key(hunt_tools_...) · 解锁左侧工具/SKILL
-# 申请:https://hunter.agentpit.io/dev/api-keys → 选 tools 类型 · 免费
+# ③ Hunter 平台 key · 一 key 通用(工具 + 数据源全解锁)
+# 申请:https://hunter.agentpit.io/dev/api-keys → 免费 · 30 秒
 # HUNTER_API_KEY=hunt_tools_xxxxxxxxxxxxxxxx
-
-# ④ Hunter 数据 key(hunt_data_...) · 解锁深度分析数据基座(强烈建议)
-# 未填:Sentinel 抓 14 条 / 保留 0 条 / 判官置信 15-30%
-# 填了:60+ 条 / 保留 5-15 条 / 判官置信 50-80%
-# 申请:同上页面 → 选 data 类型 · 免费(与 ③ 是独立 key)
-# DATA_SOURCE_PROVIDER=saas
-# HUNTER_SAAS_DATA_KEY=hunt_data_xxxxxxxxxxxxxxxx
-# HUNTER_SAAS_DATA_URL 默认 https://finance-data.agentpit.io · 一般不用改
 ```
 
 其余保持默认即可。
 
 **深度分析报告的档位**:
 
-| 场景 | 只填 ③ 工具 key | ③+④ 都填 |
+| 场景 | 未填 ③ | 填了 ③ |
 |---|---|---|
-| Sentinel 抓取新闻 | 10-15 条(akshare 免费源) | 50-80 条 |
+| Sentinel 抓取新闻 | 10-15 条(akshare 免费源 · 容器网络下常挂) | 50-80 条(finance-data 聚合) |
 | 保留通过核查条数 | 0-3 条 | 5-15 条 |
 | 判官置信度 | 15-30% | 50-80% |
 | 决策依据 | LLM 空谈 + 今日涨跌 | 巨潮/龙虎榜/北向/财联社均可引用 |
 
-> **常见误区**:只填 ③ + 设了 `DATA_SOURCE_PROVIDER=saas` 但没填 ④ · api 日志会出现
-> `401 Invalid token` from `finance-data.agentpit.io/api/v1/news/articles` ——
-> 因为平台当前 tools 与 data 是**分账的两把 key**,hunt_tools_ 不能拉数据。
-> 见 [常见问题](#常见问题) 里"深度分析报告很空"。
+> 客户端默认走 `hunter.agentpit.io/api/saas/data/*` 网关中转 · 由服务端注入
+> 内部 X-Finance-Token 访问 finance-data · 用户侧只需一把 key。
+> 详见 [统一 key gateway 方案](https://github.com/hangeaiagent/hunter/blob/main/doc/codex/community/2026-08-14_community-真正统一key-gateway方案.md)。
 
 ### 3. 启动
 
@@ -158,45 +149,37 @@ docker compose logs -f api
 
 至此左侧工具的小锁消失，「行情速查」「Kronos 走势预测」等能力全部可用。
 
-### 6. 解锁深度分析数据源(② 已填后 · 再加 3 行)
+### 6. 深度分析的数据源(§5 填了 key 就自动开)
 
-到 [hunter.agentpit.io/dev/api-keys](https://hunter.agentpit.io/dev/api-keys)
-申请一把 **data 类型** key(前缀 `hunt_data_...`)· 注意与 §5 的工具 key
-是**两把独立 key**(平台侧当前是分账鉴权 · 不通用)。填 3 行:
+§5 填的 `HUNTER_API_KEY` **同时授权**深度分析的 finance-data 数据源 · 不需要
+再申请第二把 key,也不需要在 `.env` 里加额外一行。客户端默认走
+`hunter.agentpit.io/api/saas/data/*` 网关中转 · 由服务端替你完成 finance-data
+内部鉴权。
 
+**验证生效**:
 ```bash
-# 加进 .env(§5 已有 HUNTER_API_KEY,§6 再加下面 3 行)
-DATA_SOURCE_PROVIDER=saas
-HUNTER_SAAS_DATA_URL=https://finance-data.agentpit.io
-HUNTER_SAAS_DATA_KEY=hunt_data_xxxxxxxxxxxxxxxx
-```
+# 网关探活(无需 key)
+docker compose exec api curl -s https://hunter.agentpit.io/api/saas/data/_ping
+# 期望:{"ok":true,"gateway":"saas-data","upstream":"https://finance-data.agentpit.io"}
 
-再 `docker compose up -d`(env 改动必须 `up -d` · `restart` 不重读 env)。
-
-**验证生效**(直接在容器里 ping SaaS 数据服务):
-```bash
+# 带自己的 key 拉一条新闻
 docker compose exec api python -c "
 import os, httpx
-r = httpx.get(
-    'https://finance-data.agentpit.io/api/v1/news/articles',
-    headers={'X-Finance-Token': os.getenv('HUNTER_SAAS_DATA_KEY','')},
-    params={'symbol':'601899.SH','hours':24,'threshold':0.0}, timeout=15)
-print(r.status_code, r.text[:200])
+r = httpx.get('https://hunter.agentpit.io/api/saas/data/api/v1/news/articles',
+              params={'symbol':'601899.SH','hours':24,'threshold':0.0},
+              headers={'Authorization': f\"Bearer {os.getenv('HUNTER_API_KEY','')}\"},
+              timeout=15)
+print(r.status_code, len(r.json().get('items', [])), '条')
 "
-# 期望:200 + JSON 列表  ·  401 Invalid token = key 是 hunt_tools_ 而非 hunt_data_
+# 期望:200 20+ 条  ·  401 = §5 的 key 没填/无效
 ```
 
-或触发一次深度分析,报告二段"抓取 X 条 · 保留 Y 条" 会明显变多。
-
-**客户端 fallback 逻辑**(减少配置失误):
-- `HUNTER_SAAS_DATA_KEY` 空时,会回退试 `FINANCE_DATA_TOKEN` → `HUNTER_API_KEY`。
-  这意味着如果**未来平台侧支持"一 key 通用"**,老用户不改一行 env 就能立即生效。
-- 但今天的情况是:hunt_tools_ 塞到 HUNTER_API_KEY 兜底也会被 finance-data 服务
-  拒(401),所以**必须去申请 hunt_data_**。
-
-⚠️ **智能体/新手最容易漏这步**:以为 §5 的工具 key 也能拉数据 —— **不能**。
-两把 key 各归其位。看到深度分析报告"抓 14 条 / 保留 0 条 / 判官 15%",
-99% 就是漏了这一步。
+**私有部署 finance-data**(自建镜像)· 显式配 `.env`:
+```bash
+FINANCE_DATA_URL=https://your.finance-data.example.com
+FINANCE_DATA_TOKEN=<your shared token>
+# 客户端检测到 URL 不包含 /api/saas/data 会切到 X-Finance-Token 直连模式
+```
 
 ### 默认端口（在 `.env` 里改）
 
@@ -235,13 +218,12 @@ print(r.status_code, r.text[:200])
 后者多半是本机代理／防火墙，`docker compose exec api curl -I https://hunter.agentpit.io` 验一下。
 
 **深度分析报告"技术面 AI 暂不可用" / "抓 14 条 · 保留 0 条" / 判官置信度只有 15-30%**
-99% 的原因是**漏配了数据 key(§6)**。检查表:
-1. `docker compose exec api env | grep -E "HUNTER_API_KEY|DATA_SOURCE|HUNTER_SAAS_DATA"`
-   - 只有 `HUNTER_API_KEY` 而 `HUNTER_SAAS_DATA_KEY` 空 → 就是这个原因,平台侧
-     两把 key 分账,hunt_tools_ 不能拉数据(finance-data 返 401)
-2. `docker compose logs api | grep -iE "Invalid token|news_finance_data|401"` ·
-   如果看到 `finance-data.agentpit.io/... 401 Invalid token` 100% 确认
-3. 修法:回 [§6](#6-解锁深度分析数据源-已填后--再加-3-行) 申请 hunt_data_ 填进去 · `docker compose up -d`
+`HUNTER_API_KEY` 空的必然结果 —— 深度分析数据源依赖它(通过 `hunter.agentpit.io/api/saas/data/*`
+网关中转 · 见 §6)。检查表:
+1. `docker compose exec api env | grep HUNTER_API_KEY` · 空 = 没填
+2. `docker compose exec api curl -s https://hunter.agentpit.io/api/saas/data/_ping` · 应返 `{"ok":true,...}`
+3. 完整验证请求 · 见 §6 的 curl 脚本
+4. 一行修:`.env` 加 `HUNTER_API_KEY=hunt_tools_...` · `docker compose up -d`
 
 **启动报 `JWT_SECRET` 相关的错，直接起不来**
 `.env` 里少了 `JWT_SECRET` 这一行。这是故意拦的：api 和 opencode 必须共用同一个值，

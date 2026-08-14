@@ -30,13 +30,14 @@ from .source_registry import (
 
 log = logging.getLogger(__name__)
 
-# 三级 fallback · 与 finance_data_client.py 保持一致 · 见那里的详细注释。
-# 统一优先级:显式独立 → 显式 SaaS → 统一 HUNTER_API_KEY 兜底。
-_DEFAULT_SAAS_URL = "https://finance-data.agentpit.io"
+# 双模式解析 · 与 finance_data_client.py 保持一致 · 详见那边注释。
+# 默认走 Hunter 数据网关(hunter.agentpit.io/api/saas/data)· Bearer auth
+# 显式指向 finance-data.agentpit.io 时切换到 X-Finance-Token 直连模式。
+_DEFAULT_GATEWAY_URL = "https://hunter.agentpit.io/api/saas/data"
 FINANCE_DATA_URL = (
     os.getenv("FINANCE_DATA_URL")
     or os.getenv("HUNTER_SAAS_DATA_URL")
-    or (_DEFAULT_SAAS_URL if (os.getenv("HUNTER_API_KEY") or os.getenv("HUNTER_SAAS_DATA_KEY") or os.getenv("FINANCE_DATA_TOKEN")) else "")
+    or _DEFAULT_GATEWAY_URL
 )
 FINANCE_DATA_TOKEN = (
     os.getenv("FINANCE_DATA_TOKEN")
@@ -44,7 +45,14 @@ FINANCE_DATA_TOKEN = (
     or os.getenv("HUNTER_API_KEY", "")
 )
 
-_HTTPX_HEADERS = {"X-Finance-Token": FINANCE_DATA_TOKEN}
+# 网关模式(hunter.agentpit.io/api/saas/data)用 Bearer · 直连模式(finance-data.agentpit.io)用 X-Finance-Token
+_IS_GATEWAY = "/api/saas/data" in FINANCE_DATA_URL
+if _IS_GATEWAY and FINANCE_DATA_TOKEN:
+    _HTTPX_HEADERS = {"Authorization": f"Bearer {FINANCE_DATA_TOKEN}"}
+elif FINANCE_DATA_TOKEN:
+    _HTTPX_HEADERS = {"X-Finance-Token": FINANCE_DATA_TOKEN}
+else:
+    _HTTPX_HEADERS = {}
 _PER_SOURCE_TIMEOUT = 10.0
 _GLOBAL_TIMEOUT = 30.0
 

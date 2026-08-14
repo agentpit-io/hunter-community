@@ -13,26 +13,29 @@ import httpx
 from loguru import logger
 from app.config import STOCK_MAP
 
-# 三级 fallback · 让用户可以只填一把 HUNTER_API_KEY 就解锁全部服务,
-# 也可以为高流量场景单独申请 hunt_data_ key 隔离配额。
+# 双模式 · 让用户"一 key 通用" · 也保留私有部署直连能力
 #
-# URL 三级:
-#   FINANCE_DATA_URL      (显式老名字 · 内部同事最熟)
-#   → HUNTER_SAAS_DATA_URL (显式对外新名字)
-#   → 默认 https://finance-data.agentpit.io (Hunter 官方地址 · 大多数用户就是这个)
+# 模式 A(默认 · 用户机)· Hunter 数据网关
+#   URL   = https://hunter.agentpit.io/api/saas/data
+#   AUTH  = Authorization: Bearer <HUNTER_API_KEY>
+#   一把 hunt_tools_ key 就通,由网关服务端注入内部 X-Finance-Token 转发到 finance-data。
+#   设计详见 hermes-1/doc/codex/community/2026-08-14_community-真正统一key-gateway方案.md
 #
-# TOKEN 三级:
-#   FINANCE_DATA_TOKEN         (显式老名字)
-#   → HUNTER_SAAS_DATA_KEY     (显式独立数据 key · 想隔离配额时用)
-#   → HUNTER_API_KEY           (统一 key · 也能访问所有 Hunter 服务)
+# 模式 B(SaaS 内部 / 私有部署)· 直连 finance-data
+#   URL   = https://finance-data.agentpit.io
+#   AUTH  = X-Finance-Token: <FINANCE_DATA_TOKEN>
+#   适用于:SaaS 内部服务、私有部署 finance-data、想跳过网关加速的场景。
+#   触发条件:显式设 FINANCE_DATA_URL 指向 finance-data 域名 · 或 URL 里没有 /api/saas/data
 #
-# 平台设计允许一把 HUNTER_API_KEY 通用于 tools/data/kronos · 所以只有需要
-# 精细分账/额度隔离时才独立申请 hunt_data_,一般用户只填 HUNTER_API_KEY 即可。
-_DEFAULT_SAAS_URL = "https://finance-data.agentpit.io"
-FINANCE_DATA_URL   = (
+# URL 解析优先级:
+#   FINANCE_DATA_URL(显式)→ HUNTER_SAAS_DATA_URL(显式)→ 默认 hunter gateway
+# Token 解析优先级:
+#   FINANCE_DATA_TOKEN(显式) → HUNTER_SAAS_DATA_KEY(显式) → HUNTER_API_KEY(兜底)
+_DEFAULT_GATEWAY_URL = "https://hunter.agentpit.io/api/saas/data"
+FINANCE_DATA_URL = (
     os.getenv("FINANCE_DATA_URL")
     or os.getenv("HUNTER_SAAS_DATA_URL")
-    or (_DEFAULT_SAAS_URL if (os.getenv("HUNTER_API_KEY") or os.getenv("HUNTER_SAAS_DATA_KEY") or os.getenv("FINANCE_DATA_TOKEN")) else "")
+    or _DEFAULT_GATEWAY_URL
 ).rstrip("/")
 FINANCE_DATA_TOKEN = (
     os.getenv("FINANCE_DATA_TOKEN")
@@ -40,8 +43,17 @@ FINANCE_DATA_TOKEN = (
     or os.getenv("HUNTER_API_KEY", "")
 )
 
-_HEADERS = {"X-Finance-Token": FINANCE_DATA_TOKEN} if FINANCE_DATA_TOKEN else {}
-_USE_SAAS = bool(FINANCE_DATA_URL)
+# 判断走网关还是直连 · 决定用哪种 auth 头
+_IS_GATEWAY = "/api/saas/data" in FINANCE_DATA_URL
+
+if _IS_GATEWAY and FINANCE_DATA_TOKEN:
+    _HEADERS = {"Authorization": f"Bearer {FINANCE_DATA_TOKEN}"}
+elif FINANCE_DATA_TOKEN:
+    _HEADERS = {"X-Finance-Token": FINANCE_DATA_TOKEN}
+else:
+    _HEADERS = {}
+
+_USE_SAAS = bool(FINANCE_DATA_TOKEN)   # 有 token 就试 · 网关和直连都算 SaaS 路径
 
 
 def _provider_get_quote_sync(code: str) -> dict | None:
