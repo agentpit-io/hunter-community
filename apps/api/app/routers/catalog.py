@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.services import source_catalog as catalog
 from app.services import source_health
+from app.services import tool_catalog
 
 router = APIRouter(prefix="/catalog", tags=["catalog"])
 
@@ -67,3 +68,84 @@ async def sources_health():
     与 `/sources` 分开是因为这个会被轮询,而 `/sources` 里的静态部分不必反复传。
     """
     return {"window": source_health.WINDOW, "stats": source_health.all_stats()}
+
+
+# ── 工具箱层 ──────────────────────────────────────────────────
+
+@router.get("/toolbox")
+async def list_toolbox(ready_only: bool = Query(False, description="只看当前真能用的")):
+    """工具箱清单 · 按 MCP server 分组。
+
+    用户原话「mcp 和 tools 算一类」—— 所以这里不分两栏,
+    来源差异只体现在每个条目的 `origin` 字段(内置/平台/你接的)。
+    """
+    groups = tool_catalog.grouped()
+    if ready_only:
+        for g in groups:
+            g["tools"] = [t for t in g["tools"] if t["status"] == "ready"]
+    total = sum(g["total"] for g in groups)
+    ready = sum(g["ready"] for g in groups)
+    return {
+        "groups": groups,
+        "summary": {"total": total, "ready": ready, "headline": f"{ready}/{total}"},
+    }
+
+
+# ── SKILL 层 ──────────────────────────────────────────────────
+
+@router.get("/skills")
+async def list_skills():
+    """SKILL 清单 · 按 category 分组。
+
+    **不复用 `/api/chat/skills`** 的原因:那个是聊天页在用的,返回结构要保持
+    稳定(Step A 迁移时特意做到逐字段零差异)。这里是能力目录视角,要多带
+    「依赖是否满足」这类算出来的东西,混在一起会把那个接口撑变形。
+
+    分类直接用 SKILL.md 里 `hunter.category` 的值 —— 前端**不要再自己维护
+    一份分类映射**。老的 SkillPanel 里硬编码了一份 4 类的表(单股/组合/决策/自建),
+    只覆盖 29 个里的 11 个,其余全被错误归进"自建"(明明是内置的)。
+    这就是 `_13` §3.1 说的同一份知识散落多处。
+    """
+    from app.services import skill_files
+
+    items = skill_files.load_all()
+    out = []
+    for s in items:
+        tools = s.get("needs_tools") or []
+        missing = [t for t in tools if tool_catalog.get(t) is None]
+        not_ready = [t for t in tools
+                     if (e := tool_catalog.get(t)) and tool_catalog.status_of(e)["state"] != "ready"]
+        out.append({
+            "key": s["key"],
+            "name": s["name"],
+            "icon": s["icon"],
+            "hint": s["hint"],
+            "category": s["category"],
+            "brand": s.get("brand", ""),
+            "source_url": s.get("source_url", ""),
+            "prompt_tpl": s["prompt_tpl"],
+            "builtin": s.get("builtin", True),
+            "needs_tools": tools,
+            # 三种"不能用"分开报,因为用户的下一步动作完全不同
+            "missing_tools": missing,      # 声明的工具压根不存在 → 是我们的 bug
+            "blocked_tools": not_ready,    # 工具存在但依赖没就绪 → 去配 key
+            "status": "broken" if missing else ("blocked" if not_ready else "ready"),
+        })
+
+    order = {c: i for i, c in enumerate(skill_files.CATEGORY_ORDER)}
+    groups: dict[str, list] = {}
+    for s in out:
+        groups.setdefault(s["category"], []).append(s)
+    grouped = [{"category": c, "total": len(v),
+                "ready": sum(1 for i in v if i["status"] == "ready"), "skills": v}
+               for c, v in sorted(groups.items(), key=lambda kv: order.get(kv[0], 99))]
+
+    return {
+        "groups": grouped,
+        "summary": {
+            "total": len(out),
+            "ready": sum(1 for s in out if s["status"] == "ready"),
+            "headline": f"{sum(1 for s in out if s['status'] == 'ready')}/{len(out)}",
+            "user_added": sum(1 for s in out if not s["builtin"]),
+        },
+    }
