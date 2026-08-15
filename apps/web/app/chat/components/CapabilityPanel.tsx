@@ -19,7 +19,7 @@
 // 没这些能力 —— 恰恰相反,要让他看见再去拿 key。
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ChevronDown, ChevronRight, Lock, Settings2, Database, Wrench, Sparkles, Clock } from 'lucide-react'
+import { ChevronDown, ChevronRight, Lock, Settings2, Database, Wrench, Sparkles, Clock, Plus } from 'lucide-react'
 import { HUNTER } from '../../lib/hunter-theme'
 import {
   listSources, listToolbox, listCatalogSkills, statusDot,
@@ -27,6 +27,7 @@ import {
 } from '../lib/catalogClient'
 import { getUnlockStatus, onUnlockChange, peekUnlockStatus } from '../lib/unlockClient'
 import UnlockModal from './UnlockModal'
+import SkillInstallCard from './SkillInstallCard'
 
 interface Props {
   onPick: (tpl: string, key: string) => void
@@ -48,6 +49,9 @@ export default function CapabilityPanel({ onPick, onManage, refreshKey }: Props)
   // 初始化成 false 又会在真锁着时先放行一次点击。
   const [unlocked, setUnlocked] = useState<boolean | null>(peekUnlockStatus()?.unlocked ?? null)
   const [gate, setGate] = useState<string | null>(null)
+  // 装 skill 的面板 —— 直接开在侧栏里,不用先进「管理」再往下滚
+  const [installOpen, setInstallOpen] = useState(false)
+  const [installed, setInstalled] = useState('')
   const locked = unlocked === false
 
   useEffect(() => {
@@ -158,7 +162,33 @@ export default function CapabilityPanel({ onPick, onManage, refreshKey }: Props)
         headline={skills?.summary.headline}
         sub={skills?.summary.user_added ? `含你加的 ${skills.summary.user_added} 个` : '点一下开始提问'}
         open={open.skills} onToggle={toggle}
+        action={
+          <button
+            onClick={(e) => { e.stopPropagation(); setOpen((o) => ({ ...o, skills: true })); setInstallOpen((v) => !v) }}
+            title="从 GitHub 装,或自己写一个"
+            style={addBtn}
+            onMouseEnter={(e) => { e.currentTarget.style.color = HUNTER.THEME }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = HUNTER.INK_F }}
+          >
+            <Plus size={13} strokeWidth={2.2} />
+          </button>
+        }
       >
+        {installOpen && (
+          <div style={{ margin: '2px 10px 8px', border: `1px solid ${HUNTER.LINE}`, borderRadius: 8, overflow: 'hidden' }}>
+            <SkillInstallCard
+              onClose={() => setInstallOpen(false)}
+              onInstalled={(names, msg) => {
+                setInstallOpen(false)
+                setInstalled(msg || `已装好:${names.join('、')}`)
+                listCatalogSkills().then(setSkills).catch(() => {})
+              }}
+            />
+          </div>
+        )}
+        {installed && (
+          <div style={okBox} onClick={() => setInstalled('')}>{installed}(点击关闭)</div>
+        )}
         {skills?.groups.map((g) => (
           <div key={g.category} style={{ marginBottom: 7 }}>
             <div style={groupHead}>
@@ -194,7 +224,7 @@ export default function CapabilityPanel({ onPick, onManage, refreshKey }: Props)
 
 // ── 折叠块外壳 ────────────────────────────────────────────────
 
-function Block({ id, icon: Icon, title, headline, sub, open, onToggle, children }: {
+function Block({ id, icon: Icon, title, headline, sub, open, onToggle, action, children }: {
   id: BlockId
   icon: typeof Database
   title: string
@@ -202,10 +232,13 @@ function Block({ id, icon: Icon, title, headline, sub, open, onToggle, children 
   sub?: string
   open: boolean
   onToggle: (id: BlockId) => void
+  /** 块标题右侧的操作按钮 —— 「加一个」这种动作要贴着它作用的东西放,
+   *  藏进通用设置里用户找不到(实测反馈) */
+  action?: React.ReactNode
   children: React.ReactNode
 }) {
   return (
-    <div>
+    <div style={{ position: 'relative' }}>
       <button onClick={() => onToggle(id)} style={blockHead}
               onMouseEnter={(e) => { e.currentTarget.style.background = HUNTER.PANEL_2 }}
               onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}>
@@ -217,6 +250,8 @@ function Block({ id, icon: Icon, title, headline, sub, open, onToggle, children 
           {headline ?? '—'}
         </span>
       </button>
+      {/* action 放在折叠按钮**外面** —— 嵌在 button 里会变成"点加号也切换折叠" */}
+      {action}
       {open && (
         <div style={{ paddingBottom: 4 }}>
           {sub ? <div style={subLine}>{sub}</div> : null}
@@ -282,6 +317,17 @@ const chip: React.CSSProperties = {
 }
 const chipName: React.CSSProperties = {
   maxWidth: 118, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+}
+const addBtn: React.CSSProperties = {
+  position: 'absolute', right: 34, top: 5,
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+  width: 20, height: 20, borderRadius: 5, cursor: 'pointer',
+  background: 'transparent', border: 'none', color: HUNTER.INK_F,
+  transition: 'color 0.1s',
+}
+const okBox: React.CSSProperties = {
+  margin: '0 10px 8px', padding: '7px 9px', borderRadius: 7, cursor: 'pointer',
+  background: HUNTER.TAG_OK_BG, color: HUNTER.TAG_OK_FG, fontSize: 11, lineHeight: 1.6,
 }
 const footNote: React.CSSProperties = {
   padding: '4px 12px 2px 30px', fontSize: 10, color: HUNTER.INK_F, lineHeight: 1.5,
