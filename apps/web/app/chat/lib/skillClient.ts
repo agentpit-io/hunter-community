@@ -67,8 +67,39 @@ async function req<T = any>(method: string, path: string, body?: any): Promise<T
 
 export const listSkills = () => req<SkillListResp>('GET', '/chat/skills')
 
-export const createSkill = (name: string, prompt_tpl: string, icon = '⭐') =>
-  req('POST', '/chat/skills', { name, prompt_tpl, icon })
+/** 新建自建能力的表单。
+ *
+ * 后端自 2026-08-15 起把它**写成 user-skills/{slug}/SKILL.md 文件**而不是数据库行,
+ * 所以能带方法论正文与依赖声明 —— 跟内置那 23 个是同一种东西了。
+ * 只填前三个也能建(旧 UI 的行为),其余走默认值。
+ */
+export interface SkillDraft {
+  name: string                 // 显示名(中文即可)
+  prompt_tpl: string
+  icon?: string
+  slug?: string                // 目录名(英文)· 不填由后端从显示名生成
+  description?: string         // **给模型看的**:它据此判断这次要不要用
+  category?: string
+  needs_tools?: string[]
+  needs_data?: string[]
+  body?: string                // Markdown 方法论正文
+}
+
+/** 写入结果 · `synced=false` 时 opencode 还没认到,必须把 message 显示给用户 */
+export interface SkillWriteResp {
+  ok: boolean
+  key?: string
+  synced?: boolean
+  skill_count?: number
+  needs_restart?: boolean
+  message?: string
+  reason?: string
+}
+
+export const createSkill = (draft: SkillDraft) =>
+  req<SkillWriteResp>('POST', '/chat/skills', {
+    icon: '⭐', needs_tools: [], needs_data: [], ...draft,
+  })
 
 export const patchSkill = (
   key: string,
@@ -76,7 +107,7 @@ export const patchSkill = (
 ) => req('PATCH', `/chat/skills/${encodeURIComponent(key)}`, patch)
 
 export const deleteSkill = (key: string) =>
-  req('DELETE', `/chat/skills/${encodeURIComponent(key)}`)
+  req<SkillWriteResp>('DELETE', `/chat/skills/${encodeURIComponent(key)}`)
 
 export const resetSkills = () => req('POST', '/chat/skills/reset', {})
 

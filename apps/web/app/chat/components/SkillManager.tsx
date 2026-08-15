@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { HUNTER } from '../../lib/hunter-theme'
 import {
   listSkills, createSkill, patchSkill, deleteSkill, resetSkills,
+  type SkillWriteResp,
   type SkillItem,
 } from '../lib/skillClient'
 
@@ -35,6 +36,18 @@ export default function SkillManager({ onClose, onChanged }: Props) {
   const [fIcon, setFIcon] = useState('⭐')
   const [fTpl, setFTpl] = useState('')
   const [saving, setSaving] = useState(false)
+  // 「完整 SKILL」的字段 —— 默认折叠。多数人只想要一个提问快捷方式,
+  // 一上来铺开七个输入框会把这件简单事搞复杂。
+  const [advanced, setAdvanced] = useState(false)
+  const [fSlug, setFSlug] = useState('')
+  const [fDesc, setFDesc] = useState('')
+  const [fCat, setFCat] = useState('')
+  const [fTools, setFTools] = useState<string[]>([])
+  const [fBody, setFBody] = useState('')
+  const [tools, setTools] = useState<{ key: string; name: string }[]>([])
+  // 保存成功但 opencode 还没认到时的提示 —— **必须显示给用户**,
+  // 否则他会看到"保存成功"却发现模型不认识这个能力
+  const [notice, setNotice] = useState('')
 
   const load = useCallback(async () => {
     try {
@@ -81,12 +94,38 @@ export default function SkillManager({ onClose, onChanged }: Props) {
     }
   }
 
+  // 工具列表从 /catalog/toolbox 拉 —— **做成多选而不是自由输入**:
+  // 手打必然有打错的,而打错的后果是 SKILL 显示"依赖未就绪"却查不出为什么。
+  useEffect(() => {
+    if (!advanced || tools.length) return
+    fetch('/api/catalog/toolbox', { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((d) => setTools(
+        (d.groups || []).flatMap((g: any) =>
+          (g.tools || []).map((t: any) => ({ key: t.key, name: t.name }))),
+      ))
+      .catch(() => {})
+  }, [advanced, tools.length])
+
   const submit = async () => {
     if (saving) return
     setSaving(true)
+    setNotice('')
     try {
-      await createSkill(fName, fTpl, fIcon)
-      setFName(''); setFTpl(''); setFIcon('⭐'); setAdding(false)
+      const r: SkillWriteResp = await createSkill({
+        name: fName, prompt_tpl: fTpl, icon: fIcon,
+        slug: fSlug || undefined,
+        description: fDesc || undefined,
+        category: fCat || undefined,
+        needs_tools: fTools,
+        body: fBody || undefined,
+      })
+      // 后端写完文件会让 opencode 重扫。重扫没成功时(镜像旧/连不上),
+      // 文件是好的但模型还看不到 —— 这一点必须说出来,不能只显示"保存成功"
+      if (r && r.synced === false && r.message) setNotice(r.message)
+      setFName(''); setFTpl(''); setFIcon('⭐')
+      setFSlug(''); setFDesc(''); setFCat(''); setFTools([]); setFBody('')
+      setAdding(false); setAdvanced(false)
       setDirty(true)
       await load()
     } catch (e: any) {
@@ -273,14 +312,72 @@ export default function SkillManager({ onClose, onChanged }: Props) {
                   maxLength={500}
                   style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }}
                 />
+                <button
+                  onClick={() => setAdvanced((v) => !v)}
+                  style={{ background: 'none', border: 'none', color: HUNTER.THEME, fontSize: 12, cursor: 'pointer', padding: '6px 0 0', fontFamily: 'inherit' }}
+                >
+                  {advanced ? '收起' : '写成完整 SKILL（方法论 + 依赖）'} {advanced ? '▴' : '▾'}
+                </button>
+
+                {advanced && (
+                  <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <input value={fSlug} onChange={(e) => setFSlug(e.target.value)}
+                      placeholder="目录名(英文小写,留空自动生成)" style={inputStyle} />
+                    <input value={fDesc} onChange={(e) => setFDesc(e.target.value)}
+                      placeholder="一句话说明 —— 模型据此判断什么时候用它" style={inputStyle} />
+                    <select value={fCat} onChange={(e) => setFCat(e.target.value)} style={inputStyle}>
+                      <option value="">分类(默认「其他」)</option>
+                      {categoryOrder.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select>
+
+                    <div>
+                      <div style={{ fontSize: 11.5, color: HUNTER.INK_F, marginBottom: 4 }}>
+                        需要哪些工具（勾选,不要手打）
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, maxHeight: 108, overflowY: 'auto' }}>
+                        {tools.map((t) => {
+                          const on = fTools.includes(t.key)
+                          return (
+                            <button key={t.key} onClick={() => setFTools((p) =>
+                              on ? p.filter((x) => x !== t.key) : [...p, t.key])}
+                              title={t.key}
+                              style={{ padding: '3px 8px', borderRadius: 5, cursor: 'pointer', fontSize: 11.5,
+                                fontFamily: 'inherit',
+                                background: on ? HUNTER.THEME : HUNTER.PAPER,
+                                color: on ? '#fff' : HUNTER.INK_S,
+                                border: `1px solid ${on ? HUNTER.THEME : HUNTER.LINE}` }}>
+                              {t.name}
+                            </button>
+                          )
+                        })}
+                        {!tools.length && (
+                          <span style={{ fontSize: 11.5, color: HUNTER.INK_F }}>加载中…</span>
+                        )}
+                      </div>
+                    </div>
+
+                    <textarea value={fBody} onChange={(e) => setFBody(e.target.value)}
+                      rows={8}
+                      placeholder={'方法论正文（Markdown）\n\n## 什么时候用\n\n## 怎么做\n\n## 什么时候不适用\n\n—— 最后一节最有用:说清楚什么情况下不该用它'}
+                      style={{ ...inputStyle, resize: 'vertical', fontFamily: 'ui-monospace, monospace', fontSize: 12, lineHeight: 1.6 }} />
+                  </div>
+                )}
+
                 <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                  <button onClick={() => { setAdding(false); setErr('') }} style={{ flex: 1, padding: '9px 0', background: HUNTER.PAPER, color: HUNTER.INK_S, border: `1px solid ${HUNTER.LINE}`, borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>
+                  <button onClick={() => { setAdding(false); setAdvanced(false); setErr('') }} style={{ flex: 1, padding: '9px 0', background: HUNTER.PAPER, color: HUNTER.INK_S, border: `1px solid ${HUNTER.LINE}`, borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>
                     取消
                   </button>
                   <button disabled={saving} onClick={submit} style={{ flex: 2, padding: '9px 0', background: HUNTER.THEME, color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: saving ? 0.6 : 1 }}>
                     {saving ? '保存中…' : '保存'}
                   </button>
                 </div>
+              </div>
+            )}
+
+            {notice && (
+              <div style={{ margin: '10px 18px 0', padding: '9px 11px', borderRadius: 7,
+                background: HUNTER.TAG_WARN_BG, color: HUNTER.TAG_WARN_FG, fontSize: 12, lineHeight: 1.6 }}>
+                {notice}
               </div>
             )}
 
