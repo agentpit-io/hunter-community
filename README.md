@@ -421,3 +421,17 @@ Apache 2.0 · see [LICENSE](./LICENSE) and [NOTICE](./NOTICE).
 
 **Hunter · AgentPit · 猎鹿人** are trademarks of the AgentPit team.
 Forks must rename.
+
+### 改了 skills/ 之后必须重启 opencode
+
+opencode **只在启动时扫一次** skill 目录,之后缓存住。改完 `skills/` 或
+`user-skills/` 不重启,会出现「侧栏显示 N 个、模型手上是 M 个」的不一致 ——
+而且不报错,只表现为模型答非所问或调用已删除的能力。
+
+```bash
+docker compose restart opencode          # 约 50 秒
+python scripts/check_skill_sync.py       # 比对磁盘 ↔ opencode,不一致会列出差异
+python scripts/check_skill_sync.py --fix # 不一致就自动重启并复查
+```
+
+> 实测过:`POST /instance/dispose` 无效,文件挂载可见也无效 —— 只能重启。
