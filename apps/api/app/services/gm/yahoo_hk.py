@@ -49,8 +49,10 @@ def _cache_set(key: str, value, ttl: int):
         pass
 
 
-def _yahoo_symbol(code: str) -> str:
-    """00700 -> 0700.HK (Yahoo用4位, 去一个前导零)"""
+def _yahoo_symbol(code: str, market: str = "HK") -> str:
+    """00700 -> 0700.HK (Yahoo用4位, 去一个前导零) · 美股直接用代码本身"""
+    if market.upper() == "US":
+        return code.upper().strip()
     c = code.zfill(5)
     return f"{c[1:]}.HK" if c.startswith("0") else f"{c}.HK"
 
@@ -63,14 +65,14 @@ _PERIOD_MAP = {
 
 
 def _fetch_chart(code: str, interval: str, range_: str,
-                 source_key: str = "hk.quote") -> dict | None:
-    """打 Yahoo chart 接口。
+                 source_key: str = "hk.quote", market: str = "HK") -> dict | None:
+    """打 Yahoo chart 接口。港股美股走的是同一个接口,只是 symbol 拼法不同。
 
     `source_key` 只用于被动健康观测(services/source_health.py)—— 缓存命中时
     根本不会走到这里,那也正确:没发生上游调用就没什么可观测的。
     """
     import time as _time
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{_yahoo_symbol(code)}"
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{_yahoo_symbol(code, market)}"
     t0 = _time.perf_counter()
     try:
         resp = requests.get(url, params={"interval": interval, "range": range_,
@@ -99,15 +101,21 @@ def _health(key: str, ok: bool, t0: float, err: str = "") -> None:
 
 def hk_kline(code: str, period: str = "1d", limit: int = 250) -> list[dict]:
     """港股K线，时间升序 [{ts,open,high,low,close,volume}]"""
+    return _kline("HK", code.zfill(5), period, limit)   # 归一化后作缓存key, 700/00700 共享
+
+
+def _kline(market: str, code: str, period: str = "1d", limit: int = 250) -> list[dict]:
+    """港股/美股共用的K线解析。"""
+    market = market.upper()
     if period not in _PERIOD_MAP:
         return []
-    code = code.zfill(5)   # 归一化后作缓存key, 700/00700 共享同一条目
-    key = f"gm:hkkline:{code}:{period}"
+    key = f"gm:{market.lower()}kline:{code}:{period}"
     cached = _cache_get(key)
     if cached is not None:
         return cached[-limit:]
     interval, range_ = _PERIOD_MAP[period]
-    chart = _fetch_chart(code, interval, range_, "hk.kline")
+    chart = _fetch_chart(code, interval, range_,
+                         "hk.kline" if market == "HK" else "us.kline", market)
     if not chart:
         return []
     ts_list = chart.get("timestamp") or []
@@ -130,12 +138,31 @@ def hk_kline(code: str, period: str = "1d", limit: int = 250) -> list[dict]:
 
 def hk_quote(code: str) -> dict | None:
     """港股快照（延迟15分钟）：用日线chart的meta字段"""
-    code = code.zfill(5)
-    key = f"gm:hkquote:{code}"
+    return _quote("HK", code.zfill(5))
+
+
+def us_quote(code: str) -> dict | None:
+    """美股快照(延迟15分钟)· 免 key。
+
+    存在的理由:美股原来只有 `findata_db.us_quote` 一条路,直连 financedata 库 ——
+    开源版拿不到 FINDATA_DB_URL,于是 /api/gm/quote/us/AAPL 永远 404。
+    而港股用的这个 Yahoo chart 接口**对美股同样能用**(实测 AAPL → 305.93 USD),
+    只是没人把它接上。
+    (注:yfinance 那个库不行 —— 它打的是 Yahoo v7/quoteSummary,实测被拒返回
+    非 JSON。同一个域名,两个接口,一个通一个不通。)
+    """
+    return _quote("US", code.upper().strip())
+
+
+def _quote(market: str, code: str) -> dict | None:
+    """港股/美股共用的快照解析 —— 两边 chart 返回结构完全一样。"""
+    market = market.upper()
+    key = f"gm:{market.lower()}quote:{code}"
     cached = _cache_get(key)
     if cached is not None:
         return cached
-    chart = _fetch_chart(code, "1d", "5d")
+    chart = _fetch_chart(code, "1d", "5d",
+                         "hk.quote" if market == "HK" else "us.quote", market)
     if not chart:
         return None
     meta = chart.get("meta") or {}
@@ -152,7 +179,9 @@ def hk_quote(code: str) -> dict | None:
         from datetime import datetime, timezone
         mkt_ts = datetime.fromtimestamp(mkt_ts, timezone.utc).isoformat()
     out = {
-        "code": code, "market": "HK", "currency": "HKD",
+        "code": code, "market": market,
+        # 币种取 Yahoo 返回的,不写死 —— 美股里有 ADR 与非美元计价标的
+        "currency": meta.get("currency") or ("HKD" if market == "HK" else "USD"),
         "name": meta.get("shortName") or "",
         "price": round(float(price), 3),
         "prev_close": round(float(prev), 3) if prev else None,
@@ -161,3 +190,12 @@ def hk_quote(code: str) -> dict | None:
     }
     _cache_set(key, out, 60)
     return out
+
+
+def us_kline(code: str, period: str = "1d", limit: int = 250) -> list[dict]:
+    """美股K线 · 免 key。同上:库里那 960 万条分钟线开源版拿不到,先用 Yahoo 顶上。
+
+    与库里的数据相比覆盖窄(Yahoo 分钟线只给近期),但**有总比 200 OK 配一个
+    空数组强** —— 后者是装作成功,用户完全看不出发生了什么。
+    """
+    return _kline("US", code.upper().strip(), period, limit)

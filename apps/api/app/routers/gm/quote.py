@@ -11,7 +11,10 @@ _NO_STORE = {"Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "
 def _one(market: str, code: str) -> dict | None:
     market = market.upper()
     if market == "US":
-        q = findata_db.us_quote(code)
+        # 先试 financedata 库(数据更全:主表 13,019 只 + 分钟线)。
+        # 库拿不到时回落到 Yahoo chart —— 开源版没有 FINDATA_DB_URL,
+        # 走到这里之前 100% 是 404,现在免 key 也能出行情。
+        q = findata_db.us_quote(code) or yahoo_hk.us_quote(code)
     elif market == "HK":
         q = yahoo_hk.hk_quote(code)
         if q is not None:

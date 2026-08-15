@@ -176,15 +176,16 @@ _HK: list[DataSource] = [
 #     ↑ 港股用的就是这个接口。**美股行情其实免 key 可用,只是代码没走这条路。**
 # ══════════════════════════════════════════════════════════════
 _US: list[DataSource] = [
-    DataSource("us.quote", "美股行情", Market.US, DataKind.QUOTE, "findata-db",
-               "/api/gm/quote/us/{code}", volume_hint="13,019 只主表", available=False,
-               unavailable_reason="当前实现读 us_kline 最新bar(直连数据库),开源版无此凭证",
-               note="可修:改走港股同款 Yahoo chart 接口即免 key 可用(实测已验证)"),
-    DataSource("us.kline", "美股K线", Market.US, DataKind.KLINE, "findata-db",
-               "/api/gm/kline/us/{code}",
-               volume_hint="分钟 960万 · 5分钟 870万 · 日线 288万", available=False,
-               unavailable_reason="走直连数据库,开源版无此凭证",
-               note="当前返回空数组而非报错 —— 静默失败,Step D 要改成明确告知"),
+    # 这两条原本 available=False(只走直连库)。接上港股同款 Yahoo chart 之后
+    # **免 key 可用** —— 库优先、库空回落,私有部署配了 FINDATA_DB_URL 仍拿全量。
+    DataSource("us.quote", "美股行情", Market.US, DataKind.QUOTE, "findata-db+yahoo",
+               "/api/gm/quote/us/{code}", tier=SourceTier.FREE_STABLE,
+               requires_key=False, volume_hint="13,019 只主表(库)· 全市场(Yahoo)",
+               note="库优先 · 库拿不到回落 Yahoo chart(延迟约15分钟)"),
+    DataSource("us.kline", "美股K线", Market.US, DataKind.KLINE, "findata-db+yahoo",
+               "/api/gm/kline/us/{code}", tier=SourceTier.FREE_STABLE, requires_key=False,
+               volume_hint="库:分钟 960万 · 5分钟 870万 · 日线 288万",
+               note="库优先 · 库空回落 Yahoo。Yahoo 分钟线只给近期,覆盖窄于库"),
     DataSource("us.news", "美股新闻", Market.US, DataKind.NEWS, "findata-db",
                "/api/gm/news/us/{code}", volume_hint="1万条", available=False,
                unavailable_reason="走直连数据库,开源版无此凭证"),

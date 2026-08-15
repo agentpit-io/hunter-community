@@ -11,7 +11,9 @@ async def gm_kline(market: str, code: str,
                    limit: int = Query(250, ge=1, le=2000)):
     market = market.upper()
     if market == "US":
-        bars = findata_db.us_kline(code, period, limit)
+        # 库优先(覆盖最全),库空回落 Yahoo —— 港股早就是这个写法,美股一直没接上,
+        # 结果开源版拿到的是 200 OK + bars=[](装作成功,用户看不出发生了什么)
+        bars = findata_db.us_kline(code, period, limit) or yahoo_hk.us_kline(code, period, limit)
         delayed_note = "延迟约15分钟" if period in ("1m", "5m") else ""
     elif market == "HK":
         # 读库优先(每日采集入库), 库缺(池外冷门股/1分钟粒度)回退Yahoo实时拉
