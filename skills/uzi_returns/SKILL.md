@@ -7,7 +7,7 @@ hunter:
   category: "组合级"
   brand: "UZI"
   source_url: "https://github.com/wbh604/UZI-Skill"
-  prompt_tpl: "/stock-deep-analyzer:returns"
+  prompt_tpl: "对我当前组合做收益归因 · 按持仓、行业、风格因子拆解累计收益 · 列出 Top 贡献与 Top 拖累"
   needs_tools:
     - uzi_stock_deep_analysis
   needs_data: []
@@ -24,7 +24,7 @@ v3.8 新增。对当前组合做收益归因：按持仓、行业、风格因子
 用户提问后,按下面的模板组织分析:
 
 ```
-/stock-deep-analyzer:returns
+对我当前组合做收益归因 · 按持仓、行业、风格因子拆解累计收益 · 列出 Top 贡献与 Top 拖累
 ```
 
 ## 需要的工具

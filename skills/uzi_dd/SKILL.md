@@ -7,7 +7,7 @@ hunter:
   category: "尽调风控"
   brand: "UZI"
   source_url: "https://github.com/wbh604/UZI-Skill"
-  prompt_tpl: "/stock-deep-analyzer:dd {股票}"
+  prompt_tpl: "对 {股票} 走完整尽调清单 · 财务/法律/运营/管理层/行业 5 大工作流共 21 项检查 · 逐条给结论、证据与风险等级"
   needs_tools:
     - uzi_stock_deep_analysis
   needs_data: []
@@ -24,7 +24,7 @@ hunter:
 用户提问后,按下面的模板组织分析:
 
 ```
-/stock-deep-analyzer:dd {股票}
+对 {股票} 走完整尽调清单 · 财务/法律/运营/管理层/行业 5 大工作流共 21 项检查 · 逐条给结论、证据与风险等级
 ```
 
 ## 需要的工具

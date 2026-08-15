@@ -7,7 +7,7 @@ hunter:
   category: "估值建模"
   brand: "UZI"
   source_url: "https://github.com/wbh604/UZI-Skill"
-  prompt_tpl: "/stock-deep-analyzer:comps {股票}"
+  prompt_tpl: "对 {股票} 做同行对标 · 按 PE/PB/PS/EV-EBITDA 多倍数横向对比 · 给出同业分位与合理估值区间"
   needs_tools:
     - uzi_stock_deep_analysis
   needs_data: []
@@ -24,7 +24,7 @@ hunter:
 用户提问后,按下面的模板组织分析:
 
 ```
-/stock-deep-analyzer:comps {股票}
+对 {股票} 做同行对标 · 按 PE/PB/PS/EV-EBITDA 多倍数横向对比 · 给出同业分位与合理估值区间
 ```
 
 ## 需要的工具

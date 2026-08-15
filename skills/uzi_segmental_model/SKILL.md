@@ -7,7 +7,7 @@ hunter:
   category: "估值建模"
   brand: "UZI"
   source_url: "https://github.com/wbh604/UZI-Skill"
-  prompt_tpl: "/stock-deep-analyzer:segmental-model {股票}"
+  prompt_tpl: "对 {股票} 做分部建模 · 按业务分部分别建收入预测 · 分析各分部对整体估值的贡献与敏感度"
   needs_tools:
     - uzi_stock_deep_analysis
   needs_data: []
@@ -24,7 +24,7 @@ hunter:
 用户提问后,按下面的模板组织分析:
 
 ```
-/stock-deep-analyzer:segmental-model {股票}
+对 {股票} 做分部建模 · 按业务分部分别建收入预测 · 分析各分部对整体估值的贡献与敏感度
 ```
 
 ## 需要的工具

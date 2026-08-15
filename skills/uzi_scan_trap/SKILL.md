@@ -7,7 +7,7 @@ hunter:
   category: "尽调风控"
   brand: "UZI"
   source_url: "https://github.com/wbh604/UZI-Skill"
-  prompt_tpl: "/stock-deep-analyzer:scan-trap {股票}"
+  prompt_tpl: "排查 {股票} 是否有杀猪盘特征 · 异常拉升与基本面脱节、股东减持时点、财务造假信号、社交推票热度 · 给出预警等级"
   needs_tools:
     - uzi_stock_deep_analysis
   needs_data: []
@@ -24,7 +24,7 @@ hunter:
 用户提问后,按下面的模板组织分析:
 
 ```
-/stock-deep-analyzer:scan-trap {股票}
+排查 {股票} 是否有杀猪盘特征 · 异常拉升与基本面脱节、股东减持时点、财务造假信号、社交推票热度 · 给出预警等级
 ```
 
 ## 需要的工具

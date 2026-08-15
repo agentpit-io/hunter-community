@@ -7,7 +7,7 @@ hunter:
   category: "投研报告"
   brand: "UZI"
   source_url: "https://github.com/wbh604/UZI-Skill"
-  prompt_tpl: "/stock-deep-analyzer:earnings {股票}"
+  prompt_tpl: "深度解读 {股票} 最新财报 · 对齐一致预期做 beat/miss 检测 · 拆解 EPS 驱动因子 · 评估管理层指引质量"
   needs_tools:
     - uzi_stock_deep_analysis
   needs_data: []
@@ -24,7 +24,7 @@ hunter:
 用户提问后,按下面的模板组织分析:
 
 ```
-/stock-deep-analyzer:earnings {股票}
+深度解读 {股票} 最新财报 · 对齐一致预期做 beat/miss 检测 · 拆解 EPS 驱动因子 · 评估管理层指引质量
 ```
 
 ## 需要的工具

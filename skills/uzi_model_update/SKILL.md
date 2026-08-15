@@ -7,7 +7,7 @@ hunter:
   category: "估值建模"
   brand: "UZI"
   source_url: "https://github.com/wbh604/UZI-Skill"
-  prompt_tpl: "/stock-deep-analyzer:model-update {股票}"
+  prompt_tpl: "基于 {股票} 最新财报或管理层指引 · 识别关键假设 delta · 更新 DCF 与投资论点 · 产出增量影响报告"
   needs_tools:
     - uzi_stock_deep_analysis
   needs_data: []
@@ -24,7 +24,7 @@ v3.8 新增。基于最新披露的财报或管理层指引，识别关键假设
 用户提问后,按下面的模板组织分析:
 
 ```
-/stock-deep-analyzer:model-update {股票}
+基于 {股票} 最新财报或管理层指引 · 识别关键假设 delta · 更新 DCF 与投资论点 · 产出增量影响报告
 ```
 
 ## 需要的工具

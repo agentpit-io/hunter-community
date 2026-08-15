@@ -7,7 +7,7 @@ hunter:
   category: "估值建模"
   brand: "UZI"
   source_url: "https://github.com/wbh604/UZI-Skill"
-  prompt_tpl: "/stock-deep-analyzer:lbo {股票}"
+  prompt_tpl: "对 {股票} 做 LBO 测试 · 模拟 PE 买方在合理杠杆下的进入/退出 · 输出 5 年 IRR 与 MoM"
   needs_tools:
     - uzi_stock_deep_analysis
   needs_data: []
@@ -24,7 +24,7 @@ hunter:
 用户提问后,按下面的模板组织分析:
 
 ```
-/stock-deep-analyzer:lbo {股票}
+对 {股票} 做 LBO 测试 · 模拟 PE 买方在合理杠杆下的进入/退出 · 输出 5 年 IRR 与 MoM
 ```
 
 ## 需要的工具

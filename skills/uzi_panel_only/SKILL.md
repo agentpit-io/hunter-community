@@ -7,7 +7,7 @@ hunter:
   category: "快速判断"
   brand: "UZI"
   source_url: "https://github.com/wbh604/UZI-Skill"
-  prompt_tpl: "/stock-deep-analyzer:panel-only {股票}"
+  prompt_tpl: "对 {股票} 只出 66 位专家评委的投票结果 · 买/持/卖分布、共识度、置信度与少数派意见"
   needs_tools:
     - uzi_stock_deep_analysis
   needs_data: []
@@ -24,7 +24,7 @@ hunter:
 用户提问后,按下面的模板组织分析:
 
 ```
-/stock-deep-analyzer:panel-only {股票}
+对 {股票} 只出 66 位专家评委的投票结果 · 买/持/卖分布、共识度、置信度与少数派意见
 ```
 
 ## 需要的工具

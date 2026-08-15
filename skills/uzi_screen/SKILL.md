@@ -7,7 +7,7 @@ hunter:
   category: "事件与筛选"
   brand: "UZI"
   source_url: "https://github.com/wbh604/UZI-Skill"
-  prompt_tpl: "/stock-deep-analyzer:screen {股票}"
+  prompt_tpl: "用 5 套量化筛选(价值/成长/质量/动量/低波)评估 {股票} · 报告每套下的排名与被选/落选原因"
   needs_tools:
     - uzi_stock_deep_analysis
   needs_data: []
@@ -24,7 +24,7 @@ hunter:
 用户提问后,按下面的模板组织分析:
 
 ```
-/stock-deep-analyzer:screen {股票}
+用 5 套量化筛选(价值/成长/质量/动量/低波)评估 {股票} · 报告每套下的排名与被选/落选原因
 ```
 
 ## 需要的工具

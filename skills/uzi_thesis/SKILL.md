@@ -7,7 +7,7 @@ hunter:
   category: "投研报告"
   brand: "UZI"
   source_url: "https://github.com/wbh604/UZI-Skill"
-  prompt_tpl: "/stock-deep-analyzer:thesis {股票}"
+  prompt_tpl: "为 {股票} 建立 5 支柱投资论点(增长/护城河/管理层/财务/催化)· 跟踪支柱状态与假设漂移"
   needs_tools:
     - uzi_stock_deep_analysis
   needs_data: []
@@ -24,7 +24,7 @@ hunter:
 用户提问后,按下面的模板组织分析:
 
 ```
-/stock-deep-analyzer:thesis {股票}
+为 {股票} 建立 5 支柱投资论点(增长/护城河/管理层/财务/催化)· 跟踪支柱状态与假设漂移
 ```
 
 ## 需要的工具

@@ -7,7 +7,7 @@ hunter:
   category: "事件与筛选"
   brand: "UZI"
   source_url: "https://github.com/wbh604/UZI-Skill"
-  prompt_tpl: "/stock-deep-analyzer:catalysts {股票}"
+  prompt_tpl: "整理 {股票} 未来 60 天的催化剂日历 · 财报、指引、政策窗口、行业会议、股东大会、解禁、除权 · 附对股价的影响判断"
   needs_tools:
     - uzi_stock_deep_analysis
   needs_data: []
@@ -24,7 +24,7 @@ hunter:
 用户提问后,按下面的模板组织分析:
 
 ```
-/stock-deep-analyzer:catalysts {股票}
+整理 {股票} 未来 60 天的催化剂日历 · 财报、指引、政策窗口、行业会议、股东大会、解禁、除权 · 附对股价的影响判断
 ```
 
 ## 需要的工具

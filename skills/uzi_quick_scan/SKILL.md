@@ -7,7 +7,7 @@ hunter:
   category: "快速判断"
   brand: "UZI"
   source_url: "https://github.com/wbh604/UZI-Skill"
-  prompt_tpl: "/stock-deep-analyzer:quick-scan {股票}"
+  prompt_tpl: "对 {股票} 做 30 秒速判 · 给出买/卖/持结论 + 一句话理由 + 关键关注点"
   needs_tools:
     - uzi_stock_deep_analysis
   needs_data: []
@@ -24,7 +24,7 @@ hunter:
 用户提问后,按下面的模板组织分析:
 
 ```
-/stock-deep-analyzer:quick-scan {股票}
+对 {股票} 做 30 秒速判 · 给出买/卖/持结论 + 一句话理由 + 关键关注点
 ```
 
 ## 需要的工具

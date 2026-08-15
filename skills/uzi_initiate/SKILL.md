@@ -7,7 +7,7 @@ hunter:
   category: "投研报告"
   brand: "UZI"
   source_url: "https://github.com/wbh604/UZI-Skill"
-  prompt_tpl: "/stock-deep-analyzer:initiate {股票}"
+  prompt_tpl: "为 {股票} 出机构首次覆盖报告 · 按 JPM/GS 卖方格式 · 含公司概况、投资亮点、估值模型、风险因素、评级与目标价"
   needs_tools:
     - uzi_stock_deep_analysis
   needs_data: []
@@ -24,7 +24,7 @@ hunter:
 用户提问后,按下面的模板组织分析:
 
 ```
-/stock-deep-analyzer:initiate {股票}
+为 {股票} 出机构首次覆盖报告 · 按 JPM/GS 卖方格式 · 含公司概况、投资亮点、估值模型、风险因素、评级与目标价
 ```
 
 ## 需要的工具

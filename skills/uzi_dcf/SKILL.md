@@ -7,7 +7,7 @@ hunter:
   category: "估值建模"
   brand: "UZI"
   source_url: "https://github.com/wbh604/UZI-Skill"
-  prompt_tpl: "/stock-deep-analyzer:dcf {股票}"
+  prompt_tpl: "对 {股票} 做 DCF 估值 · 估算 WACC、构建 10 年预测期 + 永续期模型 · 输出内在价值与 5×5 敏感性表"
   needs_tools:
     - uzi_stock_deep_analysis
   needs_data: []
@@ -24,7 +24,7 @@ hunter:
 用户提问后,按下面的模板组织分析:
 
 ```
-/stock-deep-analyzer:dcf {股票}
+对 {股票} 做 DCF 估值 · 估算 WACC、构建 10 年预测期 + 永续期模型 · 输出内在价值与 5×5 敏感性表
 ```
 
 ## 需要的工具

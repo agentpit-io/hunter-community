@@ -7,7 +7,7 @@ hunter:
   category: "投研报告"
   brand: "UZI"
   source_url: "https://github.com/wbh604/UZI-Skill"
-  prompt_tpl: "/stock-deep-analyzer:ic-memo {股票}"
+  prompt_tpl: "为 {股票} 写投委会备忘录 · base/bull/bear 三情景的回报分布、概率、关键假设与风险预案"
   needs_tools:
     - uzi_stock_deep_analysis
   needs_data: []
@@ -24,7 +24,7 @@ hunter:
 用户提问后,按下面的模板组织分析:
 
 ```
-/stock-deep-analyzer:ic-memo {股票}
+为 {股票} 写投委会备忘录 · base/bull/bear 三情景的回报分布、概率、关键假设与风险预案
 ```
 
 ## 需要的工具
