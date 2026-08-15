@@ -1,16 +1,17 @@
 ---
 name: uzi_quick_scan
-description: "30 秒结论"
+description: "30 秒给出买/卖/持结论 · 可附 66 位专家评委的投票分布"
 hunter:
-  display_name: "UZI · 30 秒速判"
+  display_name: "UZI · 速判"
   icon: "⚡"
   category: "快速判断"
   brand: "UZI"
   source_url: "https://github.com/wbh604/UZI-Skill"
-  prompt_tpl: "对 {股票} 做 30 秒速判 · 给出买/卖/持结论 + 一句话理由 + 关键关注点"
+  prompt_tpl: "对 {股票} 做速判 · 给出买/卖/持结论 + 一句话理由 + 关键关注点(要评委投票分布就说「带评委投票」)"
   needs_tools:
     - uzi_stock_deep_analysis
   needs_data: []
+  aliases: "uzi_panel_only"
 ---
 
 # UZI · 30 秒速判

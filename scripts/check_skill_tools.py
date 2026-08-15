@@ -43,16 +43,30 @@ REPO = Path(__file__).resolve().parent.parent
 SKILLS_DIR = REPO / "skills"
 USER_SKILLS_DIR = REPO / "user-skills"
 
-# 离线兜底清单 · 与镜像 .opencode/opencode.jsonc 注册的 4 个 MCP 对应。
-# 镜像加减 MCP 时要更新这里(或者直接用在线模式,它从容器现读)。
-KNOWN_TOOLS = {
-    "watchlist_stock_quickview", "watchlist_stock_news",
-    "watchlist_watchlist_digest", "watchlist_watchlist_add",
-    "portfolio_portfolio_rebalance", "portfolio_portfolio_stress",
-    "portfolio_update_risk_profile",
-    "uzi_stock_deep_analysis",
-    "hunter_user_list_my_sources", "hunter_user_invoke",
-}
+# 离线兜底清单 —— **从工具注册表读**,不再手写一份。
+#
+# 原来这里是硬编码的 10 个工具名。Step C 加了 hunter_cap 那 3 个之后没同步,
+# 于是 forecast 补上 needs_tools: hunter_cap_kpred 时被误报成"引用不存在的工具"。
+# 一个防漂移的脚本自己漂了 —— 正是它要治的毛病。
+#
+# tool_catalog.py 由 scripts/check_tools.py 负责与容器对账,所以从它读是安全的:
+# 那份表错了会被另一个脚本抓到,不会两边一起错。
+def _known_tools() -> set[str]:
+    import importlib.util
+    tc = REPO / "apps" / "api" / "app" / "services" / "tool_catalog.py"
+    if not tc.is_file():
+        return set()
+    # 直接 import 会拖起 app 包的依赖,这里只按文件加载这一个模块。
+    # **必须先塞进 sys.modules 再 exec** —— dataclass 解析 `list[str]` 这类注解时
+    # 要回查 sys.modules[cls.__module__],不注册就 AttributeError: NoneType。
+    spec = importlib.util.spec_from_file_location("_tool_catalog", tc)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["_tool_catalog"] = mod
+    spec.loader.exec_module(mod)
+    return {t.key for t in mod.CATALOG}
+
+
+KNOWN_TOOLS = _known_tools()
 
 
 def tools_from_container() -> set[str] | None:

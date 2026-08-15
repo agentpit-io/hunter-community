@@ -1,16 +1,17 @@
 ---
 name: uzi_thesis
-description: "5 支柱监控 · 假设跟踪"
+description: "建立 5 支柱投资论点并持续追踪支柱状态与假设漂移"
 hunter:
-  display_name: "UZI · 投资逻辑追踪"
+  display_name: "UZI · 投资论点"
   icon: "🧭"
   category: "投研报告"
   brand: "UZI"
   source_url: "https://github.com/wbh604/UZI-Skill"
-  prompt_tpl: "为 {股票} 建立 5 支柱投资论点(增长/护城河/管理层/财务/催化)· 跟踪支柱状态与假设漂移"
+  prompt_tpl: "为 {股票} 建立 5 支柱投资论点(增长/护城河/管理层/财务/催化)· 列出关键假设 · 后续调用时追踪支柱状态与假设漂移"
   needs_tools:
     - uzi_stock_deep_analysis
   needs_data: []
+  aliases: "thesis"
 ---
 
 # UZI · 投资逻辑追踪

@@ -1,16 +1,17 @@
 ---
 name: uzi_earnings
-description: "beat/miss 检测 · 逐条对齐"
+description: "解读最新财报 · beat/miss 检测、EPS 驱动拆解、指引质量评分"
 hunter:
   display_name: "UZI · 财报解读"
   icon: "💹"
   category: "投研报告"
   brand: "UZI"
   source_url: "https://github.com/wbh604/UZI-Skill"
-  prompt_tpl: "深度解读 {股票} 最新财报 · 对齐一致预期做 beat/miss 检测 · 拆解 EPS 驱动因子 · 评估管理层指引质量"
+  prompt_tpl: "解读 {股票} 最新财报 · 对齐一致预期做 beat/miss 检测 · 拆解 EPS 驱动因子 · 评估管理层指引质量(只要三条要点就说「简版」)"
   needs_tools:
     - uzi_stock_deep_analysis
   needs_data: []
+  aliases: "report"
 ---
 
 # UZI · 财报解读

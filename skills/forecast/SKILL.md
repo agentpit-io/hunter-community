@@ -8,7 +8,8 @@ hunter:
   brand: "Kronos"
   source_url: "https://github.com/shiyu-coder/Kronos"
   prompt_tpl: "用 Kronos 预测 {股票} 未来 5 天走势"
-  needs_tools: []
+  needs_tools:
+    - hunter_cap_kpred
   needs_data: []
 ---
 

@@ -1,16 +1,17 @@
 ---
 name: uzi_rebalance
-description: "v3.8 · 漂移 + 换手成本"
+description: "逐持仓再平衡建议 · 权重漂移、交易清单、扣费后净换手成本"
 hunter:
-  display_name: "UZI · 逐持仓再平衡"
+  display_name: "UZI · 组合调仓"
   icon: "🔀"
   category: "组合级"
   brand: "UZI"
   source_url: "https://github.com/wbh604/UZI-Skill"
-  prompt_tpl: "对我当前持仓做再平衡建议 · 目标与当前权重的漂移、交易清单、扣除 A 股印花税与佣金后的净换手成本"
+  prompt_tpl: "对我当前持仓做调仓建议 · 目标与当前权重的漂移、交易清单、扣除 A 股印花税与佣金后的净换手成本"
   needs_tools:
     - uzi_stock_deep_analysis
   needs_data: []
+  aliases: "portfolio_advice"
 ---
 
 # UZI · 逐持仓再平衡
