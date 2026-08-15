@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { HUNTER } from '../../lib/hunter-theme'
+import SkillInstallCard from './SkillInstallCard'
 import {
   listSkills, createSkill, patchSkill, deleteSkill, resetSkills,
   type SkillWriteResp,
@@ -32,6 +33,7 @@ export default function SkillManager({ onClose, onChanged }: Props) {
 
   // 新建表单
   const [adding, setAdding] = useState(false)
+  const [installing, setInstalling] = useState(false)
   const [fName, setFName] = useState('')
   const [fIcon, setFIcon] = useState('⭐')
   const [fTpl, setFTpl] = useState('')
@@ -267,10 +269,15 @@ export default function SkillManager({ onClose, onChanged }: Props) {
             {/* 自定义 */}
             <div style={{ padding: '14px 18px 4px', fontSize: 11, color: HUNTER.INK_F, display: 'flex', alignItems: 'center' }}>
               <span style={{ flex: 1, letterSpacing: 0.4 }}>我的能力 {customCount} / {maxCustom}</span>
-              {customCount < maxCustom && !adding && (
-                <button onClick={() => setAdding(true)} style={{ background: 'none', border: 'none', color: HUNTER.THEME, fontSize: 12, cursor: 'pointer', padding: 0 }}>
-                  + 新建
-                </button>
+              {customCount < maxCustom && !adding && !installing && (
+                <span style={{ display: 'flex', gap: 12 }}>
+                  <button onClick={() => setInstalling(true)} style={{ background: 'none', border: 'none', color: HUNTER.THEME, fontSize: 12, cursor: 'pointer', padding: 0 }}>
+                    从 GitHub 装
+                  </button>
+                  <button onClick={() => setAdding(true)} style={{ background: 'none', border: 'none', color: HUNTER.THEME, fontSize: 12, cursor: 'pointer', padding: 0 }}>
+                    + 新建
+                  </button>
+                </span>
               )}
             </div>
 
@@ -295,6 +302,20 @@ export default function SkillManager({ onClose, onChanged }: Props) {
                 </button>
               </div>
             ))}
+
+            {installing && (
+              <SkillInstallCard
+                onClose={() => setInstalling(false)}
+                onInstalled={async (names, msg) => {
+                  setInstalling(false)
+                  // 装完 opencode 没重扫时 msg 非空 —— 必须显示,
+                  // 否则用户以为装好了但模型不认识
+                  setNotice(msg || `已安装 ${names.length} 个能力:${names.join('、')}`)
+                  setDirty(true)
+                  await load()
+                }}
+              />
+            )}
 
             {adding && (
               <div style={{ padding: '12px 18px', borderTop: `1px solid ${HUNTER.LINE}`, background: HUNTER.PAPER3 }}>

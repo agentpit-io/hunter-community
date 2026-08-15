@@ -123,3 +123,47 @@ export function placeholderRange(tpl: string): { start: number; end: number } | 
   const m = /\{[^}]*\}/.exec(tpl)
   return m ? { start: m.index, end: m.index + m[0].length } : null
 }
+
+// ── 从 GitHub 装 SKILL(_18)──────────────────────────────────
+//
+// **两步不是一步**:先 inspect(不下载,只读目录树)让用户看清要装什么、
+// 会丢什么、有没有可疑内容;确认之后才 install。
+//
+// 一步装完看着更顺,但 SKILL.md 正文是**直接进模型上下文**的 ——
+// 不给用户看一眼就装,等于让他闭着眼睛接受陌生人写的提示词。
+
+export interface RepoRisk {
+  why: string
+  excerpt: string
+}
+
+export interface RepoCandidate {
+  path: string
+  name: string
+  description: string
+  body_preview: string      // 正文前 40 行 —— **这才是真正的安全边界**
+  lines: number
+  risks: RepoRisk[]
+}
+
+export interface RepoInspect {
+  owner: string
+  repo: string
+  ref: string
+  full_name: string
+  stars: number
+  updated_at: string
+  description: string
+  file_count: number
+  /** L1 单 skill · L2 多 skill · L3 带代码 · L4 完整 plugin(我们只支持 skill 那部分) */
+  level: 'L1' | 'L2' | 'L3' | 'L4'
+  has_code: boolean
+  stripped: string[]        // 会被丢掉的部分 —— 必须显示,否则用户以为装全了
+  candidates: RepoCandidate[]
+}
+
+export const inspectRepo = (repo: string) =>
+  req<RepoInspect>('POST', '/chat/skills/inspect', { repo })
+
+export const installFromRepo = (repo: string, paths: string[]) =>
+  req<SkillWriteResp & { installed: string[] }>('POST', '/chat/skills/install', { repo, paths })
