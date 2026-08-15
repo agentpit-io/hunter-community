@@ -27,7 +27,7 @@ import {
 } from '../lib/catalogClient'
 import { getUnlockStatus, onUnlockChange, peekUnlockStatus } from '../lib/unlockClient'
 import UnlockModal from './UnlockModal'
-import SkillInstallCard from './SkillInstallCard'
+import SkillAddPanel from './SkillAddPanel'
 
 interface Props {
   onPick: (tpl: string, key: string) => void
@@ -165,7 +165,7 @@ export default function CapabilityPanel({ onPick, onManage, refreshKey }: Props)
         action={
           <button
             onClick={(e) => { e.stopPropagation(); setOpen((o) => ({ ...o, skills: true })); setInstallOpen((v) => !v) }}
-            title="从 GitHub 装,或自己写一个"
+            title="加一个 SKILL —— 从 GitHub 装,或自己写"
             style={addBtn}
             onMouseEnter={(e) => { e.currentTarget.style.color = HUNTER.THEME }}
             onMouseLeave={(e) => { e.currentTarget.style.color = HUNTER.INK_F }}
@@ -175,16 +175,15 @@ export default function CapabilityPanel({ onPick, onManage, refreshKey }: Props)
         }
       >
         {installOpen && (
-          <div style={{ margin: '2px 10px 8px', border: `1px solid ${HUNTER.LINE}`, borderRadius: 8, overflow: 'hidden' }}>
-            <SkillInstallCard
-              onClose={() => setInstallOpen(false)}
-              onInstalled={(names, msg) => {
-                setInstallOpen(false)
-                setInstalled(msg || `已装好:${names.join('、')}`)
-                listCatalogSkills().then(setSkills).catch(() => {})
-              }}
-            />
-          </div>
+          <SkillAddPanel
+            categories={skills?.groups.map((g) => g.category) || []}
+            onClose={() => setInstallOpen(false)}
+            onDone={(msg) => {
+              setInstallOpen(false)
+              setInstalled(msg)
+              listCatalogSkills().then(setSkills).catch(() => {})
+            }}
+          />
         )}
         {installed && (
           <div style={okBox} onClick={() => setInstalled('')}>{installed}(点击关闭)</div>
@@ -238,20 +237,25 @@ function Block({ id, icon: Icon, title, headline, sub, open, onToggle, action, c
   children: React.ReactNode
 }) {
   return (
-    <div style={{ position: 'relative' }}>
-      <button onClick={() => onToggle(id)} style={blockHead}
-              onMouseEnter={(e) => { e.currentTarget.style.background = HUNTER.PANEL_2 }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}>
-        {open ? <ChevronDown size={12} strokeWidth={2} /> : <ChevronRight size={12} strokeWidth={2} />}
-        <Icon size={12} strokeWidth={1.6} style={{ color: HUNTER.SOFT }} />
-        <span style={{ flex: 1, textAlign: 'left', fontWeight: 600 }}>{title}</span>
+    <div>
+      {/* 一行 flex:可点区 + action + 计数。
+          **不要用绝对定位摆 action** —— right 值是拍的,计数一变宽就重叠,
+          这个坑已经踩过一次。让浏览器算位置。
+          按钮不能套按钮,所以可点区只包左半边。 */}
+      <div style={blockHeadRow}
+           onMouseEnter={(e) => { e.currentTarget.style.background = HUNTER.PANEL_2 }}
+           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}>
+        <button onClick={() => onToggle(id)} style={blockHeadMain}>
+          {open ? <ChevronDown size={12} strokeWidth={2} /> : <ChevronRight size={12} strokeWidth={2} />}
+          <Icon size={12} strokeWidth={1.6} style={{ color: HUNTER.SOFT }} />
+          <span style={{ fontWeight: 600 }}>{title}</span>
+        </button>
+        {action}
         {/* headline 没拿到时显示 — 而不是 0/0,免得像"什么都没有" */}
-        <span style={{ fontSize: 11, color: HUNTER.INK_F, fontVariantNumeric: 'tabular-nums' }}>
+        <span style={{ fontSize: 11, color: HUNTER.INK_F, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
           {headline ?? '—'}
         </span>
-      </button>
-      {/* action 放在折叠按钮**外面** —— 嵌在 button 里会变成"点加号也切换折叠" */}
-      {action}
+      </div>
       {open && (
         <div style={{ paddingBottom: 4 }}>
           {sub ? <div style={subLine}>{sub}</div> : null}
@@ -318,10 +322,18 @@ const chip: React.CSSProperties = {
 const chipName: React.CSSProperties = {
   maxWidth: 118, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
 }
+const blockHeadRow: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px',
+  transition: 'background 0.1s',
+}
+const blockHeadMain: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0,
+  padding: 0, background: 'transparent', border: 'none', textAlign: 'left',
+  fontSize: 12.5, color: HUNTER.INK_S, cursor: 'pointer', fontFamily: 'inherit',
+}
 const addBtn: React.CSSProperties = {
-  position: 'absolute', right: 34, top: 5,
-  display: 'flex', alignItems: 'center', justifyContent: 'center',
-  width: 20, height: 20, borderRadius: 5, cursor: 'pointer',
+  display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+  width: 19, height: 19, borderRadius: 5, cursor: 'pointer',
   background: 'transparent', border: 'none', color: HUNTER.INK_F,
   transition: 'color 0.1s',
 }

@@ -25,6 +25,8 @@ import { inspectRepo, installFromRepo, type RepoInspect } from '../lib/skillClie
 interface Props {
   onClose: () => void
   onInstalled: (names: string[], notice?: string) => void
+  /** 嵌在 SkillAddPanel 里时用 —— 外层已经有标题和关闭按钮,不要再画一遍 */
+  bare?: boolean
 }
 
 const LEVEL_NOTE: Record<string, string> = {
@@ -34,7 +36,7 @@ const LEVEL_NOTE: Record<string, string> = {
   L4: '这是一个 plugin · 本系统只支持其中的 skill 部分',
 }
 
-export default function SkillInstallCard({ onClose, onInstalled }: Props) {
+export default function SkillInstallCard({ onClose, onInstalled, bare }: Props) {
   const [repo, setRepo] = useState('')
   const [info, setInfo] = useState<RepoInspect | null>(null)
   const [picked, setPicked] = useState<string[]>([])
@@ -72,12 +74,14 @@ export default function SkillInstallCard({ onClose, onInstalled }: Props) {
     .reduce((n, c) => n + c.risks.length, 0) || 0
 
   return (
-    <div style={wrap}>
-      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
-        <Package size={13} strokeWidth={1.7} style={{ color: HUNTER.SOFT, marginRight: 6 }} />
-        <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: HUNTER.INK }}>从 GitHub 安装</span>
-        <button onClick={onClose} style={iconBtn}><X size={13} strokeWidth={2} /></button>
-      </div>
+    <div style={bare ? {} : wrap}>
+      {!bare && (
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
+          <Package size={13} strokeWidth={1.7} style={{ color: HUNTER.SOFT, marginRight: 6 }} />
+          <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: HUNTER.INK }}>从 GitHub 安装</span>
+          <button onClick={onClose} style={iconBtn}><X size={13} strokeWidth={2} /></button>
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: 8 }}>
         <input
