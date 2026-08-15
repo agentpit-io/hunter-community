@@ -300,6 +300,37 @@ docker compose up -d --build
 
 ---
 
+## 加你自己的 SKILL
+
+SKILL 是**分析逻辑**——一段讲清"这类问题该怎么分析"的方法论。我们内置了 29 个
+(行情速查 · 深度分析 · DCF 估值 · 多空辩论 …),你也可以加自己的。
+
+用的是 **Anthropic Agent Skills 标准格式**,所以**网上下载的 skill 不用改一个字**:
+
+```
+user-skills/
+  你的skill名/
+    SKILL.md
+```
+
+```markdown
+---
+name: 你的skill名
+description: 一句话说明什么时候该用它 —— 模型据此判断要不要调用
+---
+
+# 正文写方法论
+分几步、先看什么后看什么、注意什么。
+```
+
+放好后 `docker compose restart api opencode` 即可。**同名时你的覆盖我们的** ——
+想改我们某个 SKILL 的措辞,放一个同名目录就行,不用动我们的文件。
+
+想让你的 SKILL 用我们的数据与工具,在 frontmatter 里加一段 `hunter:`
+(标准加载器会忽略它,不影响兼容)——详见 `user-skills/README.md`。
+
+---
+
 ## Provider 矩阵
 
 数据源默认走 Hunter 网关（`hunter`）。没配 key 时它会明确回一句"去申请 key"，

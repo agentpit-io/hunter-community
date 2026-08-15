@@ -94,6 +94,13 @@ services:
       KRONOS_LOCAL_URL: ${KRONOS_LOCAL_URL:-}
       HUNTER_SAAS_KRONOS_URL: ${HUNTER_SAAS_KRONOS_URL:-}
       HUNTER_SAAS_KRONOS_KEY: ${HUNTER_SAAS_KRONOS_KEY:-}
+      # SKILL 现在是 skills/ 下的标准 SKILL.md 文件(_14 Step A),api 要读它们
+      HUNTER_SKILLS_DIR: /opt/hunter-skills
+      HUNTER_USER_SKILLS_DIR: /opt/hunter-user-skills
+    volumes:
+      # SKILL 标准文件 · 我们发的 + 用户自己加的(同名时用户覆盖)
+      - ./skills:/opt/hunter-skills:ro
+      - ./user-skills:/opt/hunter-user-skills:ro
     ports:
       - "${API_HOST_PORT:-8100}:8000"
 
@@ -204,6 +211,12 @@ services:
       # gen-config.py 注册。放 /opt/hunter-mcp 而不是覆盖 mcp/ 目录 ——
       # 覆盖会把镜像自带的 4 个脚本一起遮掉。
       - ./scripts/opencode-mcp:/opt/hunter-mcp:ro
+      # SKILL 标准文件 · opencode 自己也扫描这两处(实测见 _14 §2 结论 3):
+      #   .opencode/skills/            我们发的(会遮掉镜像自带的 effect skill —
+      #                                那是讲 Effect TS 库的,金融场景用不上)
+      #   ~/.config/opencode/skills/   用户自己加的
+      - ./skills:/opt/opencode-workspace/.opencode/skills:ro
+      - ./user-skills:/home/hunter/.config/opencode/skills:ro
     entrypoint: ["/bin/sh", "/opt/hunter-boot/entrypoint.sh"]
     ports:
       - "${OPENCODE_HOST_PORT:-3921}:3901"

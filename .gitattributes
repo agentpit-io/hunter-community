@@ -14,6 +14,11 @@ Dockerfile      text eol=lf
 docker-compose*.yml text eol=lf
 .env.example    text eol=lf
 
+# SKILL.md 要挂进 Linux 容器被 opencode 解析。YAML frontmatter 对回车符敏感 ——
+# 值会带上尾随回车,description 之类肉眼看不出问题但比对会失败。
+skills/**       text eol=lf
+user-skills/**  text eol=lf
+
 # Python 本身两种换行都能跑,但容器里可能被直接 ./xxx.py 执行,
 # shebang 带 \r 一样会挂
 *.py            text eol=lf
