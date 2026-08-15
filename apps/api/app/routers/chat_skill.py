@@ -18,7 +18,7 @@ import time
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from app.services import opencode_admin, skill_files
+from app.services import opencode_admin, skill_files, skill_install
 from app.services.database import get_conn
 
 log = logging.getLogger(__name__)
@@ -345,3 +345,46 @@ async def reset_skills(request: Request):
     n = cur.rowcount
     c.commit(); c.close()
     return {"ok": True, "reset": n}
+
+
+# ══════════════════════════════════════════════════════════════
+# 从 GitHub 装 SKILL(_18)
+#
+# **两步**,不是一步:先 inspect(不下载,只读目录树)让用户看清楚要装什么、
+# 会丢什么、有没有可疑内容;确认之后才 install。
+#
+# 一步装完看着更顺,但那等于让用户闭着眼睛把陌生人的提示词注入自己的
+# 模型上下文 —— SKILL.md 正文是直接进上下文的。
+# ══════════════════════════════════════════════════════════════
+
+class RepoIn(BaseModel):
+    repo: str                       # 完整 URL / owner/repo / owner/repo@分支
+
+
+class InstallIn(BaseModel):
+    repo: str
+    paths: list[str]                # inspect 返回的 candidate.path
+
+
+@router.post("/chat/skills/inspect")
+async def inspect_repo(body: RepoIn, request: Request):
+    """探测 GitHub 仓库 —— **不下载内容**,只读目录树与候选 SKILL.md 的头部。"""
+    _uid(request)
+    try:
+        return skill_install.inspect(body.repo)
+    except skill_install.InstallError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/chat/skills/install")
+async def install_from_repo(body: InstallIn, request: Request):
+    """按 inspect 的结果装选中的 skill。可执行文件一律跳过。"""
+    _uid(request)
+    existing = [s for s in _builtins() if not s.get("builtin", True)]
+    if len(existing) + len(body.paths) > MAX_CUSTOM:
+        raise HTTPException(400, f"最多 {MAX_CUSTOM} 个自定义能力,请先删除不用的")
+    try:
+        installed = skill_install.install(body.repo, body.paths)
+    except skill_install.InstallError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, "installed": installed, **_after_write()}
