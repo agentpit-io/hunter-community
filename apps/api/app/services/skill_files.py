@@ -162,3 +162,119 @@ def load_all(force: bool = False) -> list[dict]:
 
 def category_order() -> list[str]:
     return CATEGORY_ORDER
+
+
+# ══════════════════════════════════════════════════════════════
+# 写入(用户自建 SKILL)
+#
+# `_19` §5.2。原来用户自建走 `chat_user_skill` 数据库表,只能存
+# name / icon / prompt_tpl 三个字段 —— 建出来的本质是「带图标的提示词
+# 快捷方式」,不是带方法论、能声明工具依赖的 SKILL。
+#
+# 改成写文件之后,「UI 里建的」「手动放进目录的」「从 GitHub 装的」
+# 变成**同一个东西**,一套加载逻辑。
+# ══════════════════════════════════════════════════════════════
+
+_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{1,39}$")
+
+# 目录名黑名单 —— 这些会跟文件系统或加载逻辑打架
+_RESERVED = {"con", "prn", "aux", "nul", "user-skills", "skills"}
+
+
+class SkillWriteError(ValueError):
+    """写入前的校验失败 —— 调用方转成 400 给用户看,不是 500。"""
+
+
+def validate_name(name: str) -> str:
+    """目录名必须是安全的小写标识符。
+
+    **不接受任意字符串**:这个值会直接拼进文件路径。`../` 之类能写到
+    挂载点外面去,而这个函数的输入来自网页表单。
+    """
+    n = (name or "").strip().lower()
+    if not _NAME_RE.match(n):
+        raise SkillWriteError(
+            "名称只能用小写字母/数字/下划线,字母开头,2-40 位(例:my_dcf_check)")
+    if n in _RESERVED:
+        raise SkillWriteError(f"{n} 是保留名,换一个")
+    return n
+
+
+def _yaml_str(v: str) -> str:
+    """YAML 标量 —— 一律双引号包并转义,值里有中文、冒号、引号都不怕。"""
+    return '"' + str(v or "").replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def render(fields: dict, body: str) -> str:
+    """把表单字段渲染成标准 SKILL.md。
+
+    渲染出来的必须是**标准格式** —— 用户导出这个文件丢到别人的
+    Claude Code / opencode 里也该能用,而不是只有我们认。
+    所以扩展字段一律收在 `hunter:` 命名空间下。
+    """
+    name = validate_name(fields.get("name", ""))
+    lines = ["---", f"name: {name}",
+             f"description: {_yaml_str(fields.get('description') or fields.get('display_name') or name)}",
+             "hunter:",
+             f"  display_name: {_yaml_str(fields.get('display_name') or name)}",
+             f"  icon: {_yaml_str(fields.get('icon') or '⭐')}",
+             f"  category: {_yaml_str(fields.get('category') or '其他')}"]
+    if fields.get("brand"):
+        lines.append(f"  brand: {_yaml_str(fields['brand'])}")
+    if fields.get("source_url"):
+        lines.append(f"  source_url: {_yaml_str(fields['source_url'])}")
+    lines.append(f"  prompt_tpl: {_yaml_str(fields.get('prompt_tpl') or '')}")
+    for key in ("needs_tools", "needs_data"):
+        vals = [v for v in (fields.get(key) or []) if v]
+        if vals:
+            lines.append(f"  {key}:")
+            lines += [f"    - {v}" for v in vals]
+        else:
+            lines.append(f"  {key}: []")
+    # 来源信息 —— 日后排查"这个 skill 哪来的"全靠它
+    lines.append(f"  origin: {_yaml_str(fields.get('origin') or 'ui')}")
+    lines.append("---")
+    lines.append("")
+    lines.append(f"# {fields.get('display_name') or name}")
+    lines.append("")
+    lines.append((body or "").strip() or "> 正文待补充。写清楚:什么时候用、怎么做、什么时候**不适用**。")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def save(fields: dict, body: str) -> Path:
+    """写 user-skills/{name}/SKILL.md。返回写入路径。
+
+    **换行一律 LF** —— 这个文件要挂进 Linux 容器被 opencode 解析,
+    YAML frontmatter 对回车符敏感,值会带上尾随回车且肉眼看不出。
+    (`.gitattributes` 管的是仓库里的文件,运行时新建的管不着。)
+    """
+    name = validate_name(fields.get("name", ""))
+    USER_SKILLS_DIR.mkdir(parents=True, exist_ok=True)
+    d = USER_SKILLS_DIR / name
+    d.mkdir(exist_ok=True)
+    content = render(fields, body).replace("\r\n", "\n").replace("\r", "\n")
+    (d / "SKILL.md").write_text(content, encoding="utf-8", newline="\n")
+    load_all(force=True)          # 让本进程立刻看到;opencode 那边另外 refresh
+    logger.info("[skill_files] 写入用户 SKILL {}", d)
+    return d / "SKILL.md"
+
+
+def delete(name: str) -> bool:
+    """删掉用户自建的 SKILL。**只动 user-skills/**,内置目录碰都不碰。"""
+    n = validate_name(name)
+    d = USER_SKILLS_DIR / n
+    if not d.is_dir():
+        return False
+    import shutil
+    shutil.rmtree(d)
+    load_all(force=True)
+    logger.info("[skill_files] 删除用户 SKILL {}", d)
+    return True
+
+
+def is_user_skill(name: str) -> bool:
+    try:
+        return (USER_SKILLS_DIR / validate_name(name) / "SKILL.md").is_file()
+    except SkillWriteError:
+        return False

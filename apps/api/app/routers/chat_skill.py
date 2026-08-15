@@ -12,11 +12,13 @@
     ③ 用户自建能力 —— builtin_key 为空
 """
 import logging
+import re
+import time
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from app.services import skill_files
+from app.services import opencode_admin, skill_files
 from app.services.database import get_conn
 
 log = logging.getLogger(__name__)
@@ -153,9 +155,22 @@ async def get_skill_detail(key: str):
 
 
 class SkillIn(BaseModel):
+    """自建能力的表单。
+
+    前四个是老字段(旧版 UI 只发这些,保持兼容);后面几个是改写文件之后
+    才有意义的 —— 有了它们,用户建的才是**带方法论、能声明依赖的 SKILL**,
+    而不只是一个带图标的提示词快捷方式(见 `_19` §5.2)。
+    """
     name: str
     icon: str = "⭐"
     prompt_tpl: str
+    # 目录名(英文)· 不给就从 display_name 生成
+    slug: str | None = None
+    description: str | None = None
+    category: str | None = None
+    needs_tools: list[str] = []
+    needs_data: list[str] = []
+    body: str | None = None          # Markdown 方法论正文
 
 
 def _validate(name: str, tpl: str) -> tuple[str, str]:
@@ -172,22 +187,60 @@ def _validate(name: str, tpl: str) -> tuple[str, str]:
     return name, tpl
 
 
+def _slugify(display: str, given: str | None) -> str:
+    """给定就用给定的;否则从显示名生成一个安全的目录名。
+
+    显示名多半是中文,音译不现实,所以中文场景直接落到时间戳兜底 ——
+    目录名对用户不可见,可读性让位于**一定能生成合法值**。
+    """
+    if given:
+        return given.strip().lower()
+    s = re.sub(r"[^a-z0-9_]+", "_", (display or "").strip().lower()).strip("_")
+    if s and s[0].isdigit():
+        s = "s_" + s
+    return s or f"skill_{int(time.time())}"
+
+
+def _after_write() -> dict:
+    """写完文件之后让 opencode 重扫,并把结果如实带给前端。
+
+    **不许假装成功**:文件写好了但 opencode 没重扫,表现是"侧栏有了、
+    模型说没有",用户完全无从判断。旧镜像上刷新端点是 404,那时要明说需要重启。
+    """
+    r = opencode_admin.refresh_skills()
+    if r.get("ok"):
+        return {"synced": True, "skill_count": r.get("count")}
+    return {"synced": False, "needs_restart": True,
+            "message": opencode_admin.restart_hint(), "reason": r.get("reason", "")}
+
+
 @router.post("/chat/skills")
 async def create_skill(body: SkillIn, request: Request):
-    """新建自定义能力。"""
-    uid = _uid(request)
+    """新建自定义能力 —— **写文件,不写数据库**。
+
+    改成写 `user-skills/{slug}/SKILL.md` 之后,「UI 里建的」「手动放进目录的」
+    「从 GitHub 装的」是同一个东西,一套加载逻辑(`_19` §5.2)。
+    """
+    _uid(request)                       # 仅做鉴权
     name, tpl = _validate(body.name, body.prompt_tpl)
-    if len([r for r in _rows(uid) if not r["builtin_key"]]) >= MAX_CUSTOM:
+    existing = [s for s in _builtins() if not s.get("builtin", True)]
+    if len(existing) >= MAX_CUSTOM:
         raise HTTPException(400, f"最多创建 {MAX_CUSTOM} 个自定义能力,请先删除不用的")
-    c = get_conn(); cur = c.cursor()
-    cur.execute("""INSERT INTO chat_user_skill (user_id, name, icon, prompt_tpl, sort_order)
-                   VALUES (%s,%s,%s,%s, COALESCE(
-                     (SELECT max(sort_order)+1 FROM chat_user_skill WHERE user_id=%s), 100))
-                   RETURNING id""",
-                (uid, name, (body.icon or "⭐")[:4], tpl, uid))
-    new_id = cur.fetchone()[0]
-    c.commit(); c.close()
-    return {"ok": True, "id": new_id}
+
+    slug = _slugify(name, body.slug)
+    if any(s["key"] == slug for s in _builtins() if s.get("builtin", True)):
+        raise HTTPException(400, f"{slug} 与内置能力重名 —— 换个名字,"
+                                 f"或到「管理」里直接改那个内置能力")
+    try:
+        skill_files.save({
+            "name": slug, "display_name": name, "icon": (body.icon or "⭐")[:4],
+            "description": body.description or "", "category": body.category or "其他",
+            "prompt_tpl": tpl, "needs_tools": body.needs_tools,
+            "needs_data": body.needs_data, "origin": "ui",
+        }, body.body or "")
+    except skill_files.SkillWriteError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, "key": slug, **_after_write()}
 
 
 class SkillPatch(BaseModel):
@@ -255,21 +308,32 @@ async def update_skill(key: str, body: SkillPatch, request: Request):
 
 @router.delete("/chat/skills/{key}")
 async def delete_skill(key: str, request: Request):
-    """删自定义能力。内置能力不能删,只能关(PATCH enabled=false)。"""
+    """删自定义能力。内置能力不能删,只能关(PATCH enabled=false)。
+
+    自建的现在是 `user-skills/{key}/` 目录,删目录即可。
+    **只动 user-skills/**,内置目录碰都不碰 —— 这是"恢复默认永远不会坏"的前提。
+    """
     uid = _uid(request)
-    if not key.startswith("custom:"):
+
+    # 老路径:custom:{id} 是改成写文件之前存在数据库里的,留着能删干净
+    if key.startswith("custom:"):
+        try:
+            rid = int(key.split(":", 1)[1])
+        except ValueError:
+            raise HTTPException(400, "无效的能力 id")
+        c = get_conn(); cur = c.cursor()
+        cur.execute("DELETE FROM chat_user_skill WHERE id = %s AND user_id = %s", (rid, uid))
+        n = cur.rowcount
+        c.commit(); c.close()
+        if not n:
+            raise HTTPException(404, "能力不存在")
+        return {"ok": True}
+
+    if not skill_files.is_user_skill(key):
         raise HTTPException(400, "内置能力不能删除,可在管理里关闭")
-    try:
-        rid = int(key.split(":", 1)[1])
-    except ValueError:
-        raise HTTPException(400, "无效的能力 id")
-    c = get_conn(); cur = c.cursor()
-    cur.execute("DELETE FROM chat_user_skill WHERE id = %s AND user_id = %s", (rid, uid))
-    n = cur.rowcount
-    c.commit(); c.close()
-    if not n:
+    if not skill_files.delete(key):
         raise HTTPException(404, "能力不存在")
-    return {"ok": True}
+    return {"ok": True, **_after_write()}
 
 
 @router.post("/chat/skills/reset")

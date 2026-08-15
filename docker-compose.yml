@@ -97,10 +97,20 @@ services:
       # SKILL 现在是 skills/ 下的标准 SKILL.md 文件(_14 Step A),api 要读它们
       HUNTER_SKILLS_DIR: /opt/hunter-skills
       HUNTER_USER_SKILLS_DIR: /opt/hunter-user-skills
+      # api 写完 user-skills 之后要让 opencode 重扫(它只在启动时扫一次)。
+      # 之前这三个只给了 web,api 打过去是 401 —— 而 401 跟"镜像旧没这端点"
+      # 是两回事,不区分的话会把配置问题误报成版本问题。
+      OPENCODE_URL: http://opencode:3901
+      OPENCODE_SERVER_USERNAME: ${OPENCODE_USER:-}
+      OPENCODE_SERVER_PASSWORD: ${OPENCODE_PASS:-}
     volumes:
       # SKILL 标准文件 · 我们发的 + 用户自己加的(同名时用户覆盖)
+      # 内置能力只读 —— api **永远不该改它们**。
+      # "恢复默认永远改不坏"这条,靠的就是内置层物理只读。
       - ./skills:/opt/hunter-skills:ro
-      - ./user-skills:/opt/hunter-user-skills:ro
+      # 用户能力**可写** —— UI 里新建/编辑/删除 SKILL 要往这里写文件
+      # (_19 §5.2)。opencode 那边仍然是 :ro,它只读不写。
+      - ./user-skills:/opt/hunter-user-skills
     ports:
       - "${API_HOST_PORT:-8100}:8000"
 
