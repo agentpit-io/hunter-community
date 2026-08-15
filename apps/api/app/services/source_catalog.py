@@ -170,10 +170,10 @@ _HK: list[DataSource] = [
                volume_hint="1,950 条", available=False,
                unavailable_reason="上游 finance-data 尚未做成 HTTP 接口,只能直连库读"),
     DataSource("hk.southbound", "南向资金", Market.HK, DataKind.CAPITAL, "findata-db",
-               volume_hint="15 条", available=False,
-               unavailable_reason="**表里只有 15 行**,采集基本没跑起来 —— "
-                                  "不是通道问题,做了接口也是空的",
-               note="要先修采集,再谈开放"),
+               volume_hint="15 个交易日(2026-07-27 起)", available=False,
+               unavailable_reason="上游 finance-data 尚未做成 HTTP 接口,只能直连库读",
+               note="采集正常 —— 每工作日 8:50 跑,一个交易日一行,表 7/27 才建所以行数少。"
+                    "别把'行数少'当成'采集坏了'"),
     DataSource("hk.ah_premium", "AH 溢价", Market.HK, DataKind.VALUATION, "findata-db",
                volume_hint="360 条", available=False,
                unavailable_reason="上游 finance-data 尚未做成 HTTP 接口,只能直连库读"),
