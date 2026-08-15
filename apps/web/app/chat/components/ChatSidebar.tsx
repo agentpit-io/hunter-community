@@ -6,7 +6,7 @@ import { ArrowLeft, Plus, MessageSquare, LogOut, ChevronDown, PanelLeftClose, Un
 import { HUNTER, HUNTER_LOGO } from '../../lib/hunter-theme'
 import type { Session } from '../lib/types'
 import { listSessions, createSession } from '../lib/opencodeClient'
-import SkillPanel from './SkillPanel'
+import CapabilityPanel from './CapabilityPanel'
 import SkillManager from './SkillManager'
 import ProfileEditor from './ProfileEditor'
 import { getProfile } from '../lib/profileClient'
@@ -352,17 +352,19 @@ export default function ChatSidebar({ currentSessionId, onSelectSession, onNewSe
         </button>
       </div>
 
-      {/* 能力区 —— 让用户知道能问什么(自身失败时静默不显示,不影响聊天) */}
+      {/* 能力区 · 三层(数据源/工具箱/SKILL)—— 让用户知道**能拿到什么数据、
+          有什么工具、能问什么**。自身失败时静默不显示,不影响聊天。 */}
       {onPickSkill && (
-        <SkillPanel
+        <CapabilityPanel
           onPick={onPickSkill}
           onManage={() => setShowSkillMgr(true)}
           refreshKey={skillRefresh}
         />
       )}
 
-      {/* Session 列表 · 提升到 SkillPanel 之下 · 占据大部分空间 */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0 8px' }}>
+      {/* Session 列表 · 在能力区之下 · 占据剩余空间。
+          能力区三块默认只展开 SKILL 一块,所以这里仍能拿到大部分高度。 */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0 8px', minHeight: 120 }}>
         {loading && sessions.length === 0 ? (
           <div style={{ padding: '20px 12px', textAlign: 'center', color: HUNTER.INK_F, fontSize: 12 }}>
             加载中...
