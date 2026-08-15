@@ -1,311 +1,345 @@
-# Hunter Community Edition
+<div align="center">
 
-> 你的私人金融 AI 团队 · 开源自部署 · 跟着下面走一遍就能用
->
-> Your private financial AI team · self-hosted · follow the steps below and it runs.
+# 🎯 Hunter Community Edition
+
+**你的私人金融 AI 团队 · 一 key 通用 · 5 分钟自部署**
+
+*Your private financial AI team · one API key · self-hosted in 5 minutes*
 
 [![License](https://img.shields.io/badge/license-Apache_2.0-blue)](./LICENSE)
 [![CI](https://github.com/agentpit-io/hunter-community/actions/workflows/ci.yml/badge.svg)](https://github.com/agentpit-io/hunter-community/actions/workflows/ci.yml)
 [![Docker](https://img.shields.io/badge/ghcr.io-agentpit--io-blue)](https://github.com/agentpit-io/hunter-community/pkgs/container/hunter-community-api)
+[![GitHub Stars](https://img.shields.io/github/stars/agentpit-io/hunter-community?style=social)](https://github.com/agentpit-io/hunter-community)
+
+[**🚀 Live Demo**](https://hunter-community.agentpit.io) · [**📖 Docs**](./docs/01-getting-started.md) · [**🐦 Twitter**](https://x.com/agentpit_io) · [**⭐ Star us**](https://github.com/agentpit-io/hunter-community)
+
+<br>
+
+<img src="./docs/screenshots/01-overview-quickview.png" alt="Hunter Community · 601899 现价查询 · 富卡片 + 侧栏三层" width="820" />
+
+*一问「601899 多少钱」· 侧栏 32 数据源全解锁 · 富卡片带 AI 短评 · 3 按钮秒进深度分析 / 加自选 / 查新闻*
+
+</div>
+
+---
+
+## 📖 目录
+
+- [这是什么](#-这是什么)
+- [为什么选 Hunter](#-为什么选-hunter)
+- [核心能力](#-核心能力)
+- [5 分钟跑起来](#-5-分钟跑起来)
+- [两把 key(唯一需要理解的概念)](#-两把-key唯一需要理解的概念)
+- [大模型兼容性](#-大模型兼容性)
+- [23 个内置 SKILL](#-23-个内置-skill)
+- [技术栈](#-技术栈)
+- [架构](#-架构)
+- [Provider 矩阵](#-provider-矩阵)
+- [扩展 Hunter](#-扩展-hunter)
+- [Community vs Cloud](#-community-vs-cloud)
+- [常见问题](#-常见问题)
+- [Contributing](#-contributing)
+- [社区与支持](#-社区与支持)
+- [Roadmap](#-roadmap)
+
+---
+
+## 🎯 这是什么
+
+**Hunter 是给个人投资者用的金融 AI Agent 平台**。给它 1 把 key + 1 个大模型 · 你就有一个能查行情、拉新闻、跑深度分析、预测走势、盯自选、按 SKILL 方法论工作的 AI 团队 —— **全部在你自己的机器上运行**。
+
+- 🎯 **一 key 通用** · `hunt_tools_xxx` 一把 key 解锁 **32/33 数据源** + **23 个精修 SKILL** + Kronos 走势预测 + TrueSource 情报
+- 🧠 **多模型可插拔** · **DeepSeek v4 pro 实测 P0 默认**(<$0.001/次 · 12-70 秒)· 通义/豆包/Claude/GPT env 模板齐全
+- 💾 **自部署** · docker compose 一键起 · 数据在你磁盘 · 不上云 · 不联系我们除非你想
+- 🔌 **易扩展** · Markdown 写 SKILL 方法论 · GitHub 一键装 SKILL · 接自己的 MCP · 三种扩展全支持
+- 💰 **免费开源** · Apache 2.0 · fork 随便用(仅须换名)
 
 Live preview: **[https://hunter-community.agentpit.io](https://hunter-community.agentpit.io)**
-（演示站开了多用户，首次访问会引导你注册；自己 clone 下来跑是不需要账号的）
+(演示站开了多用户 · 首次访问会引导你注册 · 自己 clone 下来跑不需要账号)
 
 ---
 
-## 先搞清楚两把 key
+## 🌟 为什么选 Hunter
 
-这是使用本项目**唯一需要理解的概念**，其余都是照抄命令。
-
-| | 谁的 key | 干什么 | 不填会怎样 |
-|---|---|---|---|
-| **① 大模型 key** | 你自己的（OpenAI / OpenRouter / 任意 OpenAI 兼容网关） | 驱动对话本身 | 聊天不可用 |
-| **② Hunter 平台 key** (`hunt_tools_...` 或 `hunt_data_...`) | 我们签发的，[免费申请](https://hunter.agentpit.io/dev/api-keys) | 解锁左侧**工具/SKILL**(行情/K线/财报/UZI/Kronos)**+** 深度分析的**数据基座**(巨潮/龙虎榜/北向/finance-data 聚合新闻 15+ 路) | 聊天照常，工具会提示"去申请"；深度分析报告 Sentinel 只能靠 akshare 免费源，常态**抓 14 条 / 保留 0 条**，基本是 LLM 空谈 |
-
-**Hunter 平台 key · 一 key 通用**:
-一把 `hunt_tools_...` 同时解锁**工具**(sidebar SKILL)+ **数据源**(深度分析
-Sentinel 用的 finance-data)· 只需填 `HUNTER_API_KEY` 一处。数据访问走
-`hunter.agentpit.io/api/saas/data/*` 网关中转(2026-08-14 起) · 服务端替你完成
-finance-data 内部鉴权 · 用户侧只管填一把 key。
-
-为什么工具要我们的 key：这些能力背后是我们持续维护的数据管道和模型服务，
-在 Hunter 服务器上执行，不在你的机器上。产物免费给你用，用量按 key 记账。
-
-**开源版不打折**：左侧工具全部照常显示，点下去会告诉你怎么解锁，而不是把功能藏起来。
+| 别人家 | Hunter |
+|---|---|
+| **OpenBB · FinGPT** — 需要自己拼 provider 与 tool · 上手 2-3 天 | 开箱即用 · 5 分钟跑起来 · SKILL 就是方法论 · 加一个就多一种分析 |
+| **TradingView** — 强图表 · 但只订阅 · 不能自部署 · 数据不出户 | 数据在你磁盘 · 想接自己的 broker / 数据源 / MCP 完全放开 |
+| **Cursor / Cline 通用 agent** — 通用但金融要自己教 | 23 个金融专精 SKILL · 卖方研究员级方法论 · 覆盖尽调/估值/组合 |
+| **通用 ChatGPT** — 能答但拿不到实时数据 · 不会调工具 | 一 key 通吃行情/新闻/K 线/龙虎榜/北向 · Function calling 精准分流 |
 
 ---
 
-## 跑起来（约 10 分钟，大头是拉镜像）
+## ✨ 核心能力
 
-### 0. 前置
+<table>
+<tr>
+<td width="25%">
 
-- Docker Desktop（Windows / macOS）或 Docker Engine + Compose v2（Linux）
-- 磁盘留 20 GB（opencode 引擎镜像解压后 ~7.5 GB 是大头 · web/api 各 ~1.5 GB · 加 Postgres 数据卷），内存留 4 GB
-- 能访问 `ghcr.io`（对话引擎镜像从这里拉，压缩包 ~1.7 GB，国内首拉 10 分钟起步）
+**💹 数据(32/33 源)**
+- 实时行情 · A/港/美股
+- 30 天 K 线 · 财报 · 新闻
+- 龙虎榜 · 十大股东 · 治理
+- 北向资金 · 南向资金 · AH 溢价
+- 巨潮公告 · 行业分类
 
-### 1. 拉代码
+</td>
+<td width="25%">
+
+**🧠 AI 能力**
+- 23 个精修 SKILL(下方展开)
+- Kronos 走势预测(清华时序模型)
+- TrueSource 主动情报采集
+- DeepSeek/qwen/Claude/GPT 可插拔
+- MCP 工具循环 · 自动分流
+
+</td>
+<td width="25%">
+
+**💬 交互**
+- SSE 流式对话 · 边想边输出
+- 富卡片渲染(报价/新闻/预测)
+- **侧栏三层**(数据源/工具箱/SKILL · 见 [截图](./docs/screenshots/02-sidebar-toolbox.png))
+- 自选 · 持仓 · 信号追踪
+- 顶部深度工具菜单(在线分析/K 线预测/信号看板/事件分析 · 见 [截图](./docs/screenshots/06-top-menu-depth-tools.png))
+
+</td>
+<td width="25%">
+
+**🚀 部署**
+- docker compose 一键起
+- 5 分钟(镜像已 pull 后)
+- 6 服务 healthy 自动 orchestrate
+- bind mount 快速迭代
+- 一 key 通用 · 无外部依赖
+
+</td>
+</tr>
+</table>
+
+---
+
+## 🚀 5 分钟跑起来
+
+### 前置
+
+- Docker Desktop(Windows/macOS)或 Docker Engine + Compose v2(Linux)
+- 磁盘 20 GB(opencode 镜像 ~7.5 GB)· 内存 4 GB
+- 能访问 `ghcr.io`(对话引擎从这里拉)
+- 大模型 key(DeepSeek 免费送 500 万 tokens · [30 秒申请](https://platform.deepseek.com/api_keys))
+
+### 3 步启动
 
 ```bash
+# 1. 拉代码
 git clone https://github.com/agentpit-io/hunter-community
 cd hunter-community
 cp .env.example .env
+
+# 2. 改 .env 三处(自动生成 JWT_SECRET · 手填 LLM_API_KEY · 可选填 HUNTER_API_KEY)
+#    - Linux/macOS
+echo "JWT_SECRET=$(openssl rand -base64 48)" >> .env
+#    - Windows PowerShell 版见 docs/01-getting-started.md
+
+# 手改 .env 三处:
+# LLM_BASE_URL=https://api.deepseek.com/v1
+# LLM_DEFAULT_MODEL=deepseek-v4-pro
+# LLM_API_KEY=sk-xxxxx
+# LLM_SCHEMA_SANITIZE=1                              # DeepSeek 必开
+# HUNTER_API_KEY=hunt_tools_xxxxx                    # 免费 · 30 秒申请 hunter.agentpit.io/dev/api-keys
+
+# 3. 起服务(首次 10 分钟拉镜像 · 之后 30 秒)
+docker compose up -d
+open http://localhost:3100
 ```
 
-### 2. 改 `.env` 三处
+**首次测试**(打开浏览器后):
+- 问"601899 现在多少钱" — 会看到富卡片(实时价 · 52 周分位 · AI 短评)
+- 问"预测茅台走势" — Kronos GPU 推理 · 30-70 秒出未来 10 天 K 线预测
+- 点侧栏「深度分析」输入代码 — 60-300 秒出 22 维度深度报告
 
-先生成签名密钥（**直接复制整行执行**，会自动写进 `.env`）：
+**详细指南**:[`docs/01-getting-started.md`](./docs/01-getting-started.md)
 
-```powershell
-# Windows PowerShell
-$b=New-Object byte[] 48;[Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b)
-$s=([Convert]::ToBase64String($b) -replace '[=/+]','').Substring(0,60)
-$u=New-Object Text.UTF8Encoding $false
-$c=[IO.File]::ReadAllText("$PWD\.env",$u) -replace '(?m)^JWT_SECRET=.*$',"JWT_SECRET=$s"
-[IO.File]::WriteAllText("$PWD\.env",$c,$u)
-```
+---
 
-> 上面第 3、4 行必须**显式指定 UTF-8**,不能图省事写成
-> `(Get-Content .env -Raw) ... | Set-Content .env`。
-> 中文版 Windows 的默认代码页是 GBK,那样读会把 `.env` 里的中文注释拆坏、
-> 连带吃掉换行符 —— 实测 25 个变量里有 4 个(`LLM_PROVIDER` /
-> `NEXT_PUBLIC_API_URL` / `DATA_SOURCE_PROVIDER` / `FORECAST_PROVIDER`)
-> 会被并进上一行注释里,等于被注释掉,而且**看不出任何报错**。
+## 🔑 两把 key(唯一需要理解的概念)
 
-```bash
-# Linux / macOS
-sed -i.bak "s|^JWT_SECRET=.*|JWT_SECRET=$(openssl rand -base64 48 | tr -d '=/+' | head -c 60)|" .env && rm .env.bak
-```
+这是使用本项目**唯一需要理解的概念** · 其余都是照抄命令。
 
-<details>
-<summary>这是什么？为什么不能用默认值？</summary>
-
-它是签名密钥：登录凭证（JWT）用它签名，服务端再用它验签。本机自用时被人伪造凭证的
-风险很低，**真正的理由是它还兼了第二份工** —— 你的 Hunter 平台 key 和第三方 MCP
-凭证是用它派生出的密钥加密存在数据库里的（`apps/api/app/utils/crypto.py`）。
-以后再改它，那些已存的东西就解不开了，得重填一遍。所以现在设一次最省事。
-
-</details>
-
-然后编辑 `.env` 填大模型：
-
-```bash
-# ② 你自己的大模型 · 聊天靠它 · 三项都必填
-# 少任何一项 opencode 容器会拒启动(状态 Restarting),日志里会明说少的是哪个 ——
-# 这是故意的:留空的话上游会 401,opencode 又会把错误吞成一条空消息,
-# 前端只显示"深度思考完成"却什么都没答,谁也看不出是 key 没填。
-LLM_BASE_URL=https://api.openai.com/v1
-LLM_API_KEY=sk-<你的 key>
-LLM_DEFAULT_MODEL=gpt-4o-mini
-
-# 用 DeepSeek(deepseek-v4-flash / deepseek-v4-pro)?加一行:
-#   LLM_SCHEMA_SANITIZE=1
-# 不然对话会 400「Invalid schema ... type: 'null'」。详见 docs/02-providers.md。
-
-# ③ Hunter 平台 key · 一 key 通用(工具 + 数据源全解锁)
-# 申请:https://hunter.agentpit.io/dev/api-keys → 免费 · 30 秒
-# HUNTER_API_KEY=hunt_tools_xxxxxxxxxxxxxxxx
-```
-
-其余保持默认即可。
-
-**深度分析报告的档位**:
-
-| 场景 | 未填 ③ | 填了 ③ |
-|---|---|---|
-| Sentinel 抓取新闻 | 10-15 条(akshare 免费源 · 容器网络下常挂) | 50-80 条(finance-data 聚合) |
-| 保留通过核查条数 | 0-3 条 | 5-15 条 |
-| 判官置信度 | 15-30% | 50-80% |
-| 决策依据 | LLM 空谈 + 今日涨跌 | 巨潮/龙虎榜/北向/财联社均可引用 |
-
-> 客户端默认走 `hunter.agentpit.io/api/saas/data/*` 网关中转 · 由服务端注入
-> 内部 X-Finance-Token 访问 finance-data · 用户侧只需一把 key。
-> 详见 [统一 key gateway 方案](https://github.com/hangeaiagent/hunter/blob/main/doc/codex/community/2026-08-14_community-真正统一key-gateway方案.md)。
-
-### 3. 启动
-
-```bash
-docker compose up -d --build
-```
-
-首次会构建 api / web 镜像并拉取对话引擎，10 分钟左右属正常。看状态：
-
-```bash
-docker compose ps        # 六个服务都应是 running / healthy
-docker compose logs -f api
-```
-
-### 4. 打开浏览器
-
-<http://localhost:3100>
-
-**不需要注册，也不需要登录** —— 跑在你自己机器上，直接就是对话页。
-先发一句"你好"验证大模型通不通。
-
-> 想把这台实例开放给别人访问？在 `.env` 里设 `HUNTER_SINGLE_USER=0` 再
-> `docker compose up -d`，登录/注册就回来了（第一个注册的账号自动是管理员）。
-> **开着单用户模式暴露到公网 = 谁都能拿到管理员权限**，别这么干。
-
-### 5. 解锁工具 key(② `hunt_tools_...`)
-
-对话页左下角点 **「申请 Key · 解锁全部工具」**：
-
-1. 弹窗里点「去申请 Key（免费）」，在 Hunter 平台登录后一键签发
-2. 复制那串 `hunt_tools_...`（**只显示一次**）
-3. 粘回弹窗点「保存」——立即生效，不用重启
-
-也可以写进 `.env` 的 `HUNTER_API_KEY` 再 `docker compose up -d`，
-适合你自己长期跑的实例。
-
-至此左侧工具的小锁消失，「行情速查」「Kronos 走势预测」等能力全部可用。
-
-### 6. 一把 key 覆盖了什么(§5 填完就全开)
-
-§5 那把 `HUNTER_API_KEY` 是**唯一**要填的平台 key。所有需要我们服务端的能力都走
-`hunter.agentpit.io/api/saas/*` 网关中转 —— 网关校验你的 key、替你完成上游内部
-鉴权、并记一笔用量。上游地址对你完全隐藏,我们换机器你不用改任何配置。
-
-| 能力 | 网关路径 | 上游 | 没填 key 会怎样 |
+| | 谁的 key | 干什么 | 不填会怎样 |
 |---|---|---|---|
-| 工具 / SKILL(行情·K线·财报) | `/api/saas/tools/*` | hunter 自有 | 点了提示去申请 |
-| 深度分析数据基座(新闻·公告·龙虎榜) | `/api/saas/data/*` | finance-data | 静默降级到 akshare 免费源,报告很空 |
-| Kronos 走势预测 | `/api/saas/kronos/*` | kronos.agentpit.io | 401 + 申请引导 |
-| 发现页 · Scout 情报 | `/api/saas/truesource/*` | truesource.agentpit.io | 401 + 申请引导 |
+| **① 大模型 key** | 你自己的(DeepSeek / OpenAI / OpenRouter / OneAPI) | 驱动对话本身 | 聊天不可用 |
+| **② Hunter 平台 key** `hunt_tools_xxx` | 我们签发 · [免费申请 30 秒](https://hunter.agentpit.io/dev/api-keys) | 解锁**工具/SKILL**(行情/K线/财报/UZI/Kronos)+ **深度分析数据基座** | 聊天照常 · 工具提示"去申请" · 深度分析报告 Sentinel 常态**抓 14 条 / 保留 0 条** · 基本是 LLM 空谈 |
 
-不需要 `hunt_data_` / `hunt_kron_` 之类的第二把 key —— **平台从来没签发过这些前缀**,
-早期文档里出现过是笔误,照着填只会白费功夫。
-
-**验证生效**:
-```bash
-# 四个网关探活(都无需 key)
-for gw in tools data kronos truesource; do
-  docker compose exec api curl -s https://hunter.agentpit.io/api/saas/$gw/_ping; echo
-done
-# 期望每行都是 {"ok":true,"gateway":"saas-xxx","upstream":"..."}
-# (tools 网关没有 _ping,用 /manifest 代替)
-
-# 带自己的 key 拉一条新闻
-docker compose exec api python -c "
-import os, httpx
-r = httpx.get('https://hunter.agentpit.io/api/saas/data/api/v1/news/articles',
-              params={'symbol':'601899.SH','hours':24,'threshold':0.0},
-              headers={'Authorization': f\"Bearer {os.getenv('HUNTER_API_KEY','')}\"},
-              timeout=15)
-print(r.status_code, len(r.json().get('items', [])), '条')
-"
-# 期望:200 20+ 条  ·  401 = §5 的 key 没填/无效
+**一 key 通吃 4 网关**(2026-08-14 起统一):
+```
+一把 hunt_tools_xxx  →  /api/saas/tools/*       (23 SKILL + 工具箱)
+                    →  /api/saas/data/*        (finance-data · 32 源)
+                    →  /api/saas/kronos/*      (Kronos 走势预测)
+                    →  /api/saas/truesource/*  (TrueSource 情报)
 ```
 
-**私有部署 finance-data**(自建镜像)· 显式配 `.env`:
-```bash
-FINANCE_DATA_URL=https://your.finance-data.example.com
-FINANCE_DATA_TOKEN=<your shared token>
-# 客户端检测到 URL 不包含 /api/saas/data 会切到 X-Finance-Token 直连模式
-```
+**为什么工具需要我们的 key**:这些能力背后是我们持续维护的数据管道和模型服务 · 在 Hunter 服务器上执行 · 不在你的机器上 · 产物免费给你用 · 用量按 key 记账。
 
-### 默认端口（在 `.env` 里改）
+**开源版不打折**:左侧工具全部照常显示 · 点下去会告诉你怎么解锁 · 而不是把功能藏起来。
 
-| 服务 | 端口 |
+---
+
+## 🤖 大模型兼容性
+
+**遵循"测法是假测试 · 测工具调用才是真测试"方法论** · 我们用 12 个 golden case 实测每家模型的 tool_call 可靠性。
+
+| 模型 | tool_call | 参数正确 | 深度分析 | 延迟 | 单次成本 | 推荐等级 | 已知踩坑 |
+|---|---|---|---|---|---|---|---|
+| **DeepSeek v4 pro** | **6/7 hit** | 100% | 70 秒 | 12-70s | **~$0.0001-0.0008** | ⭐⭐⭐⭐⭐ **P0 默认** | 必开 `LLM_SCHEMA_SANITIZE=1` |
+| 通义 qwen-max | ⏳ 待测 | — | — | — | — | ⭐⭐⭐⭐ P0 | compatible-mode URL 后缀不能漏 |
+| 豆包 pro-32k | ⏳ 待测 | — | — | — | — | ⭐⭐⭐ P1 | LLM_DEFAULT_MODEL 填 endpoint_id · 不是 model 名 |
+| Claude Sonnet 4.6 | ⏳ 待测 | — | — | — | — | ⭐⭐⭐⭐⭐ 海外首选 | `LLM_PROVIDER=anthropic` |
+| GPT-4o | ⏳ 待测 | — | — | — | — | ⭐⭐⭐⭐ 海外备选 | CN 直连限流 · 走 OneAPI 中转 |
+
+**env 模板 5 家齐**(每份含 URL / model 名 / SANITIZE 设置 / 已知踩坑注释):[`docs/env-samples/`](./docs/env-samples/)
+
+**详细评测方法与数据**:[`docs/model-testing/`](./docs/model-testing/)
+
+---
+
+## 📚 23 个内置 SKILL
+
+SKILL 是**分析逻辑** —— 一段讲清"这类问题该怎么分析"的方法论。**23 个 SKILL 全部精修方法论完毕**(v0.2.3 · 2026-08-15) · **不再有"薄壳假装有方法论"** —— 每个 SKILL 都能给出机构级输出。
+
+### 综合分析(3)
+
+| SKILL | 一句话说明 |
 |---|---|
-| Web | 3100 |
-| API | 8100 |
-| Postgres | 5442 |
-| Redis | 6479 |
+| `stock_deep_analysis` | 22 维度融合 · 8 数据源 · 约 7s 出 LITE 报告 |
+| `debate` | 6 位分析师 · 2 轮辩论 · 60-90s 出深度报告 |
+| `uzi_quick_scan` | 30 秒给出买/卖/持结论 · 附 66 位专家评委投票分布 |
+
+### 估值建模(5 · UZI 系列)
+
+| SKILL | 一句话说明 |
+|---|---|
+| `uzi_dcf` | DCF 现金流折现 · WACC + 敏感性表 · 支持基于新财报的增量更新 |
+| `uzi_comps` | 同行对标 · PE/PB/PS/EV-EBITDA 多倍数横向 · 给合理估值区间 |
+| `uzi_lbo` | 杠杆收购情景 · 模拟 PE 买方 · 输出 5 年 IRR 与 MoM |
+| `uzi_segmental_model` | 分部建模 · 按业务线预测收入 · 分部对整体估值贡献 |
+| `uzi_earnings` | 解读最新财报 · beat/miss 检测 · EPS 驱动拆解 · 指引质量评分 |
+
+### 投研报告(3 · UZI 系列)
+
+| SKILL | 一句话说明 |
+|---|---|
+| `uzi_initiate` | 机构首次覆盖报告 · JPM/GS 卖方格式 · 投资亮点 + 估值 + 评级 |
+| `uzi_ic_memo` | 投委会备忘录 · base/bull/bear 三情景回报分布 |
+| `uzi_dd` | 完整尽调清单 · 财务/法律/运营/管理层/行业 5 大流 21 项 |
+
+### 投资策略(4 · UZI 系列)
+
+| SKILL | 一句话说明 |
+|---|---|
+| `uzi_thesis` | 建 5 支柱投资论点 · 持续追踪支柱状态与假设漂移 |
+| `uzi_catalysts` | 未来 60 天关键事件日历 · 财报/指引/解禁 · 附股价影响判断 |
+| `uzi_screen` | 5 套量化筛选(价值/成长/质量/动量/低波)· 排名与选中原因 |
+| `uzi_scan_trap` | 杀猪盘排查 · 异常拉升 + 减持时点 + 造假信号 + 推票热度 |
+
+### 组合管理(3)
+
+| SKILL | 一句话说明 |
+|---|---|
+| `portfolio_stress` | 压力测试 · 含板块联动 + 减半建议 · 前置需录 shares+cost |
+| `uzi_rebalance` | 逐持仓再平衡建议 · 权重漂移 + 交易清单 + 换手成本 |
+| `uzi_returns` | 收益归因 · 按持仓/行业/风格因子拆解 · Top 贡献与拖累 |
+
+### 基础工具(5)
+
+| SKILL | 一句话说明 |
+|---|---|
+| `quote` | 查一只或多只股票的最新价与近期波动 · 支持横向对比 |
+| `stock_news` | 5 条精选新闻 · 每条 AI 影响短评(利好/利空/中性/强利好) |
+| `forecast` | 清华 Kronos 金融时序大模型 · 预测未来 N 日开高低收 |
+| `risk_profile` | 读/改风险偏好 + 现金 + 单票/HK 上限 · 供组合建议自动应用 |
+| `watchlist_daily` | 自选涨跌排序 + Top 3 AI 归因 · 前置需先加自选 |
+
+<img src="./docs/screenshots/05-sidebar-skill-full.png" alt="SKILL 侧栏 23/23 全展开 · 分类分组" width="720" />
+
+*23 SKILL 侧栏视图 · 综合分析 / 投研报告 / 估值建模 / 组合管理 分类分组 · 点击即用*
+
+**想加自己的?**看 [扩展 Hunter](#-扩展-hunter) 章节。
 
 ---
 
-## 常见问题
+## 🛠 技术栈
 
-**要不要注册账号**
-不要。默认单用户模式，打开就能用。只有当你把 `HUNTER_SINGLE_USER` 设成 `0`
-（准备给别人访问时）才会出现登录和注册。
-
-**打不开 3100 / 页面一直转**
-`docker compose ps` 看 web 是不是 healthy；不是就 `docker compose logs web`。
-端口被占了就改 `.env` 的 `WEB_HOST_PORT` 再 `docker compose up -d`。
-
-**聊天报错说连不上模型**
-`LLM_BASE_URL` 要带 `/v1`，`LLM_API_KEY` 要是能用的。
-换了这两个之后必须 `docker compose up -d`（重建容器才会读新 env）。
-
-**点左侧工具弹"需要 key"**
-这就是设计如此，见上面「两把 key」。申请是免费的。
-
-**问股价时回答"尚未配置 Hunter key"**
-正常，见上面「两把 key」。想先不申请 key 试试基础行情，
-在 `.env` 里设 `DATA_SOURCE_PROVIDER=akshare` 再 `docker compose up -d`。
-
-**填了 key 还是提示未解锁**
-弹窗会告诉你具体原因：key 被吊销了、或连不上 `hunter.agentpit.io`。
-后者多半是本机代理／防火墙，`docker compose exec api curl -I https://hunter.agentpit.io` 验一下。
-
-**深度分析报告"技术面 AI 暂不可用" / "抓 14 条 · 保留 0 条" / 判官置信度只有 15-30%**
-`HUNTER_API_KEY` 空的必然结果 —— 深度分析数据源依赖它(通过 `hunter.agentpit.io/api/saas/data/*`
-网关中转 · 见 §6)。检查表:
-1. `docker compose exec api env | grep HUNTER_API_KEY` · 空 = 没填
-2. `docker compose exec api curl -s https://hunter.agentpit.io/api/saas/data/_ping` · 应返 `{"ok":true,...}`
-3. 完整验证请求 · 见 §6 的 curl 脚本
-4. 一行修:`.env` 加 `HUNTER_API_KEY=hunt_tools_...` · `docker compose up -d`
-
-**启动报 `JWT_SECRET` 相关的错，直接起不来**
-`.env` 里少了 `JWT_SECRET` 这一行。这是故意拦的：api 和 opencode 必须共用同一个值，
-少了会变成"服务起得来但对话莫名 401"的哑故障，不如启动时就说清楚。
-回到第 2 步跑一遍生成命令即可。
-
-**`docker compose ps` 里 opencode 一直 `Restarting`**
-`.env` 里 `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_DEFAULT_MODEL` 至少缺一个 ——
-`docker compose logs opencode` 会明说缺哪个。同 `JWT_SECRET` 一个道理：留空的话
-上游 401,opencode 会把错误吞成一条空消息,前端只显示"深度思考完成"没有内容,
-根本看不出是 key 没填,所以启动阶段直接拒掉。补上再 `docker compose up -d`。
-
-**发第一条对话报 `Invalid schema for function ... type: "null"`**
-用了 DeepSeek(或其它对 tool schema 严格的 OpenAI 兼容网关)。opencode 打包
-MCP 工具时会送 `parameters: null` 的 schema,DeepSeek 直接 400 —— 前端表现是
-气泡里只有"深度思考完成"没有正文。修法:`.env` 加 `LLM_SCHEMA_SANITIZE=1`
-让请求过一遍 `llm-shim` 自动清洗,再 `docker compose up -d`。
-细节和适用列表见 [docs/02-providers.md](./docs/02-providers.md)。
-
-**首次发消息像卡了 30-40 秒**
-opencode 冷启动要下 `@ai-sdk/openai-compatible` npm 包 + 初始化 provider,
-第一次 chat/session 创建就是这么慢。第二次开始秒回。docker restart 后同样。
-
-**改了 `.env` 没生效**
-`docker compose restart` 不会重读 env，用 `docker compose up -d`。
-`NEXT_PUBLIC_*` 是构建期烘进前端的，改它要 `docker compose up -d --build`。
-
-**首次 `docker compose up` 十几分钟没输出，是不是卡了**
-大概率没卡，是 compose 在非 TTY 下几乎不打印进度。opencode 引擎镜像压缩包
-1.7 GB / 解压后 7.5 GB，国内网络下就是这个体感。判断标准：`docker system df`
-里 `SIZE` 有没有持续涨，或者单独 `docker pull ghcr.io/agentpit-io/hunter-opencode:latest`
-拿实时进度看。
-
-**api build 报 `HASHES FROM THE REQUIREMENTS FILE` / `unknown package`**
-`requirements.txt` 里没手写 hash，是 pip 校验 PyPI 元数据 sha256 时下载损坏，
-PyPI CDN 偶发抖动就会中一次。修法：
-```bash
-docker compose build --no-cache api && docker compose up -d
-```
-重来一遍基本就过了。
-
-**Hunter 平台 key（`hunt_tools_*`）能顺便当大模型 key 用吗**
-不能。`saas_gemini` provider 指向的 `oneapi.hermes.agentpit.io` 是 Hunter 内网机器，
-公网 DNS 查不到。**两把 key 各管各的**（见开头「先搞清楚两把 key」）：Hunter key
-只解锁工具，聊天还是要你自己出一把 OpenAI 兼容 key（DeepSeek 最便宜、OpenRouter
-最灵活、也可以对着你自己的网关）。
-
-**想从头再来**
-```bash
-docker compose down -v      # -v 会删掉数据库，账号和自选都没了
-docker compose up -d --build
-```
+| 层 | 技术 |
+|---|---|
+| **前端** | Next.js 15 (App Router) · React 19 · TypeScript 5 · Tailwind CSS 3 · shadcn/ui |
+| **后端** | FastAPI · Python 3.12 · SQLAlchemy 2 · httpx · loguru |
+| **对话引擎** | [OpenCode](https://opencode.ai) 定制版 · MCP protocol · Bun runtime |
+| **数据库** | Postgres 16 · Redis 7 |
+| **AI** | OpenAI-compatible (DeepSeek / qwen / doubao / OneAPI) · Anthropic · Kronos GPU |
+| **认证** | JWT (HS256) · argon2id · 单用户 / 多租户可切 |
+| **部署** | Docker Compose · GHCR 私有镜像 · bind mount 快速迭代 |
+| **测试** | 12 golden case runner (v3) · SSE 订阅 · 4 维度矩阵 |
 
 ---
 
-## 加你自己的 SKILL
+## 🏗 架构
 
-SKILL 是**分析逻辑**——一段讲清"这类问题该怎么分析"的方法论。我们内置了 29 个
-(行情速查 · 深度分析 · DCF 估值 · 多空辩论 …),你也可以加自己的。
+```
+             ┌─────────────────────┐
+浏览器    →   │  web (Next.js 15)   │ :3100
+             └────────┬────────────┘
+                      │ /api/*  (web 自带 BFF 转发 · 无需反向代理)
+             ┌────────▼────────────┐        ┌──────────────────┐
+             │  api (FastAPI)      │        │ opencode 引擎     │
+             │  · auth (JWT)       │◄───────┤ MCP tools 回调    │
+             │  · providers layer  │        │ 5 plugins:        │
+             │  · 23 SKILLs        │        │  auth/guard/     │
+             │  · agents           │───► hunter 网关(4 通道 · 一 key 全开)
+             └─┬─────────────┬─────┘        │  budget/audit/    │
+                                            │  mcp-context      │
+                                            └────────┬─────────┘
+                                                     │ tool schema 清洗
+                                          ┌──────────▼─────────┐
+                                          │ llm-shim  :3999    │──► 你的大模型网关
+                                          └────────────────────┘
+        Postgres           Redis
+         :5442             :6479
+```
 
-用的是 **Anthropic Agent Skills 标准格式**,所以**网上下载的 skill 不用改一个字**:
+**关键组件**:
+- **web BFF** — Next.js 反代 opencode · 转发 JWT 供 hunter-auth 读
+- **hunter-mcp-context** plugin — tools=13 · 自动注入 `_hermes_user_id`
+- **hunter-guard** — MCP schema sanitize(DeepSeek `parameters:null` 兜底)
+- **hunter-auth** — JWT 门禁 · sessionUsers 关联 user_id
+- **hunter-budget** — 用量记账 · 支持限额
+- **hunter-audit** — AUDIT.jsonl 完整审计流
+
+---
+
+## 📊 Provider 矩阵
+
+数据源默认走 Hunter 网关(`hunter`)。没配 key 时它会明确回一句"去申请 key" · 而不是假装数据源出问题。
+
+想完全不用 key 也能取 A 股行情 · 把 `DATA_SOURCE_PROVIDER` 设成 `akshare`(美股港股用 `yfinance`)。两者都免费 · 但覆盖面和数据质量不如平台管道 · 且 akshare 在容器里经常连不上境内数据源。
+
+| 层 | 环境变量 | 可选值 | 默认 |
+|---|---|---|---|
+| 数据源 | `DATA_SOURCE_PROVIDER` | `hunter` · `akshare` · `yfinance` · `saas` | `hunter` |
+| 大模型 | `LLM_PROVIDER` | `openai_compat` · `anthropic` · `saas_gemini` | `openai_compat` |
+| 预测 | `FORECAST_PROVIDER` | `noop` · `kronos_local` · `kronos_saas` | `kronos_saas` |
+
+细节与返回结构见 [`docs/02-providers.md`](./docs/02-providers.md)。
+
+---
+
+## 🔌 扩展 Hunter
+
+三种扩展方式 · 一种比一种深入:
+
+### 1. 加自己的 SKILL(Markdown · 最简单)
+
+SKILL 就是**方法论** —— 一段讲清"这类问题该怎么分析"的 Markdown。用的是 **Anthropic Agent Skills 标准格式** · **网上下载的 skill 不用改一个字**。
 
 ```
 user-skills/
@@ -323,115 +357,196 @@ description: 一句话说明什么时候该用它 —— 模型据此判断要�
 分几步、先看什么后看什么、注意什么。
 ```
 
-放好后 `docker compose restart api opencode` 即可。**同名时你的覆盖我们的** ——
-想改我们某个 SKILL 的措辞,放一个同名目录就行,不用动我们的文件。
+放好后 `docker compose restart opencode` 即可。**同名时你的覆盖我们的**。
 
-想让你的 SKILL 用我们的数据与工具,在 frontmatter 里加一段 `hunter:`
-(标准加载器会忽略它,不影响兼容)——详见 `user-skills/README.md`。
+### 2. 从 GitHub 一键装 SKILL(v0.2.3 新)
 
----
+侧栏 SKILL 那一行点「＋」→ 粘 GitHub URL(如 `github.com/anthropics/skills/xxx`) → 装之前先看内容 → 一键装。**先探测后下载 · 装完自动生效**。
 
-## Provider 矩阵
+<img src="./docs/screenshots/04-sidebar-skill-install.png" alt="GitHub 一键装 SKILL · 侧栏面板" width="720" />
 
-数据源默认走 Hunter 网关（`hunter`）。没配 key 时它会明确回一句"去申请 key"，
-而不是假装数据源出问题——这是有意的。
+### 3. 接自己的 MCP(工具箱那行的「＋」)
 
-想完全不用 key 也能取 A 股行情，把 `DATA_SOURCE_PROVIDER` 设成 `akshare`
-（美股港股用 `yfinance`）。两者都免费，但覆盖面和数据质量不如平台管道，
-而且 akshare 在容器里经常连不上境内数据源，失败率不低。
+用户自接的 MCP server 会自动并进工具箱视图 · description 直接给模型用 —— 名字 / MCP 类型(HTTP/SSE/stdio) / URL / API key 一次填完。
 
-| 层 | 环境变量 | 可选值 | 默认 |
-|---|---|---|---|
-| 数据源 | `DATA_SOURCE_PROVIDER` | `hunter` · `akshare` · `yfinance` · `saas` | 留空 = `hunter` |
-| 大模型 | `LLM_PROVIDER` | `openai_compat` · `anthropic` · `saas_gemini` | `openai_compat` |
-| 预测 | `FORECAST_PROVIDER` | `noop` · `kronos_local` · `kronos_saas` | `noop` |
-
-细节与返回结构见 [docs/02-providers.md](./docs/02-providers.md)。
+<img src="./docs/screenshots/03-sidebar-mcp-add.png" alt="接一个自己的 MCP · 侧栏面板" width="720" />
 
 ---
 
-## Community vs Cloud
+## ☁️ Community vs Cloud
 
-| 能力 | Community（自部署） | Cloud（[hunter.agentpit.io](https://hunter.agentpit.io)） |
+| 能力 | Community(自部署) | Cloud([hunter.agentpit.io](https://hunter.agentpit.io)) |
 |---|---|---|
-| 对话（自带大模型 key） | ✅ | ✅ |
-| 左侧工具与 SKILL | ✅ 需平台 key（免费申请） | ✅ |
-| UZI 深度分析 | ✅ 需平台 key | ✅ |
-| Kronos 走势预测 | ✅ 需平台 key（或自建 GPU） | ✅ |
-| 发现页 · Scout 情报 | ✅ 需平台 key | ✅ |
+| 对话(自带大模型 key) | ✅ | ✅ |
+| 左侧工具与 23 SKILL | ✅ 需平台 key(免费) | ✅ |
+| UZI 深度分析(22 维) | ✅ 需平台 key | ✅ |
+| Kronos 走势预测 | ✅ 需平台 key(或自建 GPU) | ✅ |
+| TrueSource 情报采集 | ✅ 需平台 key | ✅ |
 | 自选 · 持仓 · 信号 | ✅ | ✅ |
-| 接入你自己的 MCP 数据源 | ✅ 不需要平台 key | ✅ |
+| 接入你自己的 MCP | ✅ 不需要平台 key | ✅ |
+| GitHub 一键装 SKILL | ✅ (v0.2.3) | ✅ |
 | 微信推送 | ❌ | ✅ |
-| 飞书 | ❌ | ✅ |
+| 飞书通知 | ❌ | ✅ |
 | 多租户计费 | ❌ | ✅ |
 
 ---
 
-## Roadmap
+## ❓ 常见问题
 
-- [x] **P1** · Monorepo skeleton + docker-compose + fin-r1 deploy
-- [x] **P2** · SaaS strip (WeChat / Lark / booth / SSO removed)
-- [x] **P3** · Local email + password auth
-- [x] **P4** · Pluggable provider layer (data · LLM · forecast) + per-user settings
-- [x] **P5** · 平台 key 门控 · 工具与 SKILL 免费解锁
-- [ ] **P6** · Push channel refactor to SMTP / Slack
-- [ ] **v1.0** · SKILL catalog UI
+<details>
+<summary><b>opencode 一直 Restarting?</b></summary>
+
+大概率是 LLM_* 三件套少填。`docker compose logs opencode --tail 20` 看日志 · 会明说少哪个。
+
+- `LLM_BASE_URL` — 大模型 API 基地址
+- `LLM_DEFAULT_MODEL` — 模型名
+- `LLM_API_KEY` — key
+- DeepSeek 额外必开 `LLM_SCHEMA_SANITIZE=1`
+</details>
+
+<details>
+<summary><b>DeepSeek 首条对话 400 "Invalid schema type: null"?</b></summary>
+
+DeepSeek 严格模式拒 `parameters: null`。`.env` 加:
+```
+LLM_SCHEMA_SANITIZE=1
+```
+`docker compose up -d`(必须 up · restart 不重读 env)。
+</details>
+
+<details>
+<summary><b>深度分析报告全空 / Sentinel 保留 0 条?</b></summary>
+
+`HUNTER_API_KEY` 没填或无效 · Sentinel 拿不到 finance-data 数据。去 [hunter.agentpit.io/dev/api-keys](https://hunter.agentpit.io/dev/api-keys) 免费申请 30 秒。
+</details>
+
+<details>
+<summary><b>改了 skills/ 后不生效?</b></summary>
+
+opencode **只在启动时扫一次** skill 目录。改完必须:
+```bash
+docker compose restart opencode          # 约 50 秒
+python scripts/check_skill_sync.py       # 比对磁盘 ↔ opencode · 不一致会列出
+```
+> 实测过 · `POST /instance/dispose` 无效 · 文件挂载可见也无效 · 只能重启。
+</details>
+
+<details>
+<summary><b>端口被占?</b></summary>
+
+编辑 `.env` 里的 `*_HOST_PORT`:
+```
+WEB_HOST_PORT=3101
+API_HOST_PORT=8101
+POSTGRES_HOST_PORT=5443
+```
+同时改 `NEXT_PUBLIC_API_URL=http://localhost:8101`。
+</details>
+
+<details>
+<summary><b>Windows 装机 3 大静默 bug?</b></summary>
+
+已在 v0.1.1+ 修复 · 现在 Windows 装机也顺畅:
+- `.gitattributes` 加了 · 防 CRLF 破坏 entrypoint.sh
+- README 里的 PowerShell 命令已换成 UTF-8 安全版
+- docker-compose.yml 默认值不再盖过代码默认值
+
+若碰到还请开 issue。
+</details>
+
+<details>
+<summary><b>更多问题?</b></summary>
+
+详细排错见 [`docs/01-getting-started.md`](./docs/01-getting-started.md) 或来 [社区群](#-社区与支持) 问。
+</details>
 
 ---
 
-## 架构
+## 🤝 Contributing
 
-```
-             ┌─────────────────────┐
-浏览器    →   │  web (Next.js 15)   │ :3100
-             └────────┬────────────┘
-                      │ /api/*  （web 自带 BFF 转发，无需反向代理）
-             ┌────────▼────────────┐        ┌──────────────────┐
-             │  api (FastAPI)      │        │ opencode 引擎     │
-             │  · auth (JWT)       │◄───────┤ MCP tools 回调    │
-             │  · providers layer  │───► hunter 网关 / akshare / yfinance
-             │  · agents           │───► 你的 OpenAI 兼容网关
-             └─┬─────────────┬─────┘        └────────┬─────────┘
-                                                     │ tool schema 清洗
-                                          ┌──────────▼─────────┐
-                                          │ llm-shim  :3999    │──► 你的网关
-                                          └────────────────────┘
-        Postgres           Redis
-         :5442             :6479
+Pull requests welcome!codebase 还在从私仓迁移中 · v1.0 前会有 churn。
 
-     工具与 SKILL ──► https://hunter.agentpit.io/api/saas/tools/*
-                      （凭平台 key 放行并计量）
+### 最简单的第一次贡献:加一个 SKILL(5 分钟)
+
+比如你有自己的"看 K 线突破"方法 · 就写:
 ```
+user-skills/kline_breakout/SKILL.md
+```
+提 PR 到 `skills/` 目录 · 全球用户下次 pull 就能用。
+
+### Good first issues
+
+看 [GitHub Issues](https://github.com/agentpit-io/hunter-community/issues?q=is%3Aissue+label%3A%22good+first+issue%22) 挂 `good first issue` 标签的 · 都是 30 分钟内能搞定的入门任务。
+
+### 完整流程
+
+见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
 
 ---
 
-## Contributing
+## 💬 社区与支持
 
-Read [CONTRIBUTING.md](./CONTRIBUTING.md). Pull requests welcome, but the
-codebase is fresh out of an ongoing extraction from a private repo —
-expect churn until v1.0.
+<table>
+<tr>
+<td align="center">
 
-## Security
+**💬 微信**(拉群交流)
+`agentpit`
 
-Vulnerabilities: `security@agentpit.io`. See [SECURITY.md](./SECURITY.md).
+</td>
+<td align="center">
 
-## License
+**📱 微信公众号**
+`agentpit.io`
+
+</td>
+<td align="center">
+
+**🐦 Twitter / X**
+[@agentpit_io](https://x.com/agentpit_io)
+
+</td>
+<td align="center">
+
+**💡 GitHub Discussions**
+[提问 · 分享](https://github.com/agentpit-io/hunter-community/discussions)
+
+</td>
+</tr>
+</table>
+
+**遇到 bug**: [开 issue](https://github.com/agentpit-io/hunter-community/issues/new)
+**安全漏洞**: `security@agentpit.io`(见 [SECURITY.md](./SECURITY.md))
+
+---
+
+## 🗺 Roadmap
+
+- [x] **v0.1** · Monorepo skeleton + docker-compose + fin-r1 deploy(P1)
+- [x] **v0.1** · SaaS strip(WeChat / Lark / SSO removed)(P2)
+- [x] **v0.1** · 本地 email + password auth(argon2 + JWT)(P3)
+- [x] **v0.1** · 可插拔 provider 层(data · LLM · forecast)+ per-user settings(P4)
+- [x] **v0.2** · opencode chat 引擎上线 · 5 plugins + 5 MCP · 一 key 通用(P5)
+- [x] **v0.2.3** · 23 SKILL 精修完毕 · GitHub 一键装 SKILL · 侧栏三层重构
+- [x] **v0.2.3** · MCP tool description 分流指引(kpred/deep_analysis/quickview)
+- [ ] **v0.3** · runner v4 支持 SSE 订阅 · 多 provider 全评测出 matrix
+- [ ] **v1.0** · SKILL catalog UI + community skill marketplace
+
+---
+
+## 📄 License
 
 Apache 2.0 · see [LICENSE](./LICENSE) and [NOTICE](./NOTICE).
 
 **Hunter · AgentPit · 猎鹿人** are trademarks of the AgentPit team.
 Forks must rename.
 
-### 改了 skills/ 之后必须重启 opencode
+---
 
-opencode **只在启动时扫一次** skill 目录,之后缓存住。改完 `skills/` 或
-`user-skills/` 不重启,会出现「侧栏显示 N 个、模型手上是 M 个」的不一致 ——
-而且不报错,只表现为模型答非所问或调用已删除的能力。
+<div align="center">
 
-```bash
-docker compose restart opencode          # 约 50 秒
-python scripts/check_skill_sync.py       # 比对磁盘 ↔ opencode,不一致会列出差异
-python scripts/check_skill_sync.py --fix # 不一致就自动重启并复查
-```
+**⭐ 觉得有用请点 Star · 是我们继续维护的动力**
 
-> 实测过:`POST /instance/dispose` 无效,文件挂载可见也无效 —— 只能重启。
+Made with ❤️ by [AgentPit](https://agentpit.io) team
+
+</div>
