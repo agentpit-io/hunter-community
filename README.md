@@ -1,3 +1,9 @@
+<div align="right">
+
+**🌏 中文(当前)· [English](./README_EN.md)**
+
+</div>
+
 <div align="center">
 
 # 🎯 Hunter Community Edition

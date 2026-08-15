@@ -27,6 +27,15 @@ changing fast and PRs against the current skeleton may need rework.
 - TypeScript: prettier + eslint (already inherited from Next.js defaults)
 - Commit messages: [Conventional Commits](https://www.conventionalcommits.org/)
 
+## Documentation
+
+**README is bilingual** — Chinese (`README.md`, default) and English (`README_EN.md`).
+When editing one, please sync the other in the same PR. Structure and section anchors
+should stay 1:1 aligned. If you only speak one language, note it in the PR so a
+maintainer can handle the translation before merge.
+
+`README_EN.md` 与 `README.md` 需保持 1:1 对齐 · 改一边请同步另一边。
+
 ## Reporting issues
 
 - Bug: open GitHub Issue with reproducer + `docker compose logs` output
