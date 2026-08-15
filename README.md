@@ -6,7 +6,9 @@
 
 <div align="center">
 
-# 🎯 Hunter Community Edition
+<img src="./docs/assets/logo.png" alt="Hunter Community · agentpit.io" width="200" height="200" />
+
+# Hunter Community Edition
 
 **你的私人金融 AI 团队 · 一 key 通用 · 5 分钟自部署**
 
