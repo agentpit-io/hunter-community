@@ -15,13 +15,11 @@
 
 <br>
 
-<a href="https://video-1253756459.cos.ap-guangzhou.myqcloud.com/misc/huntercode.mov">
-  <img src="./docs/screenshots/01-overview-quickview.png" alt="Hunter Community 演示 · 点击观看完整视频" width="820" />
-</a>
+<img src="./docs/screenshots/hunter-demo.gif" alt="Hunter Community 30 秒演示 · 点击下方看完整视频" width="820" />
 
-**▶️ [点击封面或这里 · 观看 SaaS 完整演示视频](https://video-1253756459.cos.ap-guangzhou.myqcloud.com/misc/huntercode.mov)** · `.mov` · ~95 MB
+**▶️ [看完整 3.5 分钟高清演示视频(带音频)](https://video-1253756459.cos.ap-guangzhou.myqcloud.com/misc/huntercode.mov)**
 
-*一问「601899 多少钱」· 侧栏 32 数据源全解锁 · 富卡片带 AI 短评 · 3 按钮秒进深度分析 / 加自选 / 查新闻*
+*上方 GIF 是前 30 秒预览 · 完整版展示深度分析报告 + 走势预测 + SKILL 使用*
 
 </div>
 
