@@ -28,6 +28,7 @@ import {
 import { getUnlockStatus, onUnlockChange, peekUnlockStatus } from '../lib/unlockClient'
 import UnlockModal from './UnlockModal'
 import SkillAddPanel from './SkillAddPanel'
+import ToolAddPanel from './ToolAddPanel'
 
 interface Props {
   onPick: (tpl: string, key: string) => void
@@ -52,6 +53,7 @@ export default function CapabilityPanel({ onPick, onManage, refreshKey }: Props)
   // 装 skill 的面板 —— 直接开在侧栏里,不用先进「管理」再往下滚
   const [installOpen, setInstallOpen] = useState(false)
   const [installed, setInstalled] = useState('')
+  const [toolAddOpen, setToolAddOpen] = useState(false)
   const locked = unlocked === false
 
   useEffect(() => {
@@ -128,7 +130,28 @@ export default function CapabilityPanel({ onPick, onManage, refreshKey }: Props)
         headline={toolbox?.summary.headline}
         sub="模型可以直接调用的能力"
         open={open.toolbox} onToggle={toggle}
+        action={
+          <button
+            onClick={(e) => { e.stopPropagation(); setOpen((o) => ({ ...o, toolbox: true })); setToolAddOpen((v) => !v) }}
+            title="接一个自己的 MCP 工具"
+            style={addBtn}
+            onMouseEnter={(e) => { e.currentTarget.style.color = HUNTER.THEME }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = HUNTER.INK_F }}
+          >
+            <Plus size={13} strokeWidth={2.2} />
+          </button>
+        }
       >
+        {toolAddOpen && (
+          <ToolAddPanel
+            onClose={() => setToolAddOpen(false)}
+            onDone={(msg) => {
+              setToolAddOpen(false)
+              setInstalled(msg)
+              listToolbox().then(setToolbox).catch(() => {})
+            }}
+          />
+        )}
         {toolbox?.groups.map((g) => (
           <div key={g.server} style={{ marginBottom: 6 }}>
             <div style={groupHead}>

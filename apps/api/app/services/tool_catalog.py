@@ -215,3 +215,86 @@ def grouped() -> list[dict]:
             "tools": items,
         })
     return out
+
+
+# ══════════════════════════════════════════════════════════════
+# 用户自接的 MCP
+#
+# 用户在 /mcp-config 里接的第三方 MCP,**模型早就能调到了**
+# (走 hunter_user_invoke 那条通道),但侧栏「工具箱」里一直看不见 ——
+# 那份表只列了 13 个静态工具。用户接完看不到,会以为没生效。
+#
+# 这里把 user_mcp_registrations 读出来合进同一个列表,标 origin=user。
+# 侧栏那个「你接的」标签是早就留好的。
+# ══════════════════════════════════════════════════════════════
+
+def user_tools(user_id: str | None = None) -> list[dict]:
+    """读用户自接的 MCP,转成与内置工具同一个形状。
+
+    **失败一律返回空列表**:工具箱面板挂掉不该影响聊天,
+    而且用户没接过任何 MCP 是最常见的情况,不是异常。
+    """
+    if not user_id:
+        return []
+    try:
+        from app.services.database import get_conn
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT r.id, r.name, r.slug, r.endpoint, r.enabled,
+                   r.last_ok_at, r.last_err, r.call_count, r.error_count,
+                   c.tools
+            FROM user_mcp_registrations r
+            LEFT JOIN user_mcp_tools_cache c ON c.mcp_id = r.id
+            WHERE r.user_id = %s ORDER BY r.created_at DESC
+        """, (str(user_id),))
+        rows = cur.fetchall()
+        conn.close()
+    except Exception as e:
+        logger.debug("[tool_catalog] 读用户 MCP 失败(当作没有): {}", e)
+        return []
+
+    out: list[dict] = []
+    for (rid, name, slug, endpoint, enabled, last_ok, last_err,
+         calls, errors, tools) in rows:
+        # tools 缓存是「刷新」时抓的。没刷过就只知道这个 MCP 存在、
+        # 不知道它提供哪些工具 —— 如实说,别编一个数字
+        names = [t.get("name") for t in (tools or []) if isinstance(t, dict)]
+        out.append({
+            "key": f"user:{slug}",
+            "name": name,
+            "server": "user_mcp",
+            "server_label": SERVER_LABEL["hunter_user"],
+            "origin": ToolOrigin.USER.value,
+            "origin_label": ORIGIN_LABEL[ToolOrigin.USER],
+            "summary": (f"{len(names)} 个工具:" + "、".join(names[:4])
+                        if names else "未刷新过工具清单 —— 到「我的工具」里点一次刷新"),
+            "needs_data": [], "optional_data": [], "markets": [],
+            "slow": False,
+            "note": f"{endpoint} · 调用 {calls} 次 · 失败 {errors} 次"
+                    + (f" · 最近错误:{last_err[:60]}" if last_err else ""),
+            # 用户自接的**不参与依赖计算** —— 它连的是谁家的服务我们不知道,
+            # 拿我们的数据源状态去判断它可不可用是错的
+            "status": "ready" if enabled else "unavailable",
+            "blocked_by": [], "need_key_for": [], "degraded_by": [],
+            "unavailable_reason": "" if enabled else "已在「我的工具」里停用",
+            "mcp_id": rid,
+        })
+    return out
+
+
+def grouped_with_user(user_id: str | None = None) -> list[dict]:
+    """内置分组 + 用户自接的那一组。"""
+    groups = grouped()
+    mine = user_tools(user_id)
+    if mine:
+        # 用户自己的放最后 —— 前面几组是"我们提供的",这一组是"你加的",
+        # 混在一起用户分不清哪些是自己接的
+        groups.append({
+            "server": "user_mcp",
+            "label": "你接的工具",
+            "total": len(mine),
+            "ready": sum(1 for t in mine if t["status"] == "ready"),
+            "tools": mine,
+        })
+    return groups

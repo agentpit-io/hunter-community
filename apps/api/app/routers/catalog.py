@@ -8,7 +8,7 @@
 和 `volume_hint`,而不是只给一个布尔值。用户看到"美股 5 个源 0 个可用"却不知道
 为什么,跟没有这个接口是一样的。
 """
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from app.services import source_catalog as catalog
 from app.services import source_health
@@ -73,13 +73,18 @@ async def sources_health():
 # ── 工具箱层 ──────────────────────────────────────────────────
 
 @router.get("/toolbox")
-async def list_toolbox(ready_only: bool = Query(False, description="只看当前真能用的")):
-    """工具箱清单 · 按 MCP server 分组。
+async def list_toolbox(request: Request,
+                       ready_only: bool = Query(False, description="只看当前真能用的")):
+    """工具箱清单 · 按 MCP server 分组 + 用户自接的那一组。
 
     用户原话「mcp 和 tools 算一类」—— 所以这里不分两栏,
     来源差异只体现在每个条目的 `origin` 字段(内置/平台/你接的)。
+
+    这个接口在 middleware 里是公开的(只描述能力,不含凭证),所以
+    user_id 可能拿不到 —— 那时只返回内置的,不报错。
     """
-    groups = tool_catalog.grouped()
+    uid = getattr(request.state, "user_id", None)
+    groups = tool_catalog.grouped_with_user(uid)
     if ready_only:
         for g in groups:
             g["tools"] = [t for t in g["tools"] if t["status"] == "ready"]
