@@ -138,6 +138,10 @@ export default function CapabilityPanel({ onPick, onManage, refreshKey }: Props)
                   <span style={{ ...dotStyle, background: dot.color }} />
                   <span style={rowName}>{t.name}</span>
                   {t.slow && <Clock size={9} strokeWidth={1.8} style={{ color: HUNTER.SOFT, flexShrink: 0 }} />}
+                  {t.degraded_by?.length > 0 && (
+                    <span style={{ ...tagStyle, borderColor: '#C08A2E', color: '#9B571F' }}
+                          title={`可用,但这些数据源缺: ${t.degraded_by.join(', ')}`}>部分</span>
+                  )}
                   <span style={{ ...tagStyle, opacity: t.origin === 'platform' ? 1 : 0.55 }}>
                     {t.origin_label}
                   </span>

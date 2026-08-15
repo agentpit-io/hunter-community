@@ -113,8 +113,11 @@ async def list_skills():
     for s in items:
         tools = s.get("needs_tools") or []
         missing = [t for t in tools if tool_catalog.get(t) is None]
+        # partial 不算 blocked —— 工具能用,只是某几段内容不全。
+        # 把"内容不全"说成"用不了",19 个照常工作的 SKILL 会被全标灰。
         not_ready = [t for t in tools
-                     if (e := tool_catalog.get(t)) and tool_catalog.status_of(e)["state"] != "ready"]
+                     if (e := tool_catalog.get(t))
+                     and tool_catalog.status_of(e)["state"] not in ("ready", "partial")]
         out.append({
             "key": s["key"],
             "name": s["name"],

@@ -82,15 +82,25 @@ def check_against_container(live: set[str]) -> None:
 
 
 def check_needs_data() -> None:
-    """工具声明的数据源必须真实存在 —— 跨层引用,最容易烂的一处。"""
+    """工具声明的数据源必须真实存在 —— 跨层引用,最容易烂的一处。
+
+    **必需与可选都要查**。只查 needs_data 的话,把一个依赖挪到 optional_data
+    就等于让它逃过校验 —— 而挪过去恰恰是最容易顺手打错字的时候。
+    """
     known = {s.key for s in sc.CATALOG}
-    bad = 0
+    bad = total = 0
     for t in tc.CATALOG:
-        for k in t.needs_data:
-            if k not in known:
-                errors.append(f"工具 {t.key} 的 needs_data 指向不存在的数据源 {k!r}")
-                bad += 1
-    print(f"  [3]   needs_data    引用 {sum(len(t.needs_data) for t in tc.CATALOG)} 处 · 无效 {bad}")
+        for field, keys in (("needs_data", t.needs_data), ("optional_data", t.optional_data)):
+            for k in keys:
+                total += 1
+                if k not in known:
+                    errors.append(f"工具 {t.key} 的 {field} 指向不存在的数据源 {k!r}")
+                    bad += 1
+        dup = set(t.needs_data) & set(t.optional_data)
+        if dup:
+            errors.append(f"工具 {t.key} 同一个源既必需又可选: {', '.join(sorted(dup))}")
+            bad += 1
+    print(f"  [3]   needs_data    引用 {total} 处(含 optional)· 无效 {bad}")
 
 
 def check_skill_needs_tools() -> None:

@@ -49,9 +49,10 @@ export interface ToolItem {
   markets: string[]
   slow: boolean
   note: string
-  status: 'ready' | 'need_key' | 'unavailable'
+  status: 'ready' | 'partial' | 'need_key' | 'unavailable'
   blocked_by: string[]
   need_key_for: string[]
+  degraded_by: string[]
 }
 
 export interface ToolGroup {
@@ -113,6 +114,7 @@ export function statusDot(s: SourceStatus | string): { color: string; label: str
   switch (s) {
     case 'ok':
     case 'ready':       return { color: '#3F8F6B', label: '正常' }
+    case 'partial':     return { color: '#C08A2E', label: '部分数据缺' }
     case 'degraded':    return { color: '#C08A2E', label: '不稳定' }
     case 'down':        return { color: '#B5462F', label: '故障' }
     case 'need_key':    return { color: '#B06A32', label: '需要 key' }

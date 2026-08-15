@@ -42,7 +42,13 @@ class ToolEntry:
     server: str                    # 所属 MCP server
     origin: ToolOrigin
     summary: str                   # 一句话:它干什么
-    needs_data: list[str] = field(default_factory=list)   # 依赖的 source_catalog key
+    # **必需**依赖 —— 少一个这工具就出不了活
+    needs_data: list[str] = field(default_factory=list)
+    # **可选**依赖 —— 少了只是内容不全,工具照样能用。
+    # 分开是必要的:深度分析要 7 类数据,其中股东/治理/龙虎榜三张上游表未 seed。
+    # 不分的话整个工具被判"不可用",连带 19 个 SKILL 全标灰 —— 而它明明照常出报告,
+    # 只是那三段写着"数据未 seed"。把"内容不全"说成"用不了"是另一种谎。
+    optional_data: list[str] = field(default_factory=list)
     markets: list[str] = field(default_factory=list)      # 支持的市场 · 空 = 与市场无关
     slow: bool = False             # 长任务(>30s)· UI 上提示用户要等
     note: str = ""
@@ -83,11 +89,12 @@ CATALOG: list[ToolEntry] = [
     # ── 深度分析 · uzi server ─────────────────────────────────
     ToolEntry("uzi_stock_deep_analysis", "深度分析", "uzi", ToolOrigin.IMAGE,
               "行情+K线+财务+龙虎榜+股东+治理+新闻 七类数据合成结构化研报",
-              needs_data=["a.quote", "a.kline", "a.financial", "a.lhb",
-                          "a.fund_holders", "a.governance", "a.news"],
+              # 前四类缺了就没什么可分析的;后三类缺了只是少三段
+              needs_data=["a.quote", "a.kline", "a.financial", "a.news"],
+              optional_data=["a.lhb", "a.fund_holders", "a.governance"],
               markets=["a", "hk", "us"], slow=True,
               note="薄代理转发到 /api/internal/uzi/* · 5-10 秒 · "
-                   "龙虎榜/股东/治理三张表未 seed 时会显示'数据未 seed'"),
+                   "股东/治理表上游未 seed,那两段会显示'数据未 seed'"),
 
     # ── 平台自有能力 · hunter_cap server(我们在 Step 3 加的)──
     ToolEntry("hunter_cap_kpred", "K线预测", "hunter_cap", ToolOrigin.PLATFORM,
@@ -136,26 +143,35 @@ def status_of(t: ToolEntry) -> dict:
     """
     from app.services import source_catalog as sc
 
-    missing_key, blocked, unknown_src = [], [], []
-    for k in t.needs_data:
-        src = sc.get(k)
-        if src is None:
-            unknown_src.append(k)     # 注册表漂移 —— check_tools.py 会报
-            continue
-        st = sc.status_of(src)
-        if st == "unavailable":
-            blocked.append(k)
-        elif st == "need_key":
-            missing_key.append(k)
+    def _scan(keys: list[str]):
+        blocked, need_key, unknown = [], [], []
+        for k in keys:
+            src = sc.get(k)
+            if src is None:
+                unknown.append(k)     # 注册表漂移 —— check_tools.py 会报
+                continue
+            st = sc.status_of(src)
+            if st == "unavailable":
+                blocked.append(k)
+            elif st == "need_key":
+                need_key.append(k)
+        return blocked, need_key, unknown
+
+    blocked, missing_key, unknown_src = _scan(t.needs_data)
+    opt_blocked, opt_need_key, _ = _scan(t.optional_data)
 
     if blocked:
         state = "unavailable"
     elif missing_key:
         state = "need_key"
+    elif opt_blocked or opt_need_key:
+        # 能用,但内容不全 —— 这一档必须存在,否则只能在"完全可用"和"完全不可用"
+        # 之间二选一,两个都不是事实
+        state = "partial"
     else:
         state = "ready"
     return {"state": state, "blocked_by": blocked, "need_key_for": missing_key,
-            "unknown_sources": unknown_src}
+            "degraded_by": opt_blocked + opt_need_key, "unknown_sources": unknown_src}
 
 
 def to_dict(t: ToolEntry) -> dict:
@@ -167,6 +183,7 @@ def to_dict(t: ToolEntry) -> dict:
     d["status"] = st["state"]
     d["blocked_by"] = st["blocked_by"]
     d["need_key_for"] = st["need_key_for"]
+    d["degraded_by"] = st["degraded_by"]
     return d
 
 
@@ -193,7 +210,8 @@ def grouped() -> list[dict]:
             "server": srv,
             "label": SERVER_LABEL.get(srv, srv),
             "total": len(items),
-            "ready": sum(1 for i in items if i["status"] == "ready"),
+            # partial 计入 ready —— 它是"能用但内容不全",不是"用不了"
+            "ready": sum(1 for i in items if i["status"] in ("ready", "partial")),
             "tools": items,
         })
     return out
