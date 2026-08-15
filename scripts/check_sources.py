@@ -127,16 +127,26 @@ def check_probe() -> None:
     import httpx
     from app.services import finance_data_auth as _auth
 
+    # 只探经网关的源。provider="local"(如 global.geo)是 community 自己的路由,
+    # 拿它去打上游会误报 403 —— 这个坑今天踩过一次。
     targets = [s for s in catalog.CATALOG
                if s.available and s.endpoint and s.provider == "finance-data"]
     base = _auth.data_url()
     headers = _auth.data_headers()
+    # 探测用的样本代码按市场分 —— 全用 600519.SH 会让美港股端点必然 404,
+    # 那是探测参数错,不是源坏了
+    SAMPLE = {"a": ("600519.SH", "600519"), "us": ("AAPL", "AAPL"), "hk": ("00700", "00700")}
+    # 有几个端点把标的放在 query 而不是路径里,不带就是 422。
+    # 422 是"我参数给错了",跟"这个源坏了"是两回事,不区分会天天误报。
+    QUERY_SYMBOL = {"a.news_articles", "a.announce", "a.news", "us.news"}
     ok = fail = 0
     for s in targets:
-        path = s.endpoint.replace("{symbol}", "600519.SH").replace("{code}", "600519")
+        sym, code = SAMPLE.get(s.market.value, ("600519.SH", "600519"))
+        path = s.endpoint.replace("{symbol}", sym).replace("{code}", code)
+        params = {"symbol": sym, "limit": 1} if s.key in QUERY_SYMBOL else {}
         t0 = time.perf_counter()
         try:
-            r = httpx.get(f"{base}{path}", headers=headers, timeout=15.0)
+            r = httpx.get(f"{base}{path}", headers=headers, params=params, timeout=15.0)
             good = r.status_code == 200
         except Exception as e:
             good, r = False, e

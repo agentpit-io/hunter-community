@@ -25,10 +25,52 @@ def _conn():
     return psycopg2.connect(FINDATA_DB_URL, connect_timeout=5)
 
 
+# ── 网关回落 ──────────────────────────────────────────────────
+#
+# 这个文件原来只有一条路:直连 financedata 库。开源版拿不到 FINDATA_DB_URL,
+# 于是美股查询要么 404、要么返回 200 + 空数组(装作成功)。
+#
+# 2026-08-15 finance-data 新增了 /api/v1/{us,hk}/* 端点,hunter 网关也放行了,
+# 所以现在多一条路:**库优先 · 库不可用时走网关**。
+#   · 私有部署配了 FINDATA_DB_URL → 行为完全不变,仍走直连(更快、覆盖更全)
+#   · 开源版用户 → 一把 hunt_tools_ key 走网关
+#
+# 为什么不干脆全走网关:直连能拿到网关没暴露的东西(财报日历、全市场排行、
+# ETF 榜),而且私有部署走内网直连本来就更快。留两条路的成本只是这几十行。
+#
+# 网关侧**没有**的:财报日历 · 港股新闻/公告/财报 · 全市场分析师排行 · ETF 榜
+# (对应 _15 方案里的 C 组,量小,先没做)。这些函数在开源版仍返回空 ——
+# 但那是"上游确实没这个接口",不是静默降级,数据源注册表里如实标着。
+
+def _db_available() -> bool:
+    return bool(FINDATA_DB_URL)
+
+
+def _gw_get(path: str, params: dict | None = None):
+    """经 hunter 网关取数。失败一律返回 None,由调用方决定怎么办。
+
+    凭证走 finance_data_auth 这个唯一入口 —— 之前这套 fallback 抄在四个文件里,
+    结果网页填的 key 喂不到深度分析且不报错。
+    """
+    try:
+        import httpx
+        from app.services import finance_data_auth as _auth
+        r = httpx.get(f"{_auth.data_url()}{path}", params=params or {},
+                      headers=_auth.data_headers(), timeout=20.0)
+        r.raise_for_status()
+        return r.json()
+    except Exception as e:
+        log.warning("gm gateway %s failed: %s", path, e)
+        return None
+
+
 def us_kline(symbol: str, period: str = "1d", limit: int = 250) -> list[dict]:
     """美股K线。period: 1m/5m/1d。返回时间升序 [{ts,open,high,low,close,volume}]"""
     symbol = symbol.upper()
     limit = min(max(limit, 1), 2000)
+    if not _db_available():
+        d = _gw_get(f"/api/v1/us/kline/{symbol}", {"period": period, "limit": limit})
+        return (d or {}).get("bars") or []
     try:
         conn = _conn()
         cur = conn.cursor()
@@ -71,6 +113,8 @@ def us_quote(symbol: str) -> dict | None:
     盘前/盘后时段额外给出 regular_price(正常时段收盘) 与 ext_price(延时价)分离。"""
     from zoneinfo import ZoneInfo
     symbol = symbol.upper()
+    if not _db_available():
+        return _us_quote_via_gateway(symbol)
     try:
         conn = _conn()
         cur = conn.cursor()
@@ -123,8 +167,47 @@ def us_quote(symbol: str) -> dict | None:
         return None
 
 
+def _us_quote_via_gateway(symbol: str) -> dict | None:
+    """网关版美股快照 —— 用日线 + 主表拼,比 Yahoo 那条路多出中文名/交易所/ETF 标识。
+
+    与直连版的差别(如实记在这里,不假装等价):
+      · 没有 `earnings_in_days` —— 网关侧没暴露财报日历(us_earnings_calendar)
+      · 没有盘前/盘后分离 —— 那要 1 分钟线的最新 bar,为一个字段拉一次分钟线不划算
+    拿不到就返回 None,调用方(gm/quote.py)会继续回落到 Yahoo。
+    """
+    d = _gw_get(f"/api/v1/us/kline/{symbol}", {"period": "1d", "limit": 2})
+    bars = (d or {}).get("bars") or []
+    if not bars:
+        return None
+    last = bars[-1]
+    prev = float(bars[-2]["close"]) if len(bars) > 1 else float(last["close"])
+    price = float(last["close"])
+    m = _gw_get("/api/v1/us/master", {"symbol": symbol}) or {}
+    return {
+        "code": symbol, "market": "US", "currency": "USD",
+        "name": m.get("name_cn") or m.get("name_en") or symbol,
+        "name_en": m.get("name_en") or "",
+        "exchange": m.get("exchange") or "",
+        "is_etf": bool(m.get("is_etf")),
+        "price": price, "prev_close": prev,
+        "change_pct": round((price - prev) / prev * 100, 2) if prev else None,
+        "regular_price": price, "ext_price": None, "ext_label": None,
+        "earnings_in_days": None,
+        "dual_hk": DUAL_LISTED.get(symbol),
+        "ts": last["ts"], "delayed": True,
+    }
+
+
 def hk_master(code: str) -> dict | None:
     code = code.zfill(5)
+    if not _db_available():
+        d = _gw_get("/api/v1/hk/master", {"code": code})
+        if not d or "code" not in d:
+            return None
+        return {"code": d["code"], "name": d.get("name") or "",
+                "name_trad": d.get("name_trad") or "",
+                "category": d.get("category") or "",
+                "lot_size": d.get("lot_size")}
     try:
         conn = _conn()
         cur = conn.cursor()
@@ -150,6 +233,11 @@ ETF_HOT_LIST = [
 
 def us_news_db(symbol: str, limit: int = 12) -> list[dict]:
     """新闻读库(us_news, 每日采集入库); 空则由调用方回退实时源"""
+    if not _db_available():
+        d = _gw_get("/api/v1/us/news", {"symbol": symbol.upper(), "limit": limit})
+        return [{"title": i.get("headline") or "", "source": i.get("source") or "",
+                 "url": i.get("url") or "", "ts": i.get("published_at") or "", "lang": "en"}
+                for i in ((d or {}).get("items") or [])]
     try:
         conn = _conn(); cur = conn.cursor()
         cur.execute("""SELECT headline, source, url, published_at FROM us_news
@@ -192,6 +280,12 @@ def us_filings_db(symbol: str, limit: int = 10) -> list[dict]:
     labels = {"8-K": "重大事件报告", "10-Q": "季度报告", "10-K": "年度报告",
               "6-K": "外国公司报告", "20-F": "外国公司年报", "S-1": "上市注册",
               "DEF 14A": "股东大会文件", "4": "内部人交易"}
+    if not _db_available():
+        d = _gw_get(f"/api/v1/us/filings/{symbol.upper()}", {"limit": limit})
+        return [{"form": i.get("form") or "",
+                 "title": labels.get(i.get("form"), i.get("form") or ""),
+                 "date": i.get("filed_date") or "", "url": i.get("url") or ""}
+                for i in ((d or {}).get("items") or [])]
     try:
         conn = _conn(); cur = conn.cursor()
         cur.execute("""SELECT form, filed_date, url FROM us_filings
@@ -208,6 +302,11 @@ def us_filings_db(symbol: str, limit: int = 10) -> list[dict]:
 def hk_kline_db(code: str, period: str = "1d", limit: int = 250) -> list[dict]:
     """港股K线读库(每日采集入库); 空则调用方回退Yahoo实时"""
     code = code.zfill(5)
+    if not _db_available():
+        if period not in ("1d", "5m"):        # 网关侧港股只有这两档
+            return []
+        d = _gw_get(f"/api/v1/hk/kline/{code.zfill(5)}", {"period": period, "limit": limit})
+        return (d or {}).get("bars") or []
     try:
         conn = _conn(); cur = conn.cursor()
         if period == "1d":
@@ -311,6 +410,12 @@ def analysts_top(days: int = 10, limit: int = 15) -> list[dict]:
 
 
 def analysts_by_symbol(symbol: str, limit: int = 10) -> list[dict]:
+    if not _db_available():
+        d = _gw_get(f"/api/v1/us/analysts/{symbol.upper()}", {"limit": limit})
+        return [{"date": i.get("rate_date") or "", "firm": i.get("firm") or "",
+                 "action": i.get("action") or "", "from_grade": i.get("from_grade") or "",
+                 "to_grade": i.get("to_grade") or ""}
+                for i in ((d or {}).get("items") or [])]
     try:
         conn = _conn(); cur = conn.cursor()
         cur.execute("""SELECT rate_date, firm, action, from_grade, to_grade
