@@ -9,10 +9,12 @@ symbol 格式映射：hermes code "002595" + exchange "SZ" → "002595.SZ"
 """
 import asyncio
 import os
+import time
 import httpx
 from loguru import logger
 from app.config import STOCK_MAP
 from app.services import finance_data_auth as _auth
+from app.services import source_health
 
 # 双模式 · 让用户"一 key 通用" · 也保留私有部署直连能力
 #
@@ -167,7 +169,43 @@ def subscribe(code: str, name: str, market: str, exchange: str, asset_type: str 
         return {"ok": False, "message": str(e)}
 
 
+# path → 数据源 key · 被动健康观测用(见 services/source_health.py)
+#
+# 每一次真实取数就是一次探测,不额外发请求。前缀最长优先匹配 ——
+# `/api/v1/news/articles` 必须匹配到 a.news_articles 而不是 a.news。
+_SOURCE_BY_PATH = (
+    ("/api/v1/news/articles", "a.news_articles"),
+    ("/api/v1/cninfo/announcements", "a.announce"),
+    ("/api/v1/fund_holders/", "a.fund_holders"),
+    ("/api/v1/money_flow/", "a.money_flow"),
+    ("/api/v1/governance/", "a.governance"),
+    ("/api/v1/financial/", "a.financial"),
+    ("/api/v1/orderbook/", "a.orderbook"),
+    ("/api/v1/research/", "a.research"),
+    ("/api/v1/kline/", "a.kline"),
+    ("/api/v1/quote/", "a.quote"),
+    ("/api/v1/peers/", "a.peers"),
+    ("/api/v1/news", "a.news"),
+    ("/api/v1/lhb/", "a.lhb"),
+)
+
+
+def _source_key(path: str) -> str:
+    for prefix, key in _SOURCE_BY_PATH:
+        if path.startswith(prefix):
+            return key
+    return ""
+
+
 def _get(path: str, params: dict = None) -> dict | list | None:
+    """注意:这里**吞掉全部异常返回 None** —— 调用方遍地依赖这个契约,不动它。
+
+    但"静默"正是 `_13` §3.2 说的最贵的一类 bug:用户只看到没数据,查不出原因。
+    所以这里补一次健康记录 —— 异常不再消失得无影无踪,`/api/catalog/sources`
+    能说出这个源最近失败了几次、错在哪。
+    """
+    key = _source_key(path)
+    t0 = time.perf_counter()
     try:
         r = httpx.get(
             f"{FINANCE_DATA_URL}{path}",
@@ -176,8 +214,14 @@ def _get(path: str, params: dict = None) -> dict | list | None:
             timeout=10.0,
         )
         r.raise_for_status()
-        return r.json()
-    except Exception:
+        data = r.json()
+        if key:
+            source_health.record(key, True, (time.perf_counter() - t0) * 1000)
+        return data
+    except Exception as e:
+        if key:
+            source_health.record(key, False, (time.perf_counter() - t0) * 1000,
+                                 f"{type(e).__name__}: {e}")
         return None
 
 

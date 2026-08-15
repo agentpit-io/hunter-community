@@ -261,6 +261,10 @@ app.include_router(chat_debate_router.router, prefix="/api")
 from app.routers import chat_kpred as chat_kpred_router
 app.include_router(chat_kpred_router.router, prefix="/api")
 
+# ── 能力目录 · 三层模型(数据源/工具箱/SKILL)的查询入口 ──
+from app.routers import catalog as catalog_router
+app.include_router(catalog_router.router, prefix="/api")
+
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "service": "hunter"}

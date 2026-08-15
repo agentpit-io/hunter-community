@@ -62,18 +62,39 @@ _PERIOD_MAP = {
 }
 
 
-def _fetch_chart(code: str, interval: str, range_: str) -> dict | None:
+def _fetch_chart(code: str, interval: str, range_: str,
+                 source_key: str = "hk.quote") -> dict | None:
+    """打 Yahoo chart 接口。
+
+    `source_key` 只用于被动健康观测(services/source_health.py)—— 缓存命中时
+    根本不会走到这里,那也正确:没发生上游调用就没什么可观测的。
+    """
+    import time as _time
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{_yahoo_symbol(code)}"
+    t0 = _time.perf_counter()
     try:
         resp = requests.get(url, params={"interval": interval, "range": range_,
                                          "includePrePost": "false"},
                             headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
         resp.raise_for_status()
         result = (resp.json().get("chart") or {}).get("result") or []
+        _health(source_key, bool(result), t0,
+                "" if result else "chart.result 为空(代码不存在或已退市)")
         return result[0] if result else None
     except Exception as e:
         log.warning("yahoo hk chart %s %s failed: %s", code, interval, e)
+        _health(source_key, False, t0, f"{type(e).__name__}: {e}")
         return None
+
+
+def _health(key: str, ok: bool, t0: float, err: str = "") -> None:
+    """观测绝不能影响取数 —— 这里出任何问题都当没发生。"""
+    try:
+        import time as _time
+        from app.services import source_health
+        source_health.record(key, ok, (_time.perf_counter() - t0) * 1000, err)
+    except Exception:
+        pass
 
 
 def hk_kline(code: str, period: str = "1d", limit: int = 250) -> list[dict]:
@@ -86,7 +107,7 @@ def hk_kline(code: str, period: str = "1d", limit: int = 250) -> list[dict]:
     if cached is not None:
         return cached[-limit:]
     interval, range_ = _PERIOD_MAP[period]
-    chart = _fetch_chart(code, interval, range_)
+    chart = _fetch_chart(code, interval, range_, "hk.kline")
     if not chart:
         return []
     ts_list = chart.get("timestamp") or []

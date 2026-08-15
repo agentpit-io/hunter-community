@@ -17,6 +17,7 @@ TrueSource 数据代理路由
 import os
 import httpx
 from app.services import saas_gateway as _gw
+from app.services import source_health as _sh
 from fastapi import APIRouter, HTTPException, Query, Request
 from loguru import logger
 
@@ -30,6 +31,13 @@ _TIMEOUT = 15.0
 async def _proxy_post(path: str, params: dict | None = None, timeout: float = 70.0) -> dict:
     """POST 转发到 TrueSource，供主动采集类接口使用（耗时 30-60s）。"""
     url = f"{_gw.truesource_url()}{path}"
+    # observe 只记录不吞异常 —— 下面每条 except 都会把 HTTPException 抛出去,
+    # 抛出去就被记成一次失败,原有的错误处理一个字都不用改。
+    with _sh.observe("global.truesource_scout"):
+        return await _do_proxy_post(url, params, timeout)
+
+
+async def _do_proxy_post(url: str, params: dict | None, timeout: float) -> dict:
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(connect=5.0, read=timeout, write=5.0, pool=5.0)) as client:
             r = await client.post(url, params=params or {}, headers=_gw.truesource_headers())
@@ -49,6 +57,11 @@ async def _proxy_post(path: str, params: dict | None = None, timeout: float = 70
 async def _proxy(path: str, params: dict | None = None) -> dict:
     """转发请求到 TrueSource，统一错误处理。"""
     url = f"{_gw.truesource_url()}{path}"
+    with _sh.observe("global.truesource_brief"):
+        return await _do_proxy(url, params)
+
+
+async def _do_proxy(url: str, params: dict | None) -> dict:
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             r = await client.get(url, params=params or {}, headers=_gw.truesource_headers())

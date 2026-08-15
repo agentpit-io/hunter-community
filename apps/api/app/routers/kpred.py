@@ -432,6 +432,10 @@ def _optional_user_id(request: Request | None) -> str | None:
 async def get_kpred(code: str, days: int = 10, request: Request = None):
     if days < 1 or days > 30:
         raise HTTPException(400, "days 范围 1~30")
+    # 被动健康观测 · 见 services/source_health.py:每次真实调用就是一次探测
+    from app.services import source_health as _sh
+    import time as _time
+    _t0 = _time.perf_counter()
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(connect=3.0, read=30.0, write=5.0, pool=3.0)) as client:
             r = await client.post(
@@ -439,6 +443,9 @@ async def get_kpred(code: str, days: int = 10, request: Request = None):
                 json={"symbol": code, "pred_len": days},
                 headers=_gw.kronos_headers(),
             )
+        _sh.record("global.kronos", r.status_code == 200,
+                   (_time.perf_counter() - _t0) * 1000,
+                   "" if r.status_code == 200 else f"HTTP {r.status_code}: {r.text[:120]}")
         if r.status_code != 200:
             raise HTTPException(502, f"Kronos 服务错误: {r.text[:200]}")
         result = r.json()
@@ -479,9 +486,11 @@ async def get_kpred(code: str, days: int = 10, request: Request = None):
         if _stale:
             result["data_note"] = _stale
         return result
-    except httpx.ConnectError:
+    except httpx.ConnectError as e:
+        _sh.record("global.kronos", False, (_time.perf_counter() - _t0) * 1000, f"ConnectError: {e}")
         raise HTTPException(503, "Kronos 预测服务暂不可用")
-    except httpx.TimeoutException:
+    except httpx.TimeoutException as e:
+        _sh.record("global.kronos", False, (_time.perf_counter() - _t0) * 1000, f"Timeout: {e}")
         raise HTTPException(504, "Kronos 预测超时，请稍后重试")
 
 

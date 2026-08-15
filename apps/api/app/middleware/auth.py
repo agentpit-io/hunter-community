@@ -48,6 +48,9 @@ _PUBLIC_PREFIXES = (
     "/api/public/chat_debate/stream/",
     "/api/public/chat_kpred/stream/",
     "/api/chat/skills/detail/",
+    # Capability catalog · 只描述"这套部署能拿到什么数据",不含任何凭证
+    # (只回 configured=true/false,不回 key 本身;endpoint 路径本来就在开源代码里)
+    "/api/catalog/",
     # Internal MCP bridge · shared-secret authenticated separately
     "/api/internal/",
 )
