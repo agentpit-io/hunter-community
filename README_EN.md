@@ -10,9 +10,13 @@
 
 # Hunter Community Edition
 
-**Your private financial AI team · One API key · Self-hosted in 5 minutes**
+### Your investment brain · on your terms
+### One platform · a system for every strategy
 
-*你的私人金融 AI 团队 · 一 key 通用 · 5 分钟自部署*
+*别人的策略 · 你自己的 SKILL · 一个平台 · 一亿套系统*
+
+**Your private financial AI team · One API key · Self-hosted in 5 minutes**
+*开源自部署 · 一 key 通用 · 5 分钟跑起来*
 
 [![License](https://img.shields.io/badge/license-Apache_2.0-blue)](./LICENSE)
 [![CI](https://github.com/agentpit-io/hunter-community/actions/workflows/ci.yml/badge.svg)](https://github.com/agentpit-io/hunter-community/actions/workflows/ci.yml)

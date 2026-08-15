@@ -10,8 +10,12 @@
 
 # Hunter Community Edition
 
-**你的私人金融 AI 团队 · 一 key 通用 · 5 分钟自部署**
+### 别人的策略 · 你自己的 SKILL
+### 一个平台 · 一亿套系统
 
+*Your investment brain, on your terms*
+
+**开源自部署 · 一 key 通用 · 5 分钟跑起来**
 *Your private financial AI team · one API key · self-hosted in 5 minutes*
 
 [![License](https://img.shields.io/badge/license-Apache_2.0-blue)](./LICENSE)
