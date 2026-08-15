@@ -42,3 +42,8 @@ coverage/
 tmp/
 .claude/
 tsconfig.tsbuildinfo
+
+# 本地备份文件
+*.bak
+*.bak.*
+.env.bak.*

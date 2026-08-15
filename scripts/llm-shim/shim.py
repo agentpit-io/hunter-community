@@ -110,39 +110,55 @@ class Handler(BaseHTTPRequestHandler):
     def _proxy(self, body: bytes | None):
         if body is not None and self.path.endswith("/chat/completions"):
             body = sanitize_body(body)
-        try:
-            req = urllib.request.Request(self._target(), data=body,
-                                         method=self.command)
-            for k in ("Authorization", "Content-Type", "Accept"):
-                if k in self.headers:
-                    req.add_header(k, self.headers[k])
-            if body is not None:
-                req.add_header("Content-Length", str(len(body)))
-            r = urllib.request.urlopen(req, timeout=300)
-            self.send_response(r.status)
-            for k, v in r.headers.items():
-                if k.lower() in ("content-length", "connection", "transfer-encoding"):
+        # SSL EOF 常发生在 keep-alive stream 尾部 · 加 Connection: close 强制新连接
+        # 重试 1 次 · 主要覆盖偶发 SSL_UNEXPECTED_EOF · 不做无限重试防死循环
+        for attempt in (1, 2):
+            try:
+                req = urllib.request.Request(self._target(), data=body,
+                                             method=self.command)
+                for k in ("Authorization", "Content-Type", "Accept"):
+                    if k in self.headers:
+                        req.add_header(k, self.headers[k])
+                if body is not None:
+                    req.add_header("Content-Length", str(len(body)))
+                req.add_header("Connection", "close")
+                r = urllib.request.urlopen(req, timeout=300)
+                self.send_response(r.status)
+                for k, v in r.headers.items():
+                    if k.lower() in ("content-length", "connection", "transfer-encoding"):
+                        continue
+                    self.send_header(k, v)
+                self.end_headers()
+                # 4KB 流式转发 · 保持 SSE 分块边界,否则 tool_calls 增量拼不起来
+                # stream 尾部 SSL EOF 不算失败(数据已到) · 静默吞掉
+                try:
+                    while True:
+                        chunk = r.read(4096)
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+                        self.wfile.flush()
+                except Exception as se:
+                    print(f"[shim] stream tail eof (ignored · data delivered): {type(se).__name__}",
+                          flush=True)
+                return
+            except urllib.error.HTTPError as e:
+                data = e.read()
+                print(f"[shim] upstream {e.code}: {data.decode(errors='replace')[:300]}",
+                      flush=True)
+                self.send_response(e.code)
+                self.end_headers()
+                self.wfile.write(data)
+                return
+            except Exception as e:
+                if attempt == 1:
+                    print(f"[shim] attempt 1 failed ({type(e).__name__}) · retry once",
+                          flush=True)
                     continue
-                self.send_header(k, v)
-            self.end_headers()
-            # 4KB 流式转发 · 保持 SSE 分块边界,否则 tool_calls 增量拼不起来
-            while True:
-                chunk = r.read(4096)
-                if not chunk:
-                    break
-                self.wfile.write(chunk)
-                self.wfile.flush()
-        except urllib.error.HTTPError as e:
-            data = e.read()
-            print(f"[shim] upstream {e.code}: {data.decode(errors='replace')[:300]}",
-                  flush=True)
-            self.send_response(e.code)
-            self.end_headers()
-            self.wfile.write(data)
-        except Exception as e:
-            print(f"[shim] error: {e}", flush=True)
-            self.send_response(502)
-            self.end_headers()
+                print(f"[shim] error after retry: {e}", flush=True)
+                self.send_response(502)
+                self.end_headers()
+                return
 
     def do_POST(self):
         n = int(self.headers.get("Content-Length", 0))
