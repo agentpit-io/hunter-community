@@ -23,11 +23,11 @@
 
 <br>
 
-<img src="./docs/screenshots/hunter-demo.gif" alt="Hunter Community 30 秒演示 · 点击下方看完整视频" width="820" />
 
-**▶️ [看完整 3.5 分钟高清演示视频(带音频)](https://video-1253756459.cos.ap-guangzhou.myqcloud.com/misc/huntercode.mov)**
 
-*上方 GIF 是前 30 秒预览 · 完整版展示深度分析报告 + 走势预测 + SKILL 使用*
+https://github.com/user-attachments/assets/37f4a065-663b-4eee-8d3f-c9c0573270e3
+
+*SaaS 完整演示 · 3 分 34 秒 · 深度分析 + 走势预测 + SKILL 使用 · 点视频左下角播放*
 
 </div>
 

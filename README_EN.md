@@ -23,11 +23,11 @@
 
 <br>
 
-<img src="./docs/screenshots/hunter-demo.gif" alt="Hunter Community 30-second demo" width="820" />
 
-**▶️ [Watch full 3.5-minute HD demo (with audio)](https://video-1253756459.cos.ap-guangzhou.myqcloud.com/misc/huntercode.mov)**
 
-*GIF above is a 30-second preview. Full version shows deep analysis reports + trend forecast + SKILL usage.*
+https://github.com/user-attachments/assets/37f4a065-663b-4eee-8d3f-c9c0573270e3
+
+*Full SaaS demo · 3m 34s · deep analysis + trend forecast + SKILL usage · click play in the video player*
 
 </div>
 
