@@ -15,11 +15,13 @@
 
 <br>
 
-<video src="https://video-1253756459.cos.ap-guangzhou.myqcloud.com/misc/huntercode.mov" controls muted playsinline width="820" poster="./docs/screenshots/01-overview-quickview.png">
-  你的浏览器不支持内嵌视频 · <a href="https://video-1253756459.cos.ap-guangzhou.myqcloud.com/misc/huntercode.mov">▶️ 点这里观看演示视频(.mov · ~95 MB)</a>
-</video>
+<a href="https://video-1253756459.cos.ap-guangzhou.myqcloud.com/misc/huntercode.mov">
+  <img src="./docs/screenshots/01-overview-quickview.png" alt="Hunter Community 演示 · 点击观看完整视频" width="820" />
+</a>
 
-*🎥 SaaS 演示视频 · 或看截图:一问「601899 多少钱」· 侧栏 32 数据源全解锁 · 富卡片带 AI 短评 · 3 按钮秒进深度分析 / 加自选 / 查新闻*
+**▶️ [点击封面或这里 · 观看 SaaS 完整演示视频](https://video-1253756459.cos.ap-guangzhou.myqcloud.com/misc/huntercode.mov)** · `.mov` · ~95 MB
+
+*一问「601899 多少钱」· 侧栏 32 数据源全解锁 · 富卡片带 AI 短评 · 3 按钮秒进深度分析 / 加自选 / 查新闻*
 
 </div>
 
