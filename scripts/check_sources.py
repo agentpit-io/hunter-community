@@ -139,9 +139,15 @@ def check_probe() -> None:
     # 有几个端点把标的放在 query 而不是路径里,不带就是 422。
     # 422 是"我参数给错了",跟"这个源坏了"是两回事,不区分会天天误报。
     QUERY_SYMBOL = {"a.news_articles", "a.announce", "a.news", "us.news"}
+    # 覆盖极薄的源要用**已入库的**样本,否则探的是"这只没数据"而不是"这个源坏了"。
+    # 十大股东/治理目前只 seed 了 2 只(002138.SZ / 603444.SH)——
+    # 用 600519.SH 探必然 404,天天误报。
+    # 哪天覆盖上去了,这条覆盖删掉即可,不删也不会错。
+    SAMPLE_OVERRIDE = {"a.fund_holders": "002138.SZ", "a.governance": "002138.SZ"}
     ok = fail = 0
     for s in targets:
         sym, code = SAMPLE.get(s.market.value, ("600519.SH", "600519"))
+        sym = SAMPLE_OVERRIDE.get(s.key, sym)
         path = s.endpoint.replace("{symbol}", sym).replace("{code}", code)
         params = {"symbol": sym, "limit": 1} if s.key in QUERY_SYMBOL else {}
         t0 = time.perf_counter()

@@ -347,6 +347,11 @@ def hk_news_db(code: str, limit: int = 12) -> list[dict]:
 
 def hk_filings_db(code: str, limit: int = 10) -> list[dict]:
     code = code.zfill(5)
+    if not _db_available():
+        d = _gw_get(f"/api/v1/hk/filings/{code.zfill(5)}", {"limit": limit})
+        return [{"title": i.get("title") or "", "url": i.get("url") or "",
+                 "date": (i.get("filed_at") or "")[:10]}
+                for i in ((d or {}).get("items") or [])]
     try:
         conn = _conn(); cur = conn.cursor()
         cur.execute("""SELECT title, filed_at, url FROM hk_filings
@@ -363,6 +368,14 @@ def hk_filings_db(code: str, limit: int = 10) -> list[dict]:
 def hk_fin_db(code: str, limit: int = 4) -> list[dict]:
     """港股财务指标读库(hk_fin_indicator, 年度多期), 含营收/净利YoY"""
     code = code.zfill(5)
+    if not _db_available():
+        d = _gw_get(f"/api/v1/hk/financial/{code.zfill(5)}", {"limit": limit})
+        return [{"report_date": i.get("report_date") or "",
+                 "eps": i.get("basic_eps"), "bps": i.get("bps"),
+                 # 上游给原始单位,这里换算成亿 —— 与直连版保持同一口径
+                 "oi": (i.get("oi") or 0) / 1e8 if i.get("oi") else None,
+                 "net_profit": (i.get("net_profit") or 0) / 1e8 if i.get("net_profit") else None}
+                for i in ((d or {}).get("items") or [])]
     try:
         conn = _conn(); cur = conn.cursor()
         cur.execute("""SELECT report_date, oi, net_profit, basic_eps, bps FROM hk_fin_indicator

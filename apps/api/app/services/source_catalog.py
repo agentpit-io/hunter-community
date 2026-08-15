@@ -116,24 +116,27 @@ _A: list[DataSource] = [
                "/api/v1/money_flow/{symbol}"),
     DataSource("a.lhb", "龙虎榜", Market.A, DataKind.CAPITAL, "finance-data",
                "/api/v1/lhb/{symbol}"),
-    # 这两个跟 a.peers 一样:通道和凭证都没问题,是**上游表还没 seed**。
-    # 实测 600519.SH → 404「无股东数据」/「无治理数据」。
-    # uzi_mcp 的工具描述里其实也写了"龙虎榜/十大股东/治理表尚未 seed" ——
-    # 那句话散在工具描述里没人看得见,现在挪到数据源层,侧栏上直接标出来。
-    DataSource("a.fund_holders", "基金持仓", Market.A, DataKind.HOLDER, "finance-data",
-               "/api/v1/fund_holders/{symbol}", available=False,
-               unavailable_reason="上游 fund_holdings 表未 seed —— 实测 600519.SH 返回「无股东数据」"),
+    # 2026-08-15 跑了 seed_uzi_dims.py。通道一直是好的,现在也有数据了 ——
+    # 但**覆盖极薄**:只有 2 只股票,其余仍 404。
+    # 标 available=True 说的是"通道通",覆盖度写在 volume_hint 里别让人误会。
+    # 覆盖上不去的原因:seed 用的 akshare 从新加坡打 push2.eastmoney.com
+    # 大部分调用失败(20 只里只成了 2 只)。要提高覆盖得换数据源或走国内代理。
+    DataSource("a.fund_holders", "十大流通股东", Market.A, DataKind.HOLDER, "finance-data",
+               "/api/v1/fund_holders/{symbol}", volume_hint="仅 2 只已入库",
+               note="未入库的股票返回 404(不是假装成功)· 提高覆盖需换数据源"),
     DataSource("a.governance", "公司治理", Market.A, DataKind.HOLDER, "finance-data",
-               "/api/v1/governance/{symbol}", available=False,
-               unavailable_reason="上游 governance_metrics 表未 seed —— 实测 600519.SH 返回「无治理数据」",
-               note="高管 · 股权结构"),
+               "/api/v1/governance/{symbol}", volume_hint="仅 2 只已入库",
+               note="大股东占比/top5/top10 · 从十大股东派生 · 覆盖同上"),
     DataSource("a.research", "券商研报", Market.A, DataKind.RESEARCH, "finance-data",
                "/api/v1/research/{symbol}"),
     DataSource("a.peers", "同业对标", Market.A, DataKind.VALUATION, "finance-data",
                "/api/v1/peers/{symbol}", available=False,
-               unavailable_reason="上游行业映射表为空 —— 实测 600519.SH / 000001.SZ / 600519 "
-                                  "全部返回『无行业映射』404",
-               note="通道和凭证都没问题,是上游缺数据。要修得在 finance-data 侧补行业映射"),
+               unavailable_reason="peers_mapping 表 0 行,且**暂时补不上** —— "
+                                  "seed 要的 akshare stock_individual_info_em 从新加坡打不通"
+                                  "(push2.eastmoney.com 返非 JSON),国内 AK 代理的白名单里"
+                                  "又没有这个函数;company_master.industry_sw 6,138 行全空",
+               note="通道和凭证都没问题,纯粹是**哪儿都拿不到行业分类数据**。"
+                    "要修:给 AK 代理白名单加 stock_individual_info_em,或另找行业分类源"),
     # 免 key 兜底 —— 但要如实说明它的问题
     DataSource("a.akshare", "AKShare(免 key)", Market.A, DataKind.QUOTE, "akshare",
                tier=SourceTier.FREE_UNSTABLE, requires_key=False,
@@ -162,21 +165,20 @@ _HK: list[DataSource] = [
     DataSource("hk.kline_db", "港股历史K线(库)", Market.HK, DataKind.KLINE, "finance-data",
                "/api/v1/hk/kline/{code}", volume_hint="日线 69.8万 · 5分钟 74.3万",
                note="比 Yahoo 那条覆盖更全(历史更长)· 经 hunter 网关"),
-    # 下面 4 条仍未通 —— 但理由各不相同,写清楚才有用(_15 的 C 组)
-    DataSource("hk.financial", "港股财报", Market.HK, DataKind.FINANCIAL, "findata-db",
-               "/api/gm/fundamentals/hk/{code}", volume_hint="1,425 条", available=False,
-               unavailable_reason="上游 finance-data 尚未做成 HTTP 接口,只能直连库读"),
-    DataSource("hk.filings", "港交所公告", Market.HK, DataKind.ANNOUNCE, "findata-db",
-               volume_hint="1,950 条", available=False,
-               unavailable_reason="上游 finance-data 尚未做成 HTTP 接口,只能直连库读"),
-    DataSource("hk.southbound", "南向资金", Market.HK, DataKind.CAPITAL, "findata-db",
-               volume_hint="15 个交易日(2026-07-27 起)", available=False,
-               unavailable_reason="上游 finance-data 尚未做成 HTTP 接口,只能直连库读",
-               note="采集正常 —— 每工作日 8:50 跑,一个交易日一行,表 7/27 才建所以行数少。"
-                    "别把'行数少'当成'采集坏了'"),
-    DataSource("hk.ah_premium", "AH 溢价", Market.HK, DataKind.VALUATION, "findata-db",
-               volume_hint="360 条", available=False,
-               unavailable_reason="上游 finance-data 尚未做成 HTTP 接口,只能直连库读"),
+    # 这 4 条 2026-08-15 第二批通了 —— finance-data 补了 /api/v1/hk/* 端点
+    DataSource("hk.financial", "港股财报", Market.HK, DataKind.FINANCIAL, "finance-data",
+               "/api/v1/hk/financial/{code}", volume_hint="1,425 条",
+               note="EPS/BPS/营收/净利 按报告期倒序 · 经 hunter 网关"),
+    DataSource("hk.filings", "港交所公告", Market.HK, DataKind.ANNOUNCE, "finance-data",
+               "/api/v1/hk/filings/{code}", volume_hint="1,950 条",
+               note="经 hunter 网关"),
+    DataSource("hk.southbound", "南向资金", Market.HK, DataKind.CAPITAL, "finance-data",
+               "/api/v1/hk/southbound", volume_hint="每交易日一行(2026-07-27 起)",
+               note="采集每工作日 8:50 跑。表 7/27 才建所以行数少 —— "
+                    "那是表龄不是故障,别再从行数少推断成采集坏了"),
+    DataSource("hk.ah_premium", "AH 溢价", Market.HK, DataKind.VALUATION, "finance-data",
+               "/api/v1/hk/ah_premium", volume_hint="24 对/日",
+               note="不带 date 取最新一天全部 · premium_pct>0 表示 A 股溢价"),
 ]
 
 # ══════════════════════════════════════════════════════════════
