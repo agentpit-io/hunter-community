@@ -143,7 +143,8 @@ def check_probe() -> None:
     # 十大股东/治理目前只 seed 了 2 只(002138.SZ / 603444.SH)——
     # 用 600519.SH 探必然 404,天天误报。
     # 哪天覆盖上去了,这条覆盖删掉即可,不删也不会错。
-    SAMPLE_OVERRIDE = {"a.fund_holders": "002138.SZ", "a.governance": "002138.SZ"}
+    SAMPLE_OVERRIDE = {"a.fund_holders": "002138.SZ", "a.governance": "002138.SZ",
+                       "a.peers": "600031.SH"}
     ok = fail = 0
     for s in targets:
         sym, code = SAMPLE.get(s.market.value, ("600519.SH", "600519"))

@@ -115,28 +115,30 @@ _A: list[DataSource] = [
     DataSource("a.money_flow", "资金流向", Market.A, DataKind.CAPITAL, "finance-data",
                "/api/v1/money_flow/{symbol}"),
     DataSource("a.lhb", "龙虎榜", Market.A, DataKind.CAPITAL, "finance-data",
-               "/api/v1/lhb/{symbol}"),
+               "/api/v1/lhb/{symbol}", volume_hint="17 只有记录",
+               note="没上过榜的股票返回 200 + 空数组(不是 404)—— 上层分不清'没上榜'和'我们没数据',待改"),
     # 2026-08-15 跑了 seed_uzi_dims.py。通道一直是好的,现在也有数据了 ——
     # 但**覆盖极薄**:只有 2 只股票,其余仍 404。
     # 标 available=True 说的是"通道通",覆盖度写在 volume_hint 里别让人误会。
     # 覆盖上不去的原因:seed 用的 akshare 从新加坡打 push2.eastmoney.com
     # 大部分调用失败(20 只里只成了 2 只)。要提高覆盖得换数据源或走国内代理。
     DataSource("a.fund_holders", "十大流通股东", Market.A, DataKind.HOLDER, "finance-data",
-               "/api/v1/fund_holders/{symbol}", volume_hint="仅 2 只已入库",
-               note="未入库的股票返回 404(不是假装成功)· 提高覆盖需换数据源"),
+               "/api/v1/fund_holders/{symbol}", volume_hint="5 只已入库",
+               note="含持股数与占流通股比例 · 未入库返回 404(不是假装成功)。"
+                    "覆盖低是因为东财这个接口成功率本身就低,已改走国内代理但仍有限"),
     DataSource("a.governance", "公司治理", Market.A, DataKind.HOLDER, "finance-data",
-               "/api/v1/governance/{symbol}", volume_hint="仅 2 只已入库",
-               note="大股东占比/top5/top10 · 从十大股东派生 · 覆盖同上"),
+               "/api/v1/governance/{symbol}", volume_hint="5 只已入库",
+               note="大股东占比/top5/top10 · 从十大流通股东派生,覆盖跟着它走"),
     DataSource("a.research", "券商研报", Market.A, DataKind.RESEARCH, "finance-data",
-               "/api/v1/research/{symbol}"),
+               "/api/v1/research/{symbol}", volume_hint="53 只 · 1,763 篇",
+               note="无研报的股票返回 200 + count:0 · 同 a.lhb 的问题"),
+    # 2026-08-15 通了。原来 0 行,因为 seed 走的东财 stock_individual_info_em
+    # **在新加坡和国内都是 RemoteDisconnected**(接口本身坏了,换代理也没用)。
+    # 改用巨潮 stock_industry_change_cninfo 经国内 AK 代理拿三级分类,
+    # 同业清单在我们自己库里按同 industry_l2 分组 —— 不再依赖外部接口。
     DataSource("a.peers", "同业对标", Market.A, DataKind.VALUATION, "finance-data",
-               "/api/v1/peers/{symbol}", available=False,
-               unavailable_reason="peers_mapping 表 0 行,且**暂时补不上** —— "
-                                  "seed 要的 akshare stock_individual_info_em 从新加坡打不通"
-                                  "(push2.eastmoney.com 返非 JSON),国内 AK 代理的白名单里"
-                                  "又没有这个函数;company_master.industry_sw 6,138 行全空",
-               note="通道和凭证都没问题,纯粹是**哪儿都拿不到行业分类数据**。"
-                    "要修:给 AK 代理白名单加 stock_individual_info_em,或另找行业分类源"),
+               "/api/v1/peers/{symbol}", volume_hint="58 只已分类",
+               note="巨潮三级行业分类 + 同业清单 · 未分类的股票返回 404"),
     # 免 key 兜底 —— 但要如实说明它的问题
     DataSource("a.akshare", "AKShare(免 key)", Market.A, DataKind.QUOTE, "akshare",
                tier=SourceTier.FREE_UNSTABLE, requires_key=False,
