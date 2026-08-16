@@ -218,9 +218,11 @@ open http://localhost:3100
 | 🥉 | **Gemini 3.5 Flash** | 6/7 | 62.3s | ⚠ C1 边界过度调用超时 · 无 think 泄漏 | ⭐⭐⭐⭐ 便宜快 |
 | 4 | **Doubao Seed 2.1 Pro** | 6/7 | 103.9s | ⚠ 深度分析慢 3-5× | ⭐⭐⭐ 建议直连火山引擎 |
 | 5 | **GPT-5.6 sol** | 5/7 | **18.1s**(最快) | ✅ 快 · 但 A3/B1 错选 tool | ⭐⭐⭐ 快 · tool 命中偏差 |
-| 6 | **MiniMax M3** | 6/7 | 60.9s | ❌ **7/7 全 `<think>` 泄漏** | ⭐⭐ 不推荐(需前端剥 think) |
+| 6 | **MiniMax M3**(修复后) | 6/7 | 77.3s | ✅ **0/7 泄漏**(修复前 7/7 · shim 已内置双保险)| ⭐⭐⭐⭐ 已可用 |
 
 **AIHubMix 使用注意**:Alpine 容器直连 aihubmix 会被 CDN 按 TLS 指纹拦截(SSL EOF)· 需要 host proxy 中转 · 详见 [`docs/env-samples/.env.aihubmix.example`](./docs/env-samples/.env.aihubmix.example) 和 [`docs/model-testing/scripts/aihubmix-host-proxy.py`](./docs/model-testing/scripts/aihubmix-host-proxy.py)。
+
+**Thinking 类模型 `<think>` 泄漏兜底**:MiniMax / Qwen thinking / Kimi thinking 系列会把内部推理夹在 assistant.content 里 · `scripts/llm-shim/shim.py` 已内置双保险(请求端注入 `thinking:false` + 响应端 SSE 状态机剥离 `<think>...</think>`)· 用 `LLM_STRIP_THINK=0` 可紧急关闭。**11 个跨 chunk 边界的单元测试全过**,复测 MiniMax M3 think 泄漏 7/7 → 0/7。
 
 **env 模板 6 份齐备**(每份含 URL / model 名 / SANITIZE 设置 / 已知踩坑注释):[`docs/env-samples/`](./docs/env-samples/)
 - `.env.aihubmix.example` — 网关(GPT/Claude/Gemini/Qwen/Doubao/MiniMax/DeepSeek/GLM 一把 key)
