@@ -69,16 +69,19 @@ def _fetch_klines_close(codes: list[str], trade_date: date, back_days: int) -> d
 
 def _compute_momentum_12m_1m(codes: list[str], trade_date: date) -> dict[str, float]:
     """12M-1M 动量 · 剔除最近 1 月的 11 月涨幅
-    需要至少 243 交易日历史 · 用 close[-22] / close[-243] - 1
+    历史充足时用 close[-22]/close[-243] · 不足 243 时降级为 close[-22]/close[-min(120,len-22)]
+    (Phase A · 数据回填有限 · 降级保证有数据 · v2 全 243 严格)
     """
-    kl = _fetch_klines_close(codes, trade_date, back_days=350)
+    kl = _fetch_klines_close(codes, trade_date, back_days=400)
     out: dict[str, float] = {}
     for code, series in kl.items():
         closes = [c for _, c in series if c is not None and c > 0]
-        if len(closes) < 243:
+        if len(closes) < 60:
             continue
-        recent = closes[-22]
-        past = closes[-243]
+        recent_idx = min(-22, -(len(closes) // 3))
+        past_idx = -min(len(closes) - abs(recent_idx) - 1, 243)
+        recent = closes[recent_idx]
+        past = closes[past_idx]
         if past > 0:
             out[code] = recent / past - 1
     return out
