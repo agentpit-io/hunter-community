@@ -29,6 +29,22 @@ const SB_BG = '#faf9f4'
 const SB_HOVER = '#f0ede2'
 const SB_ACTIVE = '#e8e2d1'
 
+// Tab 切换样式(方案 A · 2026-08-17)
+const tabBtn = (active: boolean): React.CSSProperties => ({
+  flex: 1,
+  padding: '10px 6px',
+  fontSize: 12,
+  fontWeight: active ? 600 : 500,
+  color: active ? HUNTER.THEME : HUNTER.INK_S,
+  background: 'transparent',
+  border: 'none',
+  borderBottom: active ? `2px solid ${HUNTER.THEME}` : '2px solid transparent',
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+  transition: 'color 0.1s, border-color 0.1s',
+  marginBottom: -1,
+})
+
 function fmtTitle(t: string): string {
   if (!t) return '新对话'
   return t.length > 26 ? t.slice(0, 26) + '…' : t
@@ -72,6 +88,16 @@ export default function ChatSidebar({ currentSessionId, onSelectSession, onNewSe
   const [loading, setLoading] = useState(false)
   const [creating, setCreating] = useState(false)
   const [showSkillMgr, setShowSkillMgr] = useState(false)
+  // Tab 切换 · 一次只显对话或能力 · localStorage 持久 · 默认对话(最常用)
+  // (2026-08-17 方案 A · doc: sidebar-history-space-plan.md)
+  const [activeTab, setActiveTab] = useState<'chat' | 'capability'>(() => {
+    if (typeof window === 'undefined') return 'chat'
+    return (localStorage.getItem('hunter_sidebar_tab') as any) === 'capability' ? 'capability' : 'chat'
+  })
+  const switchTab = (t: 'chat' | 'capability') => {
+    setActiveTab(t)
+    try { localStorage.setItem('hunter_sidebar_tab', t) } catch { /* ignore */ }
+  }
   const [skillRefresh, setSkillRefresh] = useState(0)
   const [showProfile, setShowProfile] = useState(false)
   const [wizard, setWizard] = useState(false)
@@ -352,36 +378,56 @@ export default function ChatSidebar({ currentSessionId, onSelectSession, onNewSe
         </button>
       </div>
 
-      {/* 能力区 · 三层(数据源/工具箱/SKILL)—— 让用户知道**能拿到什么数据、
-          有什么工具、能问什么**。自身失败时静默不显示,不影响聊天。 */}
-      {onPickSkill && (
-        <CapabilityPanel
-          onPick={onPickSkill}
-          onManage={() => setShowSkillMgr(true)}
-          refreshKey={skillRefresh}
-        />
+      {/* Tab 切换栏 · 一次只显对话或能力 · 让历史对话拿到全部剩余空间(方案 A) */}
+      <div style={{ display: 'flex', borderBottom: `1px solid ${HUNTER.LINE}`, padding: '0 12px' }}>
+        <button
+          onClick={() => switchTab('chat')}
+          style={tabBtn(activeTab === 'chat')}
+          title="历史对话"
+        >
+          💬 对话
+        </button>
+        <button
+          onClick={() => switchTab('capability')}
+          style={tabBtn(activeTab === 'capability')}
+          title="能力(数据源 / 工具箱 / SKILL)"
+        >
+          ✨ 能力
+        </button>
+      </div>
+
+      {/* 能力区 · Tab 选中"能力"时才显 · 关闭时释放 ~480px 给历史对话 */}
+      {activeTab === 'capability' && onPickSkill && (
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+          <CapabilityPanel
+            onPick={onPickSkill}
+            onManage={() => setShowSkillMgr(true)}
+            refreshKey={skillRefresh}
+          />
+        </div>
       )}
 
-      {/* Session 列表 · 在能力区之下 · 占据剩余空间。
-          能力区三块默认只展开 SKILL 一块,所以这里仍能拿到大部分高度。 */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0 8px', minHeight: 120 }}>
-        {loading && sessions.length === 0 ? (
-          <div style={{ padding: '20px 12px', textAlign: 'center', color: HUNTER.INK_F, fontSize: 12 }}>
-            加载中...
-          </div>
-        ) : sessions.length === 0 ? (
-          <div style={{ padding: '20px 12px', textAlign: 'center', color: HUNTER.INK_F, fontSize: 12 }}>
-            暂无对话 · 点击上方新建
-          </div>
-        ) : (
-          <>
-            {renderGroup('Today', groups.today)}
-            {renderGroup('Yesterday', groups.yesterday)}
-            {renderGroup('This Week', groups.week)}
-            {renderGroup('Older', groups.older)}
-          </>
-        )}
-      </div>
+      {/* Session 列表 · Tab 选中"对话"时占满剩余空间(~700px = 15-17 条对话) */}
+      {activeTab === 'chat' && (
+        <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0 8px', minHeight: 120 }}>
+          {loading && sessions.length === 0 ? (
+            <div style={{ padding: '20px 12px', textAlign: 'center', color: HUNTER.INK_F, fontSize: 12 }}>
+              加载中...
+            </div>
+          ) : sessions.length === 0 ? (
+            <div style={{ padding: '20px 12px', textAlign: 'center', color: HUNTER.INK_F, fontSize: 12 }}>
+              暂无对话 · 点击上方新建
+            </div>
+          ) : (
+            <>
+              {renderGroup('Today', groups.today)}
+              {renderGroup('Yesterday', groups.yesterday)}
+              {renderGroup('This Week', groups.week)}
+              {renderGroup('Older', groups.older)}
+            </>
+          )}
+        </div>
+      )}
 
       {/* 平台 key 入口 · 未解锁时这是整个侧栏最该被看见的一行
           —— 左侧那些工具与 SKILL 都要它,所以给整行宽度 + 铜色描边,
