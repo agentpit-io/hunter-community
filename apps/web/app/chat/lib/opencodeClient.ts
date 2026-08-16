@@ -154,9 +154,11 @@ export async function defaultModelKey(): Promise<string> {
     const data = await req<any>('GET', '/config/providers')
     const def = data?.default
     if (def && typeof def === 'object') {
-      const ids: string[] = (data.providers || []).map((p: any) => p.id)
-      // 优先我们自己配的那个 · 'opencode' 是镜像内置的 OpenCode Zen,不是用户想要的
-      const pick = ids.find((id) => id !== 'opencode' && def[id]) || ids.find((id) => def[id])
+      // 与 listProviders / resolveModelKey 一致 · 过滤 opencode zen(用户不能用)
+      const ids: string[] = (data.providers || [])
+        .filter((p: any) => p.id !== 'opencode')
+        .map((p: any) => p.id)
+      const pick = ids.find((id) => def[id])
       if (pick) return `${pick}/${def[pick]}`
     }
   } catch (e) {
@@ -179,7 +181,9 @@ export async function defaultModelKey(): Promise<string> {
 export async function resolveModelKey(saved: string | null): Promise<string> {
   try {
     const data = await req<any>('GET', '/config/providers')
-    const providers: any[] = data?.providers || []
+    // 与 listProviders 保持一致 · 过滤掉 OpenCode Zen(内置无 key · tool schema 不兼容会 400)
+    // 这里必须过滤 · 否则 saved='opencode/xxx' 会通过校验被继续使用 · UI 显示但发消息必挂
+    const providers: any[] = (data?.providers || []).filter((p: any) => p.id !== 'opencode')
     if (saved) {
       const [pid, ...rest] = saved.split('/')
       const mid = rest.join('/')
@@ -189,8 +193,7 @@ export async function resolveModelKey(saved: string | null): Promise<string> {
     const def = data?.default
     if (def && typeof def === 'object') {
       const ids: string[] = providers.map((p) => p.id)
-      // 'opencode' 是镜像内置的 OpenCode Zen,不是用户配的那个,排在最后
-      const pick = ids.find((id) => id !== 'opencode' && def[id]) || ids.find((id) => def[id])
+      const pick = ids.find((id) => def[id])
       if (pick) return `${pick}/${def[pick]}`
     }
   } catch (e) {
