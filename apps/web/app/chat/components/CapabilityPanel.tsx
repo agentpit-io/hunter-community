@@ -82,6 +82,9 @@ export default function CapabilityPanel({ onPick, onManage, refreshKey }: Props)
     <div style={{ borderBottom: `1px solid ${HUNTER.LINE}`, paddingBottom: 6, marginBottom: 2 }}>
       <div style={{ display: 'flex', alignItems: 'center', padding: '10px 12px 4px' }}>
         <div style={sectionLabel}>能力</div>
+        <a href="/library" style={{ ...miniLink, textDecoration: 'none', marginRight: 8 }} title="打开能力库(独立管理页)">
+          ⇱ 完整库
+        </a>
         <button onClick={onManage} style={miniLink} title="管理你的能力">
           <Settings2 size={11} strokeWidth={1.5} style={{ marginRight: 3 }} />
           管理
