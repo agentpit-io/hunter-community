@@ -36,22 +36,30 @@ export default function AuthGuard() {
 
     window.fetch = async (...args) => {
       const res = await original.apply(window, args as Parameters<typeof fetch>)
-      if (res.status !== 401) return res
+      // 401 · 后端标准未授权
+      // 503 ownership_unavailable · BFF 的 /api/opencode 把下游 401 掩盖成 503
+      //   (归属服务不可用 ≠ token 坏了 · 但真挂时重试也无伤大雅 · 且 token 坏时不重试用户会卡死)
+      if (res.status !== 401 && res.status !== 503) return res
 
-      // Only act on OUR API's structured 401 · avoid trapping third-party 401s
+      // Only act on OUR API's structured errors · avoid trapping third-party
       const url = (typeof args[0] === 'string' ? args[0] : (args[0] as Request).url) || ''
       if (!url.includes('/api/')) return res
-      // 换 token 本身返回的 401 不能再进来,否则会打转
+      // 换 token 本身返回的错误不能再进来,否则会打转
       if (url.includes('/api/auth/')) return res
 
       let needLogin = false
       try {
         // Peek body without consuming (clone)
         const body = await res.clone().json()
-        needLogin = body?.needLogin === true || body?.error === 'INVALID_TOKEN' || body?.error === 'UNAUTHORIZED'
+        // 兼容大小写 error code · 兼容 BFF 的 503 ownership_unavailable
+        const code = String(body?.error || '').toLowerCase()
+        needLogin = body?.needLogin === true
+          || code === 'invalid_token'
+          || code === 'unauthorized'
+          || code === 'ownership_unavailable'
       } catch {
         // Non-JSON 401 · treat as needLogin too when we have a stored token
-        needLogin = !!localStorage.getItem('hunter_token')
+        needLogin = res.status === 401 && !!localStorage.getItem('hunter_token')
       }
       if (!needLogin) return res
 

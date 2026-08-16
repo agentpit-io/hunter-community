@@ -109,15 +109,19 @@ async function hermes(
 }
 
 /** 我拥有的 session id 集合 */
-async function ownedIds(token: string): Promise<Set<string> | null> {
+async function ownedIds(token: string): Promise<Set<string> | 'unauthorized' | null> {
   const r = await hermes('GET', '/api/chat/sessions', token)
+  // 区分下游 401(token 过期/无效)vs 真正的下游不可用 · 让 AuthGuard 能自愈
+  // 之前不管 401 还是别的 · ownedIds 都返 null · BFF 一律回 503 · AuthGuard 抓不到 · token 死锁
+  if (r.status === 401) return 'unauthorized'
   if (!r.ok) return null
   return new Set<string>(r.data?.session_ids ?? [])
 }
 
 /** 是否拥有该会话 */
-async function owns(token: string, sessionId: string): Promise<boolean | null> {
+async function owns(token: string, sessionId: string): Promise<boolean | 'unauthorized' | null> {
   const r = await hermes('GET', `/api/chat/sessions/${encodeURIComponent(sessionId)}/owned`, token)
+  if (r.status === 401) return 'unauthorized'
   if (!r.ok) return null
   return !!r.data?.owned
 }
@@ -332,6 +336,7 @@ async function handle(req: Request, segs: string[]): Promise<Response> {
   if (eventStream) {
     if (!token) return json({ error: 'unauthorized', message: '需要登录' }, 401)
     const mine = await ownedIds(token)
+    if (mine === 'unauthorized') return json({ error: 'INVALID_TOKEN', needLogin: true }, 401)
     if (mine === null) return json({ error: 'ownership_unavailable', message: '会话服务暂不可用' }, 503)
     const upstream = await forward(req, segs)
     if (!upstream.ok || !upstream.body) return upstream
@@ -349,6 +354,7 @@ async function handle(req: Request, segs: string[]): Promise<Response> {
   // ① 会话列表:只返回本人拥有的
   if (collection && req.method === 'GET') {
     const mine = await ownedIds(token)
+    if (mine === 'unauthorized') return json({ error: 'INVALID_TOKEN', needLogin: true }, 401)
     if (mine === null) {
       // 归属服务不可用时**不降级为全量返回** —— 宁可报错也不泄露别人的会话
       return json({ error: 'ownership_unavailable', message: '会话服务暂不可用' }, 503)
@@ -394,6 +400,7 @@ async function handle(req: Request, segs: string[]): Promise<Response> {
   // ③ 单会话操作:先验归属
   if (sid) {
     const ok = await owns(token, sid)
+    if (ok === 'unauthorized') return json({ error: 'INVALID_TOKEN', needLogin: true }, 401)
     if (ok === null) return json({ error: 'ownership_unavailable', message: '会话服务暂不可用' }, 503)
     if (!ok) return json({ error: 'forbidden', message: '无权访问该对话' }, 403)
 
