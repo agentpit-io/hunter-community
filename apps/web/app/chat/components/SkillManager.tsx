@@ -18,11 +18,13 @@ interface Props {
   onClose: () => void
   /** 关闭时若有改动 · 通知外层刷新侧栏 */
   onChanged: () => void
+  /** 点行卡片 = 把 prompt_tpl 填入 chat 输入框(与详情页"在 Hunter chat 里使用"按钮同链路) */
+  onPickTemplate?: (tpl: string, key: string) => void
 }
 
 const ICONS = ['⭐', '📊', '📈', '📋', '🔍', '📝', '💡', '🎯', '🔔', '🧭', '⚡', '🧮']
 
-export default function SkillManager({ onClose, onChanged }: Props) {
+export default function SkillManager({ onClose, onChanged, onPickTemplate }: Props) {
   const [items, setItems] = useState<SkillItem[]>([])
   const [categoryOrder, setCategoryOrder] = useState<string[]>([])
   const [maxCustom, setMaxCustom] = useState(20)
@@ -30,6 +32,7 @@ export default function SkillManager({ onClose, onChanged }: Props) {
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
   const [dirty, setDirty] = useState(false)
+  const [hoveredKey, setHoveredKey] = useState<string | null>(null)
 
   // 新建表单
   const [adding, setAdding] = useState(false)
@@ -73,6 +76,12 @@ export default function SkillManager({ onClose, onChanged }: Props) {
   const close = () => {
     if (dirty) onChanged()
     onClose()
+  }
+
+  const pick = (s: SkillItem) => {
+    if (!onPickTemplate) return
+    onPickTemplate(s.prompt_tpl, s.key)
+    close()
   }
 
   const toggle = async (s: SkillItem) => {
@@ -227,8 +236,24 @@ export default function SkillManager({ onClose, onChanged }: Props) {
                     <span>{cat}</span>
                     <span style={{ fontSize: 10, color: HUNTER.INK_F, fontWeight: 500 }}>· {groups.get(cat)!.length}</span>
                   </div>
-                  {groups.get(cat)!.map((s) => (
-                    <div key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 18px', borderTop: `1px solid ${HUNTER.LINE}` }}>
+                  {groups.get(cat)!.map((s) => {
+                    const clickable = !!onPickTemplate
+                    const hovered = hoveredKey === s.key
+                    return (
+                    <div
+                      key={s.key}
+                      onClick={clickable ? () => pick(s) : undefined}
+                      onMouseEnter={clickable ? () => setHoveredKey(s.key) : undefined}
+                      onMouseLeave={clickable ? () => setHoveredKey(null) : undefined}
+                      title={clickable ? '点击填入对话框' : undefined}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 10,
+                        padding: '9px 18px', borderTop: `1px solid ${HUNTER.LINE}`,
+                        cursor: clickable ? 'pointer' : 'default',
+                        background: clickable && hovered ? HUNTER.PAPER2 : 'transparent',
+                        transition: 'background 120ms',
+                      }}
+                    >
                       <span style={{ fontSize: 16 }}>{s.icon}</span>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 13.5, color: HUNTER.INK, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -257,11 +282,14 @@ export default function SkillManager({ onClose, onChanged }: Props) {
                       >
                         详情 ↗
                       </a>
-                      <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+                      <label
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}
+                      >
                         <input type="checkbox" checked={s.enabled} onChange={() => toggle(s)} style={{ width: 16, height: 16, accentColor: HUNTER.THEME }} />
                       </label>
                     </div>
-                  ))}
+                  )})}
                 </div>
               ))
             })()}
@@ -287,8 +315,24 @@ export default function SkillManager({ onClose, onChanged }: Props) {
               </div>
             )}
 
-            {customs.map((s) => (
-              <div key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 18px', borderTop: `1px solid ${HUNTER.LINE}` }}>
+            {customs.map((s) => {
+              const clickable = !!onPickTemplate
+              const hovered = hoveredKey === s.key
+              return (
+              <div
+                key={s.key}
+                onClick={clickable ? () => pick(s) : undefined}
+                onMouseEnter={clickable ? () => setHoveredKey(s.key) : undefined}
+                onMouseLeave={clickable ? () => setHoveredKey(null) : undefined}
+                title={clickable ? '点击填入对话框' : undefined}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '10px 18px', borderTop: `1px solid ${HUNTER.LINE}`,
+                  cursor: clickable ? 'pointer' : 'default',
+                  background: clickable && hovered ? HUNTER.PAPER2 : 'transparent',
+                  transition: 'background 120ms',
+                }}
+              >
                 <span style={{ fontSize: 16 }}>{s.icon}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13.5, color: HUNTER.INK, fontWeight: 600 }}>{s.name}</div>
@@ -296,12 +340,21 @@ export default function SkillManager({ onClose, onChanged }: Props) {
                     {s.prompt_tpl}
                   </div>
                 </div>
-                <input type="checkbox" checked={s.enabled} onChange={() => toggle(s)} style={{ width: 16, height: 16, accentColor: HUNTER.THEME }} />
-                <button onClick={() => remove(s)} style={{ background: 'none', border: `1px solid ${HUNTER.LINE}`, color: '#c0392b', fontSize: 11, borderRadius: 6, padding: '3px 9px', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={s.enabled}
+                  onChange={() => toggle(s)}
+                  onClick={(e) => e.stopPropagation()}
+                  style={{ width: 16, height: 16, accentColor: HUNTER.THEME }}
+                />
+                <button
+                  onClick={(e) => { e.stopPropagation(); remove(s) }}
+                  style={{ background: 'none', border: `1px solid ${HUNTER.LINE}`, color: '#c0392b', fontSize: 11, borderRadius: 6, padding: '3px 9px', cursor: 'pointer' }}
+                >
                   删除
                 </button>
               </div>
-            ))}
+            )})}
 
             {installing && (
               <SkillInstallCard

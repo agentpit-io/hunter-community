@@ -469,6 +469,7 @@ export default function ChatSidebar({ currentSessionId, onSelectSession, onNewSe
         <SkillManager
           onClose={() => setShowSkillMgr(false)}
           onChanged={() => setSkillRefresh((v) => v + 1)}
+          onPickTemplate={onPickSkill}
         />
       )}
 
