@@ -378,22 +378,19 @@ export default function ChatSidebar({ currentSessionId, onSelectSession, onNewSe
         </button>
       </div>
 
-      {/* Tab 切换栏 · 一次只显对话或能力 · 让历史对话拿到全部剩余空间(方案 A) */}
+      {/* Tab 切换栏 · 对话/能力/策略 三选一(方案 A + 策略中心迁入) */}
       <div style={{ display: 'flex', borderBottom: `1px solid ${HUNTER.LINE}`, padding: '0 12px' }}>
-        <button
-          onClick={() => switchTab('chat')}
-          style={tabBtn(activeTab === 'chat')}
-          title="历史对话"
-        >
+        <button onClick={() => switchTab('chat')} style={tabBtn(activeTab === 'chat')} title="历史对话">
           💬 对话
         </button>
-        <button
-          onClick={() => switchTab('capability')}
-          style={tabBtn(activeTab === 'capability')}
-          title="能力(数据源 / 工具箱 / SKILL)"
-        >
+        <button onClick={() => switchTab('capability')} style={tabBtn(activeTab === 'capability')} title="能力(数据源 / 工具箱 / SKILL)">
           ✨ 能力
         </button>
+        {/* 策略中心 · 点击新窗口打开(完整展示 · 避免侧栏太窄挤不下) · 不切 activeTab */}
+        <a href="/strategies/index.html" target="_blank" rel="noopener noreferrer"
+           style={tabBtn(false)} title="策略中心 · 多因子选股 / 组合回测(新窗口)">
+          📊 策略 ↗
+        </a>
       </div>
 
       {/* 能力区 · Tab 选中"能力"时才显 · 关闭时释放 ~480px 给历史对话 */}
@@ -429,107 +426,35 @@ export default function ChatSidebar({ currentSessionId, onSelectSession, onNewSe
         </div>
       )}
 
-      {/* 平台 key 入口 · 未解锁时这是整个侧栏最该被看见的一行
-          —— 左侧那些工具与 SKILL 都要它,所以给整行宽度 + 铜色描边,
-          解锁后退回一行安静的状态显示。 */}
-      <div style={{ padding: '6px 10px 0' }}>
-        <button
-          onClick={() => setShowUnlock(true)}
-          title={unlocked ? '已接入 Hunter 服务 · 全部工具可用' : '申请免费 key · 解锁全部工具与 SKILL'}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 6,
-            width: '100%',
-            padding: '8px 6px',
-            background: unlocked ? HUNTER.TAG_OK_BG : HUNTER.BRAND_PALE,
-            border: `1px solid ${unlocked ? '#BFD8CC' : HUNTER.THEME}`,
-            borderRadius: 8,
-            color: unlocked ? HUNTER.TAG_OK_FG : HUNTER.COPPER3,
-            fontSize: 12,
-            fontWeight: 600,
-            cursor: 'pointer',
-          }}
-        >
-          {unlocked ? <ShieldCheck size={13} strokeWidth={1.8} /> : <Unlock size={13} strokeWidth={1.8} />}
-          <span>{unlocked ? '已解锁全部工具' : '申请 Key · 解锁全部工具'}</span>
-        </button>
-      </div>
+      {/* 平台 key 入口 · 只在未解锁时显示(已解锁后隐藏 · 减少侧栏噪音) */}
+      {!unlocked && (
+        <div style={{ padding: '6px 10px 0' }}>
+          <button
+            onClick={() => setShowUnlock(true)}
+            title="申请免费 key · 解锁全部工具与 SKILL"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
+              width: '100%',
+              padding: '8px 6px',
+              background: HUNTER.BRAND_PALE,
+              border: `1px solid ${HUNTER.THEME}`,
+              borderRadius: 8,
+              color: HUNTER.COPPER3,
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            <Unlock size={13} strokeWidth={1.8} />
+            <span>申请 Key · 解锁全部工具</span>
+          </button>
+        </div>
+      )}
 
-      {/* 底部工具入口 · MCP 组件 + 策略中心 · 合并为一行两 icon 节省纵向 */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: 6,
-          padding: '6px 10px 8px',
-          borderTop: `1px solid ${HUNTER.LINE}`,
-        }}
-      >
-        <a
-          href="/mcp-config"
-          title="MCP 组件 · 接入你自己的数据源(Polygon/AlphaVantage/自研)"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 6,
-            padding: '8px 6px',
-            background: '#f4f2ea',
-            border: `1px solid ${HUNTER.LINE}`,
-            borderRadius: 8,
-            color: HUNTER.INK_S,
-            fontSize: 12,
-            textDecoration: 'none',
-            fontWeight: 500,
-            transition: 'background .12s, border-color .12s',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = HUNTER.BRAND_PALE
-            e.currentTarget.style.borderColor = HUNTER.THEME
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = '#f4f2ea'
-            e.currentTarget.style.borderColor = HUNTER.LINE
-          }}
-        >
-          <span style={{ fontSize: 13 }}>🔌</span>
-          <span>MCP 组件</span>
-        </a>
-        <a
-          href="/strategies/index.html"
-          target="_blank"
-          rel="noopener noreferrer"
-          title="策略中心 · 多因子选股 · 组合回测"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 6,
-            padding: '8px 6px',
-            background: '#faf4ea',
-            border: `1px solid ${HUNTER.LINE}`,
-            borderRadius: 8,
-            color: HUNTER.INK_S,
-            fontSize: 12,
-            textDecoration: 'none',
-            fontWeight: 500,
-            transition: 'background .12s, border-color .12s',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = HUNTER.BRAND_PALE
-            e.currentTarget.style.borderColor = HUNTER.THEME
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = '#faf4ea'
-            e.currentTarget.style.borderColor = HUNTER.LINE
-          }}
-        >
-          <span style={{ fontSize: 13, color: HUNTER.COPPER3 }}>📊</span>
-          <span>策略中心</span>
-        </a>
-      </div>
+      {/* 底部工具入口 · MCP 组件已迁入 /library(数据源+工具箱)· 策略中心已成第三 tab · 此处不再展示 */}
 
       {/* 底部 · agentpit.io / 专业版 · 点击展开菜单（画像 / 退出） */}
       <ProfileFooter
