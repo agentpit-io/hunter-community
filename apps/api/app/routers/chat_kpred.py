@@ -221,6 +221,8 @@ async def _worker(
             pass
 
     try:
+        logger.info("[chat_kpred:{}] worker 启动 · user={} · {}({}) · {}天", task_id, user_id, name, code, days)
+
         # 正规化 ticker(与 kpred.py 一致)
         ticker = code
         if "." not in ticker:
@@ -237,17 +239,22 @@ async def _worker(
         # 直接调 kpred.py 的 get_kpred_pro · 复用所有逻辑(含降级/重锚定/因子引擎)
         from app.routers.kpred import get_kpred_pro
         # get_kpred_pro 需要 request · 我们没有 · 传 None 走 _optional_user_id fallback
+        t_pro = time.time()
+        logger.info("[chat_kpred:{}] before get_kpred_pro · ticker={} · days={}", task_id, ticker, days)
         pro_result = await get_kpred_pro(
             code=ticker,
             days=days,
             request=None,
         )
+        logger.info("[chat_kpred:{}] after get_kpred_pro · 耗时 {:.2f}s", task_id, time.time() - t_pro)
 
         await emit("factor", 70, "8 因子加权计算...")
         await asyncio.sleep(0)   # 让 event loop 走一下 · 保证事件先推出去
 
         await emit("rendering", 88, "生成 HTML 报告...")
+        t_render = time.time()
         html_content = render_kpred_html(pro_result, stock_query=name)
+        logger.info("[chat_kpred:{}] after render · html_len={} · 耗时 {:.2f}s", task_id, len(html_content), time.time() - t_render)
 
         # 简短 markdown 摘要 · 塞进 chat 消息流 · 供报告面板不打开时预览
         pro = pro_result.get("pro") or {}

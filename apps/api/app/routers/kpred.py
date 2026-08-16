@@ -533,43 +533,62 @@ async def get_kpred_pro(
         custom_weights = {k: v / total for k, v in merged.items()}
 
     # Step 1: 调用 Kronos
-    try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=3.0, read=30.0, write=5.0, pool=3.0)) as client:
-            r = await client.post(
-                f"{_gw.kronos_url()}/predict",
-                json={"symbol": code, "pred_len": days},
-                headers=_gw.kronos_headers(),
-            )
-        if r.status_code != 200:
-            body_text = r.text[:200]
-            # 关键: Kronos 未收录该股(通常是次新股/新股)→ 走无 Kronos 因子降级
-            if "未找到" in body_text and ("K 线" in body_text or "K线" in body_text):
-                logger.info("kpred %s Kronos 未收录, 走无 Kronos 因子降级 (Pro)", code)
-                try:
-                    return await _compute_no_kronos_prediction(code, days, custom_weights)
-                except HTTPException:
-                    raise
-                except Exception as fb_err:
-                    logger.warning("kpred %s no-kronos fallback 失败: %s", code, fb_err)
-                    raise HTTPException(
-                        404, f"该股 Kronos 未收录, 降级分析失败: {str(fb_err)[:150]}")
-            raise HTTPException(502, f"Kronos 服务错误: {body_text}")
-        kronos_result = r.json()
-    except HTTPException:
-        raise
-    except httpx.ConnectError:
-        raise HTTPException(503, "Kronos 预测服务暂不可用")
-    except httpx.TimeoutException:
-        raise HTTPException(504, "Kronos 预测超时，请稍后重试")
+    # 缓存 10 min · key=kpred:kronos:{code}:{days} · 同一股同天多次查询直接命中
+    # Kronos 是日线时序模型 · 短时间内输入相同则输出稳定 · 缓存收益极高(8s → <10ms)
+    import time as _time_pro
+    _t_kronos = _time_pro.time()
+    from app.services import kpred_cache as _kc
+    _kronos_key = f"kpred:kronos:{code}:{days}"
+    _kronos_cached = _kc.get(_kronos_key)
+    if _kronos_cached is not None and isinstance(_kronos_cached, dict):
+        logger.info("[kpred:pro] Kronos 缓存命中 · code={} · days={} · 耗时 {:.3f}s", code, days, _time_pro.time() - _t_kronos)
+        kronos_result = _kronos_cached
+    else:
+        logger.info("[kpred:pro] POST Kronos · code={} · days={}", code, days)
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(connect=3.0, read=30.0, write=5.0, pool=3.0)) as client:
+                r = await client.post(
+                    f"{_gw.kronos_url()}/predict",
+                    json={"symbol": code, "pred_len": days},
+                    headers=_gw.kronos_headers(),
+                )
+            logger.info("[kpred:pro] Kronos 返回 · code={} · status={} · 耗时 {:.2f}s", code, r.status_code, _time_pro.time() - _t_kronos)
+            if r.status_code != 200:
+                body_text = r.text[:200]
+                # 关键: Kronos 未收录该股(通常是次新股/新股)→ 走无 Kronos 因子降级
+                if "未找到" in body_text and ("K 线" in body_text or "K线" in body_text):
+                    logger.info("kpred %s Kronos 未收录, 走无 Kronos 因子降级 (Pro)", code)
+                    try:
+                        return await _compute_no_kronos_prediction(code, days, custom_weights)
+                    except HTTPException:
+                        raise
+                    except Exception as fb_err:
+                        logger.warning("kpred %s no-kronos fallback 失败: %s", code, fb_err)
+                        raise HTTPException(
+                            404, f"该股 Kronos 未收录, 降级分析失败: {str(fb_err)[:150]}")
+                raise HTTPException(502, f"Kronos 服务错误: {body_text}")
+            kronos_result = r.json()
+            _kc.set(_kronos_key, kronos_result, 600)   # TTL 10 min
+        except HTTPException:
+            raise
+        except httpx.ConnectError:
+            raise HTTPException(503, "Kronos 预测服务暂不可用")
+        except httpx.TimeoutException:
+            raise HTTPException(504, "Kronos 预测超时，请稍后重试")
 
     # Step 1.5: 陈旧检测 — 非 watchlist 股票数据可能落后，用 akshare 重锚定
+    _t_stale = _time_pro.time()
     kronos_result, _stale_note = await _fix_stale_kronos_result(code, kronos_result)
+    logger.info("[kpred:pro] stale-check 完成 · code={} · stale_note={} · 耗时 {:.2f}s",
+                code, "yes" if _stale_note else "no", _time_pro.time() - _t_stale)
 
     # Step 2: 多因子引擎增强（带可选自定义权重）
+    _t_factor = _time_pro.time()
     try:
         pro_result = await compute_pro_prediction(code, kronos_result, days, custom_weights)
     except Exception as e:
         raise HTTPException(500, f"Pro 因子计算失败: {str(e)[:200]}")
+    logger.info("[kpred:pro] 8 因子引擎完成 · code={} · 耗时 {:.2f}s", code, _time_pro.time() - _t_factor)
 
     # 后台写记忆（用 factor_return_pct 判断方向，可选，失败不影响返回）
     user_id = _optional_user_id(request)

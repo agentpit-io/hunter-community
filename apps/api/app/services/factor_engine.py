@@ -6,7 +6,10 @@
 import os
 import math
 import asyncio
+from datetime import datetime
 import httpx
+from loguru import logger
+from app.services import finance_data_auth as _auth
 
 
 # ---------------------------------------------------------------------------
@@ -140,34 +143,52 @@ def factor_flow_divergence(flow_5d: list[dict]) -> float:
 
 
 def factor_pe(code: str, last_close: float = 0.0) -> float:
-    """D1: 用 stock_financial_analysis_indicator 的年度 EPS 反算 PE 打分。"""
-    try:
-        if last_close <= 0:
+    """D1: 用 stock_financial_analysis_indicator 的年度 EPS 反算 PE 打分。
+
+    缓存: 24h Redis · key=kpred:pe:{code}:{yyyymmdd} · 命中率接近 100%
+      (PE 依赖年报 EPS · 一天内绝不会变 · last_close 用当日 close 天然带日期维度)
+    """
+    from app.services import kpred_cache as _cache
+    bare = code.split('.')[0] if '.' in code else code
+    _cache_key = f"kpred:pe:{bare}:{datetime.now().strftime('%Y%m%d')}"
+    _cached = _cache.get(_cache_key)
+    if _cached is not None and isinstance(_cached, dict) and "score" in _cached:
+        logger.debug("[factor:pe:{}] cache hit · score={}", bare, _cached["score"])
+        return float(_cached["score"])
+    def _compute() -> float:
+        try:
+            if last_close <= 0:
+                return 0.0
+            import akshare as ak
+            # 只拉去年一年财务数据(最新年报) · akshare 会按年分页串行拉取
+            # 拉 4 年 = 4 次 HTTP × 2.5s = 10s · 但只用 iloc[-1] 一行(浪费 3 年)
+            # 改成只拉 1 年 · factor_pe 从 ~10s 降到 ~2.5s
+            start_year = str(datetime.now().year - 1)
+            df = ak.stock_financial_analysis_indicator(symbol=bare, start_year=start_year)
+            if df is None or df.empty:
+                return 0.0
+            annual = df[df['日期'].astype(str).str.endswith('12-31')]
+            if annual.empty:
+                annual = df   # 没有年报则退而用最新季报
+            raw = str(annual.iloc[-1]['摊薄每股收益(元)']).replace(',', '').strip()
+            if raw in ('', '-', '--', 'None', 'nan', 'NaN'):
+                return 0.0
+            eps = float(raw)
+            if eps <= 0:
+                return -0.3   # 亏损股
+            pe_val = last_close / eps
+            if pe_val < 12: return  0.9
+            if pe_val < 20: return  0.5
+            if pe_val < 30: return  0.1
+            if pe_val < 45: return -0.3
+            if pe_val < 70: return -0.6
+            return -0.9
+        except Exception:
             return 0.0
-        import akshare as ak
-        bare = code.split('.')[0] if '.' in code else code
-        # 拉近2年财务数据，找最新年报（12-31）行
-        df = ak.stock_financial_analysis_indicator(symbol=bare, start_year='2023')
-        if df is None or df.empty:
-            return 0.0
-        annual = df[df['日期'].astype(str).str.endswith('12-31')]
-        if annual.empty:
-            annual = df   # 没有年报则退而用最新季报
-        raw = str(annual.iloc[-1]['摊薄每股收益(元)']).replace(',', '').strip()
-        if raw in ('', '-', '--', 'None', 'nan', 'NaN'):
-            return 0.0
-        eps = float(raw)
-        if eps <= 0:
-            return -0.3   # 亏损股
-        pe_val = last_close / eps
-        if pe_val < 12: return  0.9
-        if pe_val < 20: return  0.5
-        if pe_val < 30: return  0.1
-        if pe_val < 45: return -0.3
-        if pe_val < 70: return -0.6
-        return -0.9
-    except Exception:
-        return 0.0
+
+    score = _compute()
+    _cache.set(_cache_key, {"score": score}, 24 * 3600)
+    return score
 
 
 def factor_kronos(pred_return: float, sigma: float, pred_len: int) -> float:
@@ -347,25 +368,36 @@ def _sym_with_exchange(bare: str) -> str:
     return f"{bare}.SZ"
 
 
-def _fetch_flow_sync(sym: str, url: str, token: str) -> list[dict]:
-    """获取5日资金流向：优先 finance-data PG（watchlist 内已缓存），fallback 直接调 XTick REST。"""
+def _fetch_flow_sync(sym: str, url: str = "", token: str = "") -> list[dict]:
+    """获取5日资金流向：优先 finance-data PG（watchlist 内已缓存），fallback 直接调 XTick REST。
+
+    url/token 为向后兼容保留 · 空值时自动走 finance_data_auth 统一入口
+    (Community 用户在网页填的 hunter key 也会自动生效 · 与 K 线/Kronos 一致)。
+    """
     import io, zipfile, json as _json, os
-    # 1. finance-data PG（watchlist 内股票，数据已入库）
+    # 1. finance-data(网关或直连)· 空 url/token 时走统一入口(与 K 线一致)
     bare = sym.split('.')[0] if '.' in sym else sym
     full_sym = _sym_with_exchange(bare)
+    base_url = url or _auth.data_url()
+    if url and token:
+        headers = {'X-Finance-Token': token}  # 显式直连 · 用旧签名
+    else:
+        headers = _auth.data_headers()        # 统一入口 · 网关走 Bearer / 直连走 X-Finance-Token
     try:
         r = httpx.get(
-            f"{url}/api/v1/money_flow/{full_sym}",
+            f"{base_url}/api/v1/money_flow/{full_sym}",
             params={'days': 5},
-            headers={'X-Finance-Token': token},
+            headers=headers,
             timeout=8.0,
         )
         if r.status_code == 200:
             data = r.json()
             if isinstance(data, list) and data:
                 return _parse_flow_rows(data)
-    except Exception:
-        pass
+        else:
+            logger.debug("[factor:flow] {} money_flow non-200: status={}", full_sym, r.status_code)
+    except Exception as e:
+        logger.debug("[factor:flow] {} money_flow error: {}", full_sym, e)
 
     # 2. XTick REST 直连（任意 A 股，不受 watchlist 限制）
     try:
@@ -414,9 +446,7 @@ async def compute_pro_prediction(
     """给定 Kronos 结果，计算多因子综合评分并返回 Pro 预测结果。custom_weights 覆盖默认权重。"""
     from app.services.finance_data_client import get_kline_with_fallback as get_kline, to_symbol
 
-    finance_url   = os.getenv('FINANCE_DATA_URL',   '')
-    finance_token = os.getenv('FINANCE_DATA_TOKEN', '')
-    sym           = to_symbol(code)
+    sym = to_symbol(code)
 
     loop = asyncio.get_event_loop()
 
@@ -424,14 +454,20 @@ async def compute_pro_prediction(
     _lc = kronos_result.get('last_close', 0.0)
 
     # 并发获取 K 线（80日）、5日资金流向、PE 评分
+    # _fetch_flow_sync 不再传 url/token · 走 finance_data_auth 统一入口
+    # (旧代码硬读 env 导致 Community 用户 hunter key 拿不到 · 三个因子恒为 0)
     kline_bars, flow_5d, pe_score = await asyncio.gather(
         loop.run_in_executor(None, lambda: get_kline(code, period='daily', limit=80)),
-        loop.run_in_executor(None, lambda: _fetch_flow_sync(sym or code, finance_url, finance_token)),
+        loop.run_in_executor(None, lambda: _fetch_flow_sync(sym or code)),
         loop.run_in_executor(None, lambda: factor_pe(code, _lc)),
     )
 
     bars   = kline_bars
     closes = [b['close'] for b in bars]
+
+    # 诊断 log · bars<60 导致 ma_align=0 · flow_5d=[] 导致 main_flow/flow_div=0
+    logger.info("[factor:{}] bars={} flow_5d={} pe_score={} last_close={}",
+                code, len(bars), len(flow_5d), pe_score, _lc)
 
     # 历史波动率（20日）
     if len(closes) >= 21:
