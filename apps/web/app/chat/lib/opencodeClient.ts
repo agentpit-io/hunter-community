@@ -204,11 +204,14 @@ export async function listProviders(): Promise<ProviderInfo[]> {
     const data = await req<any>('GET', '/config/providers')
     // 真实结构: {providers: [{id, name, models: {...}}]}
     if (data?.providers && Array.isArray(data.providers)) {
-      return data.providers.map((p: any) => ({
-        id: p.id,
-        name: p.name || p.id,
-        models: p.models || {},
-      }))
+      return data.providers
+        // 隐藏 OpenCode Zen · 镜像内置无 key 模型 · 用户点了会 401 · 不该出现在 ModelPicker
+        .filter((p: any) => p.id !== 'opencode')
+        .map((p: any) => ({
+          id: p.id,
+          name: p.name || p.id,
+          models: p.models || {},
+        }))
     }
     if (Array.isArray(data)) return data
   } catch (e) {

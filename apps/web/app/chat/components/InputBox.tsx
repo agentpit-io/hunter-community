@@ -1,8 +1,8 @@
 'use client'
 import { useEffect, useRef, useState, KeyboardEvent } from 'react'
-import { Send, Plus, Mic, Sparkles, Globe, ChevronDown } from 'lucide-react'
+import { Send } from 'lucide-react'
 import { HUNTER } from '../../lib/hunter-theme'
-import { AgentPicker, ModelPicker } from './AgentModelPicker'
+import { ModelPicker } from './AgentModelPicker'
 
 interface InputBoxProps {
   onSend: (text: string) => void
@@ -19,15 +19,10 @@ interface InputBoxProps {
   mode?: 'hero' | 'follow'
 }
 
-/** 深度思考档位 · 只是 UI toggle，不影响后端 · 保存本地供未来接 agent 切换 */
-type DepthMode = 'off' | 'on'
-
 export default function InputBox({
   onSend,
   disabled,
-  currentAgent,
   currentModelKey,
-  onChangeAgent,
   onChangeModel,
   autoText,
   autoSend,
@@ -37,8 +32,6 @@ export default function InputBox({
   const [text, setText] = useState('')
   const taRef = useRef<HTMLTextAreaElement>(null)
   const autoSentRef = useRef(false)
-  const [depth, setDepth] = useState<DepthMode>('off')
-  const [webSearch, setWebSearch] = useState(false)
 
   // 处理 URL ?q= 首条 · autoText 变化时填入
   useEffect(() => {
@@ -180,61 +173,16 @@ export default function InputBox({
               flexWrap: 'wrap',
             }}
           >
-            {/* 左侧 · ＋附件 + 深度思考 + 联网搜索 */}
-            <ToolPill title="附件" ariaLabel="附件">
-              <Plus size={14} />
-            </ToolPill>
-
-            <ToolPill
-              title="深度思考"
-              active={depth === 'on'}
-              onClick={() => setDepth((d) => (d === 'on' ? 'off' : 'on'))}
-            >
-              <Sparkles size={12} />
-              <span>深度思考</span>
-              <ChevronDown size={10} style={{ opacity: 0.6 }} />
-            </ToolPill>
-
-            <ToolPill
-              title="联网搜索"
-              active={webSearch}
-              onClick={() => setWebSearch((v) => !v)}
-            >
-              <Globe size={12} />
-              <span>联网搜索</span>
-            </ToolPill>
-
-            {/* 弹簧 */}
+            {/* 弹簧 · 把 ModelPicker + 发送按钮推到右边 */}
             <div style={{ flex: 1 }} />
 
-            {/* 中右 · Agent + Model picker */}
+            {/* 中右 · Model picker(AgentPicker 已隐藏 · 走 opencode 默认 agent + BFF 注入的金融 system prompt) */}
             <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-              <AgentPicker value={currentAgent} onChange={onChangeAgent} />
-              <div style={{ width: 1, height: 14, background: HUNTER.LINE }} />
               <ModelPicker value={currentModelKey} onChange={onChangeModel} />
             </div>
 
-            {/* 右侧 · 语音 + 发送 */}
+            {/* 右侧 · 发送(语音输入未实现 · 已隐藏) */}
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              <button
-                type="button"
-                title="语音输入"
-                aria-label="语音输入"
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: 8,
-                  background: 'transparent',
-                  border: 'none',
-                  color: HUNTER.INK_F,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <Mic size={14} />
-              </button>
               <button
                 type="button"
                 onClick={handleSend}
@@ -284,49 +232,3 @@ export default function InputBox({
   )
 }
 
-/** 输入卡内的 pill 按钮 · 与 prototype .tool-pill 对齐 */
-function ToolPill({
-  children,
-  onClick,
-  title,
-  ariaLabel,
-  active = false,
-}: {
-  children: React.ReactNode
-  onClick?: () => void
-  title?: string
-  ariaLabel?: string
-  active?: boolean
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title}
-      aria-label={ariaLabel || title}
-      style={{
-        height: 32,
-        padding: '0 12px',
-        border: `1px solid ${active ? HUNTER.THEME : HUNTER.LINE}`,
-        background: active ? HUNTER.BRAND_PALE : '#fff',
-        borderRadius: 10,
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 6,
-        color: active ? HUNTER.COPPER3 : '#4f514c',
-        fontSize: 13,
-        cursor: 'pointer',
-        fontFamily: 'inherit',
-        transition: 'background 0.12s, border-color 0.12s, color 0.12s',
-      }}
-      onMouseEnter={(e) => {
-        if (!active) e.currentTarget.style.background = '#f6f5f0'
-      }}
-      onMouseLeave={(e) => {
-        if (!active) e.currentTarget.style.background = '#fff'
-      }}
-    >
-      {children}
-    </button>
-  )
-}
