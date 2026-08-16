@@ -214,6 +214,10 @@ app.include_router(geo_overview.router, prefix="/api/geo")
 from app.routers import backtest as backtest_router
 app.include_router(backtest_router.router, prefix="/api")
 
+# ── 量化策略(因子/选股/回测) · Phase A · doc/11量化策略/quant-strategy-tech-plan.md ──
+from app.routers import quant as quant_router
+app.include_router(quant_router.router, prefix="/api")
+
 # ── /chat 会话归属(用户隔离的权威数据源, 供 web BFF 调用) ──
 from app.routers import chat_session as chat_session_router
 app.include_router(chat_session_router.router, prefix="/api")

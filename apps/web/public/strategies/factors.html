@@ -16,6 +16,39 @@ document.body.innerHTML = renderShell('factors', '策略广场 / 因子广场', 
 let draft = loadDraft()
 const container = document.getElementById('page-content')
 
+// Phase A · 从后端拉真启用状态 · 顶部 badge 展示 · IC/年化数据 Phase B 后端补
+// (2026-08-17 · 见 doc/11量化策略/quant-strategy-tech-plan.md)
+;(async () => {
+  try {
+    const r = await fetch('/api/quant/factors', { cache: 'no-store' })
+    if (!r.ok) return
+    const d = await r.json()
+    const enabledNames = (d.factors || []).filter(f => f.enabled).map(f => f.name).join(' · ')
+    // 覆盖 FACTORS 的 enabled 字段(mock 里默认没有)
+    const enabledSet = new Set((d.factors || []).filter(f => f.enabled).map(f => f.key))
+    FACTORS.forEach(f => { f.enabled = enabledSet.has(f.key) })
+    // 顶部加 badge
+    const bar = document.querySelector('.meta-bar')
+    if (bar) {
+      const badge = document.createElement('span')
+      badge.style.cssText = 'background:#EEF5F1;color:#2C6B55;padding:2px 8px;border-radius:6px;margin-left:8px'
+      badge.textContent = `✅ 后端已上线 · ${d.enabled_count}/${d.factors.length} 启用: ${enabledNames}`
+      bar.appendChild(badge)
+    }
+    // 卡片上给已启用的加 ✅ 徽章
+    document.querySelectorAll('.f-card').forEach(card => {
+      const key = card.dataset.key
+      if (enabledSet.has(key)) {
+        const flag = document.createElement('span')
+        flag.style.cssText = 'position:absolute;top:6px;right:26px;background:#EEF5F1;color:#2C6B55;padding:1px 6px;border-radius:4px;font-size:10px'
+        flag.textContent = '✅ 已启用'
+        card.style.position = 'relative'
+        card.appendChild(flag)
+      }
+    })
+  } catch (e) { /* 后端未起时静默 */ }
+})()
+
 // 按 CAT_ORDER 分组
 const groups = {}
 CAT_ORDER.forEach(c => groups[c] = [])

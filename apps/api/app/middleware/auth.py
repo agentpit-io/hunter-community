@@ -51,6 +51,9 @@ _PUBLIC_PREFIXES = (
     # Capability catalog · 只描述"这套部署能拿到什么数据",不含任何凭证
     # (只回 configured=true/false,不回 key 本身;endpoint 路径本来就在开源代码里)
     "/api/catalog/",
+    # 量化策略 · 因子/官方策略公开可看 · 我的策略 handler 内部再校 uid
+    # (endpoint 本身在公开代码里 · 无凭证)
+    "/api/quant/",
     # Internal MCP bridge · shared-secret authenticated separately
     "/api/internal/",
 )
