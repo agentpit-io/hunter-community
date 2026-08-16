@@ -27,7 +27,7 @@ _FACTOR_LABELS = {
 _HUNTER_CSS = """
 :root {
   --theme: #B06A32; --copper2: #D4925A;
-  --up: #A4332B; --dn: #3F6B40; --hold: #7A6F63;
+  --up: #ef4444; --dn: #22c55e; --hold: #7A6F63;  /* v8 · 对齐 PC 版 /kpred/page.tsx */
   --ink: #211C18; --ink-s: #4B423A; --ink-f: #7A6F63;
   --line: #D8CDBA; --paper: #FFFDF9; --paper2: #EFE8DC; --paper3: #FBF1E4;
 }
@@ -90,6 +90,19 @@ h2 { font-family: "Songti SC", Georgia, serif; font-size: 16px; font-weight: 700
 /* 蜡烛图 */
 .chart-box { height: 440px; margin: 0 0 16px; background: #fff;
   border: 1px solid var(--line); border-radius: 12px; padding: 10px 6px 4px; }
+
+/* 图表下方 · 预测 stat 卡 · 图 7 风格 · N 日预测收盘 + 涨跌幅 */
+.forecast-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0 0 16px; }
+.forecast-stat { border: 1px solid var(--line); border-radius: 12px;
+  padding: 14px 18px; background: #fff; }
+.forecast-stat .label { font-size: 12px; color: var(--ink-f); margin-bottom: 6px;
+  letter-spacing: .02em; }
+.forecast-stat .value { font-family: "Songti SC", "Times New Roman", serif;
+  font-size: 32px; font-weight: 700; line-height: 1.1; color: var(--ink); }
+.forecast-stat .value .arrow { font-size: 22px; margin-right: 4px; vertical-align: 1px; }
+.forecast-stat .value.up { color: var(--up); }
+.forecast-stat .value.dn { color: var(--dn); }
+.forecast-stat .value.neutral { color: var(--ink-s); }
 
 
 /* 综合评分卡 */
@@ -250,11 +263,17 @@ def render_kpred_html(pro_result: dict, stock_query: str = "") -> str:
         for b in all_bars
     ]
     hist_count = len(hist_recent)
+    # 预测收盘价折线数据 · 前 hist_count-1 段填 null · 第 hist_count-1 位置放 last_close 与预测首根连接
+    # · 与 PC 版 /kpred/page.tsx 保持一致 · 即使蜡烛实体太小也能看到走势
+    pred_close_line = [None] * (hist_count - 1) + [last_close] + [
+        float(b.get("close", 0)) for b in predictions
+    ] if hist_count > 0 else []
     chart_data = {
         "dates": dates,
         "candles": candles,
         "hist_count": hist_count,
         "last_close": last_close,
+        "pred_close_line": pred_close_line,
     }
 
     # ── 因子行 ──
@@ -354,6 +373,20 @@ def render_kpred_html(pro_result: dict, stock_query: str = "") -> str:
 
   <div class="chart-box" id="chart"></div>
 
+  <!-- 图表下方 · 图 7 风格 stat 卡 · 预测收盘 + 涨跌幅 -->
+  <div class="forecast-stats">
+    <div class="forecast-stat">
+      <div class="label">{days}日预测收盘</div>
+      <div class="value">{final_pred_close:,.2f}</div>
+    </div>
+    <div class="forecast-stat">
+      <div class="label">预测涨跌幅</div>
+      <div class="value {adj_ret_class}">
+        <span class="arrow">{'▲' if adj_ret > 0 else '▼' if adj_ret < 0 else '─'}</span>{abs(adj_ret):.2f}%
+      </div>
+    </div>
+  </div>
+
   <!-- 综合评分卡 · rating 已移顶栏 · 此处保留分数环 + 3 收益率 -->
   <div class="score-panel">
     <div class="score-row">
@@ -406,8 +439,27 @@ def render_kpred_html(pro_result: dict, stock_query: str = "") -> str:
   }}
   var chart = echarts.init(document.getElementById('chart'));
   var histCount = chartData.hist_count;
-  var hist = chartData.candles.slice(0, histCount).map(function(c, i) {{ return [i].concat(c); }});
-  var pred = chartData.candles.slice(histCount).map(function(c, i) {{ return [i + histCount].concat(c); }});
+  // 演进史:
+  //   v1 · [i, o, c, l, h] 拼 x 索引 → i 被 ECharts 算进 Y 轴 min · 蜡烛退化成实心柱
+  //   v2 · null 占位分两 series → candlestick read `.value` 未兜底 null · 崩
+  //   v3 · pred 用 {{name, value}} 绑 category → candlestick 忽略 name · pred 按 index 画到前 5 天
+  //   v4 · 单 series + series-level itemStyle 回调 → candlestick 不支持 function ·
+  //        回落默认蓝紫 · 全图统一颜色(本次报障)
+  //
+  // v5 · 单 series + dataItem itemStyle → v8 全红失效
+  //      根因:ECharts candlestick 的 dataItem itemStyle 里 `color0` 不生效
+  //           系统默认阴阳的颜色只从 series-level itemStyle.color/color0 拾取
+  //           dataItem itemStyle 只支持 borderWidth 等 · color0 被忽略 → 全按阳线 color 画
+  // v9 · 完全照抄 PC 版 /kpred/page.tsx (line 45-131) 的 series 结构(2026-08-11)
+  //      · 拆两个 candlestick series (历史 + 预测)
+  //      · 每个 series 用 series-level itemStyle 静态对象(不用 function · 不用 dataItem)
+  //      · 预测 series 前 histCount 位用 '-' 字符串占位(不是 null · null 会崩)
+  //      · 保留 chat 端专有的 markLine/markArea/预测收盘价折线/铜色主题
+  var histData = chartData.candles.slice(0, histCount);
+  var predData = chartData.candles.slice(histCount);
+  // 预测 series 前 histCount 位用 '-' 占位 · 让预测蜡烛画在正确的 X 索引上
+  // ECharts candlestick 允许 '-' 表示无值 · 但不允许 null(会崩 · 见 v2 演进史)
+  var predFill = new Array(histCount).fill('-').concat(predData);
 
   // 空数据兜底 · 只显示提示 · 不初始化 ECharts
   if (chartData.dates.length === 0) {{
@@ -426,6 +478,7 @@ def render_kpred_html(pro_result: dict, stock_query: str = "") -> str:
     grid: {{ left: 62, right: 24, top: 34, bottom: 60 }},
     legend: {{
       show: true, bottom: 8, itemGap: 22,
+      // 只显示两个 candlestick series · 预测收盘价折线不进图例
       data: [
         {{ name: '历史 K 线', icon: 'circle' }},
         {{ name: '预测 K 线(金色 · 已多因子调整)', icon: 'circle' }},
@@ -461,14 +514,18 @@ def render_kpred_html(pro_result: dict, stock_query: str = "") -> str:
       backgroundColor: 'rgba(255,255,255,0.96)', borderColor: '#D8CDBA', borderWidth: 1,
       textStyle: {{ color: '#211C18', fontSize: 12 }},
       formatter: function(params) {{
-        var p = params.find(function(x) {{ return x.componentSubType === 'candlestick'; }});
+        // 两个 candlestick series 中找有值的那个(另一个的 value 是 '-')
+        var p = params.find(function(x) {{
+          return x.componentSubType === 'candlestick' && Array.isArray(x.value) && x.value.length >= 4;
+        }});
         if (!p) return '';
-        var v = p.value.slice(1);
-        var o = v[0], c = v[1], l = v[2], h = v[3];
+        // ECharts candlestick 内部把每项 [o,c,l,h] 转为 [x, o, c, l, h] · tooltip 里从 index 1 取 4 值
+        var v = p.value.length >= 5 ? p.value.slice(1) : p.value;
+        var o = +v[0], c = +v[1], l = +v[2], h = +v[3];
         var pct = ((c - chartData.last_close) / chartData.last_close * 100).toFixed(2);
-        var color = c >= o ? '#A4332B' : '#3F6B40';
+        var color = c >= o ? '#ef4444' : '#22c55e';
         var sign = pct >= 0 ? '+' : '';
-        var isPred = p.seriesName.indexOf('预测') === 0;
+        var isPred = p.dataIndex >= histCount;
         var tag = isPred ? '<span style="color:#B06A32;">[预测]</span> ' : '';
         return tag + p.name + '<br>开 ' + o.toFixed(2) + ' · 高 ' + h.toFixed(2) +
           '<br>低 ' + l.toFixed(2) + ' · 收 <b style="color:' + color + '">' + c.toFixed(2) + '</b>' +
@@ -476,12 +533,13 @@ def render_kpred_html(pro_result: dict, stock_query: str = "") -> str:
       }},
     }},
     series: [
+      // 历史 K 线 · series-level itemStyle · ECharts 官方推荐用法
       {{
-        name: '历史 K 线', type: 'candlestick', data: hist,
-        barWidth: '65%',
+        name: '历史 K 线', type: 'candlestick', data: histData,
+        barWidth: '55%',
         itemStyle: {{
-          color: '#A4332B', color0: '#3F6B40',
-          borderColor: '#A4332B', borderColor0: '#3F6B40',
+          color: '#ef4444', color0: '#22c55e',
+          borderColor: '#ef4444', borderColor0: '#22c55e',
         }},
         markLine: {{
           silent: true, symbol: 'none',
@@ -502,15 +560,36 @@ def render_kpred_html(pro_result: dict, stock_query: str = "") -> str:
             ? [{{ xAxis: histCount - 0.5 }}]
             : [],
         }},
-      }},
-      {{
-        name: '预测 K 线(金色 · 已多因子调整)', type: 'candlestick', data: pred,
-        barWidth: '45%',
-        itemStyle: {{
-          color: '#fbbf24', color0: '#fed7aa',
-          borderColor: '#d97706', borderColor0: '#fdba74',
-          opacity: 0.82,
+        markArea: {{
+          silent: true,
+          itemStyle: {{ color: 'rgba(251, 191, 36, 0.08)', borderWidth: 0 }},
+          data: histCount < chartData.dates.length
+            ? [[
+                {{ xAxis: histCount - 0.5 }},
+                {{ xAxis: chartData.dates.length - 0.5 }}
+              ]]
+            : [],
         }},
+      }},
+      // 预测 K 线 · 双金色 · 与 PC 版 /kpred/page.tsx line 108-119 逐字对齐
+      {{
+        name: '预测 K 线(金色 · 已多因子调整)', type: 'candlestick', data: predFill,
+        barWidth: '55%',
+        itemStyle: {{
+          color: 'rgba(251,191,36,0.85)',
+          color0: 'rgba(251,191,36,0.5)',
+          borderColor: '#fbbf24',
+          borderColor0: '#f59e0b',
+          opacity: 0.9,
+        }},
+      }},
+      // 预测收盘价折线 · 与 PC 版 line 120-127 一致 · 蜡烛看不见时补位
+      {{
+        name: '预测收盘价', type: 'line', data: chartData.pred_close_line,
+        lineStyle: {{ color: '#f59e0b', type: 'dashed', width: 1.5, opacity: 0.7 }},
+        symbol: 'circle', symbolSize: 5,
+        itemStyle: {{ color: '#f59e0b' }},
+        showSymbol: true, connectNulls: false, z: 3,
       }},
     ],
   }});
