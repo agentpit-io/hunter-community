@@ -331,7 +331,7 @@ export default function StockPage() {
     series: [
       {
         type: 'line', data: timeshare.map(t => t.close), smooth: false, symbol: 'none',
-        lineStyle: { color: '#2563eb', width: 2 }, areaStyle: { color: 'rgba(37,99,235,0.08)' },
+        lineStyle: { color: '#2563eb', width: 2 }, areaStyle: { color: 'rgba(176,106,50,0.08)' },
         xAxisIndex: 0, yAxisIndex: 0,
       },
       {

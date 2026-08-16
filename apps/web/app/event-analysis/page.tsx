@@ -142,7 +142,7 @@ export default function EventAnalysisPage() {
               style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
               <button onClick={() => setHtml('')}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm"
-                style={{ background: 'rgba(37,99,235,0.08)', color: 'var(--blue)' }}>
+                style={{ background: 'rgba(176,106,50,0.08)', color: 'var(--blue)' }}>
                 <ArrowLeft className="w-4 h-4" />返回
               </button>
               <span className="text-sm font-medium truncate flex-1" style={{ color: 'var(--text)' }}>
@@ -212,9 +212,9 @@ export default function EventAnalysisPage() {
                     <button key={p} onClick={() => { setEvent(p); textareaRef.current?.focus() }}
                       className="text-xs px-3 py-1.5 rounded-full border transition-colors"
                       style={{
-                        background: event === p ? 'rgba(37,99,235,0.1)' : 'var(--bg-card)',
+                        background: event === p ? 'rgba(176,106,50,0.1)' : 'var(--bg-card)',
                         color: event === p ? 'var(--blue)' : 'var(--text-muted)',
-                        borderColor: event === p ? 'rgba(37,99,235,0.3)' : 'var(--border)',
+                        borderColor: event === p ? 'rgba(176,106,50,0.3)' : 'var(--border)',
                       }}>
                       {p}
                     </button>
@@ -253,7 +253,7 @@ export default function EventAnalysisPage() {
                           background: 'var(--bg-card)',
                           borderBottom: idx < history.length - 1 ? '1px solid var(--border)' : 'none',
                         }}
-                        onMouseEnter={e => (e.currentTarget.style.background = 'rgba(37,99,235,0.04)')}
+                        onMouseEnter={e => (e.currentTarget.style.background = 'rgba(176,106,50,0.04)')}
                         onMouseLeave={e => (e.currentTarget.style.background = 'var(--bg-card)')}>
                         <div className="flex-1 min-w-0">
                           <div className="text-sm truncate" style={{ color: 'var(--text)' }}>

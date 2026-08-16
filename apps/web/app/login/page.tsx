@@ -149,7 +149,7 @@ export default function LoginPage() {
       </div>
       <style>{`
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-        input:focus { border-color: var(--blue) !important; box-shadow: 0 0 0 2px rgba(37,99,235,0.15); }
+        input:focus { border-color: var(--blue) !important; box-shadow: 0 0 0 2px rgba(176,106,50,0.15); }
         input::placeholder { color: var(--text-muted); }
       `}</style>
     </div>

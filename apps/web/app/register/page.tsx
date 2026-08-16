@@ -104,8 +104,8 @@ function RegisterInner() {
         <div style={{
           display: 'flex', gap: 8, alignItems: 'flex-start',
           padding: '10px 12px', marginBottom: 20,
-          background: 'rgba(37,99,235,0.08)',
-          border: '1px solid rgba(37,99,235,0.25)',
+          background: 'rgba(176,106,50,0.08)',
+          border: '1px solid rgba(176,106,50,0.25)',
           borderRadius: 8, fontSize: 12, color: 'var(--text)',
         }}>
           <Sparkles style={{ width: 15, height: 15, color: 'var(--blue)', flexShrink: 0, marginTop: 1 }} />
@@ -213,7 +213,7 @@ function CardShell({ title, children }: { title: string; children: React.ReactNo
       </div>
       <style>{`
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-        input:focus { border-color: var(--blue) !important; box-shadow: 0 0 0 2px rgba(37,99,235,0.15); }
+        input:focus { border-color: var(--blue) !important; box-shadow: 0 0 0 2px rgba(176,106,50,0.15); }
         input::placeholder { color: var(--text-muted); }
       `}</style>
     </div>

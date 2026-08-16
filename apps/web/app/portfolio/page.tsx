@@ -126,7 +126,7 @@ export default function PortfolioPage() {
         <div className="flex items-center gap-2.5">
           <Briefcase className="w-5 h-5" style={{ color: 'var(--blue)' }} />
           <h1 className="text-lg font-bold" style={{ color: 'var(--text)' }}>持仓报告</h1>
-          <span className="text-xs px-2 py-0.5 rounded" style={{ background: 'rgba(37,99,235,0.1)', color: 'var(--blue)' }}>
+          <span className="text-xs px-2 py-0.5 rounded" style={{ background: 'rgba(176,106,50,0.1)', color: 'var(--blue)' }}>
             实时盈亏
           </span>
         </div>

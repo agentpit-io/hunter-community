@@ -1,16 +1,19 @@
 @import "tailwindcss";
 
 :root {
-  --bg: #f5f7fa;
-  --bg-card: #ffffff;
-  --bg-hover: #f0f4f8;
-  --border: #e2e8f0;
-  --text: #1e293b;
-  --text-muted: #64748b;
-  --red: #dc2626;
-  --green: #16a34a;
-  --blue: #2563eb;
-  --yellow: #d97706;
+  /* HUNTER 铜板主题 · 2026-08-17 · 从冷蓝 tailwind 切到暖铜/象牙白
+   * · 保留 --blue/--red/--green/--yellow 变量名不动 · 只换值 · 页面代码零改动
+   * · 语义参考 apps/web/app/lib/hunter-theme.ts */
+  --bg: #F7F3EC;          /* HUNTER.BG · 暖象牙 */
+  --bg-card: #FFFDF9;     /* HUNTER.PAPER · 纸白 */
+  --bg-hover: #EFEEE8;    /* HUNTER.PANEL_2 · hover 底 */
+  --border: #D8CDBA;      /* HUNTER.LINE · 暖分割线 */
+  --text: #211C18;        /* HUNTER.INK */
+  --text-muted: #7A6F63;  /* HUNTER.INK_F */
+  --red: #A4332B;         /* HUNTER.UP · 中式涨/删除红 */
+  --green: #3F6B40;       /* HUNTER.DN · 中式跌绿 */
+  --blue: #B06A32;        /* HUNTER.THEME · 品牌铜 · 原蓝 accent 位 */
+  --yellow: #8A5A18;      /* HUNTER.COPPER3 · 深铜(HK 标签) */
 }
 
 * { box-sizing: border-box; }

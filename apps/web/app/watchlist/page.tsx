@@ -35,7 +35,7 @@ function tagOf(it: Item): { label: string; bg: string; fg: string } {
   if (it.asset_type === 'etf')  return { label: 'ETF',  bg: 'rgba(20,184,166,0.12)', fg: '#0d9488' }
   if (it.market === 'HK')       return { label: 'HK',   bg: 'rgba(217,119,6,0.12)',  fg: 'var(--yellow)' }
   if (it.market === 'US')       return { label: 'US',   bg: 'rgba(22,163,74,0.12)',  fg: '#16a34a' }
-  return { label: 'A股', bg: 'rgba(37,99,235,0.12)', fg: 'var(--blue)' }
+  return { label: 'A股', bg: 'rgba(176,106,50,0.12)', fg: 'var(--blue)' }
 }
 
 export default function WatchlistManagePage() {
@@ -73,7 +73,7 @@ export default function WatchlistManagePage() {
           管理你的自选股列表，价格提醒请在个股 K 线或分时页面设置
         </p>
         <div className="mt-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs"
-          style={{ background: 'rgba(37,99,235,0.06)', color: 'var(--text-muted)' }}>
+          style={{ background: 'rgba(176,106,50,0.06)', color: 'var(--text-muted)' }}>
           <Info className="w-3.5 h-3.5" style={{ color: 'var(--blue)' }} />
           想添加新的自选股？请点击左侧菜单的 <span style={{ color: 'var(--blue)', fontWeight: 500 }}>"+ 添加自选股"</span>，添加后会自动出现在这里。
         </div>
@@ -127,7 +127,7 @@ function StockCard({ item, onDelete }: { item: Item; onDelete: () => void }) {
         </div>
         <button onClick={onDelete}
           className="px-3 py-2 rounded-lg text-sm transition"
-          style={{ color: '#ef4444', border: '1px solid var(--border)' }}
+          style={{ color: 'var(--red)', border: '1px solid var(--border)' }}
           title="删除自选股">
           <Trash2 className="w-3.5 h-3.5" />
         </button>
@@ -154,7 +154,7 @@ function EmptyState() {
   return (
     <div className="text-center py-24">
       <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-4"
-        style={{ background: 'rgba(37,99,235,0.08)' }}>
+        style={{ background: 'rgba(176,106,50,0.08)' }}>
         <Sparkles className="w-7 h-7" style={{ color: 'var(--blue)' }} />
       </div>
       <div className="text-base font-semibold mb-2" style={{ color: 'var(--text)' }}>还没有自选股</div>
@@ -180,7 +180,7 @@ function ConfirmModal({ title, message, danger, onConfirm, onCancel }:
             style={{ color: 'var(--text)', border: '1px solid var(--border)' }}>取消</button>
           <button onClick={onConfirm}
             className="flex-1 py-2 rounded-lg text-sm font-medium text-white"
-            style={{ background: '#ef4444' }}>{danger || '确认'}</button>
+            style={{ background: 'var(--red)' }}>{danger || '确认'}</button>
         </div>
       </div>
     </div>

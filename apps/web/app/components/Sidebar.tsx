@@ -130,14 +130,14 @@ export default function Sidebar() {
   const NavItem = ({ href, icon, label, badge }: { href: string; icon: React.ReactNode; label: string; badge?: string }) => (
     <Link href={href}
       className="flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-colors mb-0.5"
-      style={{ background: isActive(href) ? 'rgba(37,99,235,0.1)' : 'transparent', color: isActive(href) ? 'var(--blue)' : 'var(--text)' }}>
+      style={{ background: isActive(href) ? 'rgba(176,106,50,0.1)' : 'transparent', color: isActive(href) ? 'var(--blue)' : 'var(--text)' }}>
       <div className="flex items-center gap-2.5">
         <span className="w-4 h-4 shrink-0">{icon}</span>
         {label}
       </div>
       {badge && (
         <span className="text-xs px-1.5 py-0.5 rounded font-medium"
-          style={{ background: 'rgba(37,99,235,0.1)', color: 'var(--blue)' }}>
+          style={{ background: 'rgba(176,106,50,0.1)', color: 'var(--blue)' }}>
           {badge}
         </span>
       )}
@@ -174,11 +174,11 @@ export default function Sidebar() {
               s.asset_type === 'etf'  ? { bg: 'rgba(20,184,166,0.12)', fg: '#0d9488' } : // 青绿
               s.market === 'HK'       ? { bg: 'rgba(217,119,6,0.1)',   fg: 'var(--yellow)' } :
               s.market === 'US'       ? { bg: 'rgba(22,163,74,0.1)',   fg: '#16a34a' } :
-                                        { bg: 'rgba(37,99,235,0.1)',   fg: 'var(--blue)' }
+                                        { bg: 'rgba(176,106,50,0.1)',   fg: 'var(--blue)' }
             return (
               <Link key={s.code} href={`/stock/${s.code}`}
                 className="flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors mb-0.5 group"
-                style={{ background: active ? 'rgba(37,99,235,0.1)' : 'transparent', color: active ? 'var(--blue)' : 'var(--text)' }}
+                style={{ background: active ? 'rgba(176,106,50,0.1)' : 'transparent', color: active ? 'var(--blue)' : 'var(--text)' }}
                 onMouseEnter={() => setHoveredCode(s.code)}
                 onMouseLeave={() => setHoveredCode('')}>
                 <div>
@@ -251,7 +251,7 @@ export default function Sidebar() {
               className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-sm transition-colors"
               style={{ color: 'var(--text)' }}>
               <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
-                style={{ background: 'rgba(37,99,235,0.15)', color: 'var(--blue)' }}>
+                style={{ background: 'rgba(176,106,50,0.15)', color: 'var(--blue)' }}>
                 {userEmail[0].toUpperCase()}
               </div>
               <span className="flex-1 text-left truncate text-xs" style={{ color: 'var(--text-muted)' }}>{userEmail}</span>
@@ -326,7 +326,7 @@ export default function Sidebar() {
                           : it.asset_type === 'fund' ? { label: '基金', bg: 'rgba(168,85,247,0.12)', fg: '#a855f7' }
                           : it.market === 'HK' ? { label: 'HK', bg: 'rgba(217,119,6,0.12)', fg: 'var(--yellow)' }
                           : it.market === 'US' ? { label: 'US', bg: 'rgba(22,163,74,0.12)', fg: '#16a34a' }
-                          : { label: 'A股', bg: 'rgba(37,99,235,0.12)', fg: 'var(--blue)' }
+                          : { label: 'A股', bg: 'rgba(176,106,50,0.12)', fg: 'var(--blue)' }
                 return (
                   <button
                     key={`${it.market}-${it.code}`}
@@ -334,7 +334,7 @@ export default function Sidebar() {
                     disabled={saving}
                     className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-left transition-colors mb-1"
                     style={{ background: 'transparent', border: '1px solid var(--border)', opacity: saving ? 0.4 : 1, cursor: saving ? 'wait' : 'pointer' }}
-                    onMouseEnter={e => (e.currentTarget.style.background = 'rgba(37,99,235,0.06)')}
+                    onMouseEnter={e => (e.currentTarget.style.background = 'rgba(176,106,50,0.06)')}
                     onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                   >
                     <div>
