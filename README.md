@@ -201,19 +201,37 @@ open http://localhost:3100
 
 ## 🤖 大模型兼容性
 
-**遵循"测法是假测试 · 测工具调用才是真测试"方法论** · 我们用 12 个 golden case 实测每家模型的 tool_call 可靠性。
+**遵循"测法是假测试 · 测工具调用才是真测试"方法论** · 我们用 7 个 golden case 实测每家模型的 tool_call 可靠性。
 
-| 模型 | tool_call | 参数正确 | 深度分析 | 延迟 | 单次成本 | 推荐等级 | 已知踩坑 |
-|---|---|---|---|---|---|---|---|
-| **DeepSeek v4 pro** | **6/7 hit** | 100% | 70 秒 | 12-70s | **~$0.0001-0.0008** | ⭐⭐⭐⭐⭐ **P0 默认** | 必开 `LLM_SCHEMA_SANITIZE=1` |
-| 通义 qwen-max | ⏳ 待测 | — | — | — | — | ⭐⭐⭐⭐ P0 | compatible-mode URL 后缀不能漏 |
-| 豆包 pro-32k | ⏳ 待测 | — | — | — | — | ⭐⭐⭐ P1 | LLM_DEFAULT_MODEL 填 endpoint_id · 不是 model 名 |
-| Claude Sonnet 4.6 | ⏳ 待测 | — | — | — | — | ⭐⭐⭐⭐⭐ 海外首选 | `LLM_PROVIDER=anthropic` |
-| GPT-4o | ⏳ 待测 | — | — | — | — | ⭐⭐⭐⭐ 海外备选 | CN 直连限流 · 走 OneAPI 中转 |
+### 直连(单 provider)
 
-**env 模板 5 家齐**(每份含 URL / model 名 / SANITIZE 设置 / 已知踩坑注释):[`docs/env-samples/`](./docs/env-samples/)
+| 模型 | 接入 | tool_call hit | 平均延迟 | 单次成本 | 推荐等级 | 已知踩坑 |
+|---|---|---|---|---|---|---|
+| **DeepSeek v4 pro** | `api.deepseek.com` | **6/7** | 30s | ~$0.0001-0.0008 | ⭐⭐⭐⭐⭐ **P0 直连默认** | 必开 `LLM_SCHEMA_SANITIZE=1` |
+
+### 走 AIHubMix 网关(一把 key 打通 30+ 家 · 2026-08-16 实测)
+
+| 排名 | 模型 | hit | 平均延迟 | 稳定性 | 推荐等级 |
+|---|---|---|---|---|---|
+| 🥇 | **Claude Sonnet 5** | **7/7** | 25.7s | ✅ 无 timeout · 无 think 泄漏 · B2 主动编排 4 tool | ⭐⭐⭐⭐⭐ **海外首推** |
+| 🥈 | **Qwen 3.8 Max** | **7/7** | 48.1s | ✅ 无 timeout · 无 think 泄漏 | ⭐⭐⭐⭐⭐ **国内首推** |
+| 🥉 | **Gemini 3.5 Flash** | 6/7 | 62.3s | ⚠ C1 边界过度调用超时 · 无 think 泄漏 | ⭐⭐⭐⭐ 便宜快 |
+| 4 | **Doubao Seed 2.1 Pro** | 6/7 | 103.9s | ⚠ 深度分析慢 3-5× | ⭐⭐⭐ 建议直连火山引擎 |
+| 5 | **GPT-5.6 sol** | 5/7 | **18.1s**(最快) | ✅ 快 · 但 A3/B1 错选 tool | ⭐⭐⭐ 快 · tool 命中偏差 |
+| 6 | **MiniMax M3** | 6/7 | 60.9s | ❌ **7/7 全 `<think>` 泄漏** | ⭐⭐ 不推荐(需前端剥 think) |
+
+**AIHubMix 使用注意**:Alpine 容器直连 aihubmix 会被 CDN 按 TLS 指纹拦截(SSL EOF)· 需要 host proxy 中转 · 详见 [`docs/env-samples/.env.aihubmix.example`](./docs/env-samples/.env.aihubmix.example) 和 [`docs/model-testing/scripts/aihubmix-host-proxy.py`](./docs/model-testing/scripts/aihubmix-host-proxy.py)。
+
+**env 模板 6 份齐备**(每份含 URL / model 名 / SANITIZE 设置 / 已知踩坑注释):[`docs/env-samples/`](./docs/env-samples/)
+- `.env.aihubmix.example` — 网关(GPT/Claude/Gemini/Qwen/Doubao/MiniMax/DeepSeek/GLM 一把 key)
+- `.env.deepseek.example` — 直连 DeepSeek(P0 直连基线)
+- `.env.claude.example` / `.env.openai.example` / `.env.qwen.example` / `.env.doubao.example` — 直连各家
 
 **详细评测方法与数据**:[`docs/model-testing/`](./docs/model-testing/)
+- [`model-compat-matrix.md`](./docs/model-testing/model-compat-matrix.md) — 全适配矩阵
+- [`results/2026-08-16_aihubmix_六家对比.md`](./docs/model-testing/results/2026-08-16_aihubmix_六家对比.md) — 6 家最新旗舰完整对比
+- [`results/2026-08-15_deepseek_v4pro_对比分析.md`](./docs/model-testing/results/2026-08-15_deepseek_v4pro_对比分析.md) — DeepSeek v4 pro 直连基线
+- [`scripts/run-golden-cases.py`](./docs/model-testing/scripts/run-golden-cases.py) — 评测 runner(可复现)
 
 ---
 
