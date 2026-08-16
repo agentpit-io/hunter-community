@@ -423,7 +423,7 @@ def render_kpred_html(pro_result: dict, stock_query: str = "") -> str:
 
   chart.setOption({{
     animation: false,
-    grid: {{ left: 62, right: 24, top: 20, bottom: 60 }},
+    grid: {{ left: 62, right: 24, top: 34, bottom: 60 }},
     legend: {{
       show: true, bottom: 8, itemGap: 22,
       data: [
@@ -487,7 +487,12 @@ def render_kpred_html(pro_result: dict, stock_query: str = "") -> str:
           silent: true, symbol: 'none',
           lineStyle: {{ color: '#B06A32', type: 'dashed', width: 1 }},
           label: {{
-            show: true, position: 'insideEndTop',
+            show: true,
+            position: 'end',
+            distance: 6,
+            rotate: 0,
+            align: 'center',
+            verticalAlign: 'bottom',
             formatter: '预测起点',
             color: '#B06A32', fontSize: 10, fontWeight: 600,
             backgroundColor: 'rgba(251,243,224,0.95)',
