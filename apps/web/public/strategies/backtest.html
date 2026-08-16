@@ -11,10 +11,19 @@
 <script>
 const draft = loadDraft()
 
+// 从 localStorage 读真回测结果(workbench "跑回测" 按钮存的)
+let realResult = null
+try {
+  const raw = localStorage.getItem('hunter_backtest_result')
+  if (raw) realResult = JSON.parse(raw)
+} catch { /* ignore */ }
+
+const isReal = !!realResult
+
 document.body.innerHTML = renderShell(
   'backtest',
   '策略广场 / 回测结果',
-  `· ${draft.name || '未命名策略'} · 3 年回测 · 2023-08 → 2026-07`,
+  `· ${draft.name || '未命名策略'} · ${isReal ? realResult.start + ' → ' + realResult.end + ' · ✅ 真数据' : '3 年回测 · 2023-08 → 2026-07(mock)'}`,
   `<button class="btn small" id="btn-share">🔗 分享</button>
    <button class="btn small" id="btn-save">💾 保存策略</button>
    <button class="btn small ask-hunter" id="btn-ask">💬 让 Hunter 详细分析</button>`
@@ -22,11 +31,11 @@ document.body.innerHTML = renderShell(
 
 const container = document.getElementById('page-content')
 
-// 若 draft 是官方策略，其 _metrics 只有 3 个字段(ann_ret/sharpe/max_dd)。
-// 必须补齐 ir/win_rate/turnover，否则模板字符串里的 metrics.ir.toFixed() 会炸。
+// 优先用真回测数据 · 缺字段用 mock 补齐
 const metrics = Object.assign(
   { ann_ret: 0.184, sharpe: 1.42, max_dd: -0.143, ir: 0.98, win_rate: 0.62, turnover: 0.21 },
-  draft._metrics || {}
+  draft._metrics || {},
+  realResult?.metrics || {},
 )
 
 const cfg = draft.config || { universe: 'hs300', top_n: 20, rebalance: 'M', cost_bps: 15, benchmark: '000300' }
@@ -133,6 +142,7 @@ container.innerHTML = `
     <div style="display:flex;gap:20px;margin-top:10px;padding-left:20px;font-size:12px">
       <span style="display:flex;align-items:center;gap:6px"><span style="width:20px;height:3px;background:#b56b2d"></span>策略 · ${draft.name || '当前组合'}</span>
       <span style="display:flex;align-items:center;gap:6px"><span style="width:20px;height:3px;background:#a2a49d"></span>基准 · ${BENCHMARK_NAME[cfg.benchmark]}</span>
+      ${isReal ? `<span style="background:#EEF5F1;color:#2C6B55;padding:2px 8px;border-radius:6px;font-size:11">✅ 真回测 · ${realResult.nav_series?.length||0} 期 · ${realResult.duration_ms||0}ms · SVG 为示意</span>` : ''}
       <span style="margin-left:auto;color:var(--muted)">悬浮曲线看某日详情</span>
     </div>
   </div>

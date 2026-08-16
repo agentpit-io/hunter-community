@@ -156,31 +156,58 @@ function renderRightPanel() {
   return `
     <div class="panel" style="padding:0;overflow:hidden">
       <div style="padding:16px 18px 12px;border-bottom:1px solid var(--line)">
-        <div class="p-hd" style="margin-bottom:6px">🎯 今日 Top 20 <span class="cnt">2026-08-06</span></div>
+        <div class="p-hd" style="margin-bottom:6px">🎯 今日 Top <span id="topn-cnt">${draft.config.top_n||20}</span> <span class="cnt" id="topn-date">加载中...</span></div>
         <div style="color:var(--muted);font-size:11.5px">
-          改因子/权重时会实时刷新
+          改因子/权重后点"刷新" · 或按下方"跑回测"
+          <span style="background:#EEF5F1;color:#2C6B55;padding:1px 6px;border-radius:4px;margin-left:6px;font-size:10px">✅ 真数据</span>
         </div>
       </div>
-      <div style="max-height:calc(100vh - 240px);overflow-y:auto">
-        <table class="holdings-table">
-          <thead><tr><th class="rk">#</th><th>股票</th><th class="num">综合分</th></tr></thead>
-          <tbody>
-            ${TOP_HOLDINGS.map(h => `
-              <tr><td class="rk">${h.rank}</td>
-                  <td><b>${h.name}</b><div class="cd">${h.code}.${h.mkt}</div></td>
-                  <td class="num score">${h.score.toFixed(2)}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
+      <div id="picks-body" style="max-height:calc(100vh - 240px);overflow-y:auto;padding:16px 18px;color:var(--muted);font-size:12px">
+        选因子后点"刷新" · 或点"跑回测"直接调 API
       </div>
       <div style="padding:12px 18px;border-top:1px solid var(--line);background:var(--panel);color:var(--muted);font-size:11px;display:flex;gap:14px">
-        <span>换手率 <b style="color:var(--text)">18%</b></span>
-        <span>与基准重合 <b style="color:var(--text)">14/20</b></span>
+        <button id="btn-refresh-picks" class="btn small" style="height:26px;padding:0 10px">🔄 刷新 Top N</button>
         <span style="margin-left:auto;color:var(--brand);cursor:pointer" id="btn-export">导出 CSV →</span>
       </div>
     </div>
   `
+}
+
+// 从 API 拉真 picks
+async function refreshPicks() {
+  const body = document.getElementById('picks-body')
+  if (!body) return
+  const factors = draft.factors.map(k => ({ key: k, weight_pct: draft.weights[k] || 0 }))
+                                .filter(f => f.weight_pct > 0)
+  if (factors.length === 0) {
+    body.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted)">先在左侧选几个因子</div>'
+    return
+  }
+  body.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted)">拉取中...</div>'
+  try {
+    const r = await fetch('/api/quant/scan', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ factors, config: { universe: draft.config.universe||'hs300', top_n: draft.config.top_n||20 } })
+    })
+    const d = await r.json()
+    const picks = d.picks || []
+    document.getElementById('topn-date').textContent = d.trade_date
+    document.getElementById('topn-cnt').textContent = picks.length
+    if (picks.length === 0) {
+      body.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted)">无匹配 · 可能因子还没算完 · 检查后端 factor_value 表</div>'
+      return
+    }
+    body.innerHTML = `<table class="holdings-table">
+      <thead><tr><th class="rk">#</th><th>股票</th><th class="num">综合分</th></tr></thead>
+      <tbody>${picks.map((p, i) => `
+        <tr><td class="rk">${i+1}</td>
+            <td><b>${p.code}</b><div class="cd">A 股</div></td>
+            <td class="num score">${p.score.toFixed(3)}</td>
+        </tr>`).join('')}</tbody>
+    </table>`
+  } catch (e) {
+    body.innerHTML = `<div style="padding:20px;color:var(--dn)">拉取失败:${e.message||e}</div>`
+  }
 }
 
 container.innerHTML = `
@@ -234,32 +261,55 @@ document.getElementById('btn-ask-2').addEventListener('click', askHunterFromWork
 // 顶部 · 保存
 document.getElementById('btn-save').addEventListener('click', () => openSaveDialog())
 
-// 跑回测 · fake loading + 跳转
-document.getElementById('btn-backtest').addEventListener('click', () => {
+// 跑回测 · 调真 /api/quant/backtest/run · 结果落 localStorage 供 backtest.html 用
+document.getElementById('btn-backtest').addEventListener('click', async () => {
   if (draft.factors.length === 0) { toast('先选几个因子', 'warn'); return }
   const btn = document.getElementById('btn-backtest')
   btn.classList.add('loading')
-  const stages = [
-    '拉取因子面板 · 沪深 300 × 720 天',
-    '计算横截面 z-score',
-    '按月频构建 top 20 持仓',
-    '回放日收益 · 扣除交易成本',
-    '计算指标与归因',
-  ]
-  let i = 0
-  const t = setInterval(() => {
-    if (i < stages.length) toast(stages[i++], '')
-    else { clearInterval(t); location.href = '/strategies/backtest.html' }
-  }, 350)
+  btn.textContent = '⏳ 后端计算中...'
+  const factors = draft.factors.map(k => ({ key: k, weight_pct: draft.weights[k] || 0 }))
+                                .filter(f => f.weight_pct > 0)
+  try {
+    // 默认最近 8 个月 · 起止 hard-code(v2 让用户改)
+    const end = new Date(); end.setDate(15)
+    const start = new Date(end); start.setMonth(end.getMonth() - 8)
+    const fmt = d => d.toISOString().slice(0, 10)
+    const r = await fetch('/api/quant/backtest/run', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        factors, config: draft.config,
+        start: fmt(start), end: fmt(end),
+      })
+    })
+    const d = await r.json()
+    if (d.error) { toast('回测失败:' + d.message, 'warn'); btn.classList.remove('loading'); btn.textContent = '▶ 跑 3 年回测'; return }
+    // 存 result 供 backtest.html 读取
+    localStorage.setItem('hunter_backtest_result', JSON.stringify(d))
+    localStorage.setItem('hunter_backtest_draft', JSON.stringify(draft))
+    location.href = '/strategies/backtest.html'
+  } catch (e) {
+    toast('网络错误:' + e.message, 'warn')
+    btn.classList.remove('loading'); btn.textContent = '▶ 跑 3 年回测'
+  }
 })
 
-// 导出 CSV
+// 刷新 Top N · 挂事件 · 首次自动跑
+document.getElementById('btn-refresh-picks').addEventListener('click', refreshPicks)
+refreshPicks()   // 页面打开自动拉一次
+
+// 导出 CSV · 从当前 picks-body 表格里拿
 document.getElementById('btn-export').addEventListener('click', () => {
-  const rows = ['rank,code,name,score', ...TOP_HOLDINGS.map(h => `${h.rank},${h.code}.${h.mkt},${h.name},${h.score}`)]
+  const trs = document.querySelectorAll('#picks-body tbody tr')
+  if (trs.length === 0) { toast('先刷新 Top N', 'warn'); return }
+  const rows = ['rank,code,score']
+  trs.forEach(tr => {
+    const cells = tr.querySelectorAll('td')
+    rows.push(`${cells[0].textContent},${cells[1].querySelector('b')?.textContent||''},${cells[2].textContent}`)
+  })
   const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8' })
   const a = document.createElement('a')
   a.href = URL.createObjectURL(blob)
-  a.download = `hunter_top20_${new Date().toISOString().slice(0,10)}.csv`
+  a.download = `hunter_top_${new Date().toISOString().slice(0,10)}.csv`
   a.click()
   toast('✓ 已导出 CSV', 'success')
 })
