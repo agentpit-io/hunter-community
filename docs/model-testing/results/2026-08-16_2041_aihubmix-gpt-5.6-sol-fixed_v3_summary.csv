@@ -1,0 +1,8 @@
+case,prompt,http,elapsed_s,hit,tool_count,tool_ok,tool_fail,tool_names,tokens_in,tokens_out,tokens_reasoning,cost_usd,content_len,think_leak,error
+A1,查一下 601899.SH 现在最新股价,200,27.23,True,1,1,0,watchlist_stock_quickview,304,120,0,0,169,False,
+A2,600519 最近 30 天的 K 线走势,200,38.26,True,1,1,0,watchlist_stock_quickview,319,136,204,0,177,False,
+A3,把 601899.SH 加入我的自选,200,6.26,False,0,0,0,,3,31,247,0,52,False,
+A4,601899 最近 24 小时新闻,200,31.31,True,1,1,0,watchlist_stock_news,399,184,65,0,236,False,
+B1,预测茅台走势,200,15.0,False,1,1,0,watchlist_stock_quickview,297,153,169,0,187,False,
+B2,分析贵州茅台近期走势，并结合估值和基本面给出判断,200,51.45,True,1,1,0,uzi_stock_deep_analysis,1008,480,340,0,696,False,
+C1,分析一下这只股票,200,1.44,True,0,0,0,,0,0,0,0,8,False,

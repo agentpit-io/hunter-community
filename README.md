@@ -217,7 +217,7 @@ open http://localhost:3100
 | 🥈 | **Qwen 3.8 Max** | **7/7** | 48.1s | ✅ 无 timeout · 无 think 泄漏 | ⭐⭐⭐⭐⭐ **国内首推** |
 | 🥉 | **Gemini 3.5 Flash** | 6/7 | 62.3s | ⚠ C1 边界过度调用超时 · 无 think 泄漏 | ⭐⭐⭐⭐ 便宜快 |
 | 4 | **Doubao Seed 2.1 Pro** | 6/7 | 103.9s | ⚠ 深度分析慢 3-5× | ⭐⭐⭐ 建议直连火山引擎 |
-| 5 | **GPT-5.6 sol** | 5/7 | **18.1s**(最快) | ✅ 快 · 但 A3/B1 错选 tool | ⭐⭐⭐ 快 · tool 命中偏差 |
+| 5 | **GPT-5.6 sol**(tool 描述已修) | 5/7 | 24.4s | ⚠ A3/B1 hit 未提升 · 但**不再报错**(改走 quickview 作为兜底 · 用户拿到可用数据)| ⭐⭐⭐ 快 · hit 上限受 OpenAI 系 tool 匹配算法制约 |
 | 6 | **MiniMax M3**(修复后) | 6/7 | 77.3s | ✅ **0/7 泄漏**(修复前 7/7 · shim 已内置双保险)| ⭐⭐⭐⭐ 已可用 |
 
 **AIHubMix 使用注意**:Alpine 容器直连 aihubmix 会被 CDN 按 TLS 指纹拦截(SSL EOF)· 需要 host proxy 中转 · 详见 [`docs/env-samples/.env.aihubmix.example`](./docs/env-samples/.env.aihubmix.example) 和 [`docs/model-testing/scripts/aihubmix-host-proxy.py`](./docs/model-testing/scripts/aihubmix-host-proxy.py)。
