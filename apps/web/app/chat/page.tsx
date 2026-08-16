@@ -81,6 +81,11 @@ function ChatPageInner() {
   }, [])
 
   const handlePickSkill = useCallback((tpl: string, key?: string) => {
+    // 侧栏 CapabilityPanel "最近用 top 5" 需要 usage 统计 · 所有 skill 入口统一 track
+    if (key) {
+      // 动态 import 避免 SSR 报 window undefined
+      import('./lib/skillUsage').then(({ trackSkillUsage }) => trackSkillUsage(key)).catch(() => {})
+    }
     // 多专家辩论 · 先弹深度选择器 · 用户选完才把模板灌进输入框
     if (key === 'debate') {
       setPendingDebateTpl(tpl)

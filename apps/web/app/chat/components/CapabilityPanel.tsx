@@ -1,34 +1,44 @@
 'use client'
 
-// 侧栏「能力」区 · 三层模型重排(_14 §6 Step C)
+// 侧栏「能力」区 · 三段瘦身版(方案 D · 2026-08-17)
 //
-// 改之前:平铺 29 张 SKILL 卡 + 一个「查看全部工具 (29)」抽屉。
-// 问题是用户只看得见最上面那一层,底下靠什么数据、什么工具在跑,一个字都没有。
-// 查美股查不出来时,他分不清是没数据、没配 key、还是根本没通道 —— 三种情况
-// 该做的事完全不同,却长得一模一样。
+// 改之前:
+//   3 段折叠面板 · 全展开高度 1400px+ · 单 SKILL pill 每类 3-4 行 · 用户滚 3 屏
+//   侧栏塞不下 · 用户找不到管理入口
 //
-// 改之后三块:
-//   数据源   按 A股/港股/美股/全球 分 · 每条带状态点与量级
-//   工具箱   MCP 与自有工具**算一类**(用户原话),来源只体现在一个小标签上
-//   SKILL    按后端 category 分 · 点一下把提问模板填进输入框
+// 改之后(总高 ~480px · 减 66%):
+//   ┌ 数据源       32/33  →     一行 · 点跳 /library?tab=sources
+//   │ ▓▓▓▓▓▓▓░  97%
+//   │ 1 个需要 key
+//   ├ 工具箱       13/13  →     一行 · 点跳 /library?tab=tools
+//   │ ▓▓▓▓▓▓▓  100%
+//   ├ SKILL 库     23/23  + →   一行 · 点跳 /library?tab=skills
+//   │ ▓▓▓▓▓▓▓  100%
+//   ├─ 最近用 ─
+//   │ ⚡ UZI · 速判
+//   │ 📈 Kronos · 走势预测
+//   │ 🎯 UZI · 深度分析
+//   │ 🌅 自选股日报
+//   │ 💰 UZI · DCF 估值
+//   └─ 所有类目 ─
+//     [快速判断 3] [综合 2] [投研 4] [估值 4] [事件 3] [组合 3] [尽调 2]
 //
-// 顺序是有意的:数据源在最上面,因为它是"我能拿到什么"的根;SKILL 在最下面
-// 但**默认展开**,因为它是用户每天真正要点的东西。
-//
-// 【未解锁时】三块**照常全部显示**,该标锁的标锁。藏起来会让用户以为开源版
-// 没这些能力 —— 恰恰相反,要让他看见再去拿 key。
+// 深度浏览/管理去 /library · 侧栏只留高频快速用
+// 见方案 §7: /doc/开源hunter-community/参考/10-前端优化/capability-library-page-plan.md
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ChevronDown, ChevronRight, Lock, Settings2, Database, Wrench, Sparkles, Clock, Plus } from 'lucide-react'
+import Link from 'next/link'
+import { Lock, Settings2, Plus } from 'lucide-react'
 import { HUNTER } from '../../lib/hunter-theme'
 import {
-  listSources, listToolbox, listCatalogSkills, statusDot,
+  listSources, listToolbox, listCatalogSkills,
   type SourceGroup, type ToolGroup, type SkillGroup, type Summary,
+  type CatalogSkillItem,
 } from '../lib/catalogClient'
 import { getUnlockStatus, onUnlockChange, peekUnlockStatus } from '../lib/unlockClient'
+import { getRecentSkills, trackSkillUsage } from '../lib/skillUsage'
 import UnlockModal from './UnlockModal'
 import SkillAddPanel from './SkillAddPanel'
-import ToolAddPanel from './ToolAddPanel'
 
 interface Props {
   onPick: (tpl: string, key: string) => void
@@ -36,28 +46,20 @@ interface Props {
   refreshKey?: number
 }
 
-type BlockId = 'sources' | 'toolbox' | 'skills'
+const RECENT_N = 5
 
 export default function CapabilityPanel({ onPick, onManage, refreshKey }: Props) {
-  // SKILL 默认展开 —— 它是每天要点的;另外两块是"想知道时才看"的
-  const [open, setOpen] = useState<Record<BlockId, boolean>>({
-    sources: false, toolbox: false, skills: true,
-  })
   const [sources, setSources] = useState<{ groups: SourceGroup[]; summary: Summary } | null>(null)
   const [toolbox, setToolbox] = useState<{ groups: ToolGroup[]; summary: Summary } | null>(null)
-  const [skills, setSkills] = useState<{ groups: SkillGroup[]; summary: Summary } | null>(null)
-  // null = 还没问出来。用三态而不是 boolean —— 初始化成 true 会让面板闪一下锁,
-  // 初始化成 false 又会在真锁着时先放行一次点击。
+  const [skills, setSkills]   = useState<{ groups: SkillGroup[]; summary: Summary } | null>(null)
   const [unlocked, setUnlocked] = useState<boolean | null>(peekUnlockStatus()?.unlocked ?? null)
   const [gate, setGate] = useState<string | null>(null)
-  // 装 skill 的面板 —— 直接开在侧栏里,不用先进「管理」再往下滚
   const [installOpen, setInstallOpen] = useState(false)
   const [installed, setInstalled] = useState('')
-  const [toolAddOpen, setToolAddOpen] = useState(false)
+  const [recentTick, setRecentTick] = useState(0)   // 触发重新读 localStorage
   const locked = unlocked === false
 
   useEffect(() => {
-    // 三个接口各自失败各自静默 —— 能力面板挂掉绝不能影响聊天
     listSources().then(setSources).catch(() => {})
     listToolbox().then(setToolbox).catch(() => {})
     listCatalogSkills().then(setSkills).catch(() => {})
@@ -68,75 +70,98 @@ export default function CapabilityPanel({ onPick, onManage, refreshKey }: Props)
     return onUnlockChange((st) => setUnlocked(st.unlocked))
   }, [])
 
-  const toggle = useCallback((id: BlockId) => {
-    setOpen((o) => ({ ...o, [id]: !o[id] }))
+  // usage 变了(自己 track 或另一个 tab 改了)重取一次
+  useEffect(() => {
+    const handler = () => setRecentTick((n) => n + 1)
+    window.addEventListener('hunter-skill-usage', handler)
+    window.addEventListener('storage', handler)
+    return () => {
+      window.removeEventListener('hunter-skill-usage', handler)
+      window.removeEventListener('storage', handler)
+    }
   }, [])
 
+  // 建 key → SKILL item 反查表(所有 group 展平)
+  const skillByKey = useMemo(() => {
+    const m = new Map<string, CatalogSkillItem>()
+    skills?.groups.forEach((g) => g.skills.forEach((s) => m.set(s.key, s)))
+    return m
+  }, [skills])
+
+  // 最近用 top N · 已 track 的过滤存在的 · 不够就补默认(第一批高频)
+  const recent = useMemo(() => {
+    if (!skills) return [] as CatalogSkillItem[]
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const _ = recentTick   // 让 useMemo 依赖 tick
+    const trackedKeys = getRecentSkills(RECENT_N * 2)   // 拿多点 · 过滤后可能不够
+    const items: CatalogSkillItem[] = []
+    for (const k of trackedKeys) {
+      const s = skillByKey.get(k)
+      if (s) items.push(s)
+      if (items.length >= RECENT_N) break
+    }
+    // 补齐默认(用户还没用过时至少让他看到几个入口)
+    if (items.length < RECENT_N) {
+      const DEFAULTS = ['uzi_quick_scan', 'forecast', 'stock_deep_analysis', 'watchlist_daily', 'uzi_dcf']
+      for (const k of DEFAULTS) {
+        if (items.length >= RECENT_N) break
+        if (items.some((x) => x.key === k)) continue
+        const s = skillByKey.get(k)
+        if (s) items.push(s)
+      }
+    }
+    return items
+  }, [skills, skillByKey, recentTick])
+
   const handlePick = useCallback((tpl: string, key: string) => {
-    // 自建能力不门控:那是用户自己接的数据源,与平台 key 无关
     if (locked && !key.startsWith('custom:')) { setGate(key); return }
+    trackSkillUsage(key)
     onPick(tpl, key)
   }, [locked, onPick])
 
   return (
-    <div style={{ borderBottom: `1px solid ${HUNTER.LINE}`, paddingBottom: 6, marginBottom: 2 }}>
-      <div style={{ display: 'flex', alignItems: 'center', padding: '10px 12px 4px' }}>
-        <div style={sectionLabel}>能力</div>
-        <a href="/library" style={{ ...miniLink, textDecoration: 'none', marginRight: 8 }} title="打开能力库(独立管理页)">
+    <div style={rootStyle}>
+      {/* Header */}
+      <div style={headerStyle}>
+        <span style={sectionLabel}>能力</span>
+        <Link href="/library" style={miniLink} title="打开完整能力库">
           ⇱ 完整库
-        </a>
-        <button onClick={onManage} style={miniLink} title="管理你的能力">
+        </Link>
+        <button onClick={onManage} style={miniBtn} title="管理你的能力">
           <Settings2 size={11} strokeWidth={1.5} style={{ marginRight: 3 }} />
           管理
         </button>
       </div>
 
-      {/* ① 数据源 */}
-      <Block
-        id="sources" icon={Database} title="数据源"
-        headline={sources?.summary.headline}
-        // 这个副标题是整块的重点:告诉用户"还有 N 个申请个 key 就能用"
-        sub={sources ? subOfSources(sources.summary) : ''}
-        open={open.sources} onToggle={toggle}
-      >
-        {sources?.groups.map((g) => (
-          <div key={g.market} style={{ marginBottom: 6 }}>
-            <div style={groupHead}>
-              <span>{g.label}</span>
-              <span style={{ color: HUNTER.INK_F, fontWeight: 400 }}>{g.ready}/{g.total}</span>
-            </div>
-            {g.sources.map((s) => {
-              const dot = statusDot(s.status)
-              return (
-                <div key={s.key} style={row}
-                     title={s.unavailable_reason || s.note || `${dot.label}${s.endpoint ? ' · ' + s.endpoint : ''}`}>
-                  <span style={{ ...dotStyle, background: dot.color }} />
-                  <span style={rowName}>{s.name}</span>
-                  <span style={rowMeta}>{s.volume_hint || dot.label}</span>
-                </div>
-              )
-            })}
-          </div>
-        ))}
-        {/* 美股/港股那些"有数据但通道未开"的,必须有一句人话解释,
-            否则用户看到一排灰点只会以为坏了 */}
-        {sources && sources.summary.unavailable_count ? (
-          <div style={footNote}>
-            灰点 = 平台已建成但开源版暂无通道(需直连数据库),共 {sources.summary.unavailable_count} 个
-          </div>
-        ) : null}
-      </Block>
+      {/* ① 数据源 · 一行进度条 */}
+      <ProgressLine
+        icon="📊"
+        title="数据源"
+        summary={sources?.summary}
+        href="/library?tab=sources"
+        subtitle={sources ? subOfSources(sources.summary) : ''}
+      />
 
-      {/* ② 工具箱 · MCP 与自有工具算一类 */}
-      <Block
-        id="toolbox" icon={Wrench} title="工具箱"
-        headline={toolbox?.summary.headline}
-        sub="模型可以直接调用的能力"
-        open={open.toolbox} onToggle={toggle}
-        action={
+      {/* ② 工具箱 · 一行进度条 */}
+      <ProgressLine
+        icon="🛠"
+        title="工具箱"
+        summary={toolbox?.summary}
+        href="/library?tab=tools"
+        subtitle="模型可直接调用的能力"
+      />
+
+      {/* ③ SKILL 库 · 一行进度条 + 加号(直接打开 SkillAddPanel) */}
+      <ProgressLine
+        icon="✨"
+        title="SKILL 库"
+        summary={skills?.summary}
+        href="/library?tab=skills"
+        subtitle={skills?.summary.user_added ? `含你加的 ${skills.summary.user_added} 个` : undefined}
+        actionSlot={
           <button
-            onClick={(e) => { e.stopPropagation(); setOpen((o) => ({ ...o, toolbox: true })); setToolAddOpen((v) => !v) }}
-            title="接一个自己的 MCP 工具"
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setInstallOpen((v) => !v) }}
+            title="加一个 SKILL(从 GitHub / 手写)"
             style={addBtn}
             onMouseEnter={(e) => { e.currentTarget.style.color = HUNTER.THEME }}
             onMouseLeave={(e) => { e.currentTarget.style.color = HUNTER.INK_F }}
@@ -144,63 +169,10 @@ export default function CapabilityPanel({ onPick, onManage, refreshKey }: Props)
             <Plus size={13} strokeWidth={2.2} />
           </button>
         }
-      >
-        {toolAddOpen && (
-          <ToolAddPanel
-            onClose={() => setToolAddOpen(false)}
-            onDone={(msg) => {
-              setToolAddOpen(false)
-              setInstalled(msg)
-              listToolbox().then(setToolbox).catch(() => {})
-            }}
-          />
-        )}
-        {toolbox?.groups.map((g) => (
-          <div key={g.server} style={{ marginBottom: 6 }}>
-            <div style={groupHead}>
-              <span>{g.label}</span>
-              <span style={{ color: HUNTER.INK_F, fontWeight: 400 }}>{g.ready}/{g.total}</span>
-            </div>
-            {g.tools.map((t) => {
-              const dot = statusDot(t.status)
-              return (
-                <div key={t.key} style={row} title={`${t.summary}${t.note ? ' · ' + t.note : ''}`}>
-                  <span style={{ ...dotStyle, background: dot.color }} />
-                  <span style={rowName}>{t.name}</span>
-                  {t.slow && <Clock size={9} strokeWidth={1.8} style={{ color: HUNTER.SOFT, flexShrink: 0 }} />}
-                  {t.degraded_by?.length > 0 && (
-                    <span style={{ ...tagStyle, borderColor: '#C08A2E', color: '#9B571F' }}
-                          title={`可用,但这些数据源缺: ${t.degraded_by.join(', ')}`}>部分</span>
-                  )}
-                  <span style={{ ...tagStyle, opacity: t.origin === 'platform' ? 1 : 0.55 }}>
-                    {t.origin_label}
-                  </span>
-                </div>
-              )
-            })}
-          </div>
-        ))}
-      </Block>
+      />
 
-      {/* ③ SKILL · 唯一可点的一块 */}
-      <Block
-        id="skills" icon={Sparkles} title="SKILL"
-        headline={skills?.summary.headline}
-        sub={skills?.summary.user_added ? `含你加的 ${skills.summary.user_added} 个` : '点一下开始提问'}
-        open={open.skills} onToggle={toggle}
-        action={
-          <button
-            onClick={(e) => { e.stopPropagation(); setOpen((o) => ({ ...o, skills: true })); setInstallOpen((v) => !v) }}
-            title="加一个 SKILL —— 从 GitHub 装,或自己写"
-            style={addBtn}
-            onMouseEnter={(e) => { e.currentTarget.style.color = HUNTER.THEME }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = HUNTER.INK_F }}
-          >
-            <Plus size={13} strokeWidth={2.2} />
-          </button>
-        }
-      >
-        {installOpen && (
+      {installOpen && (
+        <div style={{ padding: '0 8px 6px' }}>
           <SkillAddPanel
             categories={skills?.groups.map((g) => g.category) || []}
             onClose={() => setInstallOpen(false)}
@@ -210,163 +182,257 @@ export default function CapabilityPanel({ onPick, onManage, refreshKey }: Props)
               listCatalogSkills().then(setSkills).catch(() => {})
             }}
           />
-        )}
-        {installed && (
-          <div style={okBox} onClick={() => setInstalled('')}>{installed}(点击关闭)</div>
-        )}
-        {skills?.groups.map((g) => (
-          <div key={g.category} style={{ marginBottom: 7 }}>
-            <div style={groupHead}>
-              <span>{g.category}</span>
-              <span style={{ color: HUNTER.INK_F, fontWeight: 400 }}>{g.total}</span>
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, padding: '0 10px' }}>
-              {g.skills.map((s) => (
-                <button
-                  key={s.key}
-                  onClick={() => handlePick(s.prompt_tpl, s.key)}
-                  title={`${s.hint}${s.brand ? ' · ' + s.brand : ''}${
-                    s.status !== 'ready' ? '\n⚠ 依赖未就绪: ' + [...s.missing_tools, ...s.blocked_tools].join(', ') : ''}`}
-                  style={{ ...chip, opacity: s.status === 'ready' ? 1 : 0.55 }}
-                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = HUNTER.THEME }}
-                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = HUNTER.LINE }}
-                >
-                  <span style={{ fontSize: 11 }}>{s.icon}</span>
-                  <span style={chipName}>{s.name}</span>
-                  {locked && <Lock size={9} strokeWidth={1.6} style={{ color: HUNTER.SOFT, flexShrink: 0 }} />}
-                </button>
-              ))}
-            </div>
+        </div>
+      )}
+      {installed && (
+        <div style={okBox} onClick={() => setInstalled('')}>{installed}(点击关闭)</div>
+      )}
+
+      {/* 最近用 top 5 */}
+      {recent.length > 0 && (
+        <>
+          <div style={subheaderStyle}>最近用</div>
+          <div style={{ padding: '0 8px' }}>
+            {recent.map((s) => (
+              <button
+                key={s.key}
+                onClick={() => handlePick(s.prompt_tpl, s.key)}
+                title={`${s.hint || ''}${s.brand ? ' · ' + s.brand : ''}${
+                  s.status !== 'ready'
+                    ? '\n⚠ 依赖未就绪: ' + [...s.missing_tools, ...s.blocked_tools].join(', ')
+                    : ''}`}
+                style={{ ...recentRow, opacity: s.status === 'ready' ? 1 : 0.6 }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = HUNTER.PANEL_2 }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+              >
+                <span style={{ fontSize: 13, flexShrink: 0 }}>{s.icon}</span>
+                <span style={recentName}>{s.name}</span>
+                {locked && <Lock size={9} strokeWidth={1.6} style={{ color: HUNTER.SOFT, flexShrink: 0 }} />}
+              </button>
+            ))}
           </div>
-        ))}
-      </Block>
+        </>
+      )}
+
+      {/* 所有类目 chip */}
+      {skills && skills.groups.length > 0 && (
+        <>
+          <div style={subheaderStyle}>所有类目</div>
+          <div style={chipRow}>
+            {skills.groups.map((g) => (
+              <Link
+                key={g.category}
+                href={`/library?tab=skills&group=${encodeURIComponent(g.category)}`}
+                style={catChip}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = HUNTER.THEME }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = HUNTER.LINE }}
+              >
+                <span>{g.category}</span>
+                <span style={{ color: HUNTER.INK_F, marginLeft: 4 }}>{g.total}</span>
+              </Link>
+            ))}
+          </div>
+        </>
+      )}
 
       {gate !== null && <UnlockModal triggeredBy={gate || undefined} onClose={() => setGate(null)} />}
     </div>
   )
 }
 
+// ── ProgressLine 一行进度条 ────────────────────────────
 
-// ── 折叠块外壳 ────────────────────────────────────────────────
-
-function Block({ id, icon: Icon, title, headline, sub, open, onToggle, action, children }: {
-  id: BlockId
-  icon: typeof Database
+function ProgressLine({ icon, title, summary, href, subtitle, actionSlot }: {
+  icon: string
   title: string
-  headline?: string
-  sub?: string
-  open: boolean
-  onToggle: (id: BlockId) => void
-  /** 块标题右侧的操作按钮 —— 「加一个」这种动作要贴着它作用的东西放,
-   *  藏进通用设置里用户找不到(实测反馈) */
-  action?: React.ReactNode
-  children: React.ReactNode
+  summary?: Summary
+  href: string
+  subtitle?: string
+  actionSlot?: React.ReactNode
 }) {
+  const total = summary?.total ?? 0
+  const ready = summary?.ready ?? 0
+  const pct = total > 0 ? Math.round((ready / total) * 100) : 0
   return (
-    <div>
-      {/* 一行 flex:可点区 + action + 计数。
-          **不要用绝对定位摆 action** —— right 值是拍的,计数一变宽就重叠,
-          这个坑已经踩过一次。让浏览器算位置。
-          按钮不能套按钮,所以可点区只包左半边。 */}
-      <div style={blockHeadRow}
-           onMouseEnter={(e) => { e.currentTarget.style.background = HUNTER.PANEL_2 }}
-           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}>
-        <button onClick={() => onToggle(id)} style={blockHeadMain}>
-          {open ? <ChevronDown size={12} strokeWidth={2} /> : <ChevronRight size={12} strokeWidth={2} />}
-          <Icon size={12} strokeWidth={1.6} style={{ color: HUNTER.SOFT }} />
-          <span style={{ fontWeight: 600 }}>{title}</span>
-        </button>
-        {action}
-        {/* headline 没拿到时显示 — 而不是 0/0,免得像"什么都没有" */}
-        <span style={{ fontSize: 11, color: HUNTER.INK_F, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
-          {headline ?? '—'}
-        </span>
-      </div>
-      {open && (
-        <div style={{ paddingBottom: 4 }}>
-          {sub ? <div style={subLine}>{sub}</div> : null}
-          {children}
+    <div style={progressWrap}>
+      <Link href={href} style={progressLink}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = HUNTER.PANEL_2 }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 12 }}>{icon}</span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: HUNTER.INK_S, flex: 1 }}>{title}</span>
+          <span style={{ fontSize: 10.5, color: HUNTER.INK_F, fontVariantNumeric: 'tabular-nums' }}>
+            {summary ? `${ready}/${total}` : '—'}
+          </span>
+          {actionSlot}
         </div>
-      )}
+        <div style={progressBg}>
+          <div style={{ ...progressBar, width: `${pct}%` }} />
+        </div>
+        {subtitle && <div style={progressSub}>{subtitle}</div>}
+      </Link>
     </div>
   )
 }
 
 function subOfSources(s: Summary): string {
-  if (s.need_key_count) return `${s.need_key_count} 个填上 key 即可用`
-  return '按市场分 · 每类数据一个接口'
+  if (s.need_key_count) return `${s.need_key_count} 个填 key 即可用`
+  if (s.unavailable_count) return `${s.unavailable_count} 个通道未开`
+  return '按市场分 · 每类一接口'
 }
 
+// ── 样式 ──────────────────────────────────────────
 
-// ── 样式 ──────────────────────────────────────────────────────
+const rootStyle: React.CSSProperties = {
+  borderBottom: `1px solid ${HUNTER.LINE}`,
+  paddingBottom: 8,
+}
+
+const headerStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 4,
+  padding: '10px 12px 6px',
+}
 
 const sectionLabel: React.CSSProperties = {
-  flex: 1, fontSize: 11, fontWeight: 600, letterSpacing: 0.4, color: HUNTER.INK_F,
+  flex: 1,
+  fontSize: 11,
+  fontWeight: 600,
+  letterSpacing: 0.4,
+  color: HUNTER.INK_F,
 }
+
 const miniLink: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', background: 'none', border: 'none',
-  color: HUNTER.INK_F, fontSize: 11, cursor: 'pointer', padding: '2px 4px', fontFamily: 'inherit',
+  fontSize: 11,
+  color: HUNTER.THEME,
+  textDecoration: 'none',
+  padding: '2px 6px',
+  borderRadius: 4,
+  fontFamily: 'inherit',
 }
-const blockHead: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', gap: 6, width: '100%',
-  padding: '6px 12px', background: 'transparent', border: 'none',
-  fontSize: 12.5, color: HUNTER.INK_S, cursor: 'pointer', fontFamily: 'inherit',
+
+const miniBtn: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  background: 'none',
+  border: 'none',
+  color: HUNTER.INK_F,
+  fontSize: 11,
+  cursor: 'pointer',
+  padding: '2px 4px',
+  fontFamily: 'inherit',
+}
+
+const progressWrap: React.CSSProperties = {
+  padding: '0 8px 4px',
+}
+
+const progressLink: React.CSSProperties = {
+  display: 'block',
+  padding: '6px 8px',
+  borderRadius: 6,
+  textDecoration: 'none',
+  color: 'inherit',
   transition: 'background 0.1s',
 }
-const subLine: React.CSSProperties = {
-  padding: '0 12px 4px 30px', fontSize: 10.5, color: HUNTER.INK_F,
+
+const progressBg: React.CSSProperties = {
+  marginTop: 4,
+  height: 3,
+  background: HUNTER.PANEL_2,
+  borderRadius: 2,
+  overflow: 'hidden',
 }
-const groupHead: React.CSSProperties = {
-  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-  padding: '3px 12px 2px 30px', fontSize: 10.5, fontWeight: 600, color: HUNTER.INK_F,
+
+const progressBar: React.CSSProperties = {
+  height: '100%',
+  background: HUNTER.SUCCESS,
+  transition: 'width 0.3s',
 }
-const row: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', gap: 6,
-  padding: '2px 12px 2px 30px', fontSize: 11.5, color: HUNTER.INK_S,
+
+const progressSub: React.CSSProperties = {
+  marginTop: 3,
+  fontSize: 10,
+  color: HUNTER.INK_F,
 }
-const rowName: React.CSSProperties = {
-  flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+
+const subheaderStyle: React.CSSProperties = {
+  padding: '10px 14px 4px',
+  fontSize: 10,
+  fontWeight: 600,
+  letterSpacing: 0.4,
+  color: HUNTER.INK_F,
+  textTransform: 'uppercase',
 }
-const rowMeta: React.CSSProperties = {
-  fontSize: 10, color: HUNTER.INK_F, flexShrink: 0,
-  maxWidth: 96, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+
+const recentRow: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  width: '100%',
+  padding: '5px 8px',
+  background: 'transparent',
+  border: 'none',
+  borderRadius: 5,
+  cursor: 'pointer',
+  fontSize: 12,
+  color: HUNTER.INK_S,
+  fontFamily: 'inherit',
+  textAlign: 'left',
+  transition: 'background 0.1s',
 }
-const dotStyle: React.CSSProperties = {
-  width: 5, height: 5, borderRadius: '50%', flexShrink: 0,
+
+const recentName: React.CSSProperties = {
+  flex: 1,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
 }
-const tagStyle: React.CSSProperties = {
-  fontSize: 9, color: HUNTER.INK_F, border: `1px solid ${HUNTER.LINE}`,
-  borderRadius: 3, padding: '0 3px', flexShrink: 0,
+
+const chipRow: React.CSSProperties = {
+  display: 'flex',
+  flexWrap: 'wrap',
+  gap: 4,
+  padding: '0 12px 6px',
 }
-const chip: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', gap: 3,
-  padding: '3px 7px', borderRadius: 5, cursor: 'pointer',
-  background: '#fbfaf5', border: `1px solid ${HUNTER.LINE}`,
-  fontSize: 11, color: HUNTER.INK_S, fontFamily: 'inherit',
+
+const catChip: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  padding: '3px 8px',
+  fontSize: 10.5,
+  color: HUNTER.INK_S,
+  background: '#fbfaf5',
+  border: `1px solid ${HUNTER.LINE}`,
+  borderRadius: 10,
+  textDecoration: 'none',
   transition: 'border-color 0.1s',
+  fontFamily: 'inherit',
 }
-const chipName: React.CSSProperties = {
-  maxWidth: 118, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-}
-const blockHeadRow: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px',
-  transition: 'background 0.1s',
-}
-const blockHeadMain: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0,
-  padding: 0, background: 'transparent', border: 'none', textAlign: 'left',
-  fontSize: 12.5, color: HUNTER.INK_S, cursor: 'pointer', fontFamily: 'inherit',
-}
+
 const addBtn: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-  width: 19, height: 19, borderRadius: 5, cursor: 'pointer',
-  background: 'transparent', border: 'none', color: HUNTER.INK_F,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  flexShrink: 0,
+  width: 19,
+  height: 19,
+  borderRadius: 5,
+  cursor: 'pointer',
+  background: 'transparent',
+  border: 'none',
+  color: HUNTER.INK_F,
   transition: 'color 0.1s',
 }
+
 const okBox: React.CSSProperties = {
-  margin: '0 10px 8px', padding: '7px 9px', borderRadius: 7, cursor: 'pointer',
-  background: HUNTER.TAG_OK_BG, color: HUNTER.TAG_OK_FG, fontSize: 11, lineHeight: 1.6,
-}
-const footNote: React.CSSProperties = {
-  padding: '4px 12px 2px 30px', fontSize: 10, color: HUNTER.INK_F, lineHeight: 1.5,
+  margin: '0 10px 8px',
+  padding: '7px 9px',
+  borderRadius: 7,
+  cursor: 'pointer',
+  background: HUNTER.TAG_OK_BG,
+  color: HUNTER.TAG_OK_FG,
+  fontSize: 11,
+  lineHeight: 1.6,
 }
