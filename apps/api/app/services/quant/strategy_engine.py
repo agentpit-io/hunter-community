@@ -28,7 +28,7 @@ def _resolve_universe(universe: str, trade_date: date, user_id: str | None = Non
 
 def _fetch_z_scores(factor_key: str, trade_date: date, codes: list[str]) -> dict[str, float]:
     """从 factor_value 表拿最近可用的 z_score
-    如果 trade_date 当天没数据 · 找最近 5 日内的
+    lookback 45 天 · 覆盖 Phase A 月末回填的实际情况(每月 15 号)
     """
     conn = get_conn()
     cur = conn.cursor()
@@ -37,7 +37,7 @@ def _fetch_z_scores(factor_key: str, trade_date: date, codes: list[str]) -> dict
            WHERE factor_key=%s AND code = ANY(%s) AND trade_date <= %s AND trade_date >= %s
              AND z_score IS NOT NULL
            ORDER BY code, trade_date DESC""",
-        (factor_key, codes, trade_date, trade_date - timedelta(days=5)),
+        (factor_key, codes, trade_date, trade_date - timedelta(days=45)),
     )
     out = {c: float(z) for c, z in cur.fetchall()}
     cur.close()
