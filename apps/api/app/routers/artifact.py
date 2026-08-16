@@ -216,11 +216,18 @@ def artifact_status(message_id: str, request: Request):
     uid = _uid(request)
     c = get_conn(); cur = c.cursor()
     try:
-        cur.execute("""
-            SELECT short_id, is_published, published_at, unpublished_at, artifact_type
-            FROM hunter_artifacts.published_artifact
-            WHERE owner_user_id = %s AND source_message_id = %s
-        """, (uid, message_id))
+        try:
+            cur.execute("""
+                SELECT short_id, is_published, published_at, unpublished_at, artifact_type
+                FROM hunter_artifacts.published_artifact
+                WHERE owner_user_id = %s AND source_message_id = %s
+            """, (uid, message_id))
+        except Exception as e:
+            # Community 本地部署未跑 hunter_artifacts schema 迁移 · 表/列不存在 → 静默返回未发布
+            # 避免前端每次打开 artifact 都收到 500 · 生产 SaaS 有表则正常执行
+            log.debug(f"[artifact:status] schema unavailable · treating as unpublished: {e}")
+            c.rollback()   # psycopg2 事务失败必须回滚 · 否则后续查询都会 InFailedSqlTransaction
+            return StatusResp(published=False)
         row = cur.fetchone()
         if not row:
             return StatusResp(published=False)

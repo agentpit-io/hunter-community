@@ -114,10 +114,11 @@ export default function ArtifactPanel({ part, report, onClose }: Props) {
   }, [copyMenuOpen])
 
   // 打开报告 · 拉发布状态
-  useEffect(() => {
-    if (!isReport || !report?.sourceMessageId) return
-    getStatus(report.sourceMessageId).then(setArtifactStatus).catch(() => {})
-  }, [isReport, report?.sourceMessageId])
+  // Community 本地部署不启用发布功能 · 端点会 500(schema 未迁移) · 直接跳过调用
+  // useEffect(() => {
+  //   if (!isReport || !report?.sourceMessageId) return
+  //   getStatus(report.sourceMessageId).then(setArtifactStatus).catch(() => {})
+  // }, [isReport, report?.sourceMessageId])
 
   if (!part && !report) return null
 
@@ -197,7 +198,9 @@ export default function ArtifactPanel({ part, report, onClose }: Props) {
     }
   }
 
-  const canPublish = isReport && !!report?.sourceMessageId
+  // Community 本地部署不启用发布功能(需要 hunter_artifacts.published_artifact 表迁移)
+  // 如需启用 · 跑 db/migrations 后把 canPublish 改回条件表达式
+  const canPublish = false
   const alreadyPublished = artifactStatus?.published
   const publishBlocked = artifactStatus?.republish_blocked
 

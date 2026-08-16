@@ -224,15 +224,9 @@ export default function SessionHeader({ sessionId, onSessionUpdated, onSessionDe
         </div>
       )}
 
-      {/* 右侧 · 分享 / 导出 / ••• · 无报告时 disabled + tooltip */}
+      {/* 右侧 · 导出 / ••• · 无报告时 disabled + tooltip
+          Community 本地部署去掉"分享"按钮 · 发布功能依赖 hunter_artifacts.published_artifact 表 */}
       <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-        <SoftBtn
-          onClick={onShare}
-          disabled={!onShare}
-          title={onShare ? '分享报告' : '生成报告后可分享'}
-          icon={<Share2 size={13} />}
-          label="分享"
-        />
         <SoftBtn
           onClick={onExport}
           disabled={!onExport}
