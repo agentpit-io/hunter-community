@@ -11,9 +11,11 @@ interface Props {
   tool?: ToolItem
   skill?: CatalogSkillItem
   onClose: () => void
+  /** SKILL 详情底部"填入 chat"按钮点击回调 · 未传则不显示 */
+  onPickSkillToChat?: (item: CatalogSkillItem) => void
 }
 
-export default function DetailPane({ source, tool, skill, onClose }: Props) {
+export default function DetailPane({ source, tool, skill, onClose, onPickSkillToChat }: Props) {
   const empty = !source && !tool && !skill
   return (
     <aside style={paneStyle}>
@@ -27,7 +29,7 @@ export default function DetailPane({ source, tool, skill, onClose }: Props) {
         {empty && <div style={{ color: HUNTER.INK_F, fontSize: 12 }}>点左侧任一卡片查看详情</div>}
         {source && <SourceDetail item={source} />}
         {tool && <ToolDetail item={tool} />}
-        {skill && <SkillDetail item={skill} />}
+        {skill && <SkillDetail item={skill} onPickToChat={onPickSkillToChat} />}
       </div>
     </aside>
   )
@@ -94,7 +96,7 @@ function ToolDetail({ item }: { item: ToolItem }) {
   )
 }
 
-function SkillDetail({ item }: { item: CatalogSkillItem }) {
+function SkillDetail({ item, onPickToChat }: { item: CatalogSkillItem; onPickToChat?: (i: CatalogSkillItem) => void }) {
   const dot = statusDot(item.status)
   return (
     <div style={{ fontSize: 12, color: HUNTER.INK_S }}>
@@ -128,9 +130,22 @@ function SkillDetail({ item }: { item: CatalogSkillItem }) {
         <Row label="源码" value={<a href={item.source_url} target="_blank" rel="noreferrer" style={{ color: HUNTER.THEME }}>{item.source_url}</a>} />
       )}
       <Divider />
-      <div style={{ fontSize: 11, color: HUNTER.SOFT }}>
-        操作(Phase 2 上线): {item.builtin ? '试用(填入 chat)' : '编辑 · 删除 · 试用'}
-      </div>
+      {onPickToChat && (
+        <button
+          onClick={() => onPickToChat(item)}
+          title="把这段提问模板填入 Hunter chat 输入框"
+          style={pickBtnStyle}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = HUNTER.COPPER3 }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = HUNTER.THEME }}
+        >
+          填入 Hunter chat →
+        </button>
+      )}
+      {!item.builtin && (
+        <div style={{ fontSize: 11, color: HUNTER.SOFT, marginTop: 8 }}>
+          操作(Phase 2 上线): 编辑 · 删除
+        </div>
+      )}
     </div>
   )
 }
@@ -188,6 +203,19 @@ const codeStyle: React.CSSProperties = {
   color: HUNTER.INK_S,
   fontFamily: 'ui-monospace, monospace',
   wordBreak: 'break-all',
+}
+
+const pickBtnStyle: React.CSSProperties = {
+  width: '100%',
+  padding: '10px 12px',
+  background: HUNTER.THEME,
+  color: '#fff',
+  border: 'none',
+  borderRadius: HUNTER.R_MD,
+  fontSize: 13,
+  fontWeight: 600,
+  cursor: 'pointer',
+  transition: 'background 0.15s',
 }
 
 const promptStyle: React.CSSProperties = {

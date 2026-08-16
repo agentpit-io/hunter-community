@@ -10,9 +10,11 @@ interface Props {
   search?: string
   selected: CatalogSkillItem | null
   onSelect: (item: CatalogSkillItem) => void
+  /** 双击行 = 把 prompt_tpl 送到 chat 输入框(走 /chat?q= autoText 通道) */
+  onPickToChat?: (item: CatalogSkillItem) => void
 }
 
-export default function SkillsTab({ groups, activeGroup, search, selected, onSelect }: Props) {
+export default function SkillsTab({ groups, activeGroup, search, selected, onSelect, onPickToChat }: Props) {
   const filteredGroups = useMemo(() => {
     let gs = activeGroup ? groups.filter((g) => g.category === activeGroup) : groups
     if (search) {
@@ -74,6 +76,8 @@ export default function SkillsTab({ groups, activeGroup, search, selected, onSel
               meta={s.brand || undefined}
               selected={selected?.key === s.key}
               onClick={() => onSelect(s)}
+              onDoubleClick={onPickToChat ? () => onPickToChat(s) : undefined}
+              doubleClickHint={onPickToChat ? '单击查看详情 · 双击直接填入对话框' : undefined}
             />
           ))}
         </div>

@@ -82,6 +82,12 @@ function LibraryContent() {
     setSelected({ kind: 'skill', item }); setDetailOpen(true)
   }, [])
 
+  // 把 SKILL 提问模板送回 chat 输入框 · 走 /chat?q= autoText 通道
+  // (与 SkillDetailPage 详情页"在 Hunter chat 里使用"按钮同一链路)
+  const onPickSkillToChat = useCallback((item: CatalogSkillItem) => {
+    window.location.href = `/chat?q=${encodeURIComponent(item.prompt_tpl)}`
+  }, [])
+
   return (
     <div style={wrapStyle}>
       <AuthGuard />
@@ -141,6 +147,7 @@ function LibraryContent() {
               search={query.search}
               selected={selected?.kind === 'skill' ? selected.item : null}
               onSelect={onSelectSkill}
+              onPickToChat={onPickSkillToChat}
             />
           )}
           {query.tab === 'skills' && !skills && <Loading />}
@@ -152,6 +159,7 @@ function LibraryContent() {
             tool={selected.kind === 'tool' ? selected.item : undefined}
             skill={selected.kind === 'skill' ? selected.item : undefined}
             onClose={() => { setDetailOpen(false); setSelected(null) }}
+            onPickSkillToChat={onPickSkillToChat}
           />
         )}
       </div>

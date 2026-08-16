@@ -13,6 +13,8 @@ export interface EntityCardProps {
   meta?: string        // 右侧灰字(如"全市场 5000+ 只" / "内置" / "23 只已入库")
   selected?: boolean
   onClick?: () => void
+  onDoubleClick?: () => void
+  doubleClickHint?: string  // 双击时的 tooltip 提示(SKILL 用"双击填入对话框")
 }
 
 export default function EntityCard(props: EntityCardProps) {
@@ -21,6 +23,8 @@ export default function EntityCard(props: EntityCardProps) {
     <div
       style={cardStyle(props.selected)}
       onClick={props.onClick}
+      onDoubleClick={props.onDoubleClick}
+      title={props.doubleClickHint}
       onMouseEnter={(e) => { if (!props.selected) (e.currentTarget as HTMLDivElement).style.background = HUNTER.PAPER3 }}
       onMouseLeave={(e) => { if (!props.selected) (e.currentTarget as HTMLDivElement).style.background = '#fff' }}
     >
