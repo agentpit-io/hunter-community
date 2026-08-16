@@ -373,11 +373,20 @@ def _fetch_flow_sync(sym: str, url: str = "", token: str = "") -> list[dict]:
 
     url/token 为向后兼容保留 · 空值时自动走 finance_data_auth 统一入口
     (Community 用户在网页填的 hunter key 也会自动生效 · 与 K 线/Kronos 一致)。
+
+    缓存: 15 min Redis · key=kpred:flow:{sym}:5d
+      · 5 日资金流盘中每分钟微调,15 min 平衡新鲜度与命中率
     """
     import io, zipfile, json as _json, os
+    from app.services import kpred_cache as _cache
     # 1. finance-data(网关或直连)· 空 url/token 时走统一入口(与 K 线一致)
     bare = sym.split('.')[0] if '.' in sym else sym
     full_sym = _sym_with_exchange(bare)
+    _cache_key = f"kpred:flow:{full_sym}:5d"
+    _cached = _cache.get(_cache_key)
+    if isinstance(_cached, list) and _cached:
+        logger.debug("[factor:flow] cache hit · {} · rows={}", full_sym, len(_cached))
+        return _cached
     base_url = url or _auth.data_url()
     if url and token:
         headers = {'X-Finance-Token': token}  # 显式直连 · 用旧签名
@@ -393,7 +402,10 @@ def _fetch_flow_sync(sym: str, url: str = "", token: str = "") -> list[dict]:
         if r.status_code == 200:
             data = r.json()
             if isinstance(data, list) and data:
-                return _parse_flow_rows(data)
+                _rows = _parse_flow_rows(data)
+                if _rows:
+                    _cache.set(_cache_key, _rows, 900)   # TTL 15 min
+                return _rows
         else:
             logger.debug("[factor:flow] {} money_flow non-200: status={}", full_sym, r.status_code)
     except Exception as e:
@@ -427,7 +439,10 @@ def _fetch_flow_sync(sym: str, url: str = "", token: str = "") -> list[dict]:
         except zipfile.BadZipFile:
             raw = _json.loads(content)
         if isinstance(raw, list) and raw:
-            return [_parse_xtick_flow(item) for item in raw[-5:]]
+            _rows = [_parse_xtick_flow(item) for item in raw[-5:]]
+            if _rows:
+                _cache.set(_cache_key, _rows, 900)   # TTL 15 min
+            return _rows
     except Exception:
         pass
     return []

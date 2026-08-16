@@ -649,8 +649,22 @@ def _subscribe_async(bare: str):
 
 def get_kline_with_fallback(code: str, period: str = "daily", limit: int = 120) -> list[dict]:
     """优先取 finance-data K 线；如数据陈旧（>3 自然日）立即用 akshare 补充，
-    并后台触发 watchlist 订阅，确保下次调用时 finance-data 已有实时数据。"""
+    并后台触发 watchlist 订阅，确保下次调用时 finance-data 已有实时数据。
+
+    缓存: 5 min Redis · key=kpred:kline:{code}:{period}:{limit}:{yyyymmdd}
+      · 日线数据日内绝对不变 · 5 min TTL 只是防日切过期
+      · 带日期维度保证跨天自动失效
+      · limit 进 key 避免不同 caller(kpred=80 / watchlist=252)串数据
+    """
     from datetime import date
+    from app.services import kpred_cache as _cache
+    _today = date.today().strftime("%Y%m%d")
+    _cache_key = f"kpred:kline:{code}:{period}:{limit}:{_today}"
+    _cached = _cache.get(_cache_key)
+    if isinstance(_cached, list) and _cached:
+        logger.debug("[kline] cache hit · {} · limit={} · bars={}", code, limit, len(_cached))
+        return _cached
+
     bars = get_kline(code, period, limit)
 
     # 检查是否陈旧
@@ -658,6 +672,7 @@ def get_kline_with_fallback(code: str, period: str = "daily", limit: int = 120) 
         last_ts = bars[-1].get("ts", "")[:10]
         try:
             if (date.today() - date.fromisoformat(last_ts)).days <= 3:
+                _cache.set(_cache_key, bars, 300)   # TTL 5 min
                 return bars  # 数据新鲜，直接返回
         except Exception:
             pass
@@ -667,6 +682,7 @@ def get_kline_with_fallback(code: str, period: str = "daily", limit: int = 120) 
     fresh = _get_kline_akshare(bare, limit)
     if fresh:
         _subscribe_async(bare)  # 异步订阅 watchlist，下次自动走 finance-data
+        _cache.set(_cache_key, fresh, 300)          # TTL 5 min
         return fresh
 
     return bars  # akshare 也失败则返回原有数据（至少有历史形态）
