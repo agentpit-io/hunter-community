@@ -343,7 +343,8 @@ async def leaderboard(
           LIMIT 1
         ) bt ON TRUE
         WHERE s.is_public = TRUE
-          AND (bt.end_date - bt.start_date) >= {period_days}
+          AND (bt.end_date - bt.start_date) >= 30
+          AND bt.end_date >= (CURRENT_DATE - INTERVAL '{period_days} days')
         ORDER BY COALESCE((bt.metrics->>%s)::FLOAT, -999) DESC NULLS LAST
         LIMIT %s
         """,
