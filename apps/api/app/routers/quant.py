@@ -175,6 +175,116 @@ async def create_strategy(body: StrategyIn, request: Request):
     return {"id": new_id}
 
 
+# ═══════════════════════════════════════════════════════════════
+# C5 · 社区分享 + fork + leaderboard
+# ═══════════════════════════════════════════════════════════════
+
+class ShareIn(BaseModel):
+    is_public: bool
+
+
+@router.patch("/strategies/{sid}/share")
+async def toggle_share(sid: int, body: ShareIn, request: Request):
+    """开关 is_public · 只有 owner 可"""
+    uid = getattr(request.state, "user_id", None)
+    if not uid:
+        uid = "46066ca9-bf34-4fad-a9d5-bda5beb74c11"
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute("SELECT user_id, is_official FROM strategy WHERE id=%s", (sid,))
+    r = cur.fetchone()
+    if not r:
+        cur.close(); conn.close()
+        raise HTTPException(404, f"strategy {sid} not found")
+    owner, is_off = r
+    if is_off:
+        cur.close(); conn.close()
+        raise HTTPException(403, "官方策略不可切换分享")
+    if str(owner) != str(uid):
+        cur.close(); conn.close()
+        raise HTTPException(403, "只有创建者可改分享状态")
+    cur.execute("UPDATE strategy SET is_public=%s, updated_at=NOW() WHERE id=%s",
+                (body.is_public, sid))
+    conn.commit(); cur.close(); conn.close()
+    return {"ok": True, "id": sid, "is_public": body.is_public}
+
+
+@router.post("/strategies/{sid}/fork")
+async def fork_strategy(sid: int, request: Request):
+    """fork 别人的策略 · 派生一份到自己名下"""
+    uid = getattr(request.state, "user_id", None)
+    if not uid:
+        uid = "46066ca9-bf34-4fad-a9d5-bda5beb74c11"
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute(
+        "SELECT user_id, name, description, factors, config, is_official, is_public FROM strategy WHERE id=%s",
+        (sid,),
+    )
+    r = cur.fetchone()
+    if not r:
+        cur.close(); conn.close()
+        raise HTTPException(404, f"strategy {sid} not found")
+    owner, name, desc, factors, config, is_off, is_pub = r
+    if not (is_off or is_pub or str(owner) == str(uid)):
+        cur.close(); conn.close()
+        raise HTTPException(403, "非公开策略无法 fork")
+    new_name = f"{name} (fork)"
+    new_desc = f"Fork from #{sid}\n\n{desc or ''}"
+    cur.execute(
+        """INSERT INTO strategy (user_id, name, description, factors, config, fork_from)
+           VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
+        (str(uid), new_name[:64], new_desc, json.dumps(factors), json.dumps(config), sid),
+    )
+    new_id = cur.fetchone()[0]
+    conn.commit(); cur.close(); conn.close()
+    return {"id": new_id, "fork_from": sid, "name": new_name}
+
+
+@router.get("/leaderboard")
+async def leaderboard(
+    period: str = "1y",     # 30d / 90d / 1y
+    sort: str = "sharpe",   # sharpe / ann_ret / calmar
+    limit: int = 20,
+):
+    """社区策略排行 · 只显示 is_public=TRUE + 有回测的
+    join 最新 backtest_result(每 strategy 取最新)· 按 metrics 排序
+    """
+    period_days = {"30d": 30, "90d": 90, "1y": 365}.get(period, 365)
+    sort_key = sort if sort in ("sharpe", "ann_ret", "calmar", "sortino") else "sharpe"
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute(
+        f"""
+        SELECT s.id, s.name, s.description, s.factors, s.config, s.user_id, s.created_at, s.fork_from,
+               bt.metrics, bt.start_date, bt.end_date
+        FROM strategy s
+        JOIN LATERAL (
+          SELECT metrics, start_date, end_date FROM backtest_result
+          WHERE strategy_id = s.id
+          ORDER BY created_at DESC
+          LIMIT 1
+        ) bt ON TRUE
+        WHERE s.is_public = TRUE
+          AND (bt.end_date - bt.start_date) >= {period_days}
+        ORDER BY COALESCE((bt.metrics->>%s)::FLOAT, -999) DESC NULLS LAST
+        LIMIT %s
+        """,
+        (sort_key, limit),
+    )
+    rows = cur.fetchall()
+    cur.close(); conn.close()
+    return {"strategies": [
+        {
+            "id": r[0], "name": r[1], "description": r[2],
+            "factors": r[3], "config": r[4],
+            "author_id": str(r[5]) if r[5] else None,
+            "created_at": r[6].isoformat() if r[6] else None,
+            "fork_from": r[7],
+            "metrics": r[8],
+            "backtest_start": r[9].isoformat() if r[9] else None,
+            "backtest_end": r[10].isoformat() if r[10] else None,
+        } for r in rows
+    ], "period": period, "sort": sort_key}
+
+
 @router.delete("/strategies/{sid}")
 async def delete_strategy(sid: int, request: Request):
     """C3 · 删除自己的策略 · 官方不许删"""

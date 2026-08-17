@@ -230,6 +230,40 @@ async function deleteStrategyApi(id) {
   return true
 }
 
+// C5 · 社区分享
+async function toggleShareApi(id, isPublic) {
+  const r = await fetch('/api/quant/strategies/' + encodeURIComponent(id) + '/share', {
+    method: 'PATCH',
+    headers: apiHeaders(),
+    body: JSON.stringify({is_public: isPublic}),
+  })
+  if (!r.ok) throw new Error('HTTP ' + r.status)
+  return await r.json()
+}
+
+async function forkStrategyApi(id) {
+  const r = await fetch('/api/quant/strategies/' + encodeURIComponent(id) + '/fork', {
+    method: 'POST',
+    headers: apiHeaders(),
+  })
+  if (!r.ok) throw new Error('HTTP ' + r.status)
+  return await r.json()   // {id, fork_from, name}
+}
+
+async function loadLeaderboardApi(period, sort, limit) {
+  const q = new URLSearchParams({
+    period: period || '1y',
+    sort: sort || 'sharpe',
+    limit: String(limit || 20),
+  }).toString()
+  try {
+    const r = await fetch('/api/quant/leaderboard?' + q)
+    if (!r.ok) return null
+    const d = await r.json()
+    return d.strategies || []
+  } catch { return null }
+}
+
 // 首次登录后 · 把 localStorage 里的历史策略上传到后端 · 只跑一次
 async function migrateLocalToServer() {
   if (!getToken()) return
@@ -361,9 +395,13 @@ function openSaveDialog(afterSave) {
         <div class="lbl">策略名称</div>
         <input id="save-name" class="input" placeholder="给策略起个好记的名字" value="${defaultName.replace(/"/g,'&quot;')}" maxlength="30" />
       </div>
+      <label style="display:flex;gap:8px;align-items:center;padding:10px 12px;background:var(--panel);border-radius:8px;cursor:pointer;margin-bottom:12px">
+        <input type="checkbox" id="save-public" style="accent-color:var(--brand)">
+        <span style="font-size:12px;color:var(--text)">🌐 <b>同时分享到社区</b>(其他用户可看/fork)</span>
+      </label>
       <div style="color:var(--muted);font-size:12px;line-height:1.7">
         · 保存后可在 <b style="color:var(--text)">策略广场 · 我的策略</b> 找到<br>
-        · 支持后续订阅每日 top 20 推送
+        · 分享的策略会出现在 <b style="color:var(--text)">社区精选</b> · 支持随时关闭
       </div>
     </div>
     <div class="modal-ft">
@@ -386,12 +424,18 @@ function openSaveDialog(afterSave) {
     }
     // C3 · 先试 API · 失败 fallback localStorage
     let apiOk = false
+    const isPublic = !!(modal.querySelector('#save-public')?.checked)
     if (getToken()) {
       try {
         const r = await createStrategyApi(record)
         record.id = r.id           // 用后端整数 id
         record._from_api = true
         apiOk = true
+        // C5 · 用户勾了分享 · 保存后立即 PATCH is_public=true
+        if (isPublic) {
+          try { await toggleShareApi(r.id, true) }
+          catch (e) { console.warn('[save-strategy] share 失败', e) }
+        }
       } catch (e) {
         console.warn('[save-strategy] API 失败 · 落本地', e)
       }

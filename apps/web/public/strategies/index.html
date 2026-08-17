@@ -114,6 +114,26 @@ container.innerHTML = `
     ${mine.length ? `<a href="/strategies/workbench.html" style="margin-left:auto;color:var(--brand);font-size:12px">+ 新建</a>` : ''}
   </div>
   ${mineHtml}
+
+  <!-- C5 · 社区精选 · 只显示 is_public + 有回测的 -->
+  <div class="cat-hd" style="margin-top:36px">
+    🌐 社区精选 <span class="sub" id="lb-sub">加载中…</span>
+    <span style="margin-left:auto;display:flex;gap:6px;align-items:center">
+      <select id="lb-period" class="btn small" style="border:1px solid var(--divider);background:var(--bg)">
+        <option value="30d">30 天</option>
+        <option value="90d">90 天</option>
+        <option value="1y" selected>1 年</option>
+      </select>
+      <select id="lb-sort" class="btn small" style="border:1px solid var(--divider);background:var(--bg)">
+        <option value="sharpe">Sharpe</option>
+        <option value="ann_ret">年化</option>
+        <option value="calmar">Calmar</option>
+      </select>
+    </span>
+  </div>
+  <div id="lb-grid" class="strategy-grid">
+    <div style="grid-column:1/-1;padding:30px;text-align:center;color:var(--muted)">加载社区排行…</div>
+  </div>
 </div>
 `
 
@@ -131,6 +151,83 @@ container.innerHTML = `
     sub.textContent = `${apiOfficial.length} 个 API · ${OFFICIAL_STRATEGIES.length} 个 mock · Phase A · 每季度重审`
     bindCardClicks()
   }
+})()
+
+// C5 · 社区精选 · 加载 + 排序 · 支持 fork 按钮
+;(async () => {
+  const grid = document.getElementById('lb-grid')
+  const sub = document.getElementById('lb-sub')
+  const periodSel = document.getElementById('lb-period')
+  const sortSel = document.getElementById('lb-sort')
+  if (!grid) return
+  async function refresh() {
+    grid.innerHTML = `<div style="grid-column:1/-1;padding:30px;text-align:center;color:var(--muted)">加载中…</div>`
+    const list = await loadLeaderboardApi(periodSel.value, sortSel.value, 20)
+    if (list === null) {
+      grid.innerHTML = `<div style="grid-column:1/-1;padding:30px;text-align:center;color:var(--danger)">加载失败</div>`
+      return
+    }
+    if (list.length === 0) {
+      grid.innerHTML = `<div style="grid-column:1/-1;padding:30px;text-align:center;color:var(--muted)">暂无社区策略 · 去工作台搭一个 · 保存后打开"分享到社区"</div>`
+      sub.textContent = '0 个 · 等第一个用户分享'
+      return
+    }
+    sub.textContent = `${list.length} 个 · 按 ${sortSel.value} 排序`
+    grid.innerHTML = list.map(s => {
+      const m = s.metrics || {}
+      const fromApiFactors = (s.factors || []).slice(0, 4)
+      const factorLine = fromApiFactors.map(f => `<span>${(factorByKey(f.key)?.name)||f.key} ${f.weight_pct}%</span>`).join('')
+      return `
+        <div class="s-card" data-id="${s.id}" data-lb="1" style="position:relative">
+          <button class="btn-fork" data-fork-id="${s.id}" title="Fork 到我的" style="position:absolute;top:8px;right:8px;padding:4px 10px;font-size:11px;background:var(--brand);color:#fff;border:0;border-radius:6px;cursor:pointer">Fork</button>
+          <div class="row1">
+            <div class="icon" style="background:var(--panel);color:var(--muted)">🌐</div>
+            <div class="name">${s.name}${s.fork_from ? ' <span style="color:var(--muted);font-size:11px">· fork</span>' : ''}</div>
+            <span class="chip" style="background:var(--tag-ok-bg);color:var(--tag-ok-fg)">社区</span>
+          </div>
+          <div class="desc" style="max-height:36px;overflow:hidden">${s.description || '(无描述)'}</div>
+          <div class="factors">${factorLine}</div>
+          <div class="stats">
+            <div><div class="k">Sharpe</div><div class="v">${(m.sharpe||0).toFixed(2)}</div></div>
+            <div><div class="k">年化</div><div class="v pos">${fmtPct(m.ann_ret||0)}</div></div>
+            <div><div class="k">最大回撤</div><div class="v neg">${fmtPct(m.max_dd||0)}</div></div>
+          </div>
+        </div>`
+    }).join('')
+    // 绑 fork
+    grid.querySelectorAll('.btn-fork').forEach(b => {
+      b.addEventListener('click', async (e) => {
+        e.stopPropagation()
+        if (!getToken()) { toast('请先登录', 'warn'); return }
+        b.disabled = true; b.textContent = '…'
+        try {
+          const r = await forkStrategyApi(parseInt(b.dataset.forkId))
+          toast('✓ 已 fork · 跳转工作台', 'success')
+          setTimeout(() => location.href = '/strategies/workbench.html', 700)
+        } catch (err) {
+          toast('Fork 失败: ' + err.message, 'warn')
+          b.disabled = false; b.textContent = 'Fork'
+        }
+      })
+    })
+    // 卡片点击预览
+    grid.querySelectorAll('.s-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const s = list.find(x => String(x.id) === card.dataset.id)
+        if (!s) return
+        const draftFactors = s.factors.map(f => f.key)
+        const draftWeights = Object.fromEntries(s.factors.map(f => [f.key, f.weight_pct]))
+        saveDraft({
+          factors: draftFactors, weights: draftWeights, config: s.config,
+          name: s.name, _metrics: s.metrics, updated_at: Date.now(),
+        })
+        location.href = '/strategies/backtest.html'
+      })
+    })
+  }
+  periodSel.addEventListener('change', refresh)
+  sortSel.addEventListener('change', refresh)
+  refresh()
 })()
 
 // C3 · 用户登录后 · 先自动上传本地遗留策略 · 再拉后端 mine 覆盖
