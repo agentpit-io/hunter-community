@@ -104,8 +104,19 @@ export default function SourceAddPanel({ presetGroup, onClose, onDone }: Props) 
 
   function applyTemplate(t: Template) {
     setUpstream(t.upstream)
-    // 模板只**预填**,不锁死 —— 用户可能自建了代理(我们自己就是这么用
-    // AKShare 的),写死等于假设所有人都用官方地址
+    // **直接把推荐地址填进输入框**,不是只当 placeholder。
+    //
+    // 原来只做 placeholder,结果灰字长得和真填了一模一样,用户看着
+    // 一个"已经有地址"的表单,却发现保存按钮是灰的,不知道该填什么 ——
+    // 实测第一个用户就卡在这里问「填什么」。
+    //
+    // 仍然可改(用户可能自建了代理,我们自己用 AKShare 就是这样),
+    // 只是默认值从"空"变成"能直接用的那个"。
+    // custom 除外:它的 hint 是 `https://你的接口/path/{symbol}` 这种示意,
+    // 填进去反而像个真地址,用户可能直接保存了。
+    if (t.upstream !== 'custom' && t.endpoint_hint.startsWith('http')) {
+      setEndpoint(t.endpoint_hint)
+    }
     setNeedKey(t.requires_key)
     setKind((k) => (t.kind_options.some((o) => o.value === k) ? k : t.kind_options[0]?.value || ''))
     setName((n) => n || `我的 ${t.label}`)
@@ -216,12 +227,12 @@ export default function SourceAddPanel({ presetGroup, onClose, onDone }: Props) 
                  hint="占位符:{symbol}=600519 · {secid}=1.600519(东财) · {ts_code}=600519.SH(Tushare) · {yahoo}=600519.SS。前后空白会自动清掉">
             <input value={endpoint} onChange={(e) => { setEndpoint(e.target.value); setTest(null) }}
                    style={input} placeholder={tpl.endpoint_hint} spellCheck={false} />
-            {/* 提示里那个地址是能直接用的 —— 给一键填入,省得手抄一长串 query。
+            {/* 改过或清空之后,给一条路回到推荐地址。
                 手抄 `fields=f43,f44,...` 这种串,抄错一个字符的表现是
                 "连得通但读不懂返回",而用户根本不会怀疑是自己抄错了 */}
             {tpl.endpoint_hint.startsWith('http') && endpoint !== tpl.endpoint_hint && (
               <button onClick={() => { setEndpoint(tpl.endpoint_hint); setTest(null) }}
-                      style={fillBtn}>用推荐地址填入</button>
+                      style={fillBtn}>↺ 恢复推荐地址</button>
             )}
           </Field>
 
