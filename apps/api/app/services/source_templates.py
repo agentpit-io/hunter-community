@@ -64,8 +64,11 @@ TEMPLATES: list[SourceTemplate] = [
         # 之前这里写的是 push2,用户照着填必然连不上 —— 提示里给一个
         # 打不通的地址,比不给提示更糟。
         "eastmoney",
+        # fields 要**和 source_mapping 里那份映射对齐**:少请求一个字段,
+        # 表现是卡片上某一栏静默显示 0 或回落成代码,不报错。
+        # f48 成交额 与 f60 昨收 原来漏了,f58 名称请求了却没映射。
         "https://push2delay.eastmoney.com/api/qt/stock/get"
-        "?secid={secid}&fields=f43,f44,f45,f46,f47,f57,f58,f169,f170",
+        "?secid={secid}&fields=f43,f44,f45,f46,f47,f48,f57,f58,f60,f169,f170",
         False,
         kinds=["quote", "kline", "news", "capital", "holder", "research"],
         note="东方财富 · 免 key。`{secid}` 会自动展开成 1.600519(沪)/ 0.000001(深)—— "

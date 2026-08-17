@@ -94,13 +94,22 @@ BUILTIN: dict[str, dict[str, dict]] = {
                   "title": "标题", "url": "链接", "published_at": "发布时间",
                   "_required": ["title"]},
     },
-    # 东方财富 push2 · {data:{f43:最新价, f170:涨跌幅, ...}} · 价格是**分**
+    # 东方财富 push2 · {data:{f43:最新价, f170:涨跌幅, ...}}
+    # 价格类字段单位是**分**,成交额是元。字段号含义:
+    #   f43 最新价 · f44 最高 · f45 最低 · f46 今开 · f47 成交量(手)
+    #   f48 成交额(元) · f57 代码 · f58 名称 · f60 昨收 · f169 涨跌额 · f170 涨跌幅
     "eastmoney": {
-        "quote": {"price": "$.data.f43", "change_pct": "$.data.f170",
+        "quote": {"name": "$.data.f58",
+                  "price": "$.data.f43", "change_pct": "$.data.f170",
+                  "change_amt": "$.data.f169", "prev_close": "$.data.f60",
                   "open": "$.data.f46", "high": "$.data.f44",
-                  "low": "$.data.f45", "volume": "$.data.f47",
-                  "_scale": {"price": 0.01, "open": 0.01, "high": 0.01,
-                             "low": 0.01, "change_pct": 0.01},
+                  "low": "$.data.f45",
+                  "volume": "$.data.f47", "amount": "$.data.f48",
+                  # 名称是字符串,不能过 _num() —— 过了会变成 None,
+                  # 表现是卡片标题显示成股票代码而不是"贵州茅台"
+                  "_text": ["name"],
+                  "_scale": {"price": 0.01, "open": 0.01, "high": 0.01, "low": 0.01,
+                             "prev_close": 0.01, "change_amt": 0.01, "change_pct": 0.01},
                   "_required": _QUOTE_REQ},
     },
     # Yahoo chart v8 · {chart:{result:[{meta:{...}, indicators:{quote:[{...}]}}]}}
@@ -151,11 +160,19 @@ def apply(upstream: str, kind: str, payload: Any, custom: dict | None = None) ->
 
 def _flat(payload: Any, spec: dict) -> dict:
     scale = spec.get("_scale", {})
+    text = set(spec.get("_text", []))
     out: dict = {}
     for k, path in spec.items():
         if k.startswith("_"):
             continue
-        v = _num(_walk(payload, path))
+        raw = _walk(payload, path)
+        # 文本字段(股票名之类)不能过 _num() —— 过了一律变 None。
+        # 这个 bug 的表现是"卡片标题显示 600519 而不是贵州茅台",
+        # 而且不报错:上层看到 name=None 就回落成代码,一切"正常"
+        if k in text:
+            out[k] = str(raw).strip() if raw not in (None, "") else None
+            continue
+        v = _num(raw)
         if v is not None and k in scale:
             v *= scale[k]
         out[k] = v

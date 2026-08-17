@@ -250,13 +250,35 @@ def get_quote(code: str) -> dict | None:
         hit = source_resolver.try_user(_market_of(code), "quote", code)
         if hit and hit.get("price") is not None:
             stock = STOCK_MAP.get(code) or _dynamic_map.get(code) or {}
-            return {"code": code, "name": stock.get("name") or code,
-                    "price": _f(hit.get("price")),
-                    "change_pct": _f(hit.get("change_pct")),
-                    "open": _f(hit.get("open")), "high": _f(hit.get("high")),
-                    "low": _f(hit.get("low")),
-                    "prev_close": _f(hit.get("prev_close")),
-                    "volume": int(hit.get("volume") or 0)}
+            # ⚠️ **形状必须和下面官方分支返回的完全一致**。
+            # 第一版只返回了 8 个字段,而官方返回 20+ —— 表现是卡片上
+            # 名字显示成代码、涨跌额恒为 +0.00、成交额是 0,全都不报错,
+            # 只是静默回落成默认值。这正是 `_13` §3.2 说的那种失败。
+            # 用户源给不出的字段(五档盘口)显式补 None/0,不要缺键。
+            return {
+                "code":       code,
+                # 名字优先用源给的(东财 f58 就是"贵州茅台"),
+                # 其次本地映射表,最后才回落成代码
+                "name":       hit.get("name") or stock.get("name") or code,
+                "price":      _f(hit.get("price")),
+                "change_pct": _f(hit.get("change_pct")),
+                "change_amt": _f(hit.get("change_amt")),
+                "open":       _f(hit.get("open")),
+                "high":       _f(hit.get("high")),
+                "low":        _f(hit.get("low")),
+                "prev_close": _f(hit.get("prev_close")),
+                "volume":     int(hit.get("volume") or 0),
+                "amount":     _f(hit.get("amount")),
+                # 五档盘口:多数第三方行情接口不给,补空而不是漏键 ——
+                # 漏键会让上层 q["bid1"] 直接 KeyError
+                **{f"bid{i}": None for i in range(1, 6)},
+                **{f"bid{i}v": 0 for i in range(1, 6)},
+                **{f"ask{i}": None for i in range(1, 6)},
+                **{f"ask{i}v": 0 for i in range(1, 6)},
+                "ts":         hit.get("ts") or "",
+                "market":     stock.get("market") or "A",
+                "asset_type": stock.get("asset_type", "stock"),
+            }
     except Exception as e:      # noqa: BLE001
         # 解析链自己出错**绝不能**拖垮取数 —— 它是增强,不是必经之路
         from loguru import logger as _lg
