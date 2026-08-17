@@ -72,6 +72,19 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if path in _PUBLIC_PATHS or not path.startswith("/api/"):
             return await call_next(request)
         if any(path.startswith(p) for p in _PUBLIC_PREFIXES):
+            # ⚠️ `/api/internal/*` 在白名单里,**在这里就 return 了** ——
+            # 下面那段设 user_id 的代码根本走不到。
+            #
+            # 这正是聊天里问股价拿不到用户数据源的原因:MCP 工具走的就是
+            # 这条路。身份其实**送到了**(hunter-mcp-context plugin 注入的
+            # X-Hunter-User-Id),只是没人把它转给 contextvar,于是
+            # source_resolver 看到 user_id=None,永远直接走官方源 ——
+            # 不报错、不告警,又一次静默失败。
+            #
+            # 放在中间件里而不是四个 internal 路由各加一行:那四份 `_auth`
+            # 本来就是同一件事抄了四遍,再抄第五遍只会让下一个新增的
+            # internal 路由继续漏掉。这里一处覆盖全部,包括以后新加的。
+            _bind_internal_identity(request, path)
             return await call_next(request)
 
         token = _extract_token(request)
@@ -111,6 +124,31 @@ class AuthMiddleware(BaseHTTPMiddleware):
         except Exception:      # noqa: BLE001 — 取数出处是增强,不能让它挡住请求
             pass
         return await call_next(request)
+
+
+def _bind_internal_identity(request: Request, path: str) -> None:
+    """把 MCP 桥带进来的 `X-Hunter-User-Id` 转成 contextvar。
+
+    只对 `/api/internal/*` 生效。**不做鉴权** —— 鉴权仍由各 internal 路由
+    自己的共享 secret 校验负责,这里只是把已经送到的身份挂上去。
+    即使 header 是伪造的也没有新增暴露面:那些路由本来就用这个 header
+    取数据,伪造它的前提是已经拿到了共享 secret。
+
+    header 缺失时**显式记一条日志**。缺失的表现是"用户配了数据源但
+    聊天里用不上",而这个原因从现象上完全看不出来 —— 必须在日志里留痕。
+    """
+    if not path.startswith("/api/internal/"):
+        return
+    try:
+        from app.services import request_ctx
+        uid = request.headers.get("X-Hunter-User-Id", "").strip()
+        request_ctx.set_user(uid or None)
+        request_ctx.begin_provenance()
+        if not uid:
+            logger.debug("[auth] internal 请求无 X-Hunter-User-Id path={} "
+                         "· 用户自定义数据源将不参与本次取数", path)
+    except Exception as e:      # noqa: BLE001 — 绝不能让它挡住内部调用
+        logger.warning("[auth] 绑定 internal 身份失败(已忽略): {}", e)
 
 
 def _extract_token(request: Request) -> str | None:

@@ -271,6 +271,9 @@ function LibraryContent() {
             skill={selected.kind === 'skill' ? selected.item : undefined}
             onClose={() => { setDetailOpen(false); setSelected(null) }}
             onPickSkillToChat={onPickSkillToChat}
+            // 测试会改熔断状态、删除会改条数 —— 两者都要让列表重拉,
+            // 否则右侧说"通了"左侧还挂着上一次的错误状态
+            onChanged={reload}
           />
         )}
       </div>

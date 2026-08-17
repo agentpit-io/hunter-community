@@ -12,6 +12,7 @@ API 前缀 `/api/user_sources/*` · 走 JWT 中间件。
 """
 from __future__ import annotations
 
+import json
 import time
 from typing import Optional
 
@@ -271,7 +272,6 @@ async def create_source(body: SourceIn, request: Request):
 
 
 def _json(v: dict) -> str:
-    import json
     return json.dumps(v or {}, ensure_ascii=False)
 
 
@@ -492,6 +492,78 @@ async def test_source(body: TestIn, request: Request):
         return {"ok": False, "status": 0,
                 "duration_ms": int((time.time() - t0) * 1000),
                 "body": "", "hint": f"连不上:{str(e)[:200]}"}
+
+
+@router.post("/{sid}/test")
+async def test_saved_source(sid: int, request: Request, symbol: str = "600519"):
+    """测一条**已保存**的源(老板要的「接入后支持测试,点一下看看能不能连通」)。
+
+    与 `POST /test` 的区别不只是"用存好的参数":这条会
+
+      1. 用**存着的加密 key**(用户不用再粘一遍 —— 我们只回显末 4 位,
+         让他重新粘等于让他去翻原始凭证)
+      2. 跑**完整链路**,包括字段映射 —— 这才是"能不能真用上"的判据。
+         连得通但映射不出价格,取数时照样降级,而用户会以为它是好的
+      3. **写回熔断状态**:测通了就清 fail_streak 与冷却。用户改完配置
+         点测试,期待的就是"好了,现在能用了" —— 不清的话他得等冷却结束
+    """
+    uid = _uid(request)
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT id, name, upstream, endpoint, requires_key, key_in, key_name, "
+            "       key_prefix, api_key_enc, headers, field_map, timeout_ms, kind "
+            "FROM user_data_sources WHERE id=%s AND user_id=%s", (sid, uid))
+        row = cur.fetchone()
+    finally:
+        conn.close()
+    if not row:
+        raise HTTPException(404, "数据源不存在")
+
+    from app.services import source_mapping, source_resolver
+    src = source_resolver.UserSource(*row[:12])
+    kind = row[12]
+
+    t0 = time.time()
+    try:
+        raw = await _to_thread(source_resolver._fetch_one, src, symbol)
+    except Exception as e:                                    # noqa: BLE001
+        reason = f"{type(e).__name__}: {str(e)[:200]}"
+        await _to_thread(source_resolver._mark, sid, False, reason)
+        return {"ok": False, "stage": "connect", "duration_ms": _ms(t0),
+                "reason": reason,
+                "hint": "连不上 —— 检查地址是否可从服务器访问(不是从你的浏览器)"}
+
+    # 连通了,再看映射 —— 这两步分开报,因为用户的下一步动作完全不同:
+    # 连不上 → 改地址/网络;映射失败 → 改映射或换来源
+    try:
+        mapped = source_mapping.apply(src.upstream, kind, raw, src.field_map or None)
+    except source_mapping.MappingError as e:
+        await _to_thread(source_resolver._mark, sid, False, str(e))
+        return {"ok": False, "stage": "mapping", "duration_ms": _ms(t0),
+                "reason": str(e),
+                "sample": json.dumps(raw, ensure_ascii=False)[:1500],
+                "hint": "连得通,但我们读不懂它的返回 —— 取数时会降级到官方源"}
+
+    await _to_thread(source_resolver._mark, sid, True)
+    return {"ok": True, "stage": "done", "duration_ms": _ms(t0),
+            "mapped": mapped if kind != "kline" else {
+                "rows": len((mapped or {}).get("rows") or []),
+                "first": ((mapped or {}).get("rows") or [{}])[0],
+            },
+            "hint": "通了 · 熔断状态已清除,取数会优先走它"}
+
+
+def _ms(t0: float) -> int:
+    return int((time.time() - t0) * 1000)
+
+
+async def _to_thread(fn, *a):
+    """`_fetch_one` / `_mark` 是同步的(httpx.Client + psycopg)——
+    直接在 async handler 里调会阻塞事件循环,一条 15s 超时的源
+    能把整个 api 卡住。"""
+    import asyncio
+    return await asyncio.to_thread(fn, *a)
 
 
 def _hint(status: int, requires_key: bool) -> str:
