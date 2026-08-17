@@ -155,7 +155,7 @@ def _calc_turnover(prev: list[str], curr: list[str]) -> float:
 
 
 def run_backtest(strategy: dict, start: date, end: date, user_id: str | None = None) -> dict:
-    """执行回测 · 返回完整结果"""
+    """执行回测 · 返回完整结果 · positions 含 factor_contrib(C4.2)"""
     t0 = time.time()
     schedule = _rebalance_dates(start, end)
     if len(schedule) < 2:
@@ -164,32 +164,110 @@ def run_backtest(strategy: dict, start: date, end: date, user_id: str | None = N
     cost_bps = strategy["config"].get("cost_bps", 15)
     nav = [1.0]
     nav_series = []
-    positions_hist = []
+    positions_hist = []          # 每期 code list
+    picks_hist = []              # 每期完整 picks(含 factor_contrib) · 用于最后一期展示
     turnover_hist = []
     for i in range(len(schedule) - 1):
         dt0, dt1 = schedule[i], schedule[i+1]
         picks = score_and_select(strategy, dt0, user_id)
         codes = [p["code"] for p in picks]
-        # 换手成本
         prev_codes = positions_hist[-1] if positions_hist else []
         turnover = _calc_turnover(prev_codes, codes)
         cost = turnover * cost_bps / 10000
-        # 期间收益
         period_ret = _period_return(codes, dt0, dt1)
         nav.append(nav[-1] * (1 - cost) * (1 + period_ret))
         positions_hist.append(codes)
+        picks_hist.append(picks)
         turnover_hist.append(turnover)
         nav_series.append({"date": dt0.isoformat(), "nav": round(nav[-1], 4)})
 
     metrics = _calc_metrics(nav)
     metrics["turnover"] = round(sum(turnover_hist) / len(turnover_hist), 3) if turnover_hist else 0
 
+    # C4.2 · 最后一期持仓保留 factor_contrib · 便于前端"贡献表"
+    last_picks = picks_hist[-1] if picks_hist else []
+    n_last = max(1, len(last_picks))
+    positions = [{
+        "code": p["code"],
+        "weight": round(1.0 / n_last, 4),
+        "score": p.get("score", 0),
+        "factor_contrib": p.get("factor_contrib", {}),
+    } for p in last_picks]
+
     return {
         "start": start.isoformat(),
         "end": end.isoformat(),
         "metrics": metrics,
         "nav_series": nav_series,
-        "positions": [{"code": c, "weight": 1.0/len(positions_hist[-1])} for c in positions_hist[-1]] if positions_hist else [],
+        "positions": positions,
         "cost_used": cost_bps * sum(turnover_hist),
         "duration_ms": int((time.time() - t0) * 1000),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════
+# C4.1 · 分档收益(quantile returns)
+# 单因子分档:每期按 z-score 分 10 档 · 持仓等权到下一次 rebalance
+# 输出各档年化 · 若 Q10 显著 > Q1 → 因子有效(单调)
+# ═══════════════════════════════════════════════════════════════
+
+def compute_quantile_returns(
+    factor_key: str,
+    universe: str = "hs300",
+    start: date | None = None,
+    end: date | None = None,
+    n_buckets: int = 10,
+    user_id: str | None = None,
+) -> dict:
+    """返 {q1..q_n: annualized_return_pct, cover_periods: n}
+    因子若在期间数据不足 · 返 {'error': ..., 'periods': 0}
+    """
+    from app.services.quant.strategy_engine import _resolve_universe, _fetch_z_scores
+    if end is None: end = date.today()
+    if start is None: start = end - timedelta(days=365)
+
+    schedule = _rebalance_dates(start, end)
+    if len(schedule) < 2:
+        return {"factor": factor_key, "error": "no_dates", "quantiles": {}}
+
+    bucket_navs = {i: 1.0 for i in range(1, n_buckets + 1)}
+    bucket_periods = {i: 0 for i in range(1, n_buckets + 1)}
+    for i in range(len(schedule) - 1):
+        dt0, dt1 = schedule[i], schedule[i+1]
+        codes = _resolve_universe(universe, dt0, user_id)
+        if not codes: continue
+        zs = _fetch_z_scores(factor_key, dt0, codes)
+        if len(zs) < n_buckets:
+            continue
+        sorted_codes = sorted(zs.items(), key=lambda x: x[1])   # 低 z 在前
+        chunk = max(1, len(sorted_codes) // n_buckets)
+        for b in range(1, n_buckets + 1):
+            lo = (b - 1) * chunk
+            hi = b * chunk if b < n_buckets else len(sorted_codes)
+            bucket_codes = [c for c, _ in sorted_codes[lo:hi]]
+            if not bucket_codes: continue
+            period_ret = _period_return(bucket_codes, dt0, dt1)
+            bucket_navs[b] *= (1 + period_ret)
+            bucket_periods[b] += 1
+
+    # 年化
+    max_periods = max(bucket_periods.values()) if bucket_periods else 0
+    quantiles = {}
+    for b in range(1, n_buckets + 1):
+        n = bucket_periods[b]
+        if n < 2:
+            quantiles[f"q{b}"] = None
+            continue
+        # 月频假设 · 12 段/年
+        ann = (bucket_navs[b] ** (12.0 / n)) - 1
+        quantiles[f"q{b}"] = round(ann, 4)
+
+    return {
+        "factor": factor_key,
+        "universe": universe,
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "n_buckets": n_buckets,
+        "periods": max_periods,
+        "quantiles": quantiles,
     }

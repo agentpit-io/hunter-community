@@ -117,6 +117,36 @@ container.innerHTML = `
     </div>
   </div>
 
+  <!-- C4.1 · 分档收益 · 单因子有效性验证 -->
+  <div class="chart-panel">
+    <div class="hd">
+      <div class="title">📊 因子分档验证</div>
+      <div class="actions">
+        <select id="qt-factor" class="btn small" style="border:1px solid var(--divider);background:var(--bg)"></select>
+        <select id="qt-buckets" class="btn small" style="border:1px solid var(--divider);background:var(--bg)">
+          <option value="5">5 档</option>
+          <option value="10" selected>10 档</option>
+        </select>
+      </div>
+    </div>
+    <div style="color:var(--muted);font-size:11.5px;margin-bottom:8px">
+      按单因子 z-score 排序分档 · 每档等权持仓一期到下一次调仓 · Q10 显著 > Q1 说明因子有效。
+    </div>
+    <div id="qt-chart" style="width:100%;height:260px"></div>
+    <div id="qt-verdict" style="text-align:center;font-size:12px;color:var(--muted);margin-top:8px"></div>
+  </div>
+
+  <!-- C4.2 · 最后一期持仓贡献 · 每只股票各因子贡献值 -->
+  <div class="chart-panel">
+    <div class="hd">
+      <div class="title">🧩 最后一期持仓 · 因子贡献</div>
+      <div class="actions">
+        <span style="color:var(--muted);font-size:11.5px">仅显示 Top 15 · 正值绿 / 负值红</span>
+      </div>
+    </div>
+    <div id="positions-contrib-wrap" style="overflow-x:auto"></div>
+  </div>
+
   <!-- 归因 + 持仓 · 两栏 -->
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
 
@@ -251,6 +281,121 @@ container.innerHTML = `
     ],
   })
   window.addEventListener('resize', () => chart.resize())
+})()
+
+// ─── C4.1 · 分档收益 · echarts 柱状图 ───
+;(function initQuantileChart() {
+  const el = document.getElementById('qt-chart')
+  const sel = document.getElementById('qt-factor')
+  const nBucketsSel = document.getElementById('qt-buckets')
+  if (!el || !sel || !window.echarts) return
+
+  // 只列 draft 里选中的因子(≤ 6 个 · 用户关心的)+ 前 3 高 IC 因子
+  const draftFactors = draft.factors || []
+  const optionKeys = [...new Set([...draftFactors, 'pe_inv', 'roe', 'momentum_12m_1m'])].slice(0, 8)
+  sel.innerHTML = optionKeys.map(k => {
+    const f = factorByKey(k)
+    return `<option value="${k}">${(f?.icon||'')} ${f?.name || k}</option>`
+  }).join('')
+
+  const chart = echarts.init(el)
+  async function loadAndRender() {
+    const key = sel.value
+    const n = parseInt(nBucketsSel.value)
+    const universe = (draft.config?.universe) || 'hs300'
+    el.innerHTML = '<div style="color:var(--muted);padding:60px 0;text-align:center">加载分档数据…</div>'
+    let d
+    try {
+      const r = await fetch(`/api/quant/factors/${encodeURIComponent(key)}/quantile?universe=${universe}&n_buckets=${n}`)
+      d = await r.json()
+    } catch (e) {
+      el.innerHTML = `<div style="color:var(--danger);padding:60px 0;text-align:center">加载失败: ${e.message}</div>`
+      return
+    }
+    el.innerHTML = ''
+    chart.resize && chart.clear()
+    const buckets = Object.keys(d.quantiles || {}).sort((a,b) => parseInt(a.slice(1)) - parseInt(b.slice(1)))
+    const values = buckets.map(b => d.quantiles[b])
+    const hasData = values.filter(v => v !== null).length >= 2
+    if (!hasData) {
+      el.innerHTML = `<div style="color:var(--muted);padding:60px 0;text-align:center">该因子期间数据不足(${d.periods || 0} 期)</div>`
+      document.getElementById('qt-verdict').textContent = '数据不足 · 等 APScheduler 累积更多历史后重试'
+      return
+    }
+    chart.setOption({
+      grid: {left: 55, right: 20, top: 20, bottom: 40},
+      tooltip: {trigger: 'axis', formatter: p => `${p[0].axisValue}: <b>${(p[0].value*100).toFixed(2)}%</b>`},
+      xAxis: {type: 'category', data: buckets, axisLabel: {fontSize: 11, color: '#7c7a72'},
+              axisLine: {lineStyle: {color: '#deddd5'}}, axisTick: {show: false}},
+      yAxis: {type: 'value', axisLabel: {fontSize: 10, color: '#a2a49d',
+              formatter: v => (v*100).toFixed(0)+'%'}, splitLine: {lineStyle: {color: '#efeee8'}}},
+      series: [{
+        type: 'bar', data: values.map(v => ({
+          value: v === null ? 0 : v,
+          itemStyle: {color: v === null ? '#eee' : (v > 0 ? '#4a8f5c' : '#c85a5a')},
+        })),
+        barWidth: '55%',
+        label: {show: true, position: 'top', color: '#7c7a72', fontSize: 10,
+                formatter: p => p.value === 0 ? '-' : (p.value*100).toFixed(1)+'%'},
+      }],
+    })
+    // verdict
+    const verdictEl = document.getElementById('qt-verdict')
+    const first = d.quantiles.q1
+    const last = d.quantiles[`q${d.n_buckets}`]
+    const gap = (first !== null && last !== null) ? (last - first) : null
+    if (d.monotonic) {
+      verdictEl.innerHTML = `<span style="color:#2C6B55">✅ 单调有效</span> · Q${d.n_buckets} - Q1 = <b>${gap !== null ? (gap*100).toFixed(1)+'%' : '?'}</b> · 该因子在近 1 年数据上 <b>验证有效</b>`
+    } else {
+      verdictEl.innerHTML = `<span style="color:#c85a5a">⚠ 非单调</span> · Q${d.n_buckets} - Q1 = <b>${gap !== null ? (gap*100).toFixed(1)+'%' : '?'}</b> · 该因子在近 1 年可能失效或需要更长历史`
+    }
+  }
+  sel.addEventListener('change', loadAndRender)
+  nBucketsSel.addEventListener('change', loadAndRender)
+  loadAndRender()
+  window.addEventListener('resize', () => chart.resize())
+})()
+
+// ─── C4.2 · 最后一期持仓 · 因子贡献表 ───
+;(function initPositionsContribTable() {
+  const wrap = document.getElementById('positions-contrib-wrap')
+  if (!wrap) return
+  const positions = (isReal && Array.isArray(realResult.positions)) ? realResult.positions : []
+  if (!positions.length) {
+    wrap.innerHTML = '<div style="color:var(--muted);padding:40px 0;text-align:center">无持仓数据 · 需先跑回测</div>'
+    return
+  }
+  // draft 里的因子作为列 · positions 里 factor_contrib 是 dict
+  const factorKeys = draft.factors || []
+  const factorNames = factorKeys.map(k => (factorByKey(k)||{name:k}).name)
+  const top15 = positions.slice(0, 15)
+  const headHtml = `
+    <thead style="background:var(--panel);color:var(--text);font-size:11.5px">
+      <tr>
+        <th style="padding:8px 10px;text-align:left;position:sticky;left:0;background:var(--panel)">股票</th>
+        <th style="padding:8px 10px;text-align:right">权重</th>
+        ${factorKeys.map((_, i) => `<th style="padding:8px 10px;text-align:right;font-weight:500">${factorNames[i]}</th>`).join('')}
+        <th style="padding:8px 10px;text-align:right;font-weight:600">综合</th>
+      </tr>
+    </thead>`
+  const bodyHtml = top15.map(p => {
+    const cells = factorKeys.map(k => {
+      const v = (p.factor_contrib || {})[k] ?? 0
+      const cls = v > 0.01 ? '#2C6B55' : (v < -0.01 ? '#c85a5a' : '#a2a49d')
+      return `<td style="padding:6px 10px;text-align:right;color:${cls};font-family:var(--serif);font-size:11.5px">${v > 0 ? '+' : ''}${(v).toFixed(3)}</td>`
+    }).join('')
+    return `
+      <tr style="border-top:1px solid var(--divider)">
+        <td style="padding:8px 10px;position:sticky;left:0;background:var(--bg);white-space:nowrap">${p.code} <span style="color:var(--muted);font-size:11px">${p.name || ''}</span></td>
+        <td style="padding:6px 10px;text-align:right;color:var(--muted);font-size:11.5px">${((p.weight||0)*100).toFixed(1)}%</td>
+        ${cells}
+        <td style="padding:6px 10px;text-align:right;color:var(--brand-dark);font-weight:600;font-family:var(--serif);font-size:12px">${(p.score||0).toFixed(3)}</td>
+      </tr>`
+  }).join('')
+  wrap.innerHTML = `<table style="width:100%;border-collapse:collapse">${headHtml}<tbody>${bodyHtml}</tbody></table>`
+  if (positions.length > 15) {
+    wrap.insertAdjacentHTML('beforeend', `<div style="text-align:center;padding:10px 0;color:var(--muted);font-size:11.5px">共 ${positions.length} 只 · 仅显示 Top 15</div>`)
+  }
 })()
 
 // 归因：按因子权重比例分配超额收益

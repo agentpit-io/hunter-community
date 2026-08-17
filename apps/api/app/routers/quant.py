@@ -47,6 +47,44 @@ async def list_factors():
 
 
 # ═══════════════════════════════════════════════════════════════
+# C4.1 · GET /factors/{key}/quantile · 分档收益
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/factors/{key}/quantile")
+async def factor_quantile(
+    key: str,
+    universe: str = "hs300",
+    start: str | None = None,
+    end: str | None = None,
+    n_buckets: int = 10,
+):
+    """单因子分档年化 · Q1(低 z)→ Qn(高 z)· 用于证明因子有效性
+    - Q10 > Q1 且单调 → 因子有效(前端加 ✅ 单调 标签)
+    - 起止时间 · 默认近 1 年
+    """
+    from datetime import datetime as _dt
+    d0 = _dt.strptime(start, "%Y-%m-%d").date() if start else None
+    d1 = _dt.strptime(end, "%Y-%m-%d").date() if end else None
+    if factor_defs.get_factor(key) is None:
+        raise HTTPException(404, f"factor {key} not found")
+    result = backtest_engine.compute_quantile_returns(
+        key, universe, d0, d1, n_buckets=max(2, min(20, n_buckets))
+    )
+    # 单调性判断:Qn > Q1 且 top 3 avg > bottom 3 avg
+    q = result.get("quantiles", {})
+    monotonic = False
+    q1 = q.get("q1")
+    qn = q.get(f"q{result.get('n_buckets', 10)}")
+    if q1 is not None and qn is not None and qn > q1:
+        top3 = [v for k2, v in list(q.items())[-3:] if v is not None]
+        bot3 = [v for k2, v in list(q.items())[:3] if v is not None]
+        if top3 and bot3 and sum(top3)/len(top3) > sum(bot3)/len(bot3):
+            monotonic = True
+    result["monotonic"] = monotonic
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════
 # POST /scan · 按策略打分 · Top N
 # ═══════════════════════════════════════════════════════════════
 
