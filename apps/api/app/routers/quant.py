@@ -48,6 +48,145 @@ async def list_factors():
 
 
 # ═══════════════════════════════════════════════════════════════
+# E-6 · 券商 interface(dry run · 未真接入)
+# ═══════════════════════════════════════════════════════════════
+
+class OrderIn(BaseModel):
+    code: str
+    side: str        # buy / sell
+    qty: int
+    price: float | None = None
+    price_type: str = "market"
+
+
+# broker 单例 · 内存持久(pm2 fork 单进程可用 · 重启清空)
+_broker_instances: dict[str, object] = {}
+
+
+def _get_broker(name: str = "dryrun"):
+    if name not in _broker_instances:
+        from app.services.quant.broker import get_broker
+        _broker_instances[name] = get_broker(name)
+    return _broker_instances[name]
+
+
+@router.post("/broker/submit")
+async def broker_submit(body: OrderIn, request: Request):
+    """提交订单(当前只走 DryRunBroker · 不真下单)
+    · Phase F 加入实际券商时 · 用户传 broker='xtp' 等
+    """
+    from app.services.quant.broker import Order
+    b = _get_broker("dryrun")
+    st = b.submit_order(Order(code=body.code, side=body.side, qty=body.qty,
+                              price=body.price, price_type=body.price_type))
+    return {"broker": b.name, "status": st.__dict__}
+
+
+@router.get("/broker/positions")
+async def broker_positions():
+    b = _get_broker("dryrun")
+    return {"broker": b.name, "positions": b.query_positions()}
+
+
+@router.get("/broker/balance")
+async def broker_balance():
+    b = _get_broker("dryrun")
+    return {"broker": b.name, "balance": b.query_balance()}
+
+
+# ═══════════════════════════════════════════════════════════════
+# E-1 · Prometheus metrics · 生产可观测
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/metrics")
+async def prometheus_metrics():
+    """Prometheus text format · Grafana 直接抓
+    · factor_value 各因子 24h 新增
+    · backtest_result 24h 新增
+    · 公开策略数
+    · factor_ic 覆盖
+    """
+    conn = get_conn(); cur = conn.cursor()
+
+    cur.execute("""
+        SELECT factor_key, COUNT(*) FROM factor_value
+        WHERE updated_at >= NOW() - INTERVAL '24 hours'
+        GROUP BY factor_key
+    """)
+    factor_rows = cur.fetchall()
+
+    cur.execute("SELECT COUNT(*) FROM backtest_result WHERE created_at >= NOW() - INTERVAL '24 hours'")
+    bt_24h = cur.fetchone()[0]
+
+    cur.execute("SELECT COUNT(*) FROM strategy WHERE is_public = TRUE")
+    public_strategies = cur.fetchone()[0]
+
+    cur.execute("SELECT COUNT(DISTINCT factor_key), COUNT(*) FROM factor_ic")
+    ic_factors, ic_rows = cur.fetchone()
+
+    cur.execute("SELECT COUNT(DISTINCT code) FROM klines WHERE period='daily'")
+    kline_codes = cur.fetchone()[0]
+
+    cur.execute("SELECT COUNT(*) FROM index_component WHERE effective_to IS NULL")
+    idx_current = cur.fetchone()[0]
+
+    cur.close(); conn.close()
+
+    lines = [
+        "# HELP quant_factor_value_24h Factor value rows in last 24h (per factor)",
+        "# TYPE quant_factor_value_24h gauge",
+    ]
+    for k, n in factor_rows:
+        lines.append(f'quant_factor_value_24h{{factor="{k}"}} {n}')
+
+    lines.extend([
+        "# HELP quant_backtest_result_24h Backtest results created in 24h",
+        "# TYPE quant_backtest_result_24h gauge",
+        f"quant_backtest_result_24h {bt_24h}",
+        "# HELP quant_strategies_public Public strategies count",
+        "# TYPE quant_strategies_public gauge",
+        f"quant_strategies_public {public_strategies}",
+        "# HELP quant_factor_ic Factor IC coverage",
+        "# TYPE quant_factor_ic gauge",
+        f"quant_factor_ic_factors {ic_factors}",
+        f"quant_factor_ic_rows {ic_rows}",
+        "# HELP quant_klines K-line codes count",
+        "# TYPE quant_klines gauge",
+        f"quant_klines_codes {kline_codes}",
+        "# HELP quant_index_component Current index components (all indexes)",
+        "# TYPE quant_index_component gauge",
+        f"quant_index_component_current {idx_current}",
+    ])
+    return Response(content="\n".join(lines) + "\n", media_type="text/plain; charset=utf-8")
+
+
+# ═══════════════════════════════════════════════════════════════
+# E-3 · 因子相关性矩阵
+# ═══════════════════════════════════════════════════════════════
+
+class CorrIn(BaseModel):
+    factor_keys: list[str]
+    universe: str = "hs300"
+    method: str = "pearson"
+
+
+@router.post("/factors/correlation")
+async def factor_correlation(body: CorrIn):
+    """N × N 因子相关矩阵 · pearson / spearman · 用于 workbench 热力图
+    · 至少 2 因子 · 最多 15 · 覆盖 < 10 只时返 error
+    """
+    if len(body.factor_keys) < 2:
+        raise HTTPException(400, "至少 2 个因子")
+    if len(body.factor_keys) > 15:
+        raise HTTPException(400, "最多 15 个因子(N^2 计算量限制)")
+    for k in body.factor_keys:
+        if factor_defs.get_factor(k) is None:
+            raise HTTPException(404, f"factor {k} not found")
+    from app.services.quant import correlation_engine as ce
+    return ce.compute_pairwise_corr(body.factor_keys, body.universe, method=body.method)
+
+
+# ═══════════════════════════════════════════════════════════════
 # D-2 · IC 时间序列 + IC 排行
 # ═══════════════════════════════════════════════════════════════
 

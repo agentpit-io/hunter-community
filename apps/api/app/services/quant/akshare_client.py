@@ -327,7 +327,7 @@ def _fetch_report_df(code: str, kind: str):
         ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         try:
             fut = ex.submit(_do)
-            df = fut.result(timeout=20)
+            df = fut.result(timeout=10)
             ex.shutdown(wait=False)
             time.sleep(_SLEEP)
             return df
@@ -343,13 +343,15 @@ def _fetch_report_df(code: str, kind: str):
 
 
 @lru_cache(maxsize=2048)
-def _fetch_all_reports(code: str) -> dict | None:
-    """按 code 缓存全部 3 张报表 · 12 期共用一次 fetch × 3"""
+def _fetch_all_reports(code: str) -> dict:
+    """按 code 缓存全部 3 张报表 · 12 期共用一次 fetch × 3
+    E-0 修:失败抛异常(而非返 None)· lru 不缓存异常 · 下次可重试
+    """
     bs = _fetch_report_df(code, "balance")
     ps = _fetch_report_df(code, "profit")
     cf = _fetch_report_df(code, "cashflow")
     if any(x is None or (hasattr(x, "empty") and x.empty) for x in (bs, ps, cf)):
-        return None
+        raise RuntimeError(f"reports incomplete for {code}")
     return {"balance": bs, "profit": ps, "cashflow": cf}
 
 
@@ -377,8 +379,12 @@ def get_ev_ebitda_inv(code: str, trade_date: date, mcap: float) -> float | None:
         return None
     if mcap <= 0:
         return None
-    reports = _fetch_all_reports(code)
-    if reports is None:
+    try:
+        reports = _fetch_all_reports(code)
+    except RuntimeError:
+        return None
+    except Exception as e:
+        log.warning(f"[ev_ebitda-fetch] {code}: {e}")
         return None
     try:
         import pandas as pd

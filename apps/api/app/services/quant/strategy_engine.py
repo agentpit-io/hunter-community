@@ -25,19 +25,12 @@ def fetch_stock_names(codes: list[str]) -> dict[str, str]:
 
 
 def _resolve_universe(universe: str, trade_date: date, user_id: str | None = None) -> list[str]:
-    """把 universe key 转成 code list · Phase A 简化 · 全走 stocks 表"""
-    conn = get_conn()
-    cur = conn.cursor()
-    if universe == "my_watch" and user_id:
-        cur.execute("SELECT code FROM stocks WHERE user_id=%s AND enabled AND market='A'", (user_id,))
-    else:
-        # Phase A hs300 / a_all 都简化成"stocks 表里 enabled=true 的 A 股"
-        # v2 · 加 index_component 表实现真 hs300 成分
-        cur.execute("SELECT DISTINCT code FROM stocks WHERE enabled AND market='A'")
-    codes = [r[0] for r in cur.fetchall()]
-    cur.close()
-    conn.close()
-    return codes
+    """E-4 · 从 index_component 表拉真 hs300/zz500/zz1000 成分股
+    · 未 seed 时 fallback stocks 表(向后兼容)
+    · trade_date 用于历史 · 生存者偏差防治
+    """
+    from app.services.quant import universe as _universe
+    return _universe.resolve(universe, trade_date, user_id)
 
 
 def _fetch_z_scores(factor_key: str, trade_date: date, codes: list[str]) -> dict[str, float]:

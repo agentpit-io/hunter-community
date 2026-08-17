@@ -53,6 +53,47 @@ def daily_ic_recompute():
     return result
 
 
+def weekly_report_job():
+    """E-2 · 每周一 08:00 CST · 生成质量周报 · 打印 + 写文件"""
+    try:
+        import sys, os
+        script_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "scripts")
+        if script_dir not in sys.path:
+            sys.path.insert(0, script_dir)
+        from quant_weekly_report import send_report
+        path = send_report()
+        log.info("[quant.scheduler] 周报 → %s", path)
+    except Exception as e:
+        log.warning("[quant.scheduler] 周报生成失败: %s", e)
+
+
+def daily_sanity_check():
+    """E-1 · 每日 18:00 CST · 检查 factor_value 今日覆盖 · 少于 15 因子 → 告警"""
+    from datetime import date
+    from app.services.database import get_conn
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute("""
+        SELECT COUNT(DISTINCT factor_key) FROM factor_value WHERE trade_date = CURRENT_DATE
+    """)
+    n = cur.fetchone()[0]
+    cur.close(); conn.close()
+    if n < 15:
+        log.warning("[quant.sanity] 🚨 今日 factor_value 只 %d 因子 · APScheduler 可能故障", n)
+    else:
+        log.info("[quant.sanity] ✅ 今日 %d 因子有增量", n)
+    return {"today_factors": n, "ok": n >= 15}
+
+
+def monthly_index_refresh():
+    """E-4 · 每月 1 号 09:00 CST · 3 指数 reconcile"""
+    from app.services.quant import universe
+    results = {}
+    for key in ("000300", "000905", "000852"):
+        results[key] = universe.reconcile_current(key)
+    log.info("[quant.scheduler] monthly index refresh · %s", results)
+    return results
+
+
 def register(scheduler):
     """外部传入已有 AsyncIOScheduler · 我只加 job(不 start · 由 caller 决定)"""
     from apscheduler.triggers.cron import CronTrigger
@@ -69,4 +110,25 @@ def register(scheduler):
         id="quant_daily_ic",
         replace_existing=True,
     )
-    log.info("[quant.scheduler] APScheduler 已注册:17:00 factor + 17:30 IC")
+    # E-4 · 每月 1 号 09:00 · 指数成分 reconcile
+    scheduler.add_job(
+        lambda: asyncio.create_task(asyncio.to_thread(monthly_index_refresh)),
+        CronTrigger(day=1, hour=9, minute=0),
+        id="quant_monthly_index_refresh",
+        replace_existing=True,
+    )
+    # E-2 · 每周一 08:00 · 数据质量周报
+    scheduler.add_job(
+        lambda: asyncio.create_task(asyncio.to_thread(weekly_report_job)),
+        CronTrigger(day_of_week="mon", hour=8, minute=0),
+        id="quant_weekly_report",
+        replace_existing=True,
+    )
+    # E-1 · 每日 18:00 · sanity check
+    scheduler.add_job(
+        lambda: asyncio.create_task(asyncio.to_thread(daily_sanity_check)),
+        CronTrigger(hour=18, minute=0),
+        id="quant_daily_sanity",
+        replace_existing=True,
+    )
+    log.info("[quant.scheduler] APScheduler 已注册:17:00 factor + 17:30 IC + 18:00 sanity + 每月 1 号 09:00 指数 + 每周一 08:00 周报")

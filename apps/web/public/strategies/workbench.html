@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>策略工作台 · 猎鹿人 Hunter</title>
   <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
 </head>
 <body>
 <script src="app.js"></script>
@@ -216,6 +217,24 @@ container.innerHTML = `
   <div id="mid-col">${renderMiddlePanel()}</div>
   <div id="right-col">${renderRightPanel()}</div>
 </div>
+
+<!-- E-3 · 因子相关性热力图 · 全宽面板 -->
+<div class="chart-panel" id="corr-panel" style="display:none;margin:12px 20px">
+  <div class="hd">
+    <div class="title">🔗 因子相关性 · 热力图(Pearson)</div>
+    <div class="actions">
+      <select id="corr-method" class="btn small" style="border:1px solid var(--divider);background:var(--bg)">
+        <option value="pearson">Pearson · 线性</option>
+        <option value="spearman">Spearman · 秩相关</option>
+      </select>
+    </div>
+  </div>
+  <div style="color:var(--muted);font-size:11.5px;margin-bottom:8px">
+    |r| > 0.7 → 高相关 · 建议移除一个 · 权重会被稀释成"综合因子"
+  </div>
+  <div id="corr-chart" style="width:100%;height:320px"></div>
+  <div id="corr-warning" style="margin-top:8px;font-size:12px;padding:8px 10px;border-radius:6px"></div>
+</div>
 `
 
 function bindLeft() {
@@ -319,6 +338,71 @@ document.getElementById('btn-backtest').addEventListener('click', async () => {
 // 刷新 Top N · 挂事件 · 首次自动跑
 document.getElementById('btn-refresh-picks').addEventListener('click', refreshPicks)
 refreshPicks()   // 页面打开自动拉一次
+
+// ─── E-3 · 相关性热力图 · 因子变动时自动刷新 ───
+let _corrChart = null
+async function refreshCorrelation() {
+  const panel = document.getElementById('corr-panel')
+  if (!panel) return
+  if (draft.factors.length < 2) { panel.style.display = 'none'; return }
+  const method = document.getElementById('corr-method').value
+  try {
+    const r = await fetch('/api/quant/factors/correlation', {
+      method: 'POST', headers: apiHeaders(),
+      body: JSON.stringify({factor_keys: draft.factors, universe: draft.config.universe, method}),
+    })
+    const d = await r.json()
+    if (d.error) {
+      panel.style.display = 'block'
+      document.getElementById('corr-chart').innerHTML =
+        `<div style="color:var(--muted);padding:60px 0;text-align:center">数据不足(仅 ${d.n_common||0} 只共同覆盖)</div>`
+      document.getElementById('corr-warning').innerHTML = ''
+      return
+    }
+    panel.style.display = 'block'
+    if (!_corrChart) _corrChart = echarts.init(document.getElementById('corr-chart'))
+    const labels = d.factors.map(k => (factorByKey(k)||{name:k}).name)
+    const data = []
+    d.factors.forEach((_, i) => d.factors.forEach((_, j) => data.push([j, i, d.matrix[i][j]])))
+    _corrChart.setOption({
+      tooltip: {position: 'top', formatter: p => `${labels[p.value[1]]} × ${labels[p.value[0]]}: <b>${p.value[2].toFixed(3)}</b>`},
+      grid: {left: 110, right: 30, top: 20, bottom: 80},
+      xAxis: {type: 'category', data: labels, axisLabel: {rotate: 30, fontSize: 10, color: '#7c7a72'},
+              axisTick: {show: false}, splitArea: {show: true}},
+      yAxis: {type: 'category', data: labels, axisLabel: {fontSize: 10, color: '#7c7a72'},
+              axisTick: {show: false}, splitArea: {show: true}},
+      visualMap: {min: -1, max: 1, calculable: true, orient: 'horizontal', left: 'center', bottom: 5,
+                  inRange: {color: ['#c85a5a', '#f5f5f5', '#4a8f5c']}},
+      series: [{
+        type: 'heatmap', data,
+        label: {show: true, formatter: p => p.value[2].toFixed(2), fontSize: 10},
+      }],
+    })
+    _corrChart.resize()
+    // 高相关警告
+    const w = document.getElementById('corr-warning')
+    if (d.high_pairs && d.high_pairs.length) {
+      const pairs = d.high_pairs.map(p => `${(factorByKey(p.a)||{name:p.a}).name} ⇔ ${(factorByKey(p.b)||{name:p.b}).name} = ${p.corr.toFixed(2)}`).join(' · ')
+      w.style.background = 'var(--tag-warn-bg)'; w.style.color = 'var(--tag-warn-fg)'
+      w.innerHTML = `⚠ 高相关(>0.7):${pairs} · 建议保留其一 · 权重合并`
+    } else {
+      w.style.background = 'var(--tag-ok-bg)'; w.style.color = 'var(--tag-ok-fg)'
+      w.innerHTML = `✓ 因子分散良好 · 无高相关对 · 覆盖 ${d.n_codes} 只 hs300`
+    }
+  } catch (e) {
+    console.warn('[corr] fetch failed', e)
+  }
+}
+// 因子变动 hook · 每次修 draft 后调
+const _origSaveDraft = window.saveDraft || saveDraft
+window.saveDraft = function(d) {
+  _origSaveDraft.call(this, d)
+  if (d.factors && d.factors.length >= 2) refreshCorrelation()
+}
+// method 切换
+document.getElementById('corr-method')?.addEventListener('change', refreshCorrelation)
+// 初次
+refreshCorrelation()
 
 // 导出 CSV · 从当前 picks-body 表格里拿
 document.getElementById('btn-export').addEventListener('click', () => {
