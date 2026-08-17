@@ -442,8 +442,10 @@ async def test_source(body: TestIn, request: Request):
     每次都落一条记录会让列表里堆满半成品。
     """
     _uid(request)
-    ep = _validate_endpoint(body.endpoint)
-    ep = ep.replace("{symbol}", body.symbol).replace("{code}", body.symbol)
+    # 占位符展开走 source_resolver.expand —— **必须和取数时用同一份**,
+    # 否则"测试通过但取数失败"(或反过来),而这正是测试按钮要杜绝的事
+    from app.services.source_resolver import expand
+    ep = expand(_validate_endpoint(body.endpoint), body.symbol)
 
     headers = {k: str(v) for k, v in (body.headers or {}).items()}
     params: dict = {}
@@ -462,10 +464,15 @@ async def test_source(body: TestIn, request: Request):
     t0 = time.time()
     try:
         timeout = min(max(body.timeout_ms, 1000), 30000) / 1000
+        # params 为空必须传 None —— httpx 会用它整体替换 URL 上的 query,
+        # 空 dict 把 `?secid=…&fields=…` 冲掉,上游照样 200 但返回空数据。
+        # 同 source_resolver._fetch_one,两处必须一致,否则测试与取数行为不同
+        kw: dict = {"headers": headers}
+        if params:
+            kw["params"] = params
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as c:
-            r = (await c.post(ep, headers=headers, params=params, json=json_body)
-                 if json_body is not None
-                 else await c.get(ep, headers=headers, params=params))
+            r = (await c.post(ep, json=json_body, **kw)
+                 if json_body is not None else await c.get(ep, **kw))
         ms = int((time.time() - t0) * 1000)
         text = r.text or ""
         # 截断但**说明截断了** —— 悄悄截断会让用户以为返回就这么点,

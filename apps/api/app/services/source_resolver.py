@@ -140,9 +140,61 @@ def _mark(sid: int, ok: bool, err: str = "") -> None:
                 pass
 
 
+def expand(endpoint: str, code: str) -> str:
+    """把地址里的占位符换成这个上游要的代码形式。
+
+    **只支持 `{symbol}` 是不够的。**同一只茅台,各家要的写法完全不同:
+
+        东财     secid=1.600519      ← 1=沪 0=深,前缀跟交易所走
+        Tushare  ts_code=600519.SH
+        Yahoo    600519.SS / 0700.HK
+        裸代码   600519
+
+    只给 `{symbol}` 的话,用户接东财时得自己想办法拼出那个 `1.` 前缀 ——
+    而它是**按股票变的**(60/68 开头是沪、00/30 是深),没法写死在地址里。
+    等于"选了已知来源仍然填不对",那"模板"就白给了。
+    """
+    raw = (code or "").strip()
+    bare = raw.split(".")[0].strip()
+
+    # ⚠️ **先判港股再判 A 股**。港股 00700(腾讯)是 5 位、以 "00" 开头,
+    # 而 A 股深市也是 "00" 开头 —— 按 A 股的规则先匹配的话,
+    # 腾讯会被展开成 `0.00700` / `00700.SZ`,打到深交所去。
+    # 实测就是这么错的:00700 → 00700.SZ。
+    # 区分靠**长度**:A 股一律 6 位,港股 4-5 位。
+    is_hk = (raw.upper().endswith(".HK")
+             or (bare.isdigit() and len(bare) <= 5))
+    if is_hk:
+        return (endpoint
+                .replace("{symbol}", bare).replace("{code}", bare)
+                .replace("{secid}", f"116.{bare.zfill(5)}")     # 东财港股用 116.
+                .replace("{ts_code}", f"{bare.zfill(5)}.HK")
+                .replace("{yahoo}", f"{bare.zfill(4)}.HK"))
+
+    if bare.startswith(("60", "68", "11", "51", "52")):
+        exch, em = "SH", "1"
+    elif bare.startswith(("00", "30", "12", "15", "16")):
+        exch, em = "SZ", "0"
+    elif bare.startswith(("43", "83", "87", "88")):
+        exch, em = "BJ", "0"
+    else:
+        # 美股等字母代码 —— 原样传,各家写法一致
+        exch, em = "", ""
+
+    yahoo = (f"{bare}.SS" if exch == "SH" else
+             f"{bare}.SZ" if exch == "SZ" else bare)
+
+    return (endpoint
+            .replace("{symbol}", bare)
+            .replace("{code}", bare)
+            .replace("{secid}", f"{em}.{bare}" if em else bare)   # 东财
+            .replace("{ts_code}", f"{bare}.{exch}" if exch else bare)  # Tushare
+            .replace("{yahoo}", yahoo))
+
+
 def _fetch_one(src: UserSource, symbol: str) -> dict:
     """打一次用户的源并映射。任何一步失败都抛异常,由上层降级。"""
-    ep = src.endpoint.replace("{symbol}", symbol).replace("{code}", symbol)
+    ep = expand(src.endpoint, symbol)
     headers = {k: str(v) for k, v in (src.headers or {}).items()}
     params: dict = {}
     body: dict | None = None
@@ -158,9 +210,17 @@ def _fetch_one(src: UserSource, symbol: str) -> dict:
             body = {src.key_name: val}
 
     timeout = min(max(src.timeout_ms, 1000), 30000) / 1000
+    # ⚠️ **params 为空时必须传 None,不能传 {}**。
+    # httpx 收到 params 就用它**整体替换** URL 上的 query ——
+    # 空 dict 会把 `?secid=1.600519&fields=…` 整段冲掉。
+    # 表现极隐蔽:上游照样 200,只是返回 {"rc":102,"data":null},
+    # 然后被映射层判成"结构不对",用户去查地址、查 key、查网络,
+    # 而地址其实是对的,是我们自己把它改短了。
+    kw = {"headers": headers}
+    if params:
+        kw["params"] = params
     with httpx.Client(timeout=timeout, follow_redirects=True) as c:
-        r = (c.post(ep, headers=headers, params=params, json=body)
-             if body is not None else c.get(ep, headers=headers, params=params))
+        r = c.post(ep, json=body, **kw) if body is not None else c.get(ep, **kw)
     if not r.is_success:
         raise RuntimeError(f"HTTP {r.status_code}")
     return r.json()

@@ -213,9 +213,16 @@ export default function SourceAddPanel({ presetGroup, onClose, onDone }: Props) 
           </Field>
 
           <Field label="接口地址"
-                 hint="{symbol} 会被替换成股票代码 · 粘贴带的前后空白会自动清掉">
+                 hint="占位符:{symbol}=600519 · {secid}=1.600519(东财) · {ts_code}=600519.SH(Tushare) · {yahoo}=600519.SS。前后空白会自动清掉">
             <input value={endpoint} onChange={(e) => { setEndpoint(e.target.value); setTest(null) }}
                    style={input} placeholder={tpl.endpoint_hint} spellCheck={false} />
+            {/* 提示里那个地址是能直接用的 —— 给一键填入,省得手抄一长串 query。
+                手抄 `fields=f43,f44,...` 这种串,抄错一个字符的表现是
+                "连得通但读不懂返回",而用户根本不会怀疑是自己抄错了 */}
+            {tpl.endpoint_hint.startsWith('http') && endpoint !== tpl.endpoint_hint && (
+              <button onClick={() => { setEndpoint(tpl.endpoint_hint); setTest(null) }}
+                      style={fillBtn}>用推荐地址填入</button>
+            )}
           </Field>
 
           {/* ② 要不要 key 由用户自己勾 —— 用户明确要求的。
@@ -326,6 +333,11 @@ const btnPrimary: React.CSSProperties = {
   borderRadius: 7, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
 }
 const hint: React.CSSProperties = { fontSize: 10.5, color: HUNTER.INK_F, lineHeight: 1.6 }
+const fillBtn: React.CSSProperties = {
+  marginTop: 4, padding: '3px 10px', fontSize: 10.5, borderRadius: 6,
+  background: 'transparent', color: HUNTER.THEME,
+  border: `1px solid ${HUNTER.LINE}`, cursor: 'pointer', fontFamily: 'inherit',
+}
 const noteBox: React.CSSProperties = {
   padding: '7px 9px', borderRadius: 6, fontSize: 11.5, lineHeight: 1.65,
   background: HUNTER.PAPER, color: HUNTER.INK_S, border: `1px solid ${HUNTER.LINE}`,

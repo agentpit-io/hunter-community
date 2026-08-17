@@ -49,7 +49,8 @@ TEMPLATES: list[SourceTemplate] = [
         "tushare", "https://api.tushare.pro", True,
         key_in="body", key_name="token",
         kinds=["quote", "kline", "financial", "valuation"],
-        note="Tushare Pro · token 走 POST body 的 token 字段(不是 header)",
+        note="Tushare Pro · token 走 POST body 的 token 字段(不是 header)· "
+             "地址里可用 `{ts_code}` 展开成 600519.SH",
     ),
     SourceTemplate(
         "akshare", "http://你的AKShare代理:8765", False,
@@ -58,9 +59,18 @@ TEMPLATES: list[SourceTemplate] = [
              "我们自己也是这么用的(容器里直连 AKShare 经常打不通,走了国内跳板机)",
     ),
     SourceTemplate(
-        "eastmoney", "https://push2.eastmoney.com/api/qt/stock/get", False,
+        # ⚠️ 用 push2delay 不用 push2:2026-08-17 实测 push2.eastmoney.com
+        # 对所有请求返回 **502(它自己的 nginx)**,而 push2delay 正常出数。
+        # 之前这里写的是 push2,用户照着填必然连不上 —— 提示里给一个
+        # 打不通的地址,比不给提示更糟。
+        "eastmoney",
+        "https://push2delay.eastmoney.com/api/qt/stock/get"
+        "?secid={secid}&fields=f43,f44,f45,f46,f47,f57,f58,f169,f170",
+        False,
         kinds=["quote", "kline", "news", "capital", "holder", "research"],
-        note="东方财富公开接口 · 免 key。注意它对境外 IP 的成功率很低",
+        note="东方财富 · 免 key。`{secid}` 会自动展开成 1.600519(沪)/ 0.000001(深)—— "
+             "那个前缀跟交易所走,按股票变,没法写死。"
+             "push2 主域近期 502,提示里给的是 push2delay",
     ),
     SourceTemplate(
         "xtick", "http://你的XTick地址/api", True,
@@ -69,9 +79,11 @@ TEMPLATES: list[SourceTemplate] = [
         note="XTick 至尊版 · REST 返回 ZIP 内含 data.json",
     ),
     SourceTemplate(
-        "yahoo", "https://query1.finance.yahoo.com/v8/finance/chart", False,
+        "yahoo", "https://query1.finance.yahoo.com/v8/finance/chart/{yahoo}", False,
         kinds=["quote", "kline", "news"],
-        note="Yahoo chart 接口 · 免 key · 延迟约 15 分钟",
+        note="Yahoo chart · 免 key · 延迟约 15 分钟 · "
+             "`{yahoo}` 展开成 600519.SS / 0700.HK。"
+             "注意 Yahoo 对数据中心 IP 限流较凶,可能 429",
     ),
     SourceTemplate(
         "cninfo", "http://www.cninfo.com.cn/new/hisAnnouncement/query", False,
