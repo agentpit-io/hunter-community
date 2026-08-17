@@ -102,6 +102,9 @@ UPSTREAM_LABEL = {
     "hkex":       "港交所",
     "truesource": "TrueSource",
     "internal":   "平台自建",
+    # 只给用户自定义源用 —— 没有任何官方源是 custom,所以它不进 UPSTREAM_ORDER。
+    # 放在这里是因为 UI 显示中文名走的是这张表,漏了它用户会看到裸的 "custom"
+    "custom":     "自定义接口",
 }
 
 # UI 排列顺序 —— 按条目数从多到少,大的在前。
@@ -138,6 +141,11 @@ class DataSource:
     note: str = ""
     weight: float = 1.0               # 多源合并时的采信权重 · Step D 用
     used_by: list[str] = field(default_factory=list)   # 哪些工具/SKILL 依赖它
+    # 仅对 owner="user" 有意义:这条源自己那把 key 存了没。
+    # 官方源不看它(它们共用平台 key,由 _has_platform_key() 判定)。
+    # 需要单独一个字段是因为 PATCH 允许把 key 清空而 requires_key 仍为真,
+    # 那时它就该显示 need_key —— 光看 requires_key 判断不出来
+    has_key: bool = True
 
 
 # ══════════════════════════════════════════════════════════════
@@ -380,6 +388,12 @@ def _has_platform_key() -> bool:
 def is_configured(src: DataSource) -> bool:
     if not src.requires_key:
         return True
+    # 用户自接的源看**他自己那把 key**,不看平台 key。
+    # 混用会得到荒谬结果:用户明明填好了 Tushare token,
+    # 却因为没配我们的 HUNTER_API_KEY 被标成 need_key ——
+    # 那恰好否定了"用户可以脱离我们"这件事
+    if src.owner == "user":
+        return src.has_key
     if src.provider == "findata-db":
         return bool(os.getenv("FINDATA_DB_URL"))
     return _has_platform_key()
@@ -486,12 +500,72 @@ def grouped_by_upstream(user_id: str | None = None) -> list[dict]:
 
 
 def _user_sources(user_id: str) -> list[DataSource]:
-    """用户自定义数据源 —— `_21` §7 的 `user_data_sources` 表。
+    """用户自定义数据源 —— 读 `user_data_sources` 表(`_21` §7 步 2)。
 
-    表还没建(那是步 2),这里先返回空。**不抛异常、不假装有** ——
-    步 1 只改分类维度,不碰数据库。
+    转成同一个 `DataSource` 结构,这样 UI 侧不用为"用户的"和"我们的"
+    写两套渲染。区别只体现在 `owner` 字段上。
+
+    **查库失败不抛异常**:这个函数在能力库页每次刷新时都会被调用,
+    抛出去的话整个数据源页都白屏 —— 而用户自定义源为空是完全正常的状态。
+    记日志,返回空,让页面照常显示我们的源。
     """
-    return []
+    if not user_id:
+        return []
+    try:
+        from app.services.database import get_conn
+    except Exception:
+        return []
+    conn = None
+    try:
+        conn = get_conn()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, name, upstream, market, kind, endpoint, requires_key, "
+            "       enabled, api_key_enc, last_err "
+            "FROM user_data_sources WHERE user_id=%s ORDER BY created_at DESC",
+            (user_id,),
+        )
+        rows = cur.fetchall()
+    except Exception as e:                                   # noqa: BLE001
+        from loguru import logger
+        logger.warning("[source_catalog] 读用户数据源失败(按空处理): {}", e)
+        return []
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    out: list[DataSource] = []
+    for (sid, name, upstream, market, kind, endpoint,
+         requires_key, enabled, key_enc, last_err) in rows:
+        try:
+            mk, kd = Market(market), DataKind(kind)
+        except ValueError:
+            # 库里存了注册表不认的市场/类型 —— 跳过而不是崩。
+            # 会发生在我们改了枚举而老数据没迁的时候
+            continue
+        out.append(DataSource(
+            key=f"user.{sid}",
+            name=name,
+            market=mk,
+            kind=kd,
+            provider="user",
+            endpoint=endpoint,
+            upstream=upstream,
+            owner="user",
+            tier=SourceTier.PREMIUM,
+            requires_key=bool(requires_key),
+            # 停用的源仍然列出来但标成不可用 —— 藏起来的话用户会以为被删了,
+            # 然后再加一遍,撞上唯一索引又被拒,不知道发生了什么
+            available=bool(enabled),
+            unavailable_reason="" if enabled else "你把它停用了 · 可在详情里重新启用",
+            has_key=bool(key_enc),
+            note=(f"你自己接的 · 上游 {UPSTREAM_LABEL.get(upstream, upstream)}"
+                  + (f" · 最近一次错误:{last_err[:80]}" if last_err else "")),
+        ))
+    return out
 
 
 def grouped() -> list[dict]:

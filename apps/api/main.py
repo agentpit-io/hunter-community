@@ -242,6 +242,12 @@ from app.routers import internal_user_mcp as internal_user_mcp_router
 app.include_router(user_mcp_router.router, prefix="/api")
 app.include_router(internal_user_mcp_router.router, prefix="/api")
 
+# ── 用户自定义数据源 · `_21` 步 2 —— 「用户脱离我们也能玩转」的落点 ──
+# 与 user_mcp 并列注册:两者是三层能力模型里相邻的两层
+# (数据源层 / 工具层),用户自带能力的入口也应该挨在一起
+from app.routers import user_sources as user_sources_router
+app.include_router(user_sources_router.router, prefix="/api")
+
 # ── hunter-UZI-Skill 集成 · Sprint 3 P2 · chat 深度分析 tool ──
 # 平台自有能力的 MCP 桥接(_12 Step 3)· K线预测/情报 等原来只有 HTTP 接口、
 # 模型够不着的能力,经这里暴露成 /api/internal/cap/* 再包成 MCP

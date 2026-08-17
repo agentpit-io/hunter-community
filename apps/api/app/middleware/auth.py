@@ -54,6 +54,12 @@ _PUBLIC_PREFIXES = (
     # 量化策略 · 因子/官方策略公开可看 · 我的策略 handler 内部再校 uid
     # (endpoint 本身在公开代码里 · 无凭证)
     "/api/quant/",
+    # 数据源「来源模板」· 只是一张"我们支持接哪些来源"的静态清单,不含任何凭证。
+    # 免登录是有意的:用户在决定要不要用这个开源版时,
+    # 「它能接我手上的 Tushare 吗」是个先决问题,不该先逼他注册。
+    # ⚠️ 只放这一条路径 —— `/api/user_sources` 其余端点(CRUD/test)
+    # 都带用户凭证,必须登录,所以**不能**把 "/api/user_sources/" 整个放进来
+    "/api/user_sources/templates",
     # Internal MCP bridge · shared-secret authenticated separately
     "/api/internal/",
 )

@@ -451,6 +451,44 @@ async def init_db():
         """)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_umcl_user_ts ON user_mcp_call_log(user_id, ts DESC)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_umcl_mcp_ts  ON user_mcp_call_log(mcp_id, ts DESC)")
+        # 用户自定义数据源 · DDL 同 sql/20260817_user_data_source.sql(`_21` §7.1)
+        # 与 user_mcp_registrations 同构:同样的加密、hint 回显、熔断字段,
+        # 因为解决的是同一类问题 —— 用户凭证要安全存/能回显/失败要降级而不是卡超时
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS user_data_sources (
+              id            BIGSERIAL   PRIMARY KEY,
+              user_id       TEXT        NOT NULL,
+              name          TEXT        NOT NULL,
+              upstream      VARCHAR(32) NOT NULL,
+              market        VARCHAR(8)  NOT NULL,
+              kind          VARCHAR(16) NOT NULL,
+              endpoint      TEXT        NOT NULL,
+              requires_key  BOOLEAN     NOT NULL DEFAULT TRUE,
+              key_in        VARCHAR(16) NOT NULL DEFAULT 'header',
+              key_name      VARCHAR(64) NOT NULL DEFAULT 'Authorization',
+              key_prefix    VARCHAR(16) NOT NULL DEFAULT '',
+              api_key_enc   TEXT,
+              api_key_hint  VARCHAR(12) NOT NULL DEFAULT '',
+              headers       JSONB       NOT NULL DEFAULT '{}'::jsonb,
+              field_map     JSONB       NOT NULL DEFAULT '{}'::jsonb,
+              enabled       BOOLEAN     NOT NULL DEFAULT TRUE,
+              timeout_ms    INT         NOT NULL DEFAULT 15000,
+              fail_streak    INT        NOT NULL DEFAULT 0,
+              cooldown_until TIMESTAMPTZ,
+              last_ok_at     TIMESTAMPTZ,
+              last_err       TEXT,
+              call_count     BIGINT     NOT NULL DEFAULT 0,
+              error_count    BIGINT     NOT NULL DEFAULT 0,
+              created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+              updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_uds_user_lookup "
+                    "ON user_data_sources(user_id, market, kind) WHERE enabled")
+        # 同一 (market, kind, upstream) 只允许一条 —— 允许两条的话
+        # "优先用户的" 就成了 "优先用户的哪一条?",没有答案
+        cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_uds_user_slot "
+                    "ON user_data_sources(user_id, market, kind, upstream)")
         # 用户记忆体:画像(结构化,可统计) + 浓缩记忆(JSONB,结构会演进) + 变更日志
         # DDL 同 sql/20260806_user_memory.sql
         cur.execute("""
