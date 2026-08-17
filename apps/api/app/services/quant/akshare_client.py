@@ -145,3 +145,169 @@ get_gross_margin = _percent_field("gross_margin_pct")
 get_debt_ratio = _percent_field("debt_ratio_pct")
 get_revenue_growth = _percent_field("revenue_growth_pct")
 get_earnings_growth = _percent_field("earnings_growth_pct")
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# C1 · dividend_yield · 近 12M 现金分红 / 当日 close(A 股 · 派息单位 元/10股)
+# ═════════════════════════════════════════════════════════════════════════
+
+def _fetch_dividend_df(code: str):
+    """15s 超时 · 3 次 retry · 参见 _fetch_indicator_df 同款模式"""
+    import akshare as ak
+    import warnings
+    import concurrent.futures
+    warnings.filterwarnings("ignore")
+
+    def _do():
+        return ak.stock_history_dividend_detail(symbol=code, indicator="分红")
+
+    for attempt in range(_RETRY):
+        ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        try:
+            fut = ex.submit(_do)
+            df = fut.result(timeout=15)
+            ex.shutdown(wait=False)
+            time.sleep(_SLEEP)
+            return df
+        except concurrent.futures.TimeoutError:
+            log.warning(f"[akshare-div] {code} attempt {attempt+1}/{_RETRY} · TIMEOUT 15s")
+            ex.shutdown(wait=False)
+        except Exception as e:
+            log.warning(f"[akshare-div] {code} attempt {attempt+1}/{_RETRY} · {e}")
+            ex.shutdown(wait=False)
+        if attempt < _RETRY - 1:
+            time.sleep(1.5 * (attempt + 1))
+    return None
+
+
+@lru_cache(maxsize=2048)
+def _fetch_dividends_all(code: str):
+    """按 code 缓存全历史分红明细 · 12 期回填共用一次 fetch"""
+    df = _fetch_dividend_df(code)
+    if df is None or len(df) == 0:
+        return None
+    return df
+
+
+def get_dividend_yield(code: str, trade_date: date) -> float | None:
+    """近 12M 累计现金分红(元/股) / 当日 close · 单位 %(小数)
+    - 派息列单位 · 元/10股 · 除以 10 得元/股
+    - 只统计进度='实施'(排除公告未实施)
+    - 除权除息日 < trade_date 才计入(避免未来函数)
+    - 无分红返 None(不参与 z-score · 不写 factor_value)
+    - 极端值 > 0.30(30%)视脏数据 · 返 None
+    """
+    from app.services.database import get_conn
+    df = _fetch_dividends_all(code)
+    if df is None or df.empty:
+        return None
+    try:
+        import pandas as pd
+        df2 = df.copy()
+        df2["_ex_dt"] = pd.to_datetime(df2["除权除息日"], errors="coerce")
+        cutoff_hi = pd.Timestamp(trade_date)
+        cutoff_lo = pd.Timestamp(trade_date - timedelta(days=365))
+        # 只留已实施 + 除权在 [cutoff_lo, trade_date]
+        df2 = df2[(df2["_ex_dt"] >= cutoff_lo) & (df2["_ex_dt"] <= cutoff_hi)]
+        if "进度" in df2.columns:
+            df2 = df2[df2["进度"].astype(str).str.contains("实施", na=False)]
+        if df2.empty:
+            return None
+        total_per_10 = 0.0
+        for _, r in df2.iterrows():
+            try:
+                total_per_10 += float(r.get("派息") or 0)
+            except (TypeError, ValueError):
+                continue
+        if total_per_10 <= 0:
+            return None
+        dps = total_per_10 / 10.0
+
+        # 拉当日 close
+        conn = get_conn(); cur = conn.cursor()
+        cur.execute(
+            """SELECT close FROM klines
+               WHERE code=%s AND period='daily' AND ts <= %s
+               ORDER BY ts DESC LIMIT 1""",
+            (code, trade_date),
+        )
+        row = cur.fetchone()
+        cur.close(); conn.close()
+        if not row or not row[0]:
+            return None
+        close = float(row[0])
+        if close <= 0:
+            return None
+        dy = dps / close
+        if 0 < dy < 0.30:
+            return dy
+        return None
+    except Exception as e:
+        log.warning(f"[dividend_yield] {code}: {e}")
+        return None
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# C1 · main_flow · 近 5 日主力资金净流入 / 近 5 日总资金流
+# 数据源:finance-data /api/v1/money_flow · AKShare 上游 stock_individual_fund_flow
+# 在生产网络封禁 · 走 finance-data 网关(已鉴权 · 已缓存)· 参考 factor_engine.py
+# 的老实现 _fetch_flow_sync · 只不过取多天(days=5)算比值
+# ═════════════════════════════════════════════════════════════════════════
+
+def _fetch_flow_5d(code: str, trade_date: date, days: int = 5) -> list[dict] | None:
+    """走 finance-data 网关拿多天资金流 · 返 [{trade_date, super_buy, super_sell, ...}]
+    - 不 cache(不同 trade_date 数据不同)
+    - 用 hunter_key + saas gateway auth · 与 factor_engine 老实现一致
+    """
+    from app.services.finance_data_client import to_symbol, _get
+    sym = to_symbol(code)
+    if not sym:
+        return None
+    try:
+        data = _get(f"/api/v1/money_flow/{sym}", {"days": max(days * 2, 10)})
+        # 多拿一点 · 因 trade_date 可能不是最新交易日 · 需过滤后再切
+        if not isinstance(data, list) or not data:
+            return None
+        # 过滤 trade_date · 只留 <= trade_date 的
+        cutoff = trade_date.isoformat()
+        filtered = [r for r in data if str(r.get("trade_date", ""))[:10] <= cutoff]
+        # 按日期降序 · 取最近 days 天
+        filtered.sort(key=lambda r: str(r.get("trade_date", "")), reverse=True)
+        return filtered[:days] if len(filtered) >= days else None
+    except Exception as e:
+        log.warning(f"[main_flow-fetch] {code}: {e}")
+        return None
+
+
+def get_main_flow_ratio(code: str, trade_date: date, days: int = 5) -> float | None:
+    """近 N 日主力净流入 / 近 N 日总资金流(所有方向)
+    - main_net = super_buy - super_sell + big_buy - big_sell(超大 + 大单净流入)
+    - total_flow = 所有方向绝对值(近似成交额 · 用于归一化)
+    - ratio = main_net_sum / total_flow_sum · 截断 [-0.5, 0.5]
+    - 无 N 天完整数据返 None(不写 factor_value)
+    """
+    rows = _fetch_flow_5d(code, trade_date, days)
+    if not rows or len(rows) < days:
+        return None
+    try:
+        main_net_sum = 0.0
+        total_flow_sum = 0.0
+        for r in rows:
+            super_buy = float(r.get("super_buy") or 0)
+            super_sell = float(r.get("super_sell") or 0)
+            big_buy = float(r.get("big_buy") or 0)
+            big_sell = float(r.get("big_sell") or 0)
+            mid_buy = float(r.get("mid_buy") or 0)
+            mid_sell = float(r.get("mid_sell") or 0)
+            small_buy = float(r.get("small_buy") or 0)
+            small_sell = float(r.get("small_sell") or 0)
+            main_net_sum += (super_buy - super_sell) + (big_buy - big_sell)
+            total_flow_sum += (super_buy + super_sell + big_buy + big_sell
+                              + mid_buy + mid_sell + small_buy + small_sell)
+        if total_flow_sum <= 0:
+            return None
+        ratio = main_net_sum / total_flow_sum
+        return max(-0.5, min(0.5, ratio))
+    except Exception as e:
+        log.warning(f"[main_flow] {code}: {e}")
+        return None

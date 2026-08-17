@@ -256,6 +256,42 @@ def _compute_vol_20d_inv(codes, trade_date):
     return out
 
 
+# ═══════════════════════════════════════════════════════════════
+# C1 · 3 新因子(dividend_yield / kronos / main_flow)
+# ═══════════════════════════════════════════════════════════════
+
+def _compute_dividend_yield(codes, trade_date):
+    """近 12M 现金分红 / 当日 close · 见 akshare_client.get_dividend_yield"""
+    from app.services.quant import akshare_client as akc
+    out = {}
+    for code in codes:
+        dy = akc.get_dividend_yield(code, trade_date)
+        if dy is not None:
+            out[code] = dy
+    return out
+
+
+def _compute_kronos(codes, trade_date):
+    """Kronos 5 日预测收益率 · T-0 · 无未来函数
+    注:trade_date 参数被忽略 · Kronos 只能拿当日预测
+    (回填历史因子时 · trade_date != today 的调用会拿今日预测 · 有偏)
+    · 建议只在生产 APScheduler(当日)调用 · 历史回填走"每日快照"逻辑
+    """
+    from app.services.quant.kronos_client import batch_get_kronos
+    return batch_get_kronos(codes, horizon=5)
+
+
+def _compute_main_flow(codes, trade_date):
+    """近 5 日主力净流入 / 5 日总资金流 · 见 akshare_client.get_main_flow_ratio"""
+    from app.services.quant import akshare_client as akc
+    out = {}
+    for code in codes:
+        r = akc.get_main_flow_ratio(code, trade_date, days=5)
+        if r is not None:
+            out[code] = r
+    return out
+
+
 def _compute_candle_5d(codes, trade_date):
     """近 5 日阳线数 / 5"""
     conn = get_conn(); cur = conn.cursor()
@@ -297,6 +333,11 @@ COMPUTERS = {
     "rsi": _compute_rsi,
     "vol_20d_inv": _compute_vol_20d_inv,
     "candle_5d": _compute_candle_5d,
+    # C1 · 3 新因子(dividend_yield / kronos / main_flow)
+    "dividend_yield": _compute_dividend_yield,
+    "kronos": _compute_kronos,
+    "main_flow": _compute_main_flow,
+    # ev_ebitda_inv 按 05 §13.1 决策 1 跳过 · factor_defs 保持 enabled=False
 }
 
 

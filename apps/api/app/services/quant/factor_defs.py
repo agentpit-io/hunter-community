@@ -27,8 +27,8 @@ ALL_FACTORS: list[FactorDef] = [
     # ── 价值 ──
     FactorDef("pe_inv",         "价值", "市盈率倒数",     "💰", "1 / TTM PE · 低估值分数高", enabled=True),
     FactorDef("pb_inv",         "价值", "市净率倒数",     "💰", "1 / PB · 破净股偏防御"),
-    FactorDef("dividend_yield", "价值", "股息率",         "💰", "近 12 月现金分红 / 市值", enabled=False),
-    FactorDef("ev_ebitda_inv",  "价值", "EV/EBITDA 倒数", "💰", "企业价值 / 息税折旧摊销前利润 倒数", enabled=False),
+    FactorDef("dividend_yield", "价值", "股息率",         "💰", "近 12 月现金分红 / 当日 close(A 股派息单位元/10股)"),
+    FactorDef("ev_ebitda_inv",  "价值", "EV/EBITDA 倒数", "💰", "企业价值 / 息税折旧摊销前利润 · Phase C 跳过 · Phase D 补(见 05 §13.1)", enabled=False),
 
     # ── 质量 ──
     FactorDef("roe",            "质量", "ROE",           "🏆", "TTM 净利润 / 平均归母权益", enabled=True),
@@ -46,10 +46,10 @@ ALL_FACTORS: list[FactorDef] = [
     FactorDef("momentum_12m_1m", "动量", "12M-1M 动量", "📈", "剔除最近 1 月的 11 月涨幅 · 学术经典", enabled=True),
 
     # ── ML / 技术 / 资金 ──
-    FactorDef("kronos",    "ML",   "Kronos 技术",     "🧠", "清华 Kronos 时序大模型未来 5 日预测", enabled=False),
+    FactorDef("kronos",    "ML",   "Kronos 技术",     "🧠", "清华 Kronos 时序大模型未来 5 日预测收益率"),
     FactorDef("ma_align",  "技术", "均线趋势",        "📉", "MA5/10/20/60 多头排列打分"),
     FactorDef("macd",      "技术", "MACD 动量",       "📉", "MACD_bar / ATR14"),
-    FactorDef("main_flow", "资金", "主力净流入",      "💵", "5 日主力资金净流入占比", enabled=False),
+    FactorDef("main_flow", "资金", "主力净流入",      "💵", "近 5 日超大单+大单净流入 / 5 日总资金流"),
     FactorDef("rsi",       "技术", "RSI 超买卖",      "📉", "RSI14 分段映射"),
 
     # ── 波动 / 其他 ──
