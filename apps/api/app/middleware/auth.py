@@ -72,19 +72,18 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if path in _PUBLIC_PATHS or not path.startswith("/api/"):
             return await call_next(request)
         if any(path.startswith(p) for p in _PUBLIC_PREFIXES):
-            # ⚠️ `/api/internal/*` 在白名单里,**在这里就 return 了** ——
-            # 下面那段设 user_id 的代码根本走不到。
+            # ⚠️ 白名单在这里就 return 了 —— 下面那段设 user_id 的代码走不到。
             #
-            # 这正是聊天里问股价拿不到用户数据源的原因:MCP 工具走的就是
-            # 这条路。身份其实**送到了**(hunter-mcp-context plugin 注入的
-            # X-Hunter-User-Id),只是没人把它转给 contextvar,于是
-            # source_resolver 看到 user_id=None,永远直接走官方源 ——
-            # 不报错、不告警,又一次静默失败。
+            # 「免登录可访问」不等于「不认识用户」。这两件事被混为一谈,
+            # 造成了同一个 bug 的两个实例:
+            #   · `/api/internal/*` —— 聊天问股价时 source_resolver 看到
+            #     user_id=None,永远走官方源
+            #   · `/api/catalog/*`  —— 能力库页拿不到"你自己的"那组,
+            #     用户明明加了数据源,列表里却还是"你还没有接自己的数据源"
+            # 两处都不报错、不告警。
             #
-            # 放在中间件里而不是四个 internal 路由各加一行:那四份 `_auth`
-            # 本来就是同一件事抄了四遍,再抄第五遍只会让下一个新增的
-            # internal 路由继续漏掉。这里一处覆盖全部,包括以后新加的。
-            _bind_internal_identity(request, path)
+            # 所以这里做**可选身份识别**:能认出来就认,认不出照常放行。
+            _bind_optional_identity(request, path)
             return await call_next(request)
 
         token = _extract_token(request)
@@ -126,29 +125,46 @@ class AuthMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-def _bind_internal_identity(request: Request, path: str) -> None:
-    """把 MCP 桥带进来的 `X-Hunter-User-Id` 转成 contextvar。
+def _bind_optional_identity(request: Request, path: str) -> None:
+    """免登录路径上的**可选身份识别** —— 认得出就认,认不出照常放行。
 
-    只对 `/api/internal/*` 生效。**不做鉴权** —— 鉴权仍由各 internal 路由
-    自己的共享 secret 校验负责,这里只是把已经送到的身份挂上去。
-    即使 header 是伪造的也没有新增暴露面:那些路由本来就用这个 header
-    取数据,伪造它的前提是已经拿到了共享 secret。
+    两个来源,对应两类调用方:
 
-    header 缺失时**显式记一条日志**。缺失的表现是"用户配了数据源但
-    聊天里用不上",而这个原因从现象上完全看不出来 —— 必须在日志里留痕。
+      · `/api/internal/*` —— MCP 桥注入的 `X-Hunter-User-Id`。
+        **不做鉴权**:鉴权仍由各 internal 路由自己的共享 secret 负责。
+        伪造这个 header 没有新增暴露面 —— 那些路由本来就用它取数据,
+        伪造的前提是已经拿到了共享 secret。
+
+      · 其余公开路径 —— 浏览器带的 Bearer token。校验**照常做**(走同一个
+        `_verify`),只是校验失败不拒绝请求,而是当匿名处理。
+        `/api/catalog/*` 就是这一类:它是公开的("这套部署能拿到什么数据"
+        谁都能看),但登录了就该多看到"你自己接的那些"。
+
+    识别不到时记 debug 日志。**这条日志很重要**:识别不到的表现是
+    "我明明加了数据源,列表里却说我没加",而这个原因从现象上完全看不出来。
     """
-    if not path.startswith("/api/internal/"):
-        return
+    uid = None
     try:
+        if path.startswith("/api/internal/"):
+            uid = request.headers.get("X-Hunter-User-Id", "").strip() or None
+        else:
+            token = _extract_token(request)
+            if token:
+                payload = _verify(token)
+                if payload and payload.get("type") in ("access", None):
+                    uid = payload.get("sub")
+
+        # request.state 与 contextvar 两处都设:前者给能拿到 request 的
+        # handler(如 /catalog/sources),后者给取数层那些模块级同步函数
+        request.state.user_id = uid
         from app.services import request_ctx
-        uid = request.headers.get("X-Hunter-User-Id", "").strip()
-        request_ctx.set_user(uid or None)
+        request_ctx.set_user(uid)
         request_ctx.begin_provenance()
         if not uid:
-            logger.debug("[auth] internal 请求无 X-Hunter-User-Id path={} "
-                         "· 用户自定义数据源将不参与本次取数", path)
-    except Exception as e:      # noqa: BLE001 — 绝不能让它挡住内部调用
-        logger.warning("[auth] 绑定 internal 身份失败(已忽略): {}", e)
+            logger.debug("[auth] 公开路径未识别到用户 path={} "
+                         "· 用户自定义数据源不会出现在结果里", path)
+    except Exception as e:      # noqa: BLE001 — 绝不能让它挡住公开请求
+        logger.warning("[auth] 可选身份识别失败(已忽略): {}", e)
 
 
 def _extract_token(request: Request) -> str | None:

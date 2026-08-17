@@ -114,7 +114,18 @@ export interface Summary {
 }
 
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`/api/catalog${path}`, { cache: 'no-store' })
+  // `/api/catalog/*` 免登录可访问,但**带上 token 才能看到「你自己的」那组**。
+  // 这里原来一个 header 都不发 —— 于是用户加完数据源,列表里仍显示
+  // "你还没有接自己的数据源"。保存成功了、库里也有,就是看不见。
+  //
+  // 「免登录可访问」不等于「不认识用户」。后端对公开路径做的是
+  // 可选身份识别:token 有效就认,没有或无效就当匿名,都不拒绝。
+  const headers: Record<string, string> = {}
+  if (typeof window !== 'undefined') {
+    const t = localStorage.getItem('hunter_token') || ''
+    if (t) headers['Authorization'] = `Bearer ${t}`
+  }
+  const res = await fetch(`/api/catalog${path}`, { headers, cache: 'no-store' })
   if (!res.ok) throw new Error(`catalog${path} ${res.status}`)
   return res.json()
 }

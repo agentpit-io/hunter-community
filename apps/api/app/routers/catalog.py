@@ -70,11 +70,21 @@ async def list_sources(
             g["sources"] = [s for s in g["sources"]
                             if s["status"] not in ("unavailable", "need_key")]
 
+    # summary 走 grouped()(按市场,不含用户源),再把用户源单独加回来。
+    # 不这么做的话用户加了源,列表里能看见但顶部计数不动 —— 又是一处
+    # "用户自己的东西在某个视图里不存在"。
     all_groups = catalog.grouped()
     total = sum(g["total"] for g in all_groups)
     ready = sum(g["ready"] for g in all_groups)
     blocked = [s for g in all_groups for s in g["sources"] if s["status"] == "unavailable"]
     need_key = [s for g in all_groups for s in g["sources"] if s["status"] == "need_key"]
+
+    user_uid = getattr(request.state, "user_id", None)
+    user_items = ([catalog.to_dict(s) for s in catalog._user_sources(user_uid)]
+                  if user_uid else [])
+    total += len(user_items)
+    ready += sum(1 for i in user_items
+                 if i["status"] not in ("unavailable", "need_key"))
     return {
         "groups": groups,
         "group_by": by,
@@ -91,6 +101,7 @@ async def list_sources(
             # need_key 去申请一把 key 就解决,unavailable 做什么都没用
             "need_key_count": len(need_key),
             "unavailable_count": len(blocked),
+            "user_added": len(user_items),
         },
     }
 
