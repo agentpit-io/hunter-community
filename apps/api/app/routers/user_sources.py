@@ -362,6 +362,59 @@ async def delete_source(sid: int, request: Request):
 
 
 # ═════════════════════════════════════════════════════════════════
+# GET /api/user_sources/health · 「你的源用上了吗」
+# ═════════════════════════════════════════════════════════════════
+
+@router.get("/health")
+async def sources_health(request: Request):
+    """用户源的真实使用情况 —— 降级标注(`_21` §6.3)的数据面。
+
+    **这个端点回答的是老板那句话真正的验收问题:「我脱离了吗?」**
+
+    只给"配了几个源"是不够的 —— 配了不等于用上了。所以这里给的是
+    调用计数、最近一次成功时间、当前是否在熔断冷却里,
+    以及冷却的原因。这三样合起来才能回答那个问题。
+    """
+    uid = _uid(request)
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT id, name, upstream, market, kind, enabled, call_count, error_count, "
+            "       last_ok_at, last_err, fail_streak, cooldown_until, "
+            "       (cooldown_until IS NOT NULL AND cooldown_until > NOW()) AS cooling "
+            "FROM user_data_sources WHERE user_id=%s ORDER BY updated_at DESC", (uid,))
+        rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    items = [{
+        "id": r[0], "name": r[1], "upstream": r[2], "market": r[3], "kind": r[4],
+        "enabled": r[5], "call_count": r[6], "error_count": r[7],
+        "last_ok_at": r[8].isoformat() if r[8] else None,
+        "last_err": r[9] or "", "fail_streak": r[10],
+        "cooldown_until": r[11].isoformat() if r[11] else None,
+        "cooling": bool(r[12]),
+        # 三种"没在用"分开说 —— 用户的下一步动作完全不同:
+        #   停用了   → 去启用
+        #   熔断中   → 去看 last_err 修配置
+        #   没调用过 → 可能是这个 (市场,类型) 根本没被用到,不是坏了
+        "state": ("disabled" if not r[5]
+                  else "cooling" if r[12]
+                  else "never_called" if not r[6]
+                  else "active"),
+    } for r in rows]
+    return {
+        "sources": items,
+        "active": sum(1 for i in items if i["state"] == "active"),
+        "cooling": sum(1 for i in items if i["state"] == "cooling"),
+        # 本次请求的出处记录 —— 只在同一个请求里有意义,这里给的是
+        # 空的(GET /health 自己没取数)。真正的徽章数据走
+        # 各业务接口返回体里的 _provenance,见 request_ctx
+        "note": "各业务接口的返回体里带 _provenance,那才是本次回答用了谁",
+    }
+
+
+# ═════════════════════════════════════════════════════════════════
 # POST /api/user_sources/test · 保存前先打一次真实请求
 # ═════════════════════════════════════════════════════════════════
 

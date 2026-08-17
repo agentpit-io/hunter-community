@@ -98,6 +98,18 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         request.state.user_id = payload["sub"]
         request.state.user_role = payload.get("role", "user")
+        # 同一个 user_id 也挂到 contextvar 上(`_21` §6.2)。
+        # 为什么两处都要:`request.state` 只有拿得到 request 对象的地方能读,
+        # 而取数发生在 `finance_data_client` 那十几个**模块级同步函数**里,
+        # 它们没有 request。contextvar 是一处设置、全链路可见 ——
+        # 挨个加 user_id 参数的话,漏掉一处的表现是"这个功能不认用户的
+        # 数据源"且不报错,又是一次静默失败。
+        try:
+            from app.services import request_ctx
+            request_ctx.set_user(payload["sub"])
+            request_ctx.begin_provenance()
+        except Exception:      # noqa: BLE001 — 取数出处是增强,不能让它挡住请求
+            pass
         return await call_next(request)
 
 

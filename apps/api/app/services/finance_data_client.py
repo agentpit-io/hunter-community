@@ -225,8 +225,43 @@ def _get(path: str, params: dict = None) -> dict | list | None:
         return None
 
 
+def _market_of(code: str) -> str:
+    """粗判市场 —— 只给解析链查用户源用(`_21` §6.1)。
+
+    不追求精确:判错的后果是"没匹配到用户在这个市场配的源",
+    然后照常走官方链路。**不会取到错市场的数据**,因为用户源是按
+    (market, kind) 存的,查不到就是查不到。
+    """
+    s = (code or "").upper()
+    if s.endswith(".HK") or (s.isdigit() and len(s) == 5):
+        return "hk"
+    if s.endswith(".US") or (s and s[0].isalpha()):
+        return "us"
+    return "a"
+
+
 def get_quote(code: str) -> dict | None:
     """实时报价快照（含五档盘口）· SaaS or provider fallback."""
+    # ── 用户自己的数据源优先(`_21` §6)──────────────────────────
+    # 加一层在**前面**,而不是重写下面这条路径。用户没配任何源时
+    # (现在 100% 的情况)`try_user` 直接返回 None,后续行为逐字节不变。
+    try:
+        from app.services import source_resolver
+        hit = source_resolver.try_user(_market_of(code), "quote", code)
+        if hit and hit.get("price") is not None:
+            stock = STOCK_MAP.get(code) or _dynamic_map.get(code) or {}
+            return {"code": code, "name": stock.get("name") or code,
+                    "price": _f(hit.get("price")),
+                    "change_pct": _f(hit.get("change_pct")),
+                    "open": _f(hit.get("open")), "high": _f(hit.get("high")),
+                    "low": _f(hit.get("low")),
+                    "prev_close": _f(hit.get("prev_close")),
+                    "volume": int(hit.get("volume") or 0)}
+    except Exception as e:      # noqa: BLE001
+        # 解析链自己出错**绝不能**拖垮取数 —— 它是增强,不是必经之路
+        from loguru import logger as _lg
+        _lg.warning("[finance_data_client] 用户源解析异常(已忽略): {}", e)
+
     # No SaaS URL configured → go straight to providers.data_source
     if not _use_saas():
         base = _provider_get_quote_sync(code)
@@ -456,6 +491,17 @@ def get_reliable_close(code: str, today: str) -> dict | None:
 
 def get_kline(code: str, period: str = "daily", limit: int = 120) -> list[dict]:
     """K线数据。period: daily/weekly/monthly → tf=1d。"""
+    # 用户自己的 K线源优先 · 同 get_quote,加一层在前面不动原路径
+    try:
+        from app.services import source_resolver
+        hit = source_resolver.try_user(_market_of(code), "kline", code)
+        rows = (hit or {}).get("rows") or []
+        if rows:
+            return rows[-limit:] if limit else rows
+    except Exception as e:      # noqa: BLE001
+        from loguru import logger as _lg
+        _lg.warning("[finance_data_client] 用户 K线源解析异常(已忽略): {}", e)
+
     sym = to_symbol(code)
     if not sym:
         return []
