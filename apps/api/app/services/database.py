@@ -734,13 +734,14 @@ def hard_remove_stock(code: str) -> None:
 # ─────────────────────────────────────────────────────────────────────
 
 def get_stocks_by_user(user_id: str) -> list[dict]:
+    # Sprint 1: 去掉 market NOT IN ('US','HK') 过滤 · A/HK/US 在同一个自选股列表统一展示
+    # 之前 gm 端与 A 股端隔离,导致从 A 股页添加港股后 SQL 过滤看不到 · 用户产品决策合并
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
         "SELECT code, name, market, exchange, COALESCE(asset_type,'stock') "
         "FROM stocks WHERE enabled = TRUE AND user_id = %s "
-        "AND (market IS NULL OR market NOT IN ('US','HK')) "  # gm端(美港股)自选与A股端隔离
-        "ORDER BY code",
+        "ORDER BY market, code",
         (user_id,),
     )
     rows = cur.fetchall()
@@ -825,6 +826,7 @@ def get_thesis_by_user(code: str, user_id: str) -> dict | None:
 
 
 def list_stocks_with_thesis_by_user(user_id: str) -> list[dict]:
+    # Sprint 1: 同 get_stocks_by_user · 合并 A/HK/US 到 /watchlist 管理页
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("""
@@ -834,8 +836,7 @@ def list_stocks_with_thesis_by_user(user_id: str) -> list[dict]:
         FROM stocks s
         LEFT JOIN position_thesis t ON t.code = s.code AND t.user_id = s.user_id
         WHERE s.enabled = TRUE AND s.user_id = %s
-          AND (s.market IS NULL OR s.market NOT IN ('US','HK'))
-        ORDER BY s.code
+        ORDER BY s.market, s.code
     """, (user_id,))
     rows = cur.fetchall()
     conn.close()

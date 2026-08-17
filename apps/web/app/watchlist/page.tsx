@@ -38,6 +38,34 @@ function tagOf(it: Item): { label: string; bg: string; fg: string } {
   return { label: 'A股', bg: 'rgba(176,106,50,0.12)', fg: 'var(--blue)' }
 }
 
+// Sprint 2 · 分组展示 · 优先按 asset_type=fund 分独立"基金"组,其余按 market 分
+// ETF (asset_type=etf, market=A) 归入 A 股组 · 币种为 A 股同一大类
+type GroupKey = 'A' | 'HK' | 'US' | 'FUND'
+const GROUP_ORDER: Record<GroupKey, number> = { A: 1, HK: 2, US: 3, FUND: 4 }
+const GROUP_META: Record<GroupKey, { label: string; bg: string; fg: string }> = {
+  A:    { label: 'A 股', bg: 'rgba(176,106,50,0.12)', fg: 'var(--blue)' },
+  HK:   { label: '港股', bg: 'rgba(217,119,6,0.12)',  fg: 'var(--yellow)' },
+  US:   { label: '美股', bg: 'rgba(22,163,74,0.12)',  fg: '#16a34a' },
+  FUND: { label: '基金', bg: 'rgba(168,85,247,0.12)', fg: '#a855f7' },
+}
+
+function groupKeyOf(it: Item): GroupKey {
+  if (it.asset_type === 'fund') return 'FUND'
+  const m = (it.market || 'A').toUpperCase()
+  if (m === 'HK' || m === 'US' || m === 'FUND') return m as GroupKey
+  return 'A'
+}
+
+function groupByMarket(items: Item[]): [GroupKey, Item[]][] {
+  const groups = {} as Record<GroupKey, Item[]>
+  for (const it of items) {
+    const k = groupKeyOf(it)
+    ;(groups[k] ||= []).push(it)
+  }
+  return (Object.entries(groups) as [GroupKey, Item[]][])
+    .sort(([a], [b]) => GROUP_ORDER[a] - GROUP_ORDER[b])
+}
+
 export default function WatchlistManagePage() {
   const [items, setItems] = useState<Item[]>([])
   const [loading, setLoading] = useState(true)
@@ -87,11 +115,27 @@ export default function WatchlistManagePage() {
         ) : items.length === 0 ? (
           <EmptyState />
         ) : (
-          <div className="grid gap-5" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))' }}>
-            {items.map(it => (
-              <StockCard key={it.code} item={it} onDelete={() => setConfirmDel(it)} />
+          <>
+            <SummaryHeader items={items} />
+            {groupByMarket(items).map(([mkt, list]) => (
+              <section key={mkt} id={`section-${mkt}`} className="mb-10 scroll-mt-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <span className="text-xs px-2 py-1 rounded font-medium"
+                    style={{ background: GROUP_META[mkt].bg, color: GROUP_META[mkt].fg }}>
+                    {GROUP_META[mkt].label}
+                  </span>
+                  <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                    {list.length} 只
+                  </span>
+                </div>
+                <div className="grid gap-5" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))' }}>
+                  {list.map(it => (
+                    <StockCard key={it.code} item={it} onDelete={() => setConfirmDel(it)} />
+                  ))}
+                </div>
+              </section>
             ))}
-          </div>
+          </>
         )}
       </div>
 
@@ -146,6 +190,29 @@ function StockCard({ item, onDelete }: { item: Item; onDelete: () => void }) {
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+function SummaryHeader({ items }: { items: Item[] }) {
+  const groups = groupByMarket(items)
+  return (
+    <div className="mb-8 flex flex-wrap items-center gap-3">
+      <div className="text-sm font-medium" style={{ color: 'var(--text)' }}>
+        合计 {items.length} 只
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {groups.map(([mkt, list]) => {
+          const meta = GROUP_META[mkt]
+          return (
+            <a key={mkt} href={`#section-${mkt}`}
+              className="text-xs px-2.5 py-1 rounded-full font-medium transition-opacity hover:opacity-80"
+              style={{ background: meta.bg, color: meta.fg }}>
+              {meta.label} {list.length}
+            </a>
+          )
+        })}
+      </div>
     </div>
   )
 }

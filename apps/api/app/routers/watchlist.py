@@ -158,7 +158,10 @@ async def search_stocks(q: str = "", limit: int = 10):
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=5) as resp:
             data = _json.loads(resp.read().decode("utf-8"))
-        raw = data.get("QuotationCodeTable", {}).get("Data", [])
+        # 东财对模糊 query(如"chang c"、"长城qi c")会返回 Data: null,
+        # 用 or 兜底 · dict.get 的 default 只在 key 缺失时生效,值为 None 不兜
+        qct = data.get("QuotationCodeTable") or {}
+        raw = qct.get("Data") or []
     except Exception:
         return {"items": [], "count": 0}
 
