@@ -99,6 +99,7 @@ class ScanIn(BaseModel):
 async def scan(body: ScanIn, request: Request):
     trade_date = date.fromisoformat(body.trade_date) if body.trade_date else date.today()
     uid = getattr(request.state, "user_id", None)
+    # D-8 · scan 端点已加白名单 · 无 uid 时 strategy_engine._resolve_universe 自动 fallback hs300
     picks = strategy_engine.score_and_select(
         {"factors": body.factors, "config": body.config or {"top_n": 20, "universe": "hs300"}},
         trade_date, str(uid) if uid else None,

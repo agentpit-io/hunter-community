@@ -138,8 +138,15 @@ services:
       # BFF 还要回调 api 查会话归属(谁能看哪个 session)。
       # 不传 → 回落 http://127.0.0.1:8000 → 503 ownership_unavailable
       HERMES_API_URL: http://api:8000
+      # BFF 拦截用户上传图片后调 /api/internal/ocr/extract 抽文本 · 走共享 secret
+      # 必须与 api 服务的 HUNTER_INTERNAL_KEY 同源 · 缺了 OCR 会 401 · image → text 兜底走"OCR 失败"分支
+      HUNTER_INTERNAL_KEY: ${HUNTER_INTERNAL_KEY:-hunter-internal-local}
     ports:
       - "${WEB_HOST_PORT:-3100}:3000"
+    # Phase D-3 · public/ 目录 volume mount · 本地改 HTML/JS 立即生效
+    # · 免每次都 docker cp · 参见 doc 13 §4.3
+    volumes:
+      - ./apps/web/public:/app/public:ro
 
   # opencode 送出的 tool schema 是完整 JSON Schema,Gemini 只认 OpenAPI 子集,
   # 收到 $schema / additionalProperties 之类会整个请求报错 —— 表现是"一发消息就没回复"。
