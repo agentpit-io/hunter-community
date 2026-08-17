@@ -307,9 +307,9 @@ def bootstrap_backtest(
         if "error" not in r:
             results.append(r["metrics"])
 
-    if len(results) < 10:
+    if len(results) < 3:
         return {"error": "insufficient_bootstrap",
-                "message": f"仅 {len(results)}/{n_bootstrap} 次成功 · 数据可能不够"}
+                "message": f"仅 {len(results)}/{n_bootstrap} 次成功 · 数据可能不够(至少需 3 次)"}
 
     def _percentile(sorted_lst, p):
         n = len(sorted_lst)
