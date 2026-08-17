@@ -142,7 +142,61 @@ async def list_sources(request: Request):
         rows = cur.fetchall()
     finally:
         conn.close()
-    return {"sources": [_row(r) for r in rows], "max": MAX_SOURCES_PER_USER}
+    items = [_row(r) for r in rows]
+    return {
+        "sources": items,
+        "max": MAX_SOURCES_PER_USER,
+        "enabled_count": sum(1 for i in items if i["enabled"]),
+        # 「一键用官方」按钮要据此决定是"去填 key"还是"停用你的源"。
+        # 前端自己判断不了 —— 平台 key 可能来自 env 也可能是网页里填的
+        "platform_key": _has_platform_key(),
+    }
+
+
+def _has_platform_key() -> bool:
+    try:
+        from app.services import source_catalog
+        return source_catalog._has_platform_key()
+    except Exception:
+        return False
+
+
+# ═════════════════════════════════════════════════════════════════
+# POST /api/user_sources/bulk-enable · 一键用官方 / 一键切回自己的
+# ═════════════════════════════════════════════════════════════════
+
+class BulkIn(BaseModel):
+    enabled: bool
+
+
+@router.post("/bulk-enable")
+async def bulk_enable(body: BulkIn, request: Request):
+    """批量停用/启用当前用户的全部自定义源(`_21` §5 步 3)。
+
+    **停用,不是删除。**用户点「一键用官方」多半是在排查问题
+    (我自己配的是不是坏了?),排查完要能一键切回去。删掉就回不来了 ——
+    他得照着记忆把地址和 key 重新填一遍,而 key 我们只回显末 4 位,
+    等于让他去翻原始凭证。
+
+    顺带清熔断:重新启用时如果还带着冷却状态,用户会看到
+    "我明明启用了怎么还在走官方源"。
+    """
+    uid = _uid(request)
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute(
+            "UPDATE user_data_sources SET enabled=%s, updated_at=NOW()"
+            + (", fail_streak=0, cooldown_until=NULL" if body.enabled else "")
+            + " WHERE user_id=%s AND enabled<>%s",
+            (body.enabled, uid, body.enabled),
+        )
+        n = cur.rowcount
+        conn.commit()
+        cur.execute("SELECT count(*) FROM user_data_sources WHERE user_id=%s", (uid,))
+        total = cur.fetchone()[0]
+    finally:
+        conn.close()
+    return {"changed": n, "total": total, "enabled": body.enabled}
 
 
 # ═════════════════════════════════════════════════════════════════

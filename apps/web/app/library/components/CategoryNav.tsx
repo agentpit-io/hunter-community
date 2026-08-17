@@ -70,8 +70,8 @@ export default function CategoryNav({ query, sources, tools, skills, onAdd, onRe
         <button
           style={mgmtBtnStyle(!actionable)} disabled={!actionable}
           onClick={onReset}
-          title={actionable ? '删掉这一类里你自己加的全部条目 · 内置的不受影响' : '先选一个分类'}
-        >↻ 恢复初始</button>
+          title={actionable ? RESET_HINT[query.tab] : '先选一个分类'}
+        >{RESET_LABEL[query.tab] || '↻ 恢复初始'}</button>
       </div>
     </nav>
   )
@@ -81,6 +81,20 @@ const ADD_HINT: Record<string, string> = {
   sources: '添加自己的数据源',
   tools: '接入自己的 MCP 工具',
   skills: '从 GitHub 装,或自己写一个',
+}
+
+// 数据源那条**不叫"恢复初始"** —— 它做的是"停用你自己的源、全部走官方",
+// 而且**不删除**,随时能切回来。叫"恢复初始"会让人以为要丢东西,
+// 于是不敢点;而它恰恰是排查问题时最该点的那个按钮
+const RESET_LABEL: Record<string, string> = {
+  sources: '↻ 一键用官方默认',
+  tools: '↻ 恢复初始',
+  skills: '↻ 恢复初始',
+}
+const RESET_HINT: Record<string, string> = {
+  sources: '停用你自己接的全部数据源,改走官方源 · 不删除,随时可切回',
+  tools: '删掉这一类里你自己加的全部条目 · 内置的不受影响',
+  skills: '删掉这一类里你自己加的全部条目 · 内置的不受影响',
 }
 
 function GroupList({ tabId, groups, activeGroup, onAddTo }: {

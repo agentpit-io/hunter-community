@@ -11,6 +11,7 @@ import {
   type SourceGroup, type ToolGroup, type SkillGroup, type Summary, type SourcesResponse,
   type DataSourceItem, type ToolItem, type CatalogSkillItem,
 } from '../chat/lib/catalogClient'
+import { listUserSources, bulkEnableUserSources } from './lib/userSources'
 import { parseQuery, buildQuery, TABS } from './lib/nav'
 import CategoryNav from './components/CategoryNav'
 import SearchBar from './components/SearchBar'
@@ -59,6 +60,9 @@ function LibraryContent() {
   // 加完之后的结果 —— **必须显示**:装 SKILL 时 opencode 可能没重扫,
   // 那时文件写好了但模型还看不到,只说"已保存"是骗人
   const [notice, setNotice] = useState('')
+  // 二次确认 —— 「一键用官方」会一次性影响用户配的全部源,
+  // 而且他多半是在排查问题的当口点的,得先说清楚会发生什么、以及能不能撤
+  const [confirm, setConfirm] = useState<{ text: string; action: 'disable' | 'enable' } | null>(null)
 
   useEffect(() => {
     let alive = true
@@ -90,6 +94,56 @@ function LibraryContent() {
     listToolbox().then(setToolbox).catch(() => {})
     listCatalogSkills().then(setSkills).catch(() => {})
   }, [market])
+
+  /** 「一键用官方默认」/「恢复初始」· 按 tab 分流。
+   *
+   *  数据源那条走 bulk-enable(**停用不删除**);工具与 SKILL 还没做,
+   *  照实说而不是给一个点了没反应的按钮。 */
+  const onReset = useCallback(async () => {
+    if (query.tab !== 'sources') {
+      setNotice('「恢复初始」在工具箱/SKILL 这两类还没做 —— 它要删掉你加的全部条目,'
+                + '删之前得先能列出"哪些是你加的",那部分正在做')
+      return
+    }
+    try {
+      const cur = await listUserSources()
+      if (!cur.platform_key) {
+        setNotice('还没配平台 key —— 「用官方源」需要一把 hunt_tools_ key。'
+                  + '到设置页填上就能一次解锁全部官方数据源;'
+                  + '免费额度在 hunter.agentpit.io/dev/api-keys 申请')
+        return
+      }
+      if (cur.enabled_count === 0) {
+        // 已经全走官方了 —— 这时该提供的是**反向操作**,而不是重复一次同样的事
+        setConfirm({
+          text: `你自己的源已经全部停用,现在走的就是官方源(共 ${cur.sources.length} 条已停用)。`
+                + `要把它们重新启用吗?`,
+          action: 'enable',
+        })
+        return
+      }
+      setConfirm({
+        text: `将停用你自己接的 ${cur.enabled_count} 个数据源,全部改走官方源。`
+              + `**不会删除** —— 地址和 key 都留着,随时可以一键切回来。`,
+        action: 'disable',
+      })
+    } catch (e: any) {
+      setNotice(`读不到你的数据源:${e.message}`)
+    }
+  }, [query.tab])
+
+  const doBulk = useCallback(async (enabled: boolean) => {
+    setConfirm(null)
+    try {
+      const r = await bulkEnableUserSources(enabled)
+      setNotice(enabled
+        ? `已重新启用 ${r.changed} 个你自己的数据源 —— 取数会重新优先走它们。`
+        : `已停用 ${r.changed} 个,现在全部走官方源。它们没被删除,再点一次按钮就能切回来。`)
+      reload()
+    } catch (e: any) {
+      setNotice(`操作失败:${e.message}`)
+    }
+  }, [reload])
 
   const onSearch = useCallback((v: string) => {
     router.replace(buildQuery({ ...query, search: v }), { scroll: false })
@@ -133,8 +187,7 @@ function LibraryContent() {
           tools={toolbox?.groups || null}
           skills={skills?.groups || null}
           onAdd={(preset) => { setAddPreset(preset); setAddOpen(true); setDetailOpen(false) }}
-          onReset={() => setNotice('「恢复初始」还没做 —— 它要删掉你在这一类里加的全部条目,'
-                                   + '删之前得先能列出"哪些是你加的",那部分正在做')}
+          onReset={onReset}
         />
 
         <main style={mainStyle}>
@@ -143,6 +196,18 @@ function LibraryContent() {
           {notice && (
             <div style={noticeBoxStyle} onClick={() => setNotice('')} title="点击关闭">
               {notice}
+            </div>
+          )}
+
+          {confirm && (
+            <div style={confirmBoxStyle}>
+              <div style={{ marginBottom: 10, lineHeight: 1.8 }}>{confirm.text}</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => setConfirm(null)} style={confirmGhost}>取消</button>
+                <button onClick={() => doBulk(confirm.action === 'enable')} style={confirmPrimary}>
+                  {confirm.action === 'enable' ? '重新启用' : '停用并改走官方'}
+                </button>
+              </div>
             </div>
           )}
 
@@ -261,6 +326,23 @@ const noticeBoxStyle: React.CSSProperties = {
   margin: '0 0 14px', padding: '10px 13px', borderRadius: 9, cursor: 'pointer',
   background: HUNTER.TAG_OK_BG, color: HUNTER.TAG_OK_FG,
   fontSize: 12.5, lineHeight: 1.7,
+}
+
+// 确认框用**警示色**而不是通知色 —— 它要用户做决定,不是通知他事已办完
+const confirmBoxStyle: React.CSSProperties = {
+  margin: '0 0 14px', padding: '12px 14px', borderRadius: 9,
+  background: HUNTER.TAG_WARN_BG, color: HUNTER.TAG_WARN_FG,
+  fontSize: 12.5,
+}
+const confirmGhost: React.CSSProperties = {
+  padding: '6px 16px', borderRadius: 7, fontSize: 12, cursor: 'pointer',
+  background: 'transparent', color: 'inherit',
+  border: '1px solid currentColor', opacity: 0.7, fontFamily: 'inherit',
+}
+const confirmPrimary: React.CSSProperties = {
+  padding: '6px 16px', borderRadius: 7, fontSize: 12, fontWeight: 600,
+  cursor: 'pointer', background: HUNTER.THEME, color: '#fff',
+  border: 'none', fontFamily: 'inherit',
 }
 
 const errorBoxStyle: React.CSSProperties = {
