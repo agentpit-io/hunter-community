@@ -10,6 +10,20 @@ from app.services.database import get_conn
 from app.services.quant.factor_defs import get_factor
 
 
+def fetch_stock_names(codes: list[str]) -> dict[str, str]:
+    """从 stocks 表拿 code → name 映射 · 缺的返 code 本身"""
+    if not codes:
+        return {}
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute(
+        "SELECT DISTINCT ON (code) code, name FROM stocks WHERE code = ANY(%s)",
+        (codes,),
+    )
+    out = {c: n for c, n in cur.fetchall()}
+    cur.close(); conn.close()
+    return {c: out.get(c, c) for c in codes}
+
+
 def _resolve_universe(universe: str, trade_date: date, user_id: str | None = None) -> list[str]:
     """把 universe key 转成 code list · Phase A 简化 · 全走 stocks 表"""
     conn = get_conn()

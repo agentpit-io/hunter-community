@@ -64,6 +64,11 @@ async def scan(body: ScanIn, request: Request):
         {"factors": body.factors, "config": body.config or {"top_n": 20, "universe": "hs300"}},
         trade_date, str(uid) if uid else None,
     )
+    # 补股票名(前端展示用 · 从 stocks 表拿)
+    if picks:
+        name_map = strategy_engine.fetch_stock_names([p["code"] for p in picks])
+        for p in picks:
+            p["name"] = name_map.get(p["code"], p["code"])
     return {"trade_date": trade_date.isoformat(), "picks": picks}
 
 
@@ -180,6 +185,13 @@ async def run_backtest_ep(body: BacktestIn, request: Request):
         cur.close(); conn.close()
         return {"error": result["error"], "message": result.get("message", "")}
 
+    # 补 positions 里的 name(前端展示用)
+    positions = result.get("positions", [])
+    if positions:
+        name_map = strategy_engine.fetch_stock_names([p["code"] for p in positions])
+        for p in positions:
+            p["name"] = name_map.get(p["code"], p["code"])
+
     # 落库
     cur.execute(
         """INSERT INTO backtest_result (strategy_id, spec_hash, start_date, end_date,
@@ -187,11 +199,11 @@ async def run_backtest_ep(body: BacktestIn, request: Request):
            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
         (body.strategy_id, spec_hash, start, end,
          json.dumps(result["metrics"]), json.dumps(result["nav_series"]),
-         json.dumps(result["positions"]), result["cost_used"], result["duration_ms"]),
+         json.dumps(positions), result["cost_used"], result["duration_ms"]),
     )
     new_id = cur.fetchone()[0]
     conn.commit(); cur.close(); conn.close()
 
     return {"result_id": new_id, "cached": False,
             "metrics": result["metrics"], "nav_series": result["nav_series"],
-            "positions": result["positions"], "duration_ms": result["duration_ms"]}
+            "positions": positions, "duration_ms": result["duration_ms"]}

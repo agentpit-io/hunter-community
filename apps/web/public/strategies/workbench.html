@@ -201,7 +201,7 @@ async function refreshPicks() {
       <thead><tr><th class="rk">#</th><th>股票</th><th class="num">综合分</th></tr></thead>
       <tbody>${picks.map((p, i) => `
         <tr><td class="rk">${i+1}</td>
-            <td><b>${p.code}</b><div class="cd">A 股</div></td>
+            <td><b>${p.name || p.code}</b><div class="cd">${p.code}${p.name && p.name !== p.code ? ' · A 股' : ' · A 股'}</div></td>
             <td class="num score">${p.score.toFixed(3)}</td>
         </tr>`).join('')}</tbody>
     </table>`
