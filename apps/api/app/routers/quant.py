@@ -15,7 +15,7 @@ import json
 import logging
 from datetime import date, timedelta
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, BackgroundTasks
 from fastapi.responses import Response
 from pydantic import BaseModel
 
@@ -44,6 +44,84 @@ async def list_factors():
         ],
         "cat_order": factor_defs.CAT_ORDER,
         "enabled_count": len(factor_defs.enabled_factors()),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════
+# D-2 · IC 时间序列 + IC 排行
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/factors/{key}/ic")
+async def factor_ic_series(
+    key: str, universe: str = "hs300", horizon: int = 5, days: int = 60
+):
+    """近 N 日 IC 时间序列 · 用于因子广场"IC 走势"图"""
+    if factor_defs.get_factor(key) is None:
+        raise HTTPException(404, f"factor {key} not found")
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute(
+        """SELECT trade_date, ic, ic_ir FROM factor_ic
+           WHERE factor_key=%s AND universe=%s AND horizon_days=%s
+             AND trade_date >= %s
+           ORDER BY trade_date""",
+        (key, universe, horizon, date.today() - timedelta(days=days)),
+    )
+    rows = cur.fetchall()
+    cur.close(); conn.close()
+    ic_values = [float(r[1]) for r in rows if r[1] is not None]
+    ic_avg = sum(ic_values) / len(ic_values) if ic_values else None
+    # 衰减警告:近 30 vs 全历史差异 > 30%
+    warning = None
+    if len(ic_values) >= 30:
+        recent = ic_values[-30:]
+        full_avg = ic_avg
+        recent_avg = sum(recent) / len(recent)
+        if full_avg is not None and abs(full_avg) > 1e-6:
+            drift = abs(recent_avg - full_avg) / abs(full_avg)
+            if drift > 0.3:
+                direction = "增强" if abs(recent_avg) > abs(full_avg) else "衰减"
+                warning = f"⚠ 近 30 日 IC 相对全历史{direction} {drift*100:.0f}% · 因子可能进入新阶段"
+    return {
+        "factor": key,
+        "universe": universe,
+        "horizon_days": horizon,
+        "ic_series": [
+            {"date": r[0].isoformat(),
+             "ic": float(r[1]) if r[1] is not None else None,
+             "ic_ir": float(r[2]) if r[2] is not None else None}
+            for r in rows
+        ],
+        "ic_avg": ic_avg,
+        "n_periods": len(rows),
+        "warning": warning,
+    }
+
+
+@router.get("/factors/ic-ranking")
+async def factor_ic_ranking(universe: str = "hs300", horizon: int = 5, days: int = 60):
+    """所有启用因子按近 N 日 |IC 均值| 排序 · 因子广场首屏"""
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute(
+        """SELECT factor_key, AVG(ic) AS ic_avg, AVG(ic_ir) AS ir_avg, COUNT(*) AS n
+           FROM factor_ic
+           WHERE universe=%s AND horizon_days=%s AND trade_date >= %s
+             AND ic IS NOT NULL
+           GROUP BY factor_key
+           ORDER BY ABS(AVG(ic)) DESC""",
+        (universe, horizon, date.today() - timedelta(days=days)),
+    )
+    rows = cur.fetchall()
+    cur.close(); conn.close()
+    return {
+        "universe": universe,
+        "horizon_days": horizon,
+        "period_days": days,
+        "ranking": [
+            {"factor_key": r[0], "ic_avg": float(r[1]),
+             "ic_ir": float(r[2]) if r[2] is not None else None,
+             "periods": r[3]}
+            for r in rows
+        ],
     }
 
 
@@ -323,10 +401,8 @@ class BacktestIn(BaseModel):
     end: str | None = None
 
 
-@router.post("/backtest/run")
-async def run_backtest_ep(body: BacktestIn, request: Request):
-    uid = getattr(request.state, "user_id", None)
-    # 解 spec
+def _resolve_backtest_spec(body: BacktestIn):
+    """把 BacktestIn 转成 (strategy, start, end)"""
     if body.strategy_id:
         conn = get_conn(); cur = conn.cursor()
         cur.execute("SELECT factors, config FROM strategy WHERE id=%s", (body.strategy_id,))
@@ -334,16 +410,173 @@ async def run_backtest_ep(body: BacktestIn, request: Request):
         cur.close(); conn.close()
         if not r:
             raise HTTPException(404, f"strategy {body.strategy_id} not found")
-        strategy = {"factors": r[0], "config": r[1]}
+        strategy = {"factors": r[0], "config": r[1], "id": body.strategy_id}
     elif body.factors and body.config:
         strategy = {"factors": body.factors, "config": body.config}
     else:
         raise HTTPException(400, "必须提供 strategy_id 或 factors+config")
-
     end = date.fromisoformat(body.end) if body.end else date.today()
     start = date.fromisoformat(body.start) if body.start else (end - timedelta(days=365))
+    return strategy, start, end
 
-    # 检 cache
+
+@router.post("/backtest/run")
+async def run_backtest_ep(body: BacktestIn, request: Request, bg: BackgroundTasks):
+    """D-4 · 异步版 · 返 task_id · 前端轮询 /backtest/status/{task_id}
+    · cache 命中直接返(不排队)
+    · sync=1 强制同步(用于 backtest_result 首次批量预填)
+    """
+    uid = getattr(request.state, "user_id", None)
+    strategy, start, end = _resolve_backtest_spec(body)
+
+    # cache 命中
+    spec_hash = backtest_engine.compute_spec_hash(strategy, start, end)
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute("SELECT id, metrics, nav_series, positions FROM backtest_result WHERE spec_hash=%s", (spec_hash,))
+    hit = cur.fetchone()
+    cur.close(); conn.close()
+    if hit:
+        return {"cached": True, "result_id": hit[0],
+                "metrics": hit[1], "nav_series": hit[2], "positions": hit[3]}
+
+    # 异步入队
+    from app.services.quant import backtest_task
+    task_id = backtest_task.submit(strategy, start, end, str(uid) if uid else None)
+    bg.add_task(backtest_task.run_and_store, task_id, strategy, start, end, str(uid) if uid else None)
+    return {"cached": False, "task_id": task_id, "status": "queued"}
+
+
+@router.get("/backtest/status/{task_id}")
+async def backtest_status(task_id: str):
+    """D-4 · 轮询任务状态 · queued/running/done/error/not_found
+    · done 时结果内嵌 result 字段
+    · 客户端应在 done 后 · 若需持久化 · 调 /backtest/persist/{task_id}
+    """
+    from app.services.quant import backtest_task
+    return backtest_task.get_status(task_id)
+
+
+@router.post("/backtest/persist/{task_id}")
+async def backtest_persist(task_id: str, request: Request):
+    """D-4 · 把 done 状态的 task 结果落 backtest_result 表(用户主动调用)
+    · 未 done 返 400
+    """
+    from app.services.quant import backtest_task
+    st = backtest_task.get_status(task_id)
+    if st.get("status") != "done":
+        raise HTTPException(400, f"task 未完成 · status={st.get('status')}")
+    result = st.get("result", {})
+    if not result:
+        raise HTTPException(400, "task 无结果")
+    strategy_id = result.get("strategy_id")   # backtest_engine 未返 · 需从 st 拿
+    # 从 st 里拿 strategy_id 需回溯 submit 时的原始 · 简化:客户端传 strategy_id
+    body_strategy_id = None
+    try:
+        body = await request.json()
+        body_strategy_id = body.get("strategy_id")
+    except Exception:
+        pass
+    spec_hash = result.get("spec_hash") or backtest_engine.compute_spec_hash(
+        {"factors": [], "config": {}}, date.today(), date.today()
+    )
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute(
+        """INSERT INTO backtest_result (strategy_id, spec_hash, start_date, end_date,
+             metrics, nav_series, positions, cost_used, duration_ms)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+           ON CONFLICT (spec_hash) DO UPDATE
+             SET metrics = EXCLUDED.metrics, nav_series = EXCLUDED.nav_series,
+                 positions = EXCLUDED.positions, cost_used = EXCLUDED.cost_used,
+                 duration_ms = EXCLUDED.duration_ms
+           RETURNING id""",
+        (body_strategy_id, spec_hash,
+         date.fromisoformat(result["start"]), date.fromisoformat(result["end"]),
+         json.dumps(result["metrics"]), json.dumps(result["nav_series"]),
+         json.dumps(result.get("positions", [])), result.get("cost_used", 0),
+         result.get("duration_ms", 0)),
+    )
+    new_id = cur.fetchone()[0]
+    conn.commit(); cur.close(); conn.close()
+    return {"result_id": new_id, "spec_hash": spec_hash}
+
+
+# ═══════════════════════════════════════════════════════════════
+# D-5 · Bootstrap 稳健性检验(异步 · 100 次)
+# ═══════════════════════════════════════════════════════════════
+
+class BootstrapIn(BaseModel):
+    strategy_id: int | None = None
+    factors: list[dict] | None = None
+    config: dict | None = None
+    full_start: str | None = None
+    full_end: str | None = None
+    n_bootstrap: int = 100
+    sub_period_days: int = 365
+
+
+@router.post("/backtest/bootstrap")
+async def bootstrap_ep(body: BootstrapIn, request: Request, bg: BackgroundTasks):
+    """D-5 · Bootstrap 稳健性 · 异步 · 100 次 × 1 年窗口
+    · 前端轮询 /backtest/status/{task_id} 同款
+    · kronos 因子自动剔除(T-0 无历史意义)
+    """
+    uid = getattr(request.state, "user_id", None)
+    # 复用 BacktestIn 解析(name 不同 · 手写)
+    if body.strategy_id:
+        conn = get_conn(); cur = conn.cursor()
+        cur.execute("SELECT factors, config FROM strategy WHERE id=%s", (body.strategy_id,))
+        r = cur.fetchone()
+        cur.close(); conn.close()
+        if not r:
+            raise HTTPException(404, f"strategy {body.strategy_id} not found")
+        strategy = {"factors": r[0], "config": r[1], "id": body.strategy_id}
+    elif body.factors and body.config:
+        strategy = {"factors": body.factors, "config": body.config}
+    else:
+        raise HTTPException(400, "必须提供 strategy_id 或 factors+config")
+    full_end = date.fromisoformat(body.full_end) if body.full_end else date.today()
+    full_start = date.fromisoformat(body.full_start) if body.full_start else (full_end - timedelta(days=365 * 3))
+
+    # 异步入队
+    from app.services.quant import backtest_task
+    from app.services import kpred_cache as rc
+    import uuid, time
+    task_id = uuid.uuid4().hex[:16]
+    rc.set(f"quant:bt_task:{task_id}", {
+        "status": "queued", "created_at": time.time(), "kind": "bootstrap",
+    }, 3600)
+
+    def _do():
+        rc.set(f"quant:bt_task:{task_id}", {
+            "status": "running", "started_at": time.time(), "kind": "bootstrap",
+        }, 3600)
+        try:
+            result = backtest_engine.bootstrap_backtest(
+                strategy, full_start, full_end,
+                n_bootstrap=body.n_bootstrap, sub_period_days=body.sub_period_days,
+                user_id=str(uid) if uid else None,
+            )
+            rc.set(f"quant:bt_task:{task_id}", {
+                "status": "done" if "error" not in result else "error",
+                "finished_at": time.time(), "kind": "bootstrap",
+                "result": result,
+            }, 3600)
+        except Exception as e:
+            rc.set(f"quant:bt_task:{task_id}", {
+                "status": "error", "kind": "bootstrap",
+                "error": type(e).__name__, "message": str(e)[:500],
+            }, 3600)
+
+    bg.add_task(_do)
+    return {"task_id": task_id, "status": "queued", "kind": "bootstrap"}
+
+
+@router.post("/backtest/run-sync")
+async def run_backtest_sync(body: BacktestIn, request: Request):
+    """同步版 · 保留供内部/管理员使用(6 官方策略预填)· 不推荐前端调用"""
+    uid = getattr(request.state, "user_id", None)
+    strategy, start, end = _resolve_backtest_spec(body)
+
     spec_hash = backtest_engine.compute_spec_hash(strategy, start, end)
     conn = get_conn(); cur = conn.cursor()
     cur.execute("SELECT id, metrics, nav_series, positions FROM backtest_result WHERE spec_hash=%s", (spec_hash,))
@@ -353,20 +586,17 @@ async def run_backtest_ep(body: BacktestIn, request: Request):
         return {"result_id": hit[0], "cached": True,
                 "metrics": hit[1], "nav_series": hit[2], "positions": hit[3]}
 
-    # 跑回测
     result = backtest_engine.run_backtest(strategy, start, end, str(uid) if uid else None)
     if "error" in result:
         cur.close(); conn.close()
         return {"error": result["error"], "message": result.get("message", "")}
 
-    # 补 positions 里的 name(前端展示用)
     positions = result.get("positions", [])
     if positions:
         name_map = strategy_engine.fetch_stock_names([p["code"] for p in positions])
         for p in positions:
             p["name"] = name_map.get(p["code"], p["code"])
 
-    # 落库
     cur.execute(
         """INSERT INTO backtest_result (strategy_id, spec_hash, start_date, end_date,
              metrics, nav_series, positions, cost_used, duration_ms)

@@ -261,34 +261,57 @@ document.getElementById('btn-ask-2').addEventListener('click', askHunterFromWork
 // 顶部 · 保存
 document.getElementById('btn-save').addEventListener('click', () => openSaveDialog())
 
-// 跑回测 · 调真 /api/quant/backtest/run · 结果落 localStorage 供 backtest.html 用
+// D-4 · 跑回测 · 异步任务 · task_id 轮询 · 前端可看到"计算中"进度
 document.getElementById('btn-backtest').addEventListener('click', async () => {
   if (draft.factors.length === 0) { toast('先选几个因子', 'warn'); return }
   const btn = document.getElementById('btn-backtest')
   btn.classList.add('loading')
-  btn.textContent = '⏳ 后端计算中...'
+  btn.textContent = '⏳ 提交回测...'
   const factors = draft.factors.map(k => ({ key: k, weight_pct: draft.weights[k] || 0 }))
                                 .filter(f => f.weight_pct > 0)
   try {
-    // 默认最近 8 个月 · 起止 hard-code(v2 让用户改)
     const end = new Date(); end.setDate(15)
     const start = new Date(end); start.setMonth(end.getMonth() - 8)
     const fmt = d => d.toISOString().slice(0, 10)
-    const r = await fetch('/api/quant/backtest/run', {
+    const submitR = await fetch('/api/quant/backtest/run', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({
         factors, config: draft.config,
         start: fmt(start), end: fmt(end),
       })
     })
-    const d = await r.json()
-    if (d.error) { toast('回测失败:' + d.message, 'warn'); btn.classList.remove('loading'); btn.textContent = '▶ 跑 3 年回测'; return }
-    // 存 result 供 backtest.html 读取
+    const submitD = await submitR.json()
+    if (submitD.error) throw new Error(submitD.message || submitD.error)
+
+    // cache 命中 · 直接跳
+    if (submitD.cached) {
+      localStorage.setItem('hunter_backtest_result', JSON.stringify(submitD))
+      localStorage.setItem('hunter_backtest_draft', JSON.stringify(draft))
+      location.href = '/strategies/backtest.html'
+      return
+    }
+
+    // 异步 · 轮询 status
+    const taskId = submitD.task_id
+    btn.textContent = '⏳ 排队中...'
+    let d
+    const maxRounds = 120   // 最长 3 分钟(1.5s × 120)
+    for (let i = 0; i < maxRounds; i++) {
+      await new Promise(r => setTimeout(r, 1500))
+      const s = await fetch(`/api/quant/backtest/status/${taskId}`).then(r => r.json())
+      if (s.status === 'running') btn.textContent = '⏳ 计算中...'
+      else if (s.status === 'queued') btn.textContent = '⏳ 排队中...'
+      else if (s.status === 'error') throw new Error(s.message || s.error || '未知错误')
+      else if (s.status === 'done') { d = s.result; break }
+      else if (s.status === 'not_found') throw new Error('任务丢失 · 请重试')
+    }
+    if (!d) throw new Error('超时(3 分钟)· 请重试或缩短回测范围')
+
     localStorage.setItem('hunter_backtest_result', JSON.stringify(d))
     localStorage.setItem('hunter_backtest_draft', JSON.stringify(draft))
     location.href = '/strategies/backtest.html'
   } catch (e) {
-    toast('网络错误:' + e.message, 'warn')
+    toast('回测失败: ' + e.message, 'warn')
     btn.classList.remove('loading'); btn.textContent = '▶ 跑 3 年回测'
   }
 })

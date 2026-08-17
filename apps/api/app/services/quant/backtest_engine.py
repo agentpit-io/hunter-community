@@ -271,3 +271,80 @@ def compute_quantile_returns(
         "periods": max_periods,
         "quantiles": quantiles,
     }
+
+
+# ═══════════════════════════════════════════════════════════════
+# D-5 · Bootstrap 稳健性检验 · 100 次随机窗口
+# ═══════════════════════════════════════════════════════════════
+
+def bootstrap_backtest(
+    strategy: dict, full_start: date, full_end: date,
+    n_bootstrap: int = 100, sub_period_days: int = 365,
+    user_id: str | None = None,
+) -> dict:
+    """在 [full_start, full_end] 内 · 随机取 n 个 sub_period 窗口 · 各跑一次
+    返回:各指标 p5/p25/p50/p75/p95 + mean + std
+    用户价值:告诉用户"最好 sharpe 2.1 · 最坏 0.6" · 而非只有中位 1.4
+    """
+    import random
+    from datetime import timedelta
+
+    total_days = (full_end - full_start).days
+    if total_days < sub_period_days + 30:
+        return {"error": "period_too_short",
+                "message": f"完整期间 {total_days} 天 < sub_period {sub_period_days} + 30"}
+
+    # kronos 因子 T-0 · 在 bootstrap 中无意义 · 剔除
+    filtered_factors = [f for f in strategy["factors"] if f["key"] != "kronos"]
+    substrategy = {**strategy, "factors": filtered_factors}
+
+    results = []
+    for i in range(n_bootstrap):
+        offset = random.randint(0, total_days - sub_period_days)
+        sub_start = full_start + timedelta(days=offset)
+        sub_end = sub_start + timedelta(days=sub_period_days)
+        r = run_backtest(substrategy, sub_start, sub_end, user_id)
+        if "error" not in r:
+            results.append(r["metrics"])
+
+    if len(results) < 10:
+        return {"error": "insufficient_bootstrap",
+                "message": f"仅 {len(results)}/{n_bootstrap} 次成功 · 数据可能不够"}
+
+    def _percentile(sorted_lst, p):
+        n = len(sorted_lst)
+        if n == 0:
+            return None
+        k = (n - 1) * p / 100
+        f = int(k); c = min(f + 1, n - 1)
+        if f == c:
+            return sorted_lst[f]
+        return sorted_lst[f] + (sorted_lst[c] - sorted_lst[f]) * (k - f)
+
+    percentiles = {}
+    for key in ["ann_ret", "sharpe", "sortino", "max_dd", "calmar"]:
+        values = sorted(r[key] for r in results if key in r and r[key] is not None)
+        if not values:
+            continue
+        percentiles[key] = {
+            "p5": _percentile(values, 5),
+            "p25": _percentile(values, 25),
+            "p50": _percentile(values, 50),
+            "p75": _percentile(values, 75),
+            "p95": _percentile(values, 95),
+            "mean": sum(values) / len(values),
+        }
+        # std
+        m = percentiles[key]["mean"]
+        var = sum((v - m) ** 2 for v in values) / len(values)
+        percentiles[key]["std"] = var ** 0.5
+
+    return {
+        "n_bootstrap": n_bootstrap,
+        "n_success": len(results),
+        "sub_period_days": sub_period_days,
+        "full_start": full_start.isoformat(),
+        "full_end": full_end.isoformat(),
+        "kronos_excluded": "kronos" in [f["key"] for f in strategy["factors"]],
+        "percentiles": percentiles,
+    }

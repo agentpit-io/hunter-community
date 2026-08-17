@@ -28,7 +28,7 @@ ALL_FACTORS: list[FactorDef] = [
     FactorDef("pe_inv",         "价值", "市盈率倒数",     "💰", "1 / TTM PE · 低估值分数高", enabled=True),
     FactorDef("pb_inv",         "价值", "市净率倒数",     "💰", "1 / PB · 破净股偏防御"),
     FactorDef("dividend_yield", "价值", "股息率",         "💰", "近 12 月现金分红 / 当日 close(A 股派息单位元/10股)"),
-    FactorDef("ev_ebitda_inv",  "价值", "EV/EBITDA 倒数", "💰", "企业价值 / 息税折旧摊销前利润 · Phase C 跳过 · Phase D 补(见 05 §13.1)", enabled=False),
+    FactorDef("ev_ebitda_inv",  "价值", "EV/EBITDA 倒数", "💰", "1/(EV/EBITDA) · TTM 4 季汇总 · 银行/证券/保险跳过"),
 
     # ── 质量 ──
     FactorDef("roe",            "质量", "ROE",           "🏆", "TTM 净利润 / 平均归母权益", enabled=True),

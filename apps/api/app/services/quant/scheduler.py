@@ -41,6 +41,18 @@ def daily_recompute():
     return result
 
 
+def daily_ic_recompute():
+    """D-2 · 每日 17:30 CST · 算全启用因子 × [5,10,20] horizon IC"""
+    from datetime import date
+    from app.services.quant import ic_engine
+    today = date.today()
+    log.info("[quant.scheduler] IC 重算 @ %s", today)
+    result = ic_engine.compute_daily(today, "hs300", horizons=[5, 10, 20])
+    total = sum(result.values())
+    log.info("[quant.scheduler] IC 完成 · 写入 %d 行", total)
+    return result
+
+
 def register(scheduler):
     """外部传入已有 AsyncIOScheduler · 我只加 job(不 start · 由 caller 决定)"""
     from apscheduler.triggers.cron import CronTrigger
@@ -50,4 +62,11 @@ def register(scheduler):
         id="quant_daily_recompute",
         replace_existing=True,
     )
-    log.info("[quant.scheduler] APScheduler job 已注册 · 每日 17:00 CST")
+    # D-2 · IC 30 分钟后跑(等 factor_value 写完)
+    scheduler.add_job(
+        lambda: asyncio.create_task(asyncio.to_thread(daily_ic_recompute)),
+        CronTrigger(hour=17, minute=30),
+        id="quant_daily_ic",
+        replace_existing=True,
+    )
+    log.info("[quant.scheduler] APScheduler 已注册:17:00 factor + 17:30 IC")

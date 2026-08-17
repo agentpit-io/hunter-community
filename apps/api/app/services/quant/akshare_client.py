@@ -279,6 +279,165 @@ def _fetch_flow_5d(code: str, trade_date: date, days: int = 5) -> list[dict] | N
         return None
 
 
+# ═════════════════════════════════════════════════════════════════════════
+# D-6 · ev_ebitda_inv · 需 3 张财报拼 EBITDA + 净债
+# 银行/证券/保险 EBITDA 概念不适用 · 硬编码白名单跳过
+# ═════════════════════════════════════════════════════════════════════════
+
+# 银行 + 证券 + 保险 · hs300 中约 30 只 · 计算 EV/EBITDA 无意义(15% 覆盖损失)
+FINANCIAL_INDUSTRY_CODES = frozenset([
+    # 大银行
+    '601398','601288','601988','601939','601328','601998','601009','600016',
+    '600036','600000','601818','601169','601166','600015','601009','601229',
+    '002142','600926','601128','601860','601916','601838','601077','600908',
+    '601665','600919','601187','002839',
+    # 证券
+    '600030','601688','000776','601377','600837','601377','600999','601788',
+    '601066','600109','601878','601099','601456','601901','600291',
+    # 保险
+    '601318','601601','601336','601319','601628','601186',
+])
+
+
+def _fetch_report_df(code: str, kind: str):
+    """kind: balance / profit / cashflow · 15s 超时 · 3 retry · 见 _fetch_indicator_df"""
+    import akshare as ak
+    import warnings
+    import concurrent.futures
+    warnings.filterwarnings("ignore")
+
+    fn_map = {
+        "balance": ak.stock_balance_sheet_by_report_em,
+        "profit": ak.stock_profit_sheet_by_report_em,
+        "cashflow": ak.stock_cash_flow_sheet_by_report_em,
+    }
+    fn = fn_map[kind]
+    # AKShare 东财 report 端点 code 前缀:sh600 · sz000 · bj83
+    if code.startswith(("6", "9")):
+        symbol = f"SH{code}"
+    elif code.startswith(("8", "43")):
+        symbol = f"BJ{code}"
+    else:
+        symbol = f"SZ{code}"
+
+    def _do():
+        return fn(symbol=symbol)
+
+    for attempt in range(_RETRY):
+        ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        try:
+            fut = ex.submit(_do)
+            df = fut.result(timeout=20)
+            ex.shutdown(wait=False)
+            time.sleep(_SLEEP)
+            return df
+        except concurrent.futures.TimeoutError:
+            log.warning(f"[ev-{kind}] {code} attempt {attempt+1}/{_RETRY} · TIMEOUT")
+            ex.shutdown(wait=False)
+        except Exception as e:
+            log.warning(f"[ev-{kind}] {code} attempt {attempt+1}/{_RETRY} · {e}")
+            ex.shutdown(wait=False)
+        if attempt < _RETRY - 1:
+            time.sleep(1.5 * (attempt + 1))
+    return None
+
+
+@lru_cache(maxsize=2048)
+def _fetch_all_reports(code: str) -> dict | None:
+    """按 code 缓存全部 3 张报表 · 12 期共用一次 fetch × 3"""
+    bs = _fetch_report_df(code, "balance")
+    ps = _fetch_report_df(code, "profit")
+    cf = _fetch_report_df(code, "cashflow")
+    if any(x is None or (hasattr(x, "empty") and x.empty) for x in (bs, ps, cf)):
+        return None
+    return {"balance": bs, "profit": ps, "cashflow": cf}
+
+
+def _safe_num(row, key: str, default: float = 0.0) -> float:
+    try:
+        v = row.get(key)
+        if v is None:
+            return default
+        fv = float(v)
+        if fv != fv:   # NaN
+            return default
+        return fv
+    except (TypeError, ValueError):
+        return default
+
+
+def get_ev_ebitda_inv(code: str, trade_date: date, mcap: float) -> float | None:
+    """EV/EBITDA 倒数 · TTM(近 4 季 EBITDA 汇总)
+    · 银行/证券/保险跳过(EBITDA 概念不适用)
+    · 45 天 buffer 避免未来函数
+    · 上限过滤 EV/EBITDA > 500(异常)
+    · 返 1/(EV/EBITDA) · 值越大越"便宜"
+    """
+    if code in FINANCIAL_INDUSTRY_CODES:
+        return None
+    if mcap <= 0:
+        return None
+    reports = _fetch_all_reports(code)
+    if reports is None:
+        return None
+    try:
+        import pandas as pd
+        cutoff = trade_date - timedelta(days=45)
+        cutoff_str = cutoff.isoformat()
+
+        bs = reports["balance"].copy()
+        ps = reports["profit"].copy()
+        cf = reports["cashflow"].copy()
+
+        # 报告期列名(东财 em)
+        date_col = "REPORT_DATE" if "REPORT_DATE" in bs.columns else "报告期"
+
+        for df in (bs, ps, cf):
+            df["_dt"] = df[date_col].astype(str)
+        bs = bs[bs["_dt"] <= cutoff_str].sort_values("_dt", ascending=False)
+        ps_4q = ps[ps["_dt"] <= cutoff_str].sort_values("_dt", ascending=False).head(4)
+        cf_4q = cf[cf["_dt"] <= cutoff_str].sort_values("_dt", ascending=False).head(4)
+
+        if bs.empty or len(ps_4q) < 4 or len(cf_4q) < 4:
+            return None
+
+        bs_last = bs.iloc[0]
+        # 有息负债 · 东财 EM 字段名(如不匹配 · _safe_num 返 0)
+        short_debt = _safe_num(bs_last, "SHORT_LOAN") or _safe_num(bs_last, "短期借款")
+        long_debt = _safe_num(bs_last, "LONG_LOAN") or _safe_num(bs_last, "长期借款")
+        bonds = _safe_num(bs_last, "BOND_PAYABLE") or _safe_num(bs_last, "应付债券")
+        cash = _safe_num(bs_last, "MONETARYFUNDS") or _safe_num(bs_last, "货币资金")
+        net_debt = short_debt + long_debt + bonds - cash
+
+        # TTM EBITDA · 4 季汇总
+        def _sum_col(df, key_list):
+            for k in key_list:
+                if k in df.columns:
+                    return float(pd.to_numeric(df[k], errors="coerce").fillna(0).sum())
+            return 0.0
+
+        net_income = _sum_col(ps_4q, ["PARENT_NETPROFIT", "净利润"])
+        tax = _sum_col(ps_4q, ["INCOME_TAX", "所得税费用"])
+        interest = _sum_col(ps_4q, ["FINANCE_EXPENSE", "财务费用"])
+        dep = _sum_col(cf_4q, ["FA_IR_DEPR", "FIXED_ASSET_DEPR", "固定资产折旧、油气资产折耗、生产性生物资产折旧"])
+        amor = _sum_col(cf_4q, ["IA_AMORTIZE", "无形资产摊销"])
+        ebitda = net_income + tax + interest + dep + amor
+
+        if ebitda <= 0:
+            return None
+
+        ev = mcap + net_debt
+        if ev <= 0:
+            return None
+        ratio = ev / ebitda
+        if ratio <= 0 or ratio > 500:
+            return None
+        return 1.0 / ratio
+    except Exception as e:
+        log.warning(f"[ev_ebitda] {code}: {e}")
+        return None
+
+
 def get_main_flow_ratio(code: str, trade_date: date, days: int = 5) -> float | None:
     """近 N 日主力净流入 / 近 N 日总资金流(所有方向)
     - main_net = super_buy - super_sell + big_buy - big_sell(超大 + 大单净流入)

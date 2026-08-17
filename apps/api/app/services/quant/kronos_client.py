@@ -21,13 +21,31 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from typing import Optional
 
 import httpx
 
-from app.services import saas_gateway as _gw
-
 log = logging.getLogger(__name__)
+
+
+# 双环境兼容:
+# - hunter-community · 走 saas_gateway(需 hunter_key)
+# - hermes-1 · 直接读 KRONOS_URL env var(生产内网直连或 gateway URL)
+def _kronos_url() -> str:
+    try:
+        from app.services import saas_gateway as _gw
+        return _gw.kronos_url()
+    except ImportError:
+        return os.getenv("KRONOS_URL", "http://136.110.39.14:8000").rstrip("/")
+
+
+def _kronos_headers() -> dict:
+    try:
+        from app.services import saas_gateway as _gw
+        return _gw.kronos_headers()
+    except ImportError:
+        return {}
 
 _SEM = asyncio.Semaphore(3)   # 最多 3 并发 · Kronos 单请求 3-8s · sem 5 会 timeout
 _TIMEOUT = httpx.Timeout(connect=3.0, read=45.0, write=5.0, pool=3.0)
@@ -38,9 +56,9 @@ async def _one_predict(client: httpx.AsyncClient, code: str, horizon: int = 5) -
     async with _SEM:
         try:
             r = await client.post(
-                f"{_gw.kronos_url()}/predict",
+                f"{_kronos_url()}/predict",
                 json={"symbol": code, "pred_len": horizon},
-                headers=_gw.kronos_headers(),
+                headers=_kronos_headers(),
             )
             if r.status_code != 200:
                 log.warning(f"[kronos] {code} HTTP {r.status_code}: {r.text[:100]}")

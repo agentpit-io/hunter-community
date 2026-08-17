@@ -190,6 +190,37 @@ container.innerHTML = `
     </div>
   </div>
 
+  <!-- D-5 · Bootstrap 稳健性 -->
+  <div class="chart-panel" id="bootstrap-panel">
+    <div class="hd">
+      <div class="title">🎲 Bootstrap 稳健性检验 · 100 次随机 1 年窗口</div>
+      <div class="actions">
+        <button class="btn small primary" id="btn-run-bootstrap">▶ 跑 100 次</button>
+      </div>
+    </div>
+    <div style="color:var(--muted);font-size:11.5px;margin-bottom:12px">
+      在近 3 年内 · 随机取 100 个 1 年窗口 · 各跑一次回测 · 输出各指标 5/25/50/75/95 分位数 · 展示"最好 vs 最差"区间。
+    </div>
+    <div id="bootstrap-status" style="color:var(--muted);font-size:12px;min-height:20px"></div>
+    <div id="bootstrap-result" style="display:none">
+      <table style="width:100%;border-collapse:collapse;margin-top:12px;font-size:12px">
+        <thead style="background:var(--panel);color:var(--text);font-size:11.5px">
+          <tr>
+            <th style="padding:8px 10px;text-align:left">指标</th>
+            <th style="padding:8px 10px;text-align:right">5% (最差)</th>
+            <th style="padding:8px 10px;text-align:right">25%</th>
+            <th style="padding:8px 10px;text-align:right;background:var(--tag-ok-bg);color:var(--tag-ok-fg)">50% (中位)</th>
+            <th style="padding:8px 10px;text-align:right">75%</th>
+            <th style="padding:8px 10px;text-align:right">95% (最好)</th>
+            <th style="padding:8px 10px;text-align:right;color:var(--muted)">std</th>
+          </tr>
+        </thead>
+        <tbody id="bootstrap-tbody"></tbody>
+      </table>
+      <div style="margin-top:10px;padding:8px 10px;background:var(--tag-warn-bg);color:var(--tag-warn-fg);border-radius:6px;font-size:11px" id="bootstrap-note"></div>
+    </div>
+  </div>
+
   <!-- C6 · 半自动下单 CSV 导出 -->
   <div class="chart-panel" id="orders-panel">
     <div class="hd">
@@ -390,6 +421,76 @@ container.innerHTML = `
   nBucketsSel.addEventListener('change', loadAndRender)
   loadAndRender()
   window.addEventListener('resize', () => chart.resize())
+})()
+
+// ─── D-5 · Bootstrap 稳健性 ───
+;(function initBootstrap() {
+  const btn = document.getElementById('btn-run-bootstrap')
+  const status = document.getElementById('bootstrap-status')
+  const wrap = document.getElementById('bootstrap-result')
+  const tbody = document.getElementById('bootstrap-tbody')
+  const note = document.getElementById('bootstrap-note')
+  if (!btn) return
+  btn.addEventListener('click', async () => {
+    if (!draft.factors.length) { status.textContent = '⚠ 无因子 · 先在工作台选'; return }
+    btn.disabled = true; btn.textContent = '⏳ 提交...'
+    status.textContent = '等 100 次窗口回测 · 需 60-120 秒'
+    wrap.style.display = 'none'
+    const factors = draft.factors.map(k => ({key: k, weight_pct: draft.weights[k] || 0}))
+                                  .filter(f => f.weight_pct > 0)
+    try {
+      const r = await fetch('/api/quant/backtest/bootstrap', {
+        method: 'POST', headers: apiHeaders(),
+        body: JSON.stringify({factors, config: draft.config, n_bootstrap: 100, sub_period_days: 365}),
+      })
+      const submitD = await r.json()
+      if (!submitD.task_id) throw new Error(submitD.message || 'submit failed')
+      const taskId = submitD.task_id
+      btn.textContent = '⏳ 计算中...'
+      let d = null
+      const maxRounds = 200   // 5 分钟
+      for (let i = 0; i < maxRounds; i++) {
+        await new Promise(res => setTimeout(res, 1500))
+        const s = await fetch(`/api/quant/backtest/status/${taskId}`).then(r => r.json())
+        if (s.status === 'running') {
+          status.textContent = `⏳ 计算中 · ${Math.round((Date.now() - (s.started_at||Date.now()/1000)*1000)/1000)} s`
+        }
+        else if (s.status === 'done') { d = s.result; break }
+        else if (s.status === 'error') throw new Error(s.message || s.error)
+      }
+      if (!d) throw new Error('超时(5 分钟)')
+
+      // 渲染分位数表
+      const labels = {
+        ann_ret: {name: '年化收益', fmt: v => (v*100).toFixed(2)+'%'},
+        sharpe: {name: '夏普', fmt: v => v.toFixed(2)},
+        sortino: {name: 'Sortino', fmt: v => v.toFixed(2)},
+        max_dd: {name: '最大回撤', fmt: v => (v*100).toFixed(1)+'%'},
+        calmar: {name: 'Calmar', fmt: v => v.toFixed(2)},
+      }
+      const rows = Object.entries(labels).map(([key, meta]) => {
+        const p = d.percentiles[key]
+        if (!p) return ''
+        return `<tr style="border-top:1px solid var(--divider)">
+          <td style="padding:8px 10px;font-weight:500">${meta.name}</td>
+          <td style="padding:6px 10px;text-align:right;color:#c85a5a">${meta.fmt(p.p5)}</td>
+          <td style="padding:6px 10px;text-align:right">${meta.fmt(p.p25)}</td>
+          <td style="padding:6px 10px;text-align:right;background:var(--tag-ok-bg);font-weight:600">${meta.fmt(p.p50)}</td>
+          <td style="padding:6px 10px;text-align:right">${meta.fmt(p.p75)}</td>
+          <td style="padding:6px 10px;text-align:right;color:#2C6B55">${meta.fmt(p.p95)}</td>
+          <td style="padding:6px 10px;text-align:right;color:var(--muted)">${p.std.toFixed(3)}</td>
+        </tr>`
+      }).join('')
+      tbody.innerHTML = rows
+      note.innerHTML = `✓ ${d.n_success}/${d.n_bootstrap} 次成功 · 窗口 ${d.sub_period_days} 天 · ${d.kronos_excluded ? 'kronos 已剔除(T-0 无历史意义)· ' : ''}⚠ 仍是历史数据 · 未来市场结构可能变`
+      wrap.style.display = 'block'
+      status.textContent = ''
+    } catch (e) {
+      status.textContent = '❌ ' + e.message
+    } finally {
+      btn.disabled = false; btn.textContent = '▶ 跑 100 次'
+    }
+  })
 })()
 
 // ─── C6 · 生成下单 CSV ───
