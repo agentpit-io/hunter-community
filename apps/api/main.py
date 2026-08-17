@@ -85,8 +85,14 @@ async def lifespan(app: FastAPI):
                 CronTrigger(hour=3, minute=0),
                 id="stocks_catalog_daily_seed", replace_existing=True,
             )
+            # B4 · quant 每日 17:00 CST 重算 16 因子 · 复用同一 scheduler
+            try:
+                from app.services.quant.scheduler import register as _register_quant
+                _register_quant(_catalog_sched)
+            except Exception as e:
+                logger.warning("[quant.scheduler] 注册失败(非致命): {}", e)
             _catalog_sched.start()
-            logger.info("[stocks_catalog] APScheduler 每日 03:00 CST 已启动")
+            logger.info("[stocks_catalog+quant] APScheduler 已启动 · catalog 03:00 · quant 17:00 CST")
         except Exception as e:
             logger.warning("[stocks_catalog] APScheduler 启动失败(非致命): {}", e)
     except Exception as e:

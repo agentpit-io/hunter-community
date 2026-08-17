@@ -36,20 +36,31 @@ def _fetch_indicator_df(code: str, start_year: str):
 
 
 @lru_cache(maxsize=2048)
-def get_financial_summary(code: str, trade_date: date) -> dict | None:
-    """一次拿全 · 返 dict
-    trade_date 用于选择哪个季报(避免未来函数 · 45 天 buffer)
+def _fetch_all_periods(code: str, start_year: str):
+    """按 code 缓存 · 一次拉多期 · 返 (df, 各期 dict 列表)
+    (cache key 不含 trade_date · 12 期共用一次 fetch)
     """
-    start_year = str(trade_date.year - 1)
     df = _fetch_indicator_df(code, start_year)
     if df is None or len(df) == 0:
         return None
-    cutoff = trade_date - timedelta(days=45)
-    df["_dt"] = df["日期"].astype(str)
-    df = df[df["_dt"] <= cutoff.isoformat()]
-    if len(df) == 0:
+    return df
+
+
+def get_financial_summary(code: str, trade_date: date) -> dict | None:
+    """按 trade_date 筛某期财报(不 cache · 走 _fetch_all_periods 拿全 · 过滤)
+    45 天 buffer 避免未来函数
+    """
+    start_year = str(trade_date.year - 2)   # 多拉 1 年 · 保证前几期能找到
+    df = _fetch_all_periods(code, start_year)
+    if df is None:
         return None
-    r = df.iloc[-1]
+    cutoff = trade_date - timedelta(days=45)
+    df2 = df.copy()
+    df2["_dt"] = df2["日期"].astype(str)
+    df2 = df2[df2["_dt"] <= cutoff.isoformat()]
+    if len(df2) == 0:
+        return None
+    r = df2.iloc[-1]
 
     def _f(k, default=None):
         v = r.get(k)
