@@ -52,6 +52,21 @@ class ToolEntry:
     markets: list[str] = field(default_factory=list)      # 支持的市场 · 空 = 与市场无关
     slow: bool = False             # 长任务(>30s)· UI 上提示用户要等
     note: str = ""
+    # ── 入口(`_22`)────────────────────────────────────────
+    # 用户点这个工具时,替他填进输入框的那句话。
+    #
+    # **它不是把工具变成 SKILL。**工具还是工具、还是模型调用的那个函数,
+    # 没有 SKILL.md、不进 skills/ 目录、opencode 不会把它当 skill 加载。
+    # 这个字段只解决一件事:**用户点得到它**。
+    # 现在 13 个工具里 5 个连点都点不到,就是因为缺这一句话。
+    #
+    # 空 = 不出现在能力列表里。不是隐藏功能,是"还没想好用户会怎么说" ——
+    # 编一句烂模板比留空更糟:用户点了得到答非所问的结果,
+    # 然后再也不点这一类了。scripts/check_tool_prompts.py 盯着还剩几个没写。
+    prompt_tpl: str = ""
+    # 给模型用而不是给人用的工具(如 hunter_user_invoke:得先知道自己接了
+    # 什么源才谈得上调用)。即使写了 prompt_tpl 也不进能力列表。
+    internal_only: bool = False
 
 
 # ══════════════════════════════════════════════════════════════
@@ -64,27 +79,34 @@ CATALOG: list[ToolEntry] = [
     # ── 行情与资讯 · watchlist server ──────────────────────────
     ToolEntry("watchlist_stock_quickview", "行情速查", "watchlist", ToolOrigin.IMAGE,
               "实时行情富卡片:价格、涨跌、成交、盘口",
-              needs_data=["a.quote"], markets=["a"]),
+              needs_data=["a.quote"], markets=["a"],
+              prompt_tpl="查 {股票} 最新股价"),
     ToolEntry("watchlist_stock_news", "个股新闻", "watchlist", ToolOrigin.IMAGE,
               "拉取该股最近的新闻条目",
-              needs_data=["a.news"], markets=["a"]),
+              needs_data=["a.news"], markets=["a"],
+              prompt_tpl="看 {股票} 最近的新闻"),
     ToolEntry("watchlist_watchlist_digest", "自选股速览", "watchlist", ToolOrigin.IMAGE,
               "一次拿到自选股全部最新行情与异动",
-              needs_data=["a.quote"], markets=["a"]),
+              needs_data=["a.quote"], markets=["a"],
+              prompt_tpl="我的自选股今天怎么样"),
     ToolEntry("watchlist_watchlist_add", "加自选股", "watchlist", ToolOrigin.IMAGE,
               "把一只股票加进自选列表",
-              needs_data=[], note="纯本地写库 · 不依赖任何数据源"),
+              needs_data=[], note="纯本地写库 · 不依赖任何数据源",
+              prompt_tpl="把 {股票} 加入我的自选"),
 
     # ── 组合级 · portfolio server ─────────────────────────────
     ToolEntry("portfolio_portfolio_rebalance", "组合再平衡", "portfolio", ToolOrigin.IMAGE,
               "按目标权重算调仓清单与换手成本",
-              needs_data=["a.quote"], markets=["a"]),
+              needs_data=["a.quote"], markets=["a"],
+              prompt_tpl="按目标权重帮我算一份调仓清单"),
     ToolEntry("portfolio_portfolio_stress", "组合压力测试", "portfolio", ToolOrigin.IMAGE,
               "情景冲击下的组合回撤模拟",
-              needs_data=["a.quote", "a.kline"], markets=["a"]),
+              needs_data=["a.quote", "a.kline"], markets=["a"],
+              prompt_tpl="模拟一次大跌,看我的组合会回撤多少"),
     ToolEntry("portfolio_update_risk_profile", "更新风险画像", "portfolio", ToolOrigin.IMAGE,
               "记录用户风险偏好,后续建议据此调整",
-              needs_data=[], note="纯本地写库"),
+              needs_data=[], note="纯本地写库",
+              prompt_tpl="记录我的风险偏好:我能接受的最大回撤是 {比例}"),
 
     # ── 深度分析 · uzi server ─────────────────────────────────
     ToolEntry("uzi_stock_deep_analysis", "深度分析", "uzi", ToolOrigin.IMAGE,
@@ -94,27 +116,33 @@ CATALOG: list[ToolEntry] = [
               optional_data=["a.lhb", "a.fund_holders", "a.governance"],
               markets=["a", "hk", "us"], slow=True,
               note="薄代理转发到 /api/internal/uzi/* · 5-10 秒 · "
-                   "股东/治理表上游未 seed,那两段会显示'数据未 seed'"),
+                   "股东/治理表上游未 seed,那两段会显示'数据未 seed'",
+              prompt_tpl="对 {股票} 做一次全面分析"),
 
     # ── 平台自有能力 · hunter_cap server(我们在 Step 3 加的)──
     ToolEntry("hunter_cap_kpred", "K线预测", "hunter_cap", ToolOrigin.PLATFORM,
               "Kronos 模型预测未来 N 日开高低收与涨跌幅",
               needs_data=["global.kronos"], markets=["a"], slow=True,
-              note="经 hunter 网关 · 同一把 key"),
+              note="经 hunter 网关 · 同一把 key",
+              prompt_tpl="预测 {股票} 未来 5 日走势"),
     ToolEntry("hunter_cap_truesource_brief", "情报简报", "hunter_cap", ToolOrigin.PLATFORM,
               "多标的情报摘要与预警级别",
-              needs_data=["global.truesource_brief"]),
+              needs_data=["global.truesource_brief"],
+              prompt_tpl="给我 {股票} 的情报摘要与预警"),
     ToolEntry("hunter_cap_truesource_scout", "主动情报采集", "hunter_cap", ToolOrigin.PLATFORM,
               "针对单只标的现场搜集情报(Gemini 搜索,耗时较长)",
-              needs_data=["global.truesource_scout"], slow=True),
+              needs_data=["global.truesource_scout"], slow=True,
+              prompt_tpl="现场搜集 {股票} 的最新情报"),
 
     # ── 用户自接数据源的通道 · hunter_user server ─────────────
     ToolEntry("hunter_user_list_my_sources", "列出我接的数据源", "hunter_user", ToolOrigin.IMAGE,
               "查看用户自己在设置里接入的第三方 MCP/API",
-              needs_data=[], note="与平台 key 无关 · 用户自建"),
+              needs_data=[], note="与平台 key 无关 · 用户自建",
+              prompt_tpl="我接了哪些自己的数据源"),
     ToolEntry("hunter_user_invoke", "调用我接的数据源", "hunter_user", ToolOrigin.IMAGE,
               "调用用户自建数据源的某个端点",
-              needs_data=[], note="与平台 key 无关 · 用户自建"),
+              needs_data=[], note="与平台 key 无关 · 用户自建",
+              internal_only=True),
 ]
 
 _BY_KEY = {t.key: t for t in CATALOG}
@@ -184,7 +212,16 @@ def to_dict(t: ToolEntry) -> dict:
     d["blocked_by"] = st["blocked_by"]
     d["need_key_for"] = st["need_key_for"]
     d["degraded_by"] = st["degraded_by"]
+    # 能不能出现在「能力」列表里(`_22` §3)。
+    # 前端不必自己判 prompt_tpl 是否为空 + internal_only —— 那个判断
+    # 一旦抄到第二处就会漂,判据只留在这一处
+    d["pickable"] = bool(t.prompt_tpl) and not t.internal_only
     return d
+
+
+def pickable() -> list[ToolEntry]:
+    """能出现在能力列表里的工具 —— 有模板、且不是给模型用的。"""
+    return [t for t in CATALOG if t.prompt_tpl and not t.internal_only]
 
 
 def get(key: str) -> ToolEntry | None:
