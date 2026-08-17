@@ -124,6 +124,49 @@ html += `
 
 container.innerHTML = html
 
+// D-2 · 拉真 IC ranking 覆盖 mock · 有数据的因子卡片 badge 颜色更新
+;(async () => {
+  try {
+    const r = await fetch('/api/quant/factors/ic-ranking?horizon=5&days=60')
+    if (!r.ok) return
+    const d = await r.json()
+    const icMap = Object.fromEntries((d.ranking || []).map(x => [x.factor_key, x]))
+    let updated = 0
+    document.querySelectorAll('.f-card').forEach(card => {
+      const key = card.dataset.key
+      const real = icMap[key]
+      if (!real) return
+      const icEl = card.querySelector('.metrics .metric:first-child .v')
+      if (!icEl) return
+      const ic = real.ic_avg
+      icEl.textContent = (ic >= 0 ? '+' : '') + ic.toFixed(3)
+      icEl.className = 'v ' + (ic >= 0 ? 'pos' : 'neg')
+      // 加"真"字标 · 与硬编码 mock 区分
+      if (!card.querySelector('.badge-real')) {
+        const badge = document.createElement('span')
+        badge.className = 'badge-real'
+        badge.textContent = '✅ 真'
+        badge.style.cssText = 'position:absolute;top:6px;right:36px;font-size:10px;color:#2C6B55;background:#EEF5F1;padding:1px 6px;border-radius:4px'
+        card.style.position = 'relative'
+        card.appendChild(badge)
+      }
+      updated++
+    })
+    if (updated > 0) {
+      // 顶部条加汇总
+      const bar = document.querySelector('.meta-bar')
+      if (bar && !document.getElementById('ic-summary')) {
+        const span = document.createElement('span')
+        span.id = 'ic-summary'
+        span.innerHTML = `<span class="sep">·</span><span style="color:#2C6B55"><b>${updated}/${d.ranking.length}</b> 因子有真 IC(60d · horizon 5)</span>`
+        bar.appendChild(span)
+      }
+    }
+  } catch (e) {
+    console.warn('[factors] IC ranking 拉取失败 · 走 mock', e)
+  }
+})()
+
 // 卡片 toggle
 document.querySelectorAll('.f-card').forEach(card => {
   card.addEventListener('click', e => {
