@@ -133,6 +133,72 @@ container.innerHTML = `
   }
 })()
 
+// C3 · 用户登录后 · 先自动上传本地遗留策略 · 再拉后端 mine 覆盖
+;(async () => {
+  await migrateLocalToServer()
+  const apiMine = await loadMineFromApi()
+  if (apiMine === null) return   // 未登录 · localStorage 已渲染
+  // 用后端数据覆盖 localStorage · 保持一致
+  saveMine(apiMine)
+  // 找到"我的策略"section 重渲
+  const container = document.getElementById('page-content')
+  if (container) {
+    // 简单重刷:location.reload 会 flash · 改为局部重渲
+    const catHds = container.querySelectorAll('.cat-hd')
+    for (const hd of catHds) {
+      if (hd.textContent.includes('我的策略')) {
+        const grid = hd.nextElementSibling
+        hd.querySelector('.sub').textContent = apiMine.length
+          ? `${apiMine.length} 个 · 已同步账户 · 换设备可见`
+          : '暂无 · 去工作台搭一个'
+        if (grid) {
+          if (apiMine.length === 0) {
+            grid.outerHTML = `
+              <div class="empty">
+                <div class="ic">🧩</div>
+                <div class="msg">还没有保存的策略</div>
+                <a href="/strategies/factors.html" class="btn primary">→ 去挑因子搭一个</a>
+              </div>`
+          } else {
+            grid.innerHTML = apiMine.map(m => `
+              <div class="s-card" data-id="${m.id}" data-mine="1" style="position:relative">
+                <button class="btn-del" data-del-id="${m.id}" title="删除" style="position:absolute;top:8px;right:8px;background:transparent;border:0;color:var(--muted);font-size:16px;cursor:pointer">×</button>
+                <div class="row1">
+                  <div class="icon" style="background:var(--panel);color:var(--muted)">✎</div>
+                  <div class="name">${m.name}</div>
+                  <span class="chip" style="background:var(--panel-2);color:var(--muted)">我的 · 账户</span>
+                </div>
+                <div class="desc">${draftFactorNames({factors:m.factors})}</div>
+                <div class="factors">
+                  ${m.factors.slice(0,4).map(k => `<span>${(factorByKey(k)||{name:k}).name} ${m.weights[k]||0}%</span>`).join('')}
+                </div>
+                <div class="stats">
+                  <div><div class="k">因子数</div><div class="v">${m.factors.length}</div></div>
+                  <div><div class="k">股票池</div><div class="v">${(m.config?.universe||'-').toUpperCase()}</div></div>
+                  <div><div class="k">持仓</div><div class="v">Top ${m.config?.top_n||20}</div></div>
+                </div>
+              </div>
+            `).join('')
+          }
+          bindCardClicks()
+          // 绑删除按钮
+          document.querySelectorAll('.btn-del').forEach(b => {
+            b.addEventListener('click', async (e) => {
+              e.stopPropagation()
+              const id = b.dataset.delId
+              const nid = Number.isNaN(Number(id)) ? id : Number(id)
+              if (await deleteMyStrategy(nid)) {
+                setTimeout(() => location.reload(), 400)
+              }
+            })
+          })
+        }
+        break
+      }
+    }
+  }
+})()
+
 function bindCardClicks() {
 // 卡片点击 → 载入 draft + 跳 backtest
 document.querySelectorAll('.s-card').forEach(card => {

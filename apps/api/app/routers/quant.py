@@ -137,6 +137,30 @@ async def create_strategy(body: StrategyIn, request: Request):
     return {"id": new_id}
 
 
+@router.delete("/strategies/{sid}")
+async def delete_strategy(sid: int, request: Request):
+    """C3 · 删除自己的策略 · 官方不许删"""
+    uid = getattr(request.state, "user_id", None)
+    if not uid:
+        uid = "46066ca9-bf34-4fad-a9d5-bda5beb74c11"
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute("SELECT user_id, is_official FROM strategy WHERE id=%s", (sid,))
+    r = cur.fetchone()
+    if not r:
+        cur.close(); conn.close()
+        raise HTTPException(404, f"strategy {sid} not found")
+    owner, is_off = r
+    if is_off:
+        cur.close(); conn.close()
+        raise HTTPException(403, "官方策略不可删")
+    if str(owner) != str(uid):
+        cur.close(); conn.close()
+        raise HTTPException(403, "只有创建者可删")
+    cur.execute("DELETE FROM strategy WHERE id=%s", (sid,))
+    conn.commit(); cur.close(); conn.close()
+    return {"ok": True, "id": sid}
+
+
 # ═══════════════════════════════════════════════════════════════
 # POST /backtest/run · 同步回测(MVP 简单)
 # ═══════════════════════════════════════════════════════════════

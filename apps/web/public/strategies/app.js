@@ -153,6 +153,104 @@ function saveMine(list) {
 }
 
 // ═════════════════════════════════════════════════════════════════
+// C3 · 用户策略 CRUD 后端 API(fallback localStorage)
+// ═════════════════════════════════════════════════════════════════
+function getToken() {
+  try { return localStorage.getItem('hunter_token') || '' } catch { return '' }
+}
+function apiHeaders(extra) {
+  const t = getToken()
+  return Object.assign(
+    { 'Content-Type': 'application/json' },
+    t ? { 'Authorization': 'Bearer ' + t } : {},
+    extra || {}
+  )
+}
+
+// 前端 record 格式:{factors: [key], weights: {key: pct}}
+// 后端 API 格式:{factors: [{key, weight_pct}]}
+function strategyToApi(record) {
+  return {
+    name: record.name,
+    description: record.description || '',
+    factors: (record.factors || []).map(k => ({
+      key: k,
+      weight_pct: (record.weights || {})[k] || 0,
+    })),
+    config: record.config || {},
+  }
+}
+function strategyFromApi(row) {
+  const factors = []
+  const weights = {}
+  for (const f of (row.factors || [])) {
+    factors.push(f.key)
+    weights[f.key] = f.weight_pct
+  }
+  return {
+    id: row.id,             // 后端整数 id · 前端 detect 用 (typeof id === 'number' → 后端)
+    name: row.name,
+    description: row.description || '',
+    factors,
+    weights,
+    config: row.config || {},
+    metrics_mock: { ann_ret: 0.184, sharpe: 1.42, max_dd: -0.143 },  // Phase C4 上真数据
+    created_at: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
+    _from_api: true,
+  }
+}
+
+async function loadMineFromApi() {
+  if (!getToken()) return null
+  try {
+    const r = await fetch('/api/quant/strategies/mine', { headers: apiHeaders() })
+    if (r.status === 401) return null
+    if (!r.ok) return null
+    const d = await r.json()
+    return (d.strategies || []).map(strategyFromApi)
+  } catch { return null }
+}
+
+async function createStrategyApi(record) {
+  const r = await fetch('/api/quant/strategies', {
+    method: 'POST',
+    headers: apiHeaders(),
+    body: JSON.stringify(strategyToApi(record)),
+  })
+  if (!r.ok) throw new Error('HTTP ' + r.status)
+  return await r.json()  // {id}
+}
+
+async function deleteStrategyApi(id) {
+  const r = await fetch('/api/quant/strategies/' + encodeURIComponent(id), {
+    method: 'DELETE',
+    headers: apiHeaders(),
+  })
+  if (!r.ok) throw new Error('HTTP ' + r.status)
+  return true
+}
+
+// 首次登录后 · 把 localStorage 里的历史策略上传到后端 · 只跑一次
+async function migrateLocalToServer() {
+  if (!getToken()) return
+  if (localStorage.getItem('hunter_strategies_migrated_v1') === '1') return
+  const local = loadMine()
+  if (!local.length) {
+    localStorage.setItem('hunter_strategies_migrated_v1', '1')
+    return
+  }
+  let ok = 0
+  for (const s of local) {
+    try {
+      await createStrategyApi(s)
+      ok++
+    } catch {}
+  }
+  if (ok > 0) toast(`✓ 已把 ${ok} 个本地策略同步到账户`, 'success')
+  localStorage.setItem('hunter_strategies_migrated_v1', '1')
+}
+
+// ═════════════════════════════════════════════════════════════════
 // 工具
 // ═════════════════════════════════════════════════════════════════
 function factorByKey(key) { return FACTORS.find(f => f.key === key) }
@@ -273,9 +371,10 @@ function openSaveDialog(afterSave) {
       <button class="btn primary" id="save-ok">保存</button>
     </div>
   `)
-  modal.querySelector('#save-ok').addEventListener('click', () => {
+  modal.querySelector('#save-ok').addEventListener('click', async () => {
+    const btn = modal.querySelector('#save-ok')
+    btn.disabled = true; btn.textContent = '保存中…'
     const name = modal.querySelector('#save-name').value.trim() || defaultName
-    const mine = loadMine()
     const record = {
       id: 'my_' + Date.now(),
       name,
@@ -285,14 +384,41 @@ function openSaveDialog(afterSave) {
       metrics_mock: { ann_ret: 0.184, sharpe: 1.42, max_dd: -0.143 },
       created_at: Date.now(),
     }
+    // C3 · 先试 API · 失败 fallback localStorage
+    let apiOk = false
+    if (getToken()) {
+      try {
+        const r = await createStrategyApi(record)
+        record.id = r.id           // 用后端整数 id
+        record._from_api = true
+        apiOk = true
+      } catch (e) {
+        console.warn('[save-strategy] API 失败 · 落本地', e)
+      }
+    }
+    const mine = loadMine()
     mine.unshift(record)
     saveMine(mine)
     d.name = name
     saveDraft(d)
     modal.remove()
-    toast('✓ 已保存到我的策略', 'success')
+    toast(apiOk ? '✓ 已保存到账户 · 换设备可见' : '✓ 已保存(本地 · 登录后可同步)', 'success')
     if (afterSave) afterSave()
   })
+}
+
+// C3 · 删除自己的策略 · 优先调 API · fallback 删本地
+async function deleteMyStrategy(id) {
+  if (!confirm('确认删除这个策略?')) return false
+  let apiOk = false
+  if (getToken() && typeof id === 'number') {
+    try { await deleteStrategyApi(id); apiOk = true }
+    catch (e) { console.warn('[delete-strategy] API 失败', e) }
+  }
+  const mine = loadMine().filter(s => String(s.id) !== String(id))
+  saveMine(mine)
+  toast(apiOk ? '✓ 已从账户删除' : '✓ 已从本地删除', 'success')
+  return true
 }
 
 // 订阅推送 dialog
