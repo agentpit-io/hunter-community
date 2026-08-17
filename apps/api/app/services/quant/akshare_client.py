@@ -20,18 +20,33 @@ _RETRY = 3
 
 
 def _fetch_indicator_df(code: str, start_year: str):
+    """带 15s 硬超时 · akshare requests 无超时会挂死
+    ThreadPoolExecutor 不用 with · 避免 timeout 后 __exit__ 等挂死线程
+    """
     import akshare as ak
     import warnings
+    import concurrent.futures
     warnings.filterwarnings("ignore")
+
+    def _do():
+        return ak.stock_financial_analysis_indicator(symbol=code, start_year=start_year)
+
     for attempt in range(_RETRY):
+        ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         try:
-            df = ak.stock_financial_analysis_indicator(symbol=code, start_year=start_year)
+            fut = ex.submit(_do)
+            df = fut.result(timeout=15)
+            ex.shutdown(wait=False)   # 不等 · 已 return
             time.sleep(_SLEEP)
             return df
+        except concurrent.futures.TimeoutError:
+            log.warning(f"[akshare] {code} attempt {attempt+1}/{_RETRY} · TIMEOUT 15s · abandon thread")
+            ex.shutdown(wait=False)   # 挂死 thread 就 daemon 化 · 别等
         except Exception as e:
             log.warning(f"[akshare] {code} attempt {attempt+1}/{_RETRY} · {e}")
-            if attempt < _RETRY - 1:
-                time.sleep(1.5 * (attempt + 1))
+            ex.shutdown(wait=False)
+        if attempt < _RETRY - 1:
+            time.sleep(1.5 * (attempt + 1))
     return None
 
 
