@@ -49,8 +49,24 @@ function ChatPageInner() {
 
     const q = searchParams.get('q')
     if (q) {
-      setAutoText(q)
-      setAutoSend(true)
+      // ⚠️ **带 `{占位符}` 的模板不能自动发。**
+      //
+      // `/library` 双击一个能力会跳到 `/chat?q=查 {股票} 最新股价`。
+      // 原来这里一律 autoSend=true,于是那句话**带着 `{股票}` 原样发给模型** ——
+      // 模型看到的是一句它看不懂的话,而用户根本没机会填进去。
+      //
+      // 侧栏点击走的是 draft 通道:填进输入框并**选中第一个占位符**,
+      // 等用户替换。这里复用同一条通道,而不是新加一个分支 ——
+      // 两条路径各写一份"怎么处理模板"的逻辑,早晚会不一致
+      // (这个 bug 本身就是这么来的)。
+      if (/\{[^}]*\}/.test(q)) {
+        setDraft((d) => ({ text: q, seq: (d?.seq ?? 0) + 1 }))
+      } else {
+        // 没有占位符的模板(如「我的自选股今天怎么样」)是完整的一句话,
+        // 直接发出去正是用户点它时期待的
+        setAutoText(q)
+        setAutoSend(true)
+      }
       router.replace('/chat', { scroll: false })
     }
   }, [router, searchParams])
