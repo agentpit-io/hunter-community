@@ -40,8 +40,29 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 REPO = Path(__file__).resolve().parent.parent
-SKILLS_DIR = REPO / "skills"
-USER_SKILLS_DIR = REPO / "user-skills"
+
+
+def _pick(*cands: str) -> Path:
+    """挑第一个真实存在的目录。
+
+    这个脚本的文档写的是 `docker compose exec -T api python - < 本文件`,
+    而**管道进去时 `__file__` 是 `<stdin>`** —— `parent.parent` 解出来是 `/`,
+    于是它去找 `/skills` 和 `/user-skills`,永远找不到。
+    照着自己的文档跑必然失败,而失败信息("找不到任何 SKILL.md")
+    看起来像是仓库空了,不像是路径算错了。
+
+    容器里 SKILL 挂在 /opt/hunter-skills(内置,只读)与
+    /opt/hunter-user-skills(用户的,可写),见 docker-compose.yml。
+    """
+    for c in cands:
+        p = Path(c)
+        if p.is_dir():
+            return p
+    return Path(cands[0])
+
+
+SKILLS_DIR = _pick(str(REPO / "skills"), "/opt/hunter-skills")
+USER_SKILLS_DIR = _pick(str(REPO / "user-skills"), "/opt/hunter-user-skills")
 
 # 离线兜底清单 —— **从工具注册表读**,不再手写一份。
 #
@@ -53,8 +74,15 @@ USER_SKILLS_DIR = REPO / "user-skills"
 # 那份表错了会被另一个脚本抓到,不会两边一起错。
 def _known_tools() -> set[str]:
     import importlib.util
-    tc = REPO / "apps" / "api" / "app" / "services" / "tool_catalog.py"
-    if not tc.is_file():
+    # 与 SKILLS_DIR 同一个坑:管道进容器时 REPO 解成 `/`,
+    # 于是这里读不到注册表、返回空集,**23 处引用全被误报成"工具不存在"**。
+    # 而失败信息长得像"SKILL 写错了工具名",完全指不到真正的原因。
+    # 容器里注册表在 /app/app/services/。
+    tc = next((p for p in (
+        REPO / "apps" / "api" / "app" / "services" / "tool_catalog.py",
+        Path("/app/app/services/tool_catalog.py"),
+    ) if p.is_file()), None)
+    if tc is None:
         return set()
     # 直接 import 会拖起 app 包的依赖,这里只按文件加载这一个模块。
     # **必须先塞进 sys.modules 再 exec** —— dataclass 解析 `list[str]` 这类注解时

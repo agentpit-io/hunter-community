@@ -103,39 +103,23 @@ export default function CapabilityPanel({ onPick, onManage, refreshKey }: Props)
 
   // ── 统一「能力」反查表(`_22` §3)────────────────────────────
   //
-  // SKILL 与工具**合并成一个列表**。老板的原话:双击工具也要能跳对话框
-  // 填模板,而 SKILL 已经支持 —— 那两者在用户眼里就是一回事。
-  //
-  // 合的是**入口**,不是实体:工具还是工具(模型调的函数),
-  // SKILL 还是 SKILL(模型读的方法论)。kind 只用来在卡片上标一个小记号,
-  // 让用户知道"为什么这个 2 秒那个 90 秒",不是分类。
-  //
-  // 这一步顺带解决一个比重复更亏的问题:13 个工具里 5 个原来**根本点不到**,
-  // 包括老板自己要的「一句话加自选股」。
+  // **直接用 /catalog/capabilities**,不在前端把 skills + toolbox 再拼一遍。
+  // 拼一遍的代价是判据要抄两份:哪些工具已被 SKILL 代表、哪些 pickable ——
+  // 抄两份的结果是侧栏和 /library 显示的项不一样,而用户看不出为什么。
   const capByKey = useMemo(() => {
     const m = new Map<string, Capability>()
-    skills?.groups.forEach((g) => g.skills.forEach((s) => m.set(s.key, {
-      key: s.key, name: s.name, icon: s.icon || '✨',
-      prompt_tpl: s.prompt_tpl, kind: 'skill',
-      status: s.status, hint: s.hint, brand: s.brand,
-      missing: [...(s.missing_tools || []), ...(s.blocked_tools || [])],
+    caps?.groups.forEach((g) => g.items.forEach((i) => m.set(i.key, {
+      key: i.key, name: i.name, icon: i.icon,
+      prompt_tpl: i.prompt_tpl, kind: i.kind,
+      status: i.status, hint: i.hint, brand: i.brand,
+      missing: i.blocked_by || [],
     })))
-    toolbox?.groups.forEach((g) => g.tools.forEach((t) => {
-      // pickable 由后端算 —— 前端不重算那个判据
-      if (!t.pickable) return
-      m.set(t.key, {
-        key: t.key, name: t.name, icon: '🔧',
-        prompt_tpl: t.prompt_tpl, kind: 'tool',
-        status: t.status, hint: t.summary, brand: '',
-        missing: [...(t.blocked_by || []), ...(t.need_key_for || [])],
-      })
-    }))
     return m
-  }, [skills, toolbox])
+  }, [caps])
 
   // 最近用 top N · 已 track 的过滤存在的 · 不够就补默认(第一批高频)
   const recent = useMemo(() => {
-    if (!skills && !toolbox) return [] as Capability[]
+    if (!caps) return [] as Capability[]
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const _ = recentTick   // 让 useMemo 依赖 tick
     const trackedKeys = getRecentSkills(RECENT_N * 2)   // 拿多点 · 过滤后可能不够
@@ -150,8 +134,11 @@ export default function CapabilityPanel({ onPick, onManage, refreshKey }: Props)
     // 行情速查是最高频的问法。原来这两条只能通过薄壳 SKILL 触达,
     // 而薄壳马上要删(步 4),默认位得先换成工具本身
     if (items.length < RECENT_N) {
+      // 用的是**列表里真实存在的 key**:quickview 已被 quote SKILL 代表,
+      // 所以这里写 quote 而不是那个工具 —— 写工具的话它查不到,
+      // 默认位会静默少一个
       const DEFAULTS = ['uzi_quick_scan', 'watchlist_watchlist_add',
-                        'watchlist_stock_quickview', 'forecast', 'uzi_dcf']
+                        'quote', 'forecast', 'uzi_dcf']
       for (const k of DEFAULTS) {
         if (items.length >= RECENT_N) break
         if (items.some((x) => x.key === k)) continue
@@ -160,7 +147,7 @@ export default function CapabilityPanel({ onPick, onManage, refreshKey }: Props)
       }
     }
     return items
-  }, [skills, toolbox, capByKey, recentTick])
+  }, [caps, capByKey, recentTick])
 
   const handlePick = useCallback((tpl: string, key: string) => {
     if (locked && !key.startsWith('custom:')) { setGate(key); return }

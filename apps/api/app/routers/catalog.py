@@ -253,11 +253,36 @@ async def list_capabilities(request: Request):
             "status": "broken" if missing else ("blocked" if not_ready else "ready"),
         })
 
+    # ── 哪些工具已经被某个 SKILL "代表"了 ──
+    #
+    # 老板看到的重复(quote SKILL 与 行情速查 工具并排出现)是**界面上的**重复。
+    # 原计划是删掉那 6 个"薄壳 SKILL",但逐条读完之后发现判断错了:
+    # 它们不是空壳,每一个都带着工具装不下的约束 ——
+    #   stock_news  「不要把新闻和股价强行因果化」
+    #   risk_profile「这是写入操作,记错会一直影响后续建议 → 复述确认」
+    #   portfolio_stress「相关性在下跌时会上升,工具没考虑,要提醒实际更差」
+    #   stock_deep_analysis「是总入口,用户指定角度时该用专项 SKILL」
+    # 开头那句"没有额外方法论"是模板样板话,**它们说错了自己**。
+    #
+    # 而这些约束**只能通过 SKILL 正文到达模型**(opencode 读 SKILL.md)。
+    # 工具的 note 是给 UI 看的,模型读不到 —— 删了搬进 note,
+    # 等于把模型指令降级成界面文案,那些约束会静默失效。
+    #
+    # 所以界面上的重复在界面上解决:一个工具如果是某个 SKILL 的**唯一**
+    # 依赖,那个 SKILL 就是它的入口,工具本身不再单独列出。
+    represented: set[str] = set()
+    for s in skill_files.load_all():
+        tools = s.get("needs_tools") or []
+        if len(tools) == 1:
+            represented.add(tools[0])
+
     # ── 工具 ──
-    # 只收 pickable 的:没写模板 = 用户点了不知道说什么;
-    # internal_only = 给模型用的。两种都不该出现在这个列表里,
-    # 判据在 tool_catalog 一处算好(前端与这里都不重算)
+    # 只收 pickable 且**没有被 SKILL 代表**的。
+    # 剩下的恰好是原来那批「根本没有入口」的工具 —— 这一步同时消除了
+    # 重复、又补上了缺口,而不用删任何方法论。
     for t in tool_catalog.pickable():
+        if t.key in represented:
+            continue
         st = tool_catalog.status_of(t)
         items.append({
             "key": t.key, "name": t.name, "icon": "🔧",
