@@ -19,15 +19,52 @@ router = APIRouter(prefix="/catalog", tags=["catalog"])
 
 @router.get("/sources")
 async def list_sources(
+    request: Request,
     market: str = Query("", description="a / hk / us / global · 空 = 全部"),
+    by: str = Query("upstream", description="upstream(默认·按来源)/ market(旧·按市场)"),
     usable_only: bool = Query(False, description="只看当前真能用的"),
 ):
-    """数据源清单 · 按市场分组。"""
-    groups = catalog.grouped()
-    if market:
-        groups = [g for g in groups if g["market"] == market.lower()]
-        if not groups:
-            raise HTTPException(400, f"未知市场 {market!r} · 可选 a/hk/us/global")
+    """数据源清单。
+
+    **默认按来源(upstream)分组** —— `_21` §2 换掉了原来的按市场分组。
+    原因:按市场分是我们的视角,回答不了用户真正的问题
+    「我有 Tushare 的 key,能接进来吗」。
+
+    `by=market` 保留旧行为,因为概览页的市场统计还在用它 ——
+    换分组维度不该顺手弄坏另一个页面。
+
+    `market` 参数在两种模式下都还有效:
+      · by=market   —— 筛掉别的市场分组(旧语义)
+      · by=upstream —— 筛掉组内不属于该市场的条目(新语义,给筛选条用)
+    """
+    if by not in ("upstream", "market"):
+        raise HTTPException(400, f"未知分组方式 {by!r} · 可选 upstream/market")
+
+    mk = market.lower()
+    if mk and mk not in {m.value for m in catalog.Market}:
+        raise HTTPException(400, f"未知市场 {market!r} · 可选 a/hk/us/global")
+
+    if by == "market":
+        groups = catalog.grouped()
+        if mk:
+            groups = [g for g in groups if g["market"] == mk]
+    else:
+        user_id = getattr(request.state, "user_id", None)
+        groups = catalog.grouped_by_upstream(user_id=user_id)
+        if mk:
+            # 按市场筛时,组内条目过滤后**重算计数** —— 直接沿用总数会让
+            # 侧栏显示 "AKShare 7/7" 但点进去只有 5 条,是另一种形式的说谎。
+            kept = []
+            for g in groups:
+                srcs = [s for s in g["sources"] if s["market"] == mk]
+                if not srcs and g["upstream"] != "user":
+                    continue
+                g = {**g, "sources": srcs, "total": len(srcs),
+                     "ready": len([s for s in srcs
+                                   if s["status"] not in ("unavailable", "need_key")])}
+                kept.append(g)
+            groups = kept
+
     if usable_only:
         for g in groups:
             g["sources"] = [s for s in g["sources"]
@@ -40,6 +77,11 @@ async def list_sources(
     need_key = [s for g in all_groups for s in g["sources"] if s["status"] == "need_key"]
     return {
         "groups": groups,
+        "group_by": by,
+        # 市场降级成筛选条(`_21` §2)—— 前端拿它渲染 chip。
+        # 从注册表算而不是写死,加了新市场不用改两处。
+        "markets": [{"value": m.value, "label": catalog.MARKET_LABEL[m]}
+                    for m in catalog.MARKET_ORDER],
         "summary": {
             "total": total,
             "ready": ready,

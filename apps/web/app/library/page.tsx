@@ -8,7 +8,7 @@ import { HUNTER } from '../lib/hunter-theme'
 import AuthGuard from '../components/AuthGuard'
 import {
   listSources, listToolbox, listCatalogSkills,
-  type SourceGroup, type ToolGroup, type SkillGroup, type Summary,
+  type SourceGroup, type ToolGroup, type SkillGroup, type Summary, type SourcesResponse,
   type DataSourceItem, type ToolItem, type CatalogSkillItem,
 } from '../chat/lib/catalogClient'
 import { parseQuery, buildQuery, TABS } from './lib/nav'
@@ -41,7 +41,11 @@ function LibraryContent() {
   const searchParams = useSearchParams()
   const query = useMemo(() => parseQuery(searchParams), [searchParams])
 
-  const [sources, setSources] = useState<{ groups: SourceGroup[]; summary: Summary } | null>(null)
+  const [sources, setSources] = useState<SourcesResponse | null>(null)
+  // 市场筛选条(`_21` §2)—— 原来的主分类降级成它。
+  // 不放进 URL query 是有意的:它是**视图内的临时过滤**,
+  // 不像 tab/group 那样值得被收藏或分享
+  const [market, setMarket] = useState('')
   const [toolbox, setToolbox] = useState<{ groups: ToolGroup[]; summary: Summary } | null>(null)
   const [skills, setSkills] = useState<{ groups: SkillGroup[]; summary: Summary } | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -49,6 +53,9 @@ function LibraryContent() {
   const [selected, setSelected] = useState<SelectedItem>(null)
   const [detailOpen, setDetailOpen] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
+  // 从某一组的 ＋ 点进来时,表单预选好那个来源(`_21` §3)——
+  // 用户看着"东方财富"那一组点加号,意图已经明确,不该再让他选一遍
+  const [addPreset, setAddPreset] = useState<string | undefined>()
   // 加完之后的结果 —— **必须显示**:装 SKILL 时 opencode 可能没重扫,
   // 那时文件写好了但模型还看不到,只说"已保存"是骗人
   const [notice, setNotice] = useState('')
@@ -56,7 +63,7 @@ function LibraryContent() {
   useEffect(() => {
     let alive = true
     Promise.all([
-      listSources().catch((e) => { console.warn('sources', e); return null }),
+      listSources(market).catch((e) => { console.warn('sources', e); return null }),
       listToolbox().catch((e) => { console.warn('toolbox', e); return null }),
       listCatalogSkills().catch((e) => { console.warn('skills', e); return null }),
     ]).then(([s, t, k]) => {
@@ -65,7 +72,9 @@ function LibraryContent() {
       if (!s && !t && !k) setError('能力目录接口全部失败 · 检查后端 /api/catalog/* 是否正常')
     })
     return () => { alive = false }
-  }, [])
+    // market 变了要重拉 —— 筛选在**后端**做,因为后端会重算每组计数。
+    // 在前端过滤的话侧栏会显示 "AKShare 7/7" 但点进去只有 5 条
+  }, [market])
 
   // 切 tab / group 时清空选中
   useEffect(() => {
@@ -77,10 +86,10 @@ function LibraryContent() {
 
   /** 重新拉一次目录 —— 加完东西后刷新计数与列表 */
   const reload = useCallback(() => {
-    listSources().then(setSources).catch(() => {})
+    listSources(market).then(setSources).catch(() => {})
     listToolbox().then(setToolbox).catch(() => {})
     listCatalogSkills().then(setSkills).catch(() => {})
-  }, [])
+  }, [market])
 
   const onSearch = useCallback((v: string) => {
     router.replace(buildQuery({ ...query, search: v }), { scroll: false })
@@ -123,7 +132,7 @@ function LibraryContent() {
           sources={sources?.groups || null}
           tools={toolbox?.groups || null}
           skills={skills?.groups || null}
-          onAdd={() => { setAddOpen(true); setDetailOpen(false) }}
+          onAdd={(preset) => { setAddPreset(preset); setAddOpen(true); setDetailOpen(false) }}
           onReset={() => setNotice('「恢复初始」还没做 —— 它要删掉你在这一类里加的全部条目,'
                                    + '删之前得先能列出"哪些是你加的",那部分正在做')}
         />
@@ -140,9 +149,10 @@ function LibraryContent() {
           {addOpen && query.tab !== 'overview' && (
             <AddPanel
               tab={query.tab}
+              presetGroup={addPreset}
               categories={skills?.groups.map((g) => g.category) || []}
-              onClose={() => setAddOpen(false)}
-              onDone={(msg) => { setAddOpen(false); setNotice(msg); reload() }}
+              onClose={() => { setAddOpen(false); setAddPreset(undefined) }}
+              onDone={(msg) => { setAddOpen(false); setAddPreset(undefined); setNotice(msg); reload() }}
             />
           )}
 
@@ -153,10 +163,14 @@ function LibraryContent() {
           {query.tab === 'sources' && sources && (
             <SourcesTab
               groups={sources.groups}
+              markets={sources.markets || []}
               activeGroup={query.group}
+              activeMarket={market}
+              onMarketChange={setMarket}
               search={query.search}
               selected={selected?.kind === 'source' ? selected.item : null}
               onSelect={onSelectSource}
+              onAdd={(preset) => { setAddPreset(preset); setAddOpen(true); setDetailOpen(false) }}
             />
           )}
           {query.tab === 'sources' && !sources && <Loading />}

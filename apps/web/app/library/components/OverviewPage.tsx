@@ -25,7 +25,10 @@ export default function OverviewPage({ sources, tools, skills }: Props) {
         icon="📊"
         label="数据源"
         summary={sources?.summary}
-        groups={sources?.groups.map((g) => ({
+        // 跳过空组 —— 「你自己的」在没接任何源时是 0/0,而 0/0 夹在
+        // 一排 "7/7 6/7" 中间读起来像"坏了"。它的空状态该在数据源页
+        // 里展开讲(那里有地方说清楚),不是这张概览卡
+        groups={sources?.groups.filter((g) => g.total > 0).map((g) => ({
           label: g.label, ready: g.ready, total: g.total,
         })) || []}
         href={buildQuery({ tab: 'sources' })}

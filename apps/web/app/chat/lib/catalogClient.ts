@@ -16,7 +16,13 @@ export interface DataSourceItem {
   market_label: string
   kind: string
   kind_label: string
+  /** 我们**怎么取到**它(finance-data 网关 / 直连库 / 本地路由) */
   provider: string
+  /** 数据**原本来自谁**(xtick / eastmoney / sec …)· `_21` §1.2 —— 这才是分组依据 */
+  upstream: string
+  upstream_label: string
+  /** official | user —— 用户自己接的排在最前,且不可被"恢复初始"以外的操作删掉 */
+  owner: string
   tier: string
   endpoint: string
   volume_hint: string
@@ -30,11 +36,23 @@ export interface DataSourceItem {
 }
 
 export interface SourceGroup {
-  market: string
+  /** 分组主键 —— 按来源分组时是 upstream slug('user' / 'akshare' / …) */
+  upstream: string
   label: string
+  owner: 'official' | 'user'
+  /** 这一组覆盖了哪些市场 · 市场已降级成筛选条(`_21` §2) */
+  markets: string[]
   total: number
   ready: number
   sources: DataSourceItem[]
+  /** 旧的按市场分组仍会返回它(概览页在用)· 按来源分组时不存在 */
+  market?: string
+}
+
+/** 市场筛选条的选项 —— 由后端从注册表算出,不在前端写死 */
+export interface MarketOption {
+  value: string
+  label: string
 }
 
 export interface ToolItem {
@@ -101,7 +119,18 @@ async function get<T>(path: string): Promise<T> {
   return res.json()
 }
 
-export const listSources = () => get<{ groups: SourceGroup[]; summary: Summary }>('/sources')
+export interface SourcesResponse {
+  groups: SourceGroup[]
+  group_by: 'upstream' | 'market'
+  markets: MarketOption[]
+  summary: Summary
+}
+
+/** 数据源清单 · **默认按来源分组**(`_21` §2)。
+ *  `market` 是筛选条,不是分组维度 —— 传了它后端会重算每组计数,
+ *  所以侧栏显示的 N/M 永远和点进去看到的条数一致。 */
+export const listSources = (market?: string) =>
+  get<SourcesResponse>(`/sources${market ? `?market=${encodeURIComponent(market)}` : ''}`)
 export const listToolbox = () => get<{ groups: ToolGroup[]; summary: Summary }>('/toolbox')
 export const listCatalogSkills = () => get<{ groups: SkillGroup[]; summary: Summary }>('/skills')
 
