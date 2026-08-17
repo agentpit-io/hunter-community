@@ -190,6 +190,42 @@ container.innerHTML = `
     </div>
   </div>
 
+  <!-- C6 · 半自动下单 CSV 导出 -->
+  <div class="chart-panel" id="orders-panel">
+    <div class="hd">
+      <div class="title">📥 生成券商下单清单(CSV)</div>
+      <div class="actions"><span style="color:var(--muted);font-size:11.5px">按当前持仓 + 等权 + 最新 close 生成</span></div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:12px">
+      <div class="field">
+        <div class="lbl" style="font-size:11px;color:var(--muted);margin-bottom:4px">总资金(元)</div>
+        <input type="number" id="ord-capital" class="input" value="100000" step="1000" min="1000" />
+      </div>
+      <div class="field">
+        <div class="lbl" style="font-size:11px;color:var(--muted);margin-bottom:4px">券商格式</div>
+        <select id="ord-broker" class="input">
+          <option value="em">东方财富</option>
+          <option value="ht">华泰涨乐</option>
+          <option value="generic">通用 CSV</option>
+        </select>
+      </div>
+      <div class="field">
+        <div class="lbl" style="font-size:11px;color:var(--muted);margin-bottom:4px">价格类型</div>
+        <select id="ord-pt" class="input">
+          <option value="market">市价单</option>
+          <option value="limit">限价单(用最新 close)</option>
+        </select>
+      </div>
+      <div class="field" style="display:flex;align-items:flex-end">
+        <button class="btn primary" id="btn-gen-orders" style="width:100%">📥 下载 CSV</button>
+      </div>
+    </div>
+    <div id="ord-status" style="color:var(--muted);font-size:11.5px;min-height:16px"></div>
+    <div style="margin-top:8px;padding:10px 12px;background:var(--tag-warn-bg);color:var(--tag-warn-fg);border-radius:8px;font-size:11.5px;line-height:1.6">
+      ⚠️ 本工具仅生成下单清单 · 不代表投资建议 · 所有交易决策与风险由用户自负 · 导入券商前请仔细核对每一笔
+    </div>
+  </div>
+
   <!-- 底部 CTA -->
   <div class="chart-panel" style="background:linear-gradient(180deg,#fff9f0 0%,#fff 100%);border-color:#e8dcc4;display:flex;align-items:center;gap:16px;padding:20px 22px">
     <div style="flex:1">
@@ -354,6 +390,55 @@ container.innerHTML = `
   nBucketsSel.addEventListener('change', loadAndRender)
   loadAndRender()
   window.addEventListener('resize', () => chart.resize())
+})()
+
+// ─── C6 · 生成下单 CSV ───
+;(function initOrdersPanel() {
+  const btn = document.getElementById('btn-gen-orders')
+  const status = document.getElementById('ord-status')
+  if (!btn) return
+  btn.addEventListener('click', async () => {
+    const positions = (isReal && Array.isArray(realResult.positions)) ? realResult.positions : []
+    if (!positions.length) {
+      status.textContent = '⚠ 无持仓数据 · 需先跑回测'
+      status.style.color = 'var(--danger)'
+      return
+    }
+    btn.disabled = true; btn.textContent = '生成中…'
+    status.textContent = ''
+    try {
+      const r = await fetch('/api/quant/orders/generate', {
+        method: 'POST',
+        headers: apiHeaders(),
+        body: JSON.stringify({
+          positions: positions.map(p => ({code: p.code, weight: p.weight})),
+          total_capital: parseFloat(document.getElementById('ord-capital').value) || 100000,
+          broker: document.getElementById('ord-broker').value,
+          price_type: document.getElementById('ord-pt').value,
+        }),
+      })
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}))
+        throw new Error(err.detail || `HTTP ${r.status}`)
+      }
+      const blob = await r.blob()
+      // 从响应头拿 filename
+      const cd = r.headers.get('Content-Disposition') || ''
+      const m = /filename="([^"]+)"/.exec(cd)
+      const filename = m ? m[1] : `orders_${new Date().toISOString().slice(0,10)}.csv`
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = filename; a.click()
+      URL.revokeObjectURL(url)
+      status.innerHTML = `✅ CSV 已下载 · <b>${filename}</b> · 请打开券商 App 找"批量委托"导入`
+      status.style.color = 'var(--brand-dark)'
+    } catch (e) {
+      status.textContent = '❌ 生成失败: ' + e.message
+      status.style.color = 'var(--danger)'
+    } finally {
+      btn.disabled = false; btn.textContent = '📥 下载 CSV'
+    }
+  })
 })()
 
 // ─── C4.2 · 最后一期持仓 · 因子贡献表 ───

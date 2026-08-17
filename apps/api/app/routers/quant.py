@@ -16,6 +16,7 @@ import logging
 from datetime import date, timedelta
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 from app.services.database import get_conn
@@ -379,3 +380,95 @@ async def run_backtest_ep(body: BacktestIn, request: Request):
     return {"result_id": new_id, "cached": False,
             "metrics": result["metrics"], "nav_series": result["nav_series"],
             "positions": positions, "duration_ms": result["duration_ms"]}
+
+
+# ═══════════════════════════════════════════════════════════════
+# C6 · 半自动下单 CSV 导出
+# ═══════════════════════════════════════════════════════════════
+
+class OrdersGenIn(BaseModel):
+    positions: list[dict]          # [{code, weight}]
+    total_capital: float = 100000  # 元
+    broker: str = "em"             # em / ht / generic
+    price_type: str = "market"     # market / limit
+
+
+@router.post("/orders/generate")
+async def generate_orders(body: OrdersGenIn):
+    """按 positions 生成券商 CSV 下单指令 · 3 格式:东财 / 华泰 / 通用
+    - 每只股票分配 total_capital * weight → 元
+    - 除以 close → 股数 · 向下取整到 100 手
+    - 输出:CSV 文件 · 附下载头
+    """
+    positions = body.positions or []
+    if not positions:
+        raise HTTPException(400, "positions 不能为空")
+    codes = [p["code"] for p in positions if p.get("code")]
+    if not codes:
+        raise HTTPException(400, "positions 无有效 code")
+
+    # 拉最新 close · 从 klines 表
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute(
+        """SELECT DISTINCT ON (code) code, close FROM klines
+           WHERE code = ANY(%s) AND period='daily' AND close IS NOT NULL
+           ORDER BY code, ts DESC""",
+        (codes,),
+    )
+    price_map = {c: float(cl) for c, cl in cur.fetchall()}
+    cur.close(); conn.close()
+
+    name_map = strategy_engine.fetch_stock_names(codes)
+
+    orders = []
+    for p in positions:
+        code = p.get("code")
+        weight = float(p.get("weight") or 0)
+        price = price_map.get(code)
+        if not price or price <= 0 or weight <= 0:
+            continue
+        amount = body.total_capital * weight
+        qty = int(amount / price / 100) * 100
+        if qty < 100:
+            continue
+        orders.append({
+            "code": code,
+            "name": name_map.get(code, code),
+            "side": "买入",
+            "qty": qty,
+            "price": round(price, 2) if body.price_type == "limit" else "",
+            "price_type": "限价" if body.price_type == "limit" else "市价",
+        })
+
+    if not orders:
+        raise HTTPException(400, "无有效下单指令(检查 klines close 数据)")
+
+    csv_str = _format_orders_csv(orders, body.broker)
+    filename = f"orders_{date.today().isoformat()}_{body.broker}.csv"
+    return Response(
+        content=csv_str,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _format_orders_csv(orders: list[dict], broker: str) -> str:
+    import csv, io
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    if broker == "em":
+        # 东方财富格式
+        w.writerow(["代码", "方向", "数量", "价格", "类型"])
+        for o in orders:
+            w.writerow([o["code"], o["side"], o["qty"], o["price"], o["price_type"]])
+    elif broker == "ht":
+        # 华泰涨乐财富通格式
+        w.writerow(["证券代码", "证券名称", "买卖方向", "委托数量", "委托价格", "价格类型"])
+        for o in orders:
+            w.writerow([o["code"], o["name"], o["side"], o["qty"], o["price"], o["price_type"]])
+    else:
+        # 通用格式
+        w.writerow(["code", "name", "side", "qty", "price", "price_type"])
+        for o in orders:
+            w.writerow([o["code"], o["name"], "buy", o["qty"], o["price"], o["price_type"]])
+    return buf.getvalue()
