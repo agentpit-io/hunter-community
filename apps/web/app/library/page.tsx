@@ -19,6 +19,7 @@ import SourcesTab from './components/SourcesTab'
 import ToolsTab from './components/ToolsTab'
 import SkillsTab from './components/SkillsTab'
 import DetailPane from './components/DetailPane'
+import AddPanel from './components/AddPanel'
 
 type SelectedItem =
   | { kind: 'source'; item: DataSourceItem }
@@ -47,6 +48,10 @@ function LibraryContent() {
 
   const [selected, setSelected] = useState<SelectedItem>(null)
   const [detailOpen, setDetailOpen] = useState(false)
+  const [addOpen, setAddOpen] = useState(false)
+  // 加完之后的结果 —— **必须显示**:装 SKILL 时 opencode 可能没重扫,
+  // 那时文件写好了但模型还看不到,只说"已保存"是骗人
+  const [notice, setNotice] = useState('')
 
   useEffect(() => {
     let alive = true
@@ -66,7 +71,16 @@ function LibraryContent() {
   useEffect(() => {
     setSelected(null)
     setDetailOpen(false)
+    // 面板内容按 tab 决定,切了 tab 不收起会出现"在数据源页显示接工具表单"
+    setAddOpen(false)
   }, [query.tab, query.group])
+
+  /** 重新拉一次目录 —— 加完东西后刷新计数与列表 */
+  const reload = useCallback(() => {
+    listSources().then(setSources).catch(() => {})
+    listToolbox().then(setToolbox).catch(() => {})
+    listCatalogSkills().then(setSkills).catch(() => {})
+  }, [])
 
   const onSearch = useCallback((v: string) => {
     router.replace(buildQuery({ ...query, search: v }), { scroll: false })
@@ -109,10 +123,28 @@ function LibraryContent() {
           sources={sources?.groups || null}
           tools={toolbox?.groups || null}
           skills={skills?.groups || null}
+          onAdd={() => { setAddOpen(true); setDetailOpen(false) }}
+          onReset={() => setNotice('「恢复初始」还没做 —— 它要删掉你在这一类里加的全部条目,'
+                                   + '删之前得先能列出"哪些是你加的",那部分正在做')}
         />
 
         <main style={mainStyle}>
           {error && <div style={errorBoxStyle}>{error}</div>}
+
+          {notice && (
+            <div style={noticeBoxStyle} onClick={() => setNotice('')} title="点击关闭">
+              {notice}
+            </div>
+          )}
+
+          {addOpen && query.tab !== 'overview' && (
+            <AddPanel
+              tab={query.tab}
+              categories={skills?.groups.map((g) => g.category) || []}
+              onClose={() => setAddOpen(false)}
+              onDone={(msg) => { setAddOpen(false); setNotice(msg); reload() }}
+            />
+          )}
 
           {query.tab === 'overview' && (
             <OverviewPage sources={sources} tools={toolbox} skills={skills} />
@@ -209,6 +241,12 @@ const mainStyle: React.CSSProperties = {
   flex: 1,
   overflowY: 'auto',
   background: HUNTER.BG,
+}
+
+const noticeBoxStyle: React.CSSProperties = {
+  margin: '0 0 14px', padding: '10px 13px', borderRadius: 9, cursor: 'pointer',
+  background: HUNTER.TAG_OK_BG, color: HUNTER.TAG_OK_FG,
+  fontSize: 12.5, lineHeight: 1.7,
 }
 
 const errorBoxStyle: React.CSSProperties = {

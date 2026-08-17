@@ -11,9 +11,15 @@ interface Props {
   sources: SourceGroup[] | null
   tools: ToolGroup[] | null
   skills: SkillGroup[] | null
+  /** 点「＋ 添加」· 由页面按当前 tab 决定加什么(_20 §2) */
+  onAdd?: () => void
+  /** 点「↻ 恢复初始」· 删掉当前 tab 的全部用户自定义项 */
+  onReset?: () => void
 }
 
-export default function CategoryNav({ query, sources, tools, skills }: Props) {
+export default function CategoryNav({ query, sources, tools, skills, onAdd, onReset }: Props) {
+  // 概览页没有"当前在加什么"的上下文,所以这两个操作只在具体 tab 下可用
+  const actionable = query.tab !== 'overview'
   return (
     <nav style={navStyle}>
       {TABS.map((tab) => {
@@ -46,13 +52,26 @@ export default function CategoryNav({ query, sources, tools, skills }: Props) {
 
       <div style={separatorStyle} />
 
-      {/* Phase 2 才做的管理操作 · 先占位 disabled */}
       <div style={{ padding: '0 12px' }}>
-        <button style={mgmtBtnStyle(true)} disabled title="Phase 2 上线">＋ 添加</button>
-        <button style={mgmtBtnStyle(true)} disabled title="Phase 2 上线">↻ 恢复初始</button>
+        <button
+          style={mgmtBtnStyle(!actionable)} disabled={!actionable}
+          onClick={onAdd}
+          title={actionable ? ADD_HINT[query.tab] : '先选一个分类(数据源 / 工具箱 / SKILL)'}
+        >＋ 添加</button>
+        <button
+          style={mgmtBtnStyle(!actionable)} disabled={!actionable}
+          onClick={onReset}
+          title={actionable ? '删掉这一类里你自己加的全部条目 · 内置的不受影响' : '先选一个分类'}
+        >↻ 恢复初始</button>
       </div>
     </nav>
   )
+}
+
+const ADD_HINT: Record<string, string> = {
+  sources: '添加自己的数据源',
+  tools: '接入自己的 MCP 工具',
+  skills: '从 GitHub 装,或自己写一个',
 }
 
 function GroupList({ tabId, groups, activeGroup }: {
