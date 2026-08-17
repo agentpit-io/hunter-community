@@ -167,3 +167,34 @@ export function statusDot(s: SourceStatus | string): { color: string; label: str
     default:            return { color: '#CFCBBF', label: '未调用过' }
   }
 }
+
+// ── 统一能力(`_22` 步 3)────────────────────────────────────
+//
+// SKILL 与工具合成一个列表。**合的是入口,不是实体** ——
+// 每条都带 kind,但那只是卡片上一个小记号,不是分类维度。
+
+export interface CapabilityItem {
+  key: string
+  name: string
+  icon: string
+  kind: 'skill' | 'tool'
+  kind_label: string          // "带方法论" / "直接执行"
+  category: string
+  hint: string
+  prompt_tpl: string
+  brand: string
+  builtin: boolean
+  slow: boolean
+  blocked_by: string[]
+  status: 'ready' | 'blocked' | 'broken'
+}
+
+export interface CapabilityGroup {
+  category: string
+  total: number
+  ready: number
+  items: CapabilityItem[]
+}
+
+export const listCapabilities = () =>
+  get<{ groups: CapabilityGroup[]; summary: Summary }>('/capabilities')

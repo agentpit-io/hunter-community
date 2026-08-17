@@ -5,13 +5,13 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { HUNTER } from '../../lib/hunter-theme'
 import { TABS, type TabId, type LibraryQuery, buildQuery } from '../lib/nav'
-import type { SourceGroup, ToolGroup, SkillGroup } from '../../chat/lib/catalogClient'
+import type { SourceGroup, CapabilityGroup } from '../../chat/lib/catalogClient'
 
 interface Props {
   query: LibraryQuery
   sources: SourceGroup[] | null
-  tools: ToolGroup[] | null
-  skills: SkillGroup[] | null
+  /** 工具与 SKILL 合并后的能力分组(`_22` 步 3) */
+  caps: CapabilityGroup[] | null
   /** 点「＋ 添加」· 由页面按当前 tab 决定加什么(_20 §2)。
    *  `presetGroup` = 从某一组的 ＋ 点进来时,表单预选好那个来源(`_21` §3) */
   onAdd?: (presetGroup?: string) => void
@@ -19,7 +19,7 @@ interface Props {
   onReset?: () => void
 }
 
-export default function CategoryNav({ query, sources, tools, skills, onAdd, onReset }: Props) {
+export default function CategoryNav({ query, sources, caps, onAdd, onReset }: Props) {
   // 概览页没有"当前在加什么"的上下文,所以这两个操作只在具体 tab 下可用
   const actionable = query.tab !== 'overview'
   return (
@@ -43,13 +43,8 @@ export default function CategoryNav({ query, sources, tools, skills, onAdd, onRe
               }))} activeGroup={isActiveTab ? query.group : undefined}
                 onAddTo={onAdd} />
             )}
-            {tab.id === 'tools' && tools && (
-              <GroupList tabId={tab.id} groups={tools.map(g => ({
-                id: g.server, label: g.label, total: g.total, ready: g.ready,
-              }))} activeGroup={isActiveTab ? query.group : undefined} />
-            )}
-            {tab.id === 'skills' && skills && (
-              <GroupList tabId={tab.id} groups={skills.map(g => ({
+            {tab.id === 'capabilities' && caps && (
+              <GroupList tabId={tab.id} groups={caps.map(g => ({
                 id: g.category, label: g.category, total: g.total, ready: g.ready,
               }))} activeGroup={isActiveTab ? query.group : undefined} />
             )}
@@ -79,8 +74,7 @@ export default function CategoryNav({ query, sources, tools, skills, onAdd, onRe
 
 const ADD_HINT: Record<string, string> = {
   sources: '添加自己的数据源',
-  tools: '接入自己的 MCP 工具',
-  skills: '从 GitHub 装,或自己写一个',
+  capabilities: '装一个 SKILL,或接入自己的 MCP 工具',
 }
 
 // 数据源那条**不叫"恢复初始"** —— 它做的是"停用你自己的源、全部走官方",
@@ -88,13 +82,11 @@ const ADD_HINT: Record<string, string> = {
 // 于是不敢点;而它恰恰是排查问题时最该点的那个按钮
 const RESET_LABEL: Record<string, string> = {
   sources: '↻ 一键用官方默认',
-  tools: '↻ 恢复初始',
-  skills: '↻ 恢复初始',
+  capabilities: '↻ 恢复初始',
 }
 const RESET_HINT: Record<string, string> = {
   sources: '停用你自己接的全部数据源,改走官方源 · 不删除,随时可切回',
-  tools: '删掉这一类里你自己加的全部条目 · 内置的不受影响',
-  skills: '删掉这一类里你自己加的全部条目 · 内置的不受影响',
+  capabilities: '删掉你自己加的全部 SKILL 与工具 · 内置的不受影响',
 }
 
 function GroupList({ tabId, groups, activeGroup, onAddTo }: {

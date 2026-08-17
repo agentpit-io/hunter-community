@@ -67,6 +67,13 @@ class ToolEntry:
     # 给模型用而不是给人用的工具(如 hunter_user_invoke:得先知道自己接了
     # 什么源才谈得上调用)。即使写了 prompt_tpl 也不进能力列表。
     internal_only: bool = False
+    # 合并后的能力列表按**用途**分组,用的就是 SKILL 那 7 个类目 ——
+    # 不另立一套。"我想估值"和"这是工具还是 SKILL"是两个问题,
+    # 只有前者是用户会问的,所以分组维度必须是用途。
+    #
+    # 原来的 server 分组(行情与资讯/组合管理/…)保留在 `/catalog/toolbox`,
+    # 那是给开发者看"哪个 MCP server 提供了什么"的,两个视角都有用。
+    category: str = ""
 
 
 # ══════════════════════════════════════════════════════════════
@@ -80,33 +87,40 @@ CATALOG: list[ToolEntry] = [
     ToolEntry("watchlist_stock_quickview", "行情速查", "watchlist", ToolOrigin.IMAGE,
               "实时行情富卡片:价格、涨跌、成交、盘口",
               needs_data=["a.quote"], markets=["a"],
-              prompt_tpl="查 {股票} 最新股价"),
+              prompt_tpl="查 {股票} 最新股价",
+              category="快速判断"),
     ToolEntry("watchlist_stock_news", "个股新闻", "watchlist", ToolOrigin.IMAGE,
               "拉取该股最近的新闻条目",
               needs_data=["a.news"], markets=["a"],
-              prompt_tpl="看 {股票} 最近的新闻"),
+              prompt_tpl="看 {股票} 最近的新闻",
+              category="事件与筛选"),
     ToolEntry("watchlist_watchlist_digest", "自选股速览", "watchlist", ToolOrigin.IMAGE,
               "一次拿到自选股全部最新行情与异动",
               needs_data=["a.quote"], markets=["a"],
-              prompt_tpl="我的自选股今天怎么样"),
+              prompt_tpl="我的自选股今天怎么样",
+              category="组合级"),
     ToolEntry("watchlist_watchlist_add", "加自选股", "watchlist", ToolOrigin.IMAGE,
               "把一只股票加进自选列表",
               needs_data=[], note="纯本地写库 · 不依赖任何数据源",
-              prompt_tpl="把 {股票} 加入我的自选"),
+              prompt_tpl="把 {股票} 加入我的自选",
+              category="组合级"),
 
     # ── 组合级 · portfolio server ─────────────────────────────
     ToolEntry("portfolio_portfolio_rebalance", "组合再平衡", "portfolio", ToolOrigin.IMAGE,
               "按目标权重算调仓清单与换手成本",
               needs_data=["a.quote"], markets=["a"],
-              prompt_tpl="按目标权重帮我算一份调仓清单"),
+              prompt_tpl="按目标权重帮我算一份调仓清单",
+              category="组合级"),
     ToolEntry("portfolio_portfolio_stress", "组合压力测试", "portfolio", ToolOrigin.IMAGE,
               "情景冲击下的组合回撤模拟",
               needs_data=["a.quote", "a.kline"], markets=["a"],
-              prompt_tpl="模拟一次大跌,看我的组合会回撤多少"),
+              prompt_tpl="模拟一次大跌,看我的组合会回撤多少",
+              category="组合级"),
     ToolEntry("portfolio_update_risk_profile", "更新风险画像", "portfolio", ToolOrigin.IMAGE,
               "记录用户风险偏好,后续建议据此调整",
               needs_data=[], note="纯本地写库",
-              prompt_tpl="记录我的风险偏好:我能接受的最大回撤是 {比例}"),
+              prompt_tpl="记录我的风险偏好:我能接受的最大回撤是 {比例}",
+              category="组合级"),
 
     # ── 深度分析 · uzi server ─────────────────────────────────
     ToolEntry("uzi_stock_deep_analysis", "深度分析", "uzi", ToolOrigin.IMAGE,
@@ -117,32 +131,38 @@ CATALOG: list[ToolEntry] = [
               markets=["a", "hk", "us"], slow=True,
               note="薄代理转发到 /api/internal/uzi/* · 5-10 秒 · "
                    "股东/治理表上游未 seed,那两段会显示'数据未 seed'",
-              prompt_tpl="对 {股票} 做一次全面分析"),
+              prompt_tpl="对 {股票} 做一次全面分析",
+              category="综合分析"),
 
     # ── 平台自有能力 · hunter_cap server(我们在 Step 3 加的)──
     ToolEntry("hunter_cap_kpred", "K线预测", "hunter_cap", ToolOrigin.PLATFORM,
               "Kronos 模型预测未来 N 日开高低收与涨跌幅",
               needs_data=["global.kronos"], markets=["a"], slow=True,
               note="经 hunter 网关 · 同一把 key",
-              prompt_tpl="预测 {股票} 未来 5 日走势"),
+              prompt_tpl="预测 {股票} 未来 5 日走势",
+              category="快速判断"),
     ToolEntry("hunter_cap_truesource_brief", "情报简报", "hunter_cap", ToolOrigin.PLATFORM,
               "多标的情报摘要与预警级别",
               needs_data=["global.truesource_brief"],
-              prompt_tpl="给我 {股票} 的情报摘要与预警"),
+              prompt_tpl="给我 {股票} 的情报摘要与预警",
+              category="事件与筛选"),
     ToolEntry("hunter_cap_truesource_scout", "主动情报采集", "hunter_cap", ToolOrigin.PLATFORM,
               "针对单只标的现场搜集情报(Gemini 搜索,耗时较长)",
               needs_data=["global.truesource_scout"], slow=True,
-              prompt_tpl="现场搜集 {股票} 的最新情报"),
+              prompt_tpl="现场搜集 {股票} 的最新情报",
+              category="事件与筛选"),
 
     # ── 用户自接数据源的通道 · hunter_user server ─────────────
     ToolEntry("hunter_user_list_my_sources", "列出我接的数据源", "hunter_user", ToolOrigin.IMAGE,
               "查看用户自己在设置里接入的第三方 MCP/API",
               needs_data=[], note="与平台 key 无关 · 用户自建",
-              prompt_tpl="我接了哪些自己的数据源"),
+              prompt_tpl="我接了哪些自己的数据源",
+              category="接入与自查"),
     ToolEntry("hunter_user_invoke", "调用我接的数据源", "hunter_user", ToolOrigin.IMAGE,
               "调用用户自建数据源的某个端点",
               needs_data=[], note="与平台 key 无关 · 用户自建",
-              internal_only=True),
+              internal_only=True,
+              category="接入与自查"),
 ]
 
 _BY_KEY = {t.key: t for t in CATALOG}

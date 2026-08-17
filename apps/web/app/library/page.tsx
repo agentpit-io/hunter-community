@@ -7,9 +7,10 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { HUNTER } from '../lib/hunter-theme'
 import AuthGuard from '../components/AuthGuard'
 import {
-  listSources, listToolbox, listCatalogSkills,
+  listSources, listToolbox, listCatalogSkills, listCapabilities,
   type SourceGroup, type ToolGroup, type SkillGroup, type Summary, type SourcesResponse,
   type DataSourceItem, type ToolItem, type CatalogSkillItem,
+  type CapabilityGroup, type CapabilityItem,
 } from '../chat/lib/catalogClient'
 import { listUserSources, bulkEnableUserSources } from './lib/userSources'
 import { parseQuery, buildQuery, TABS } from './lib/nav'
@@ -17,13 +18,13 @@ import CategoryNav from './components/CategoryNav'
 import SearchBar from './components/SearchBar'
 import OverviewPage from './components/OverviewPage'
 import SourcesTab from './components/SourcesTab'
-import ToolsTab from './components/ToolsTab'
-import SkillsTab from './components/SkillsTab'
+import CapabilitiesTab from './components/CapabilitiesTab'
 import DetailPane from './components/DetailPane'
 import AddPanel from './components/AddPanel'
 
 type SelectedItem =
   | { kind: 'source'; item: DataSourceItem }
+  | { kind: 'cap'; item: CapabilityItem }
   | { kind: 'tool'; item: ToolItem }
   | { kind: 'skill'; item: CatalogSkillItem }
   | null
@@ -49,6 +50,10 @@ function LibraryContent() {
   const [market, setMarket] = useState('')
   const [toolbox, setToolbox] = useState<{ groups: ToolGroup[]; summary: Summary } | null>(null)
   const [skills, setSkills] = useState<{ groups: SkillGroup[]; summary: Summary } | null>(null)
+  // 合并后的能力(工具 + SKILL)· `_22` 步 3。
+  // skills/toolbox 两份**保留**:概览页的三块统计、AddPanel 的类目下拉
+  // 都还在用它们。换个视角不该弄坏另外两处
+  const [caps, setCaps] = useState<{ groups: CapabilityGroup[]; summary: Summary } | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const [selected, setSelected] = useState<SelectedItem>(null)
@@ -70,9 +75,10 @@ function LibraryContent() {
       listSources(market).catch((e) => { console.warn('sources', e); return null }),
       listToolbox().catch((e) => { console.warn('toolbox', e); return null }),
       listCatalogSkills().catch((e) => { console.warn('skills', e); return null }),
-    ]).then(([s, t, k]) => {
+      listCapabilities().catch((e) => { console.warn('capabilities', e); return null }),
+    ]).then(([s, t, k, c]) => {
       if (!alive) return
-      setSources(s); setToolbox(t); setSkills(k)
+      setSources(s); setToolbox(t); setSkills(k); setCaps(c)
       if (!s && !t && !k) setError('能力目录接口全部失败 · 检查后端 /api/catalog/* 是否正常')
     })
     return () => { alive = false }
@@ -93,6 +99,7 @@ function LibraryContent() {
     listSources(market).then(setSources).catch(() => {})
     listToolbox().then(setToolbox).catch(() => {})
     listCatalogSkills().then(setSkills).catch(() => {})
+    listCapabilities().then(setCaps).catch(() => {})
   }, [market])
 
   /** 「一键用官方默认」/「恢复初始」· 按 tab 分流。
@@ -101,7 +108,7 @@ function LibraryContent() {
    *  照实说而不是给一个点了没反应的按钮。 */
   const onReset = useCallback(async () => {
     if (query.tab !== 'sources') {
-      setNotice('「恢复初始」在工具箱/SKILL 这两类还没做 —— 它要删掉你加的全部条目,'
+      setNotice('「恢复初始」在能力这一类还没做 —— 它要删掉你加的全部 SKILL 与工具,'
                 + '删之前得先能列出"哪些是你加的",那部分正在做')
       return
     }
@@ -152,11 +159,14 @@ function LibraryContent() {
   const onSelectSource = useCallback((item: DataSourceItem) => {
     setSelected({ kind: 'source', item }); setDetailOpen(true)
   }, [])
-  const onSelectTool = useCallback((item: ToolItem) => {
-    setSelected({ kind: 'tool', item }); setDetailOpen(true)
+  const onSelectCap = useCallback((item: CapabilityItem) => {
+    setSelected({ kind: 'cap', item }); setDetailOpen(true)
   }, [])
-  const onSelectSkill = useCallback((item: CatalogSkillItem) => {
-    setSelected({ kind: 'skill', item }); setDetailOpen(true)
+
+  /** 双击/「用它」—— 跳对话框并填好模板。**老板要的就是这个动作。**
+   *  工具与 SKILL 走同一条路径,这正是"合并入口"的落点。 */
+  const onUseCap = useCallback((item: CapabilityItem) => {
+    window.location.href = `/chat?q=${encodeURIComponent(item.prompt_tpl)}`
   }, [])
 
   // 把 SKILL 提问模板送回 chat 输入框 · 走 /chat?q= autoText 通道
@@ -184,8 +194,7 @@ function LibraryContent() {
         <CategoryNav
           query={query}
           sources={sources?.groups || null}
-          tools={toolbox?.groups || null}
-          skills={skills?.groups || null}
+          caps={caps?.groups || null}
           onAdd={(preset) => { setAddPreset(preset); setAddOpen(true); setDetailOpen(false) }}
           onReset={onReset}
         />
@@ -240,35 +249,26 @@ function LibraryContent() {
           )}
           {query.tab === 'sources' && !sources && <Loading />}
 
-          {query.tab === 'tools' && toolbox && (
-            <ToolsTab
-              groups={toolbox.groups}
+          {query.tab === 'capabilities' && caps && (
+            <CapabilitiesTab
+              groups={caps.groups}
               activeGroup={query.group}
               search={query.search}
-              selected={selected?.kind === 'tool' ? selected.item : null}
-              onSelect={onSelectTool}
+              selected={selected?.kind === 'cap' ? selected.item : null}
+              onSelect={onSelectCap}
+              onUse={onUseCap}
             />
           )}
-          {query.tab === 'tools' && !toolbox && <Loading />}
-
-          {query.tab === 'skills' && skills && (
-            <SkillsTab
-              groups={skills.groups}
-              activeGroup={query.group}
-              search={query.search}
-              selected={selected?.kind === 'skill' ? selected.item : null}
-              onSelect={onSelectSkill}
-              onPickToChat={onPickSkillToChat}
-            />
-          )}
-          {query.tab === 'skills' && !skills && <Loading />}
+          {query.tab === 'capabilities' && !caps && <Loading />}
         </main>
 
         {detailOpen && selected && (
           <DetailPane
             source={selected.kind === 'source' ? selected.item : undefined}
+            cap={selected.kind === 'cap' ? selected.item : undefined}
             tool={selected.kind === 'tool' ? selected.item : undefined}
             skill={selected.kind === 'skill' ? selected.item : undefined}
+            onUseCap={onUseCap}
             onClose={() => { setDetailOpen(false); setSelected(null) }}
             onPickSkillToChat={onPickSkillToChat}
             // 测试会改熔断状态、删除会改条数 —— 两者都要让列表重拉,

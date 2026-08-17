@@ -210,3 +210,93 @@ async def list_skills():
             "user_added": sum(1 for s in out if not s["builtin"]),
         },
     }
+
+
+@router.get("/capabilities")
+async def list_capabilities(request: Request):
+    """**统一的能力清单** —— SKILL 与工具合成一个列表(`_22` §3)。
+
+    老板的原话:双击工具也要能跳对话框填模板,而 SKILL 已经支持 ——
+    那两者在用户眼里就是一回事。
+
+    **合的是入口,不是实体。**每一项都带 `kind`(skill / tool),
+    但那只是卡片上一个小记号(📋 带方法论 / 🔧 直接执行),不是分类。
+    用户不需要理解它,但当他好奇"为什么这个 2 秒那个 90 秒"时,记号给了答案。
+
+    分组按**用途**(SKILL 那 7 个类目 + 接入与自查),不按实现方式 ——
+    "我想估值"和"这是工具还是 SKILL"是两个问题,只有前者是用户会问的。
+
+    `/skills` 与 `/toolbox` 都保留:
+      · `/skills`  聊天页与校验脚本在用
+      · `/toolbox` 按 MCP server 分组,是给开发者看"哪个 server 提供了什么"
+    换个视角不该弄坏另外两个。
+    """
+    from app.services import skill_files
+
+    items: list[dict] = []
+
+    # ── SKILL ──
+    for s in skill_files.load_all():
+        tools = s.get("needs_tools") or []
+        missing = [t for t in tools if tool_catalog.get(t) is None]
+        not_ready = [t for t in tools
+                     if (e := tool_catalog.get(t))
+                     and tool_catalog.status_of(e)["state"] not in ("ready", "partial")]
+        items.append({
+            "key": s["key"], "name": s["name"], "icon": s["icon"] or "✨",
+            "kind": "skill", "kind_label": "带方法论",
+            "category": s["category"], "hint": s["hint"],
+            "prompt_tpl": s["prompt_tpl"], "brand": s.get("brand", ""),
+            "builtin": s.get("builtin", True),
+            "slow": False,
+            "blocked_by": missing + not_ready,
+            "status": "broken" if missing else ("blocked" if not_ready else "ready"),
+        })
+
+    # ── 工具 ──
+    # 只收 pickable 的:没写模板 = 用户点了不知道说什么;
+    # internal_only = 给模型用的。两种都不该出现在这个列表里,
+    # 判据在 tool_catalog 一处算好(前端与这里都不重算)
+    for t in tool_catalog.pickable():
+        st = tool_catalog.status_of(t)
+        items.append({
+            "key": t.key, "name": t.name, "icon": "🔧",
+            "kind": "tool", "kind_label": "直接执行",
+            "category": t.category or "接入与自查", "hint": t.summary,
+            "prompt_tpl": t.prompt_tpl, "brand": "",
+            "builtin": t.origin is not tool_catalog.ToolOrigin.USER,
+            "slow": t.slow,
+            "blocked_by": st["blocked_by"] + st["need_key_for"],
+            "status": "ready" if st["state"] in ("ready", "partial") else "blocked",
+        })
+
+    # 类目顺序沿用 SKILL 的,工具独有的类目(接入与自查)排在最后 ——
+    # 不在两处各维护一份顺序表
+    order = {c: i for i, c in enumerate(skill_files.CATEGORY_ORDER)}
+    groups: dict[str, list] = {}
+    for i in items:
+        groups.setdefault(i["category"], []).append(i)
+    grouped = [
+        {
+            "category": c,
+            "total": len(v),
+            "ready": sum(1 for i in v if i["status"] == "ready"),
+            # 同一类目里 SKILL 在前、工具在后:方法论是"怎么做",
+            # 工具是"直接做",前者更需要被读到
+            "items": sorted(v, key=lambda i: (i["kind"] != "skill", i["name"])),
+        }
+        for c, v in sorted(groups.items(), key=lambda kv: order.get(kv[0], 99))
+    ]
+
+    ready = sum(1 for i in items if i["status"] == "ready")
+    return {
+        "groups": grouped,
+        "summary": {
+            "total": len(items),
+            "ready": ready,
+            "headline": f"{ready}/{len(items)}",
+            "skills": sum(1 for i in items if i["kind"] == "skill"),
+            "tools": sum(1 for i in items if i["kind"] == "tool"),
+            "user_added": sum(1 for i in items if not i["builtin"]),
+        },
+    }

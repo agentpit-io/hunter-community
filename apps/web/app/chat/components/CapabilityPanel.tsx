@@ -31,9 +31,9 @@ import Link from 'next/link'
 import { Lock, Settings2, Plus } from 'lucide-react'
 import { HUNTER } from '../../lib/hunter-theme'
 import {
-  listSources, listToolbox, listCatalogSkills,
+  listSources, listToolbox, listCatalogSkills, listCapabilities,
   type SourceGroup, type ToolGroup, type SkillGroup, type Summary,
-  type CatalogSkillItem,
+  type CatalogSkillItem, type CapabilityGroup,
 } from '../lib/catalogClient'
 import { getUnlockStatus, onUnlockChange, peekUnlockStatus } from '../lib/unlockClient'
 import { getRecentSkills, trackSkillUsage } from '../lib/skillUsage'
@@ -70,6 +70,7 @@ export default function CapabilityPanel({ onPick, onManage, refreshKey }: Props)
   const [sources, setSources] = useState<{ groups: SourceGroup[]; summary: Summary } | null>(null)
   const [toolbox, setToolbox] = useState<{ groups: ToolGroup[]; summary: Summary } | null>(null)
   const [skills, setSkills]   = useState<{ groups: SkillGroup[]; summary: Summary } | null>(null)
+  const [caps, setCaps]       = useState<{ groups: CapabilityGroup[]; summary: Summary } | null>(null)
   const [unlocked, setUnlocked] = useState<boolean | null>(peekUnlockStatus()?.unlocked ?? null)
   const [gate, setGate] = useState<string | null>(null)
   const [installOpen, setInstallOpen] = useState(false)
@@ -81,6 +82,7 @@ export default function CapabilityPanel({ onPick, onManage, refreshKey }: Props)
     listSources().then(setSources).catch(() => {})
     listToolbox().then(setToolbox).catch(() => {})
     listCatalogSkills().then(setSkills).catch(() => {})
+    listCapabilities().then(setCaps).catch(() => {})
   }, [refreshKey])
 
   useEffect(() => {
@@ -189,22 +191,19 @@ export default function CapabilityPanel({ onPick, onManage, refreshKey }: Props)
         subtitle={sources ? subOfSources(sources.summary) : ''}
       />
 
-      {/* ② 工具箱 · 一行进度条 */}
-      <ProgressLine
-        icon="🛠"
-        title="工具箱"
-        summary={toolbox?.summary}
-        href="/library?tab=tools"
-        subtitle="模型可直接调用的能力"
-      />
-
-      {/* ③ SKILL 库 · 一行进度条 + 加号(直接打开 SkillAddPanel) */}
+      {/* ② 能力 · 工具与 SKILL 合成一条(`_22` 步 3)
+             原来是「工具箱」「SKILL 库」两行 —— 那是把我们的实现细节
+             推给了用户。他要判断的是"这个平台能替我做多少事",
+             一个数字就够了 */}
       <ProgressLine
         icon="✨"
-        title="SKILL 库"
-        summary={skills?.summary}
-        href="/library?tab=skills"
-        subtitle={skills?.summary.user_added ? `含你加的 ${skills.summary.user_added} 个` : undefined}
+        title="能力"
+        summary={caps?.summary}
+        href="/library?tab=capabilities"
+        subtitle={caps?.summary
+          ? `📋 ${(caps.summary as any).skills ?? 0} 带方法论 · 🔧 ${(caps.summary as any).tools ?? 0} 直接执行`
+            + (caps.summary.user_added ? ` · 含你加的 ${caps.summary.user_added}` : '')
+          : undefined}
         actionSlot={
           <button
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); setInstallOpen((v) => !v) }}
@@ -226,11 +225,16 @@ export default function CapabilityPanel({ onPick, onManage, refreshKey }: Props)
             onDone={(msg) => {
               setInstallOpen(false)
               setInstalled(msg)
+              // 装完 SKILL 两份都要重拉:skills 给这个面板的类目下拉,
+              // caps 给合并后的能力计数与「最近用」。只刷一份的表现是
+              // "装好了但计数没动",用户会以为没装上
               listCatalogSkills().then(setSkills).catch(() => {})
+              listCapabilities().then(setCaps).catch(() => {})
             }}
           />
         </div>
       )}
+
       {installed && (
         <div style={okBox} onClick={() => setInstalled('')}>{installed}(点击关闭)</div>
       )}
@@ -268,14 +272,14 @@ export default function CapabilityPanel({ onPick, onManage, refreshKey }: Props)
       )}
 
       {/* 所有类目 chip */}
-      {skills && skills.groups.length > 0 && (
+      {caps && caps.groups.length > 0 && (
         <>
           <div style={subheaderStyle}>所有类目</div>
           <div style={chipRow}>
-            {skills.groups.map((g) => (
+            {caps.groups.map((g) => (
               <Link
                 key={g.category}
-                href={`/library?tab=skills&group=${encodeURIComponent(g.category)}`}
+                href={`/library?tab=capabilities&group=${encodeURIComponent(g.category)}`}
                 style={catChip}
                 onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = HUNTER.THEME }}
                 onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = HUNTER.LINE }}

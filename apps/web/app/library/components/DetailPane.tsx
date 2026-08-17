@@ -3,12 +3,15 @@
 import { useState } from 'react'
 import { HUNTER } from '../../lib/hunter-theme'
 import type {
-  DataSourceItem, ToolItem, CatalogSkillItem,
+  DataSourceItem, ToolItem, CatalogSkillItem, CapabilityItem,
 } from '../../chat/lib/catalogClient'
 import { statusDot } from '../../chat/lib/catalogClient'
 
 interface Props {
   source?: DataSourceItem
+  /** 合并后的能力项(`_22` 步 3)· 工具与 SKILL 共用一个详情视图 */
+  cap?: CapabilityItem
+  onUseCap?: (item: CapabilityItem) => void
   tool?: ToolItem
   skill?: CatalogSkillItem
   onClose: () => void
@@ -18,19 +21,22 @@ interface Props {
   onChanged?: () => void
 }
 
-export default function DetailPane({ source, tool, skill, onClose, onPickSkillToChat, onChanged }: Props) {
-  const empty = !source && !tool && !skill
+export default function DetailPane({ source, cap, onUseCap, tool, skill, onClose, onPickSkillToChat, onChanged }: Props) {
+  const empty = !source && !cap && !tool && !skill
   return (
     <aside style={paneStyle}>
       <div style={headStyle}>
         <span style={{ fontSize: 13, fontWeight: 600 }}>
-          {source ? '数据源详情' : tool ? '工具详情' : skill ? 'SKILL 详情' : '选中一项以查看'}
+          {source ? '数据源详情'
+            : cap ? (cap.kind === 'tool' ? '工具详情' : 'SKILL 详情')
+            : tool ? '工具详情' : skill ? 'SKILL 详情' : '选中一项以查看'}
         </span>
         <button onClick={onClose} style={closeBtnStyle} title="收起">×</button>
       </div>
       <div style={{ padding: '12px 16px', overflowY: 'auto', flex: 1 }}>
         {empty && <div style={{ color: HUNTER.INK_F, fontSize: 12 }}>点左侧任一卡片查看详情</div>}
         {source && <SourceDetail item={source} onChanged={onChanged} />}
+        {cap && <CapDetail item={cap} onUse={onUseCap} />}
         {tool && <ToolDetail item={tool} />}
         {skill && <SkillDetail item={skill} onPickToChat={onPickSkillToChat} />}
       </div>
@@ -176,6 +182,53 @@ const preStyle: React.CSSProperties = {
   fontSize: 10, lineHeight: 1.45, color: HUNTER.INK_S,
   fontFamily: 'ui-monospace, Menlo, monospace',
   whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+}
+
+/** 合并后的能力详情 —— 工具与 SKILL 共用(`_22` 步 3)。
+ *
+ *  两者展示的字段几乎一样(名字/类目/说明/提问模板/依赖),
+ *  区别只在 kind_label 那一行。分成两个组件写会让"改一处忘另一处"
+ *  变成常态 —— 这两天已经因为同一份知识散落多处吃过几次亏。 */
+function CapDetail({ item, onUse }: { item: CapabilityItem; onUse?: (i: CapabilityItem) => void }) {
+  const blocked = item.status !== 'ready'
+  return (
+    <div style={{ fontSize: 12, color: HUNTER.INK_S }}>
+      <Row label="名称" value={<span>{item.icon} {item.name}</span>} />
+      <Row label="类型" value={item.kind === 'tool' ? '🔧 直接执行' : '📋 带方法论'} />
+      <Row label="类目" value={item.category} />
+      {item.brand && <Row label="出处" value={item.brand} />}
+      <Row label="来源" value={item.builtin ? '内置' : '你自己加的'} />
+      {item.slow && <Row label="耗时" value="⏱ 较长(30s+)" />}
+      <Divider />
+      {item.hint && <Row label="说明" value={item.hint} />}
+      {/* 提问模板放在最显眼处 —— 用户要判断的是"点了会发生什么",
+          模板就是答案,而且他还能照着改成自己的问法 */}
+      <div style={{ fontSize: 11, color: HUNTER.INK_F, margin: '8px 0 4px' }}>点它会问</div>
+      <div style={tplBox}>{item.prompt_tpl || '（没有模板）'}</div>
+      {blocked && item.blocked_by.length > 0 && (
+        <>
+          <Divider />
+          <Row label="依赖未就绪"
+               value={<span style={{ color: HUNTER.UP }}>{item.blocked_by.join(', ')}</span>} />
+        </>
+      )}
+      <Divider />
+      <button onClick={() => onUse?.(item)} disabled={!item.prompt_tpl}
+              style={{ ...useBtnBig, opacity: item.prompt_tpl ? 1 : 0.4 }}>
+        在对话框里用它 →
+      </button>
+    </div>
+  )
+}
+
+const tplBox: React.CSSProperties = {
+  padding: '7px 9px', borderRadius: 6, fontSize: 12, lineHeight: 1.6,
+  background: HUNTER.PAPER3, color: HUNTER.INK, border: `1px solid ${HUNTER.LINE}`,
+}
+const useBtnBig: React.CSSProperties = {
+  width: '100%', padding: '8px 0', fontSize: 12, fontWeight: 600,
+  borderRadius: 7, border: 'none', background: HUNTER.THEME, color: '#fff',
+  cursor: 'pointer', fontFamily: 'inherit',
 }
 
 function ToolDetail({ item }: { item: ToolItem }) {
