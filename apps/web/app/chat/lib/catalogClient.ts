@@ -68,6 +68,11 @@ export interface ToolItem {
   slow: boolean
   note: string
   status: 'ready' | 'partial' | 'need_key' | 'unavailable'
+  /** 用户点它时替他填进输入框的那句话(`_22`)· 空 = 不进能力列表 */
+  prompt_tpl: string
+  /** 能不能出现在能力列表里 —— 判据在后端 to_dict 一处算好,
+   *  前端不要自己重算 `prompt_tpl && !internal_only`,抄第二份就会漂 */
+  pickable: boolean
   blocked_by: string[]
   need_key_for: string[]
   degraded_by: string[]

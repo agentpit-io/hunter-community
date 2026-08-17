@@ -46,6 +46,24 @@ interface Props {
   refreshKey?: number
 }
 
+/** 统一的「能力」—— SKILL 与工具在入口层归一(`_22` §3)。
+ *
+ *  `kind` 只用来在卡片上标一个小记号(📋 带方法论 / 🔧 直接执行),
+ *  **不是分类**。用户不需要理解它,但当他好奇"为什么这个 90 秒那个 2 秒"时,
+ *  这个记号给了答案。 */
+interface Capability {
+  key: string
+  name: string
+  icon: string
+  prompt_tpl: string
+  kind: 'skill' | 'tool'
+  status: string
+  hint?: string
+  brand?: string
+  /** 依赖没就绪的项 · 用于置灰与 title 提示 */
+  missing: string[]
+}
+
 const RECENT_N = 5
 
 export default function CapabilityPanel({ onPick, onManage, refreshKey }: Props) {
@@ -81,37 +99,66 @@ export default function CapabilityPanel({ onPick, onManage, refreshKey }: Props)
     }
   }, [])
 
-  // 建 key → SKILL item 反查表(所有 group 展平)
-  const skillByKey = useMemo(() => {
-    const m = new Map<string, CatalogSkillItem>()
-    skills?.groups.forEach((g) => g.skills.forEach((s) => m.set(s.key, s)))
+  // ── 统一「能力」反查表(`_22` §3)────────────────────────────
+  //
+  // SKILL 与工具**合并成一个列表**。老板的原话:双击工具也要能跳对话框
+  // 填模板,而 SKILL 已经支持 —— 那两者在用户眼里就是一回事。
+  //
+  // 合的是**入口**,不是实体:工具还是工具(模型调的函数),
+  // SKILL 还是 SKILL(模型读的方法论)。kind 只用来在卡片上标一个小记号,
+  // 让用户知道"为什么这个 2 秒那个 90 秒",不是分类。
+  //
+  // 这一步顺带解决一个比重复更亏的问题:13 个工具里 5 个原来**根本点不到**,
+  // 包括老板自己要的「一句话加自选股」。
+  const capByKey = useMemo(() => {
+    const m = new Map<string, Capability>()
+    skills?.groups.forEach((g) => g.skills.forEach((s) => m.set(s.key, {
+      key: s.key, name: s.name, icon: s.icon || '✨',
+      prompt_tpl: s.prompt_tpl, kind: 'skill',
+      status: s.status, hint: s.hint, brand: s.brand,
+      missing: [...(s.missing_tools || []), ...(s.blocked_tools || [])],
+    })))
+    toolbox?.groups.forEach((g) => g.tools.forEach((t) => {
+      // pickable 由后端算 —— 前端不重算那个判据
+      if (!t.pickable) return
+      m.set(t.key, {
+        key: t.key, name: t.name, icon: '🔧',
+        prompt_tpl: t.prompt_tpl, kind: 'tool',
+        status: t.status, hint: t.summary, brand: '',
+        missing: [...(t.blocked_by || []), ...(t.need_key_for || [])],
+      })
+    }))
     return m
-  }, [skills])
+  }, [skills, toolbox])
 
   // 最近用 top N · 已 track 的过滤存在的 · 不够就补默认(第一批高频)
   const recent = useMemo(() => {
-    if (!skills) return [] as CatalogSkillItem[]
+    if (!skills && !toolbox) return [] as Capability[]
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const _ = recentTick   // 让 useMemo 依赖 tick
     const trackedKeys = getRecentSkills(RECENT_N * 2)   // 拿多点 · 过滤后可能不够
-    const items: CatalogSkillItem[] = []
+    const items: Capability[] = []
     for (const k of trackedKeys) {
-      const s = skillByKey.get(k)
+      const s = capByKey.get(k)
       if (s) items.push(s)
       if (items.length >= RECENT_N) break
     }
-    // 补齐默认(用户还没用过时至少让他看到几个入口)
+    // 补齐默认(用户还没用过时至少让他看到几个入口)。
+    // 里面**特意放了两个工具** —— 加自选股是老板点名要的"一句话加自选",
+    // 行情速查是最高频的问法。原来这两条只能通过薄壳 SKILL 触达,
+    // 而薄壳马上要删(步 4),默认位得先换成工具本身
     if (items.length < RECENT_N) {
-      const DEFAULTS = ['uzi_quick_scan', 'forecast', 'stock_deep_analysis', 'watchlist_daily', 'uzi_dcf']
+      const DEFAULTS = ['uzi_quick_scan', 'watchlist_watchlist_add',
+                        'watchlist_stock_quickview', 'forecast', 'uzi_dcf']
       for (const k of DEFAULTS) {
         if (items.length >= RECENT_N) break
         if (items.some((x) => x.key === k)) continue
-        const s = skillByKey.get(k)
+        const s = capByKey.get(k)
         if (s) items.push(s)
       }
     }
     return items
-  }, [skills, skillByKey, recentTick])
+  }, [skills, toolbox, capByKey, recentTick])
 
   const handlePick = useCallback((tpl: string, key: string) => {
     if (locked && !key.startsWith('custom:')) { setGate(key); return }
@@ -197,16 +244,22 @@ export default function CapabilityPanel({ onPick, onManage, refreshKey }: Props)
               <button
                 key={s.key}
                 onClick={() => handlePick(s.prompt_tpl, s.key)}
-                title={`${s.hint || ''}${s.brand ? ' · ' + s.brand : ''}${
-                  s.status !== 'ready'
-                    ? '\n⚠ 依赖未就绪: ' + [...s.missing_tools, ...s.blocked_tools].join(', ')
-                    : ''}`}
+                title={`${s.hint || ''}${s.brand ? ' · ' + s.brand : ''}`
+                  + `\n${s.kind === 'tool' ? '🔧 直接执行' : '📋 带方法论'}`
+                  + (s.status !== 'ready' && s.missing.length
+                      ? '\n⚠ 依赖未就绪: ' + s.missing.join(', ') : '')}
                 style={{ ...recentRow, opacity: s.status === 'ready' ? 1 : 0.6 }}
                 onMouseEnter={(e) => { e.currentTarget.style.background = HUNTER.PANEL_2 }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
               >
                 <span style={{ fontSize: 13, flexShrink: 0 }}>{s.icon}</span>
                 <span style={recentName}>{s.name}</span>
+                {/* 工具标个 🔧 —— 侧栏一行放不下"直接执行"四个字,
+                    完整说明在 title 里。不标的话用户分不出为什么
+                    有的秒回有的要等一分钟 */}
+                {s.kind === 'tool' && (
+                  <span style={{ fontSize: 9, color: HUNTER.SOFT, flexShrink: 0 }}>🔧</span>
+                )}
                 {locked && <Lock size={9} strokeWidth={1.6} style={{ color: HUNTER.SOFT, flexShrink: 0 }} />}
               </button>
             ))}
