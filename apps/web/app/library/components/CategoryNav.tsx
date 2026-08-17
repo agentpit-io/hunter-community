@@ -1,6 +1,7 @@
 'use client'
 // 左侧分类导航(240px)· 3 tab · 每 tab 若干 group
 // 见方案 §3.1: /doc/开源hunter-community/参考/10-前端优化/capability-library-page-plan.md
+import { useState } from 'react'
 import Link from 'next/link'
 import { HUNTER } from '../../lib/hunter-theme'
 import { TABS, type TabId, type LibraryQuery, buildQuery } from '../lib/nav'
@@ -89,14 +90,26 @@ function GroupList({ tabId, groups, activeGroup, onAddTo }: {
   /** 给每组挂一个 ＋ · 传了才渲染。点它 = 「给这个来源加一个我自己的」 */
   onAddTo?: (group: string) => void
 }) {
+  // ＋ 只在**悬停或选中**时露出来。11 个来源每行都常驻一个 ＋,
+  // 视觉上是 11 个同等重量的号召 —— 而用户进这个页面九成是来看有什么源的,
+  // 不是来加源的。用 opacity 而不是条件渲染:留着占位,
+  // 露出时行内元素不会横向跳一下。
+  const [hover, setHover] = useState<string | null>(null)
+
   if (groups.length === 0) return null
   return (
     <div style={{ marginTop: 2, marginBottom: 4 }}>
       {groups.map((g) => {
         const isActive = activeGroup === g.id
         const label = g.label || g.id
+        const showAdd = hover === g.id || isActive
         return (
-          <div key={g.id} style={groupRowStyle(isActive)}>
+          <div
+            key={g.id}
+            style={groupRowStyle(isActive)}
+            onMouseEnter={() => setHover(g.id)}
+            onMouseLeave={() => setHover((h) => (h === g.id ? null : h))}
+          >
             <Link href={buildQuery({ tab: tabId, group: g.id })} style={groupLinkStyle(isActive, g.emphasis)}>
               <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {label}
@@ -110,7 +123,9 @@ function GroupList({ tabId, groups, activeGroup, onAddTo }: {
             {onAddTo && (
               <button
                 onClick={(e) => { e.preventDefault(); onAddTo(g.id) }}
-                style={groupAddStyle}
+                style={groupAddStyle(showAdd)}
+                tabIndex={showAdd ? 0 : -1}
+                aria-hidden={!showAdd}
                 title={g.emphasis ? '添加一个自己的数据源' : `接一个自己的${label}数据源`}
               >＋</button>
             )}
@@ -170,16 +185,21 @@ const groupLinkStyle = (active: boolean, emphasis?: boolean): React.CSSPropertie
   cursor: 'pointer',
 })
 
-const groupAddStyle: React.CSSProperties = {
+const groupAddStyle = (visible: boolean): React.CSSProperties => ({
   padding: '2px 12px 2px 4px',
   fontSize: 13,
   lineHeight: 1,
   color: HUNTER.INK_F,
   background: 'none',
   border: 'none',
+  // 不可见时连指针事件一起关掉 —— 否则鼠标划过那块空白仍会变成手型,
+  // 用户会以为那里藏了什么可点的东西
+  opacity: visible ? 1 : 0,
+  pointerEvents: visible ? 'auto' : 'none',
   cursor: 'pointer',
   fontFamily: 'inherit',
-}
+  transition: 'opacity 0.12s',
+})
 
 const separatorStyle: React.CSSProperties = {
   margin: '16px 12px',

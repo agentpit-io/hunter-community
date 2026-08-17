@@ -7,7 +7,7 @@
 // 因为用户要替换的就是来源。
 //
 // 市场没有删,降级成顶部的筛选条 —— 它本身有用,只是不该当主分类。
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { HUNTER } from '../../lib/hunter-theme'
 import type { SourceGroup, DataSourceItem, MarketOption } from '../../chat/lib/catalogClient'
 import EntityCard from './EntityCard'
@@ -49,6 +49,23 @@ export default function SourcesTab({
 
   const totalCount = filteredGroups.reduce((a, g) => a + g.sources.length, 0)
 
+  // ── 折叠 ──────────────────────────────────────────────────
+  // 11 个来源 33 条源全铺开有五六屏,滚到底也数不清哪组是哪组。
+  // 默认收起,点组头展开。
+  //
+  // 三种情况**必须**展开,否则折叠反而挡了事:
+  //   · 「你自己的」—— 它的空状态就是添加入口,藏起来等于没有入口
+  //   · 从左侧点了某个来源(activeGroup)—— 用户明确要看那一组
+  //   · 搜索中 —— 把命中结果折起来等于没搜
+  const [opened, setOpened] = useState<Set<string>>(new Set())
+  const isOpen = (g: SourceGroup) =>
+    !!search || g.owner === 'user' || activeGroup === g.upstream || opened.has(g.upstream)
+  const toggle = (id: string) => setOpened((s) => {
+    const n = new Set(s)
+    n.has(id) ? n.delete(id) : n.add(id)
+    return n
+  })
+
   return (
     <div style={{ padding: '20px 24px', maxWidth: 900 }}>
       <div style={headStyle}>
@@ -77,46 +94,67 @@ export default function SourcesTab({
         <div style={emptyStyle}>没有匹配的数据源</div>
       )}
 
-      {filteredGroups.map((g) => (
-        <div key={g.upstream} style={{ marginBottom: 20 }}>
-          <div style={groupHeadStyle}>
-            <span style={{ fontWeight: g.owner === 'user' ? 700 : 600 }}>{g.label}</span>
-            <span style={{ color: HUNTER.INK_F, fontSize: 12 }}>
-              {g.owner === 'user' && g.total === 0 ? '' : `${g.ready}/${g.total}`}
-            </span>
-          </div>
+      {filteredGroups.map((g) => {
+        const open = isOpen(g)
+        const isUserEmpty = g.owner === 'user' && g.sources.length === 0
+        return (
+          <div key={g.upstream} style={{ marginBottom: open ? 20 : 2 }}>
+            <button
+              onClick={() => toggle(g.upstream)}
+              style={groupHeadStyle(open)}
+              // 「你自己的」和搜索/选中态是强制展开的,点它收不起来 ——
+              // 与其让用户点了没反应,不如直接告诉他为什么
+              title={open && !opened.has(g.upstream)
+                ? (search ? '搜索时不折叠' : g.owner === 'user' ? '这一组不折叠' : '你正在看这一组')
+                : open ? '收起' : `展开 ${g.total} 项`}
+            >
+              <span style={{ width: 14, color: HUNTER.INK_F, fontSize: 10 }}>{open ? '▾' : '▸'}</span>
+              <span style={{ fontWeight: g.owner === 'user' ? 700 : 600 }}>{g.label}</span>
+              {/* 收起时把这一组的**市场**摆出来。折叠后用户看不到条目,
+                  只有一个名字和计数太干 —— 市场是他判断"要不要点开"最有用的一条 */}
+              {!open && g.markets.length > 0 && (
+                <span style={{ fontSize: 11.5, color: HUNTER.INK_F, marginLeft: 8 }}>
+                  {g.markets.map((m) => MARKET_CN[m] || m).join(' · ')}
+                </span>
+              )}
+              <span style={{ flex: 1 }} />
+              <span style={{ color: HUNTER.INK_F, fontSize: 12 }}>
+                {isUserEmpty ? '' : `${g.ready}/${g.total}`}
+              </span>
+            </button>
 
-          {/* 「你自己的」空组 —— 这个空状态就是添加入口。
-              它必须显示,否则用户在这个页面上看不到任何
-              "我可以接自己的" 的迹象,而那正是这次改造的主题 */}
-          {g.owner === 'user' && g.sources.length === 0 ? (
-            <div style={userEmptyStyle}>
-              <div style={{ marginBottom: 8 }}>
-                你还没有接自己的数据源。接进来之后,<b>取数会优先走你的</b>,
-                你的拿不到才回落到我们的 —— 并且会明确告诉你这次用的是谁。
+            {open && (isUserEmpty ? (
+              /* 「你自己的」空组 —— 这个空状态就是添加入口。
+                 它必须显示,否则用户在这个页面上看不到任何
+                 "我可以接自己的" 的迹象,而那正是这次改造的主题 */
+              <div style={userEmptyStyle}>
+                <div style={{ marginBottom: 8 }}>
+                  你还没有接自己的数据源。接进来之后,<b>取数会优先走你的</b>,
+                  你的拿不到才回落到我们的 —— 并且会明确告诉你这次用的是谁。
+                </div>
+                <button onClick={() => onAdd?.('user')} style={addBtnStyle}>
+                  ＋ 添加我的数据源
+                </button>
               </div>
-              <button onClick={() => onAdd?.('user')} style={addBtnStyle}>
-                ＋ 添加我的数据源
-              </button>
-            </div>
-          ) : (
-            g.sources.map((s) => (
-              <EntityCard
-                key={s.key}
-                title={s.name}
-                // 副标题里放**数据类型 + 市场**。来源已经是组标题了,
-                // 再重复一遍是噪音;市场在这里反而有用,因为按来源分组后
-                // 同一组里会混着 A股和港股(比如 AKShare)
-                subtitle={[s.kind_label, s.market_label].filter(Boolean).join(' · ')}
-                status={s.status}
-                meta={s.volume_hint || (s.available ? undefined : '通道未开')}
-                selected={selected?.key === s.key}
-                onClick={() => onSelect(s)}
-              />
-            ))
-          )}
-        </div>
-      ))}
+            ) : (
+              g.sources.map((s) => (
+                <EntityCard
+                  key={s.key}
+                  title={s.name}
+                  // 副标题里放**数据类型 + 市场**。来源已经是组标题了,
+                  // 再重复一遍是噪音;市场在这里反而有用,因为按来源分组后
+                  // 同一组里会混着 A股和港股(比如 AKShare)
+                  subtitle={[s.kind_label, s.market_label].filter(Boolean).join(' · ')}
+                  status={s.status}
+                  meta={s.volume_hint || (s.available ? undefined : '通道未开')}
+                  selected={selected?.key === s.key}
+                  onClick={() => onSelect(s)}
+                />
+              ))
+            ))}
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -150,14 +188,27 @@ const chipStyle = (active: boolean): React.CSSProperties => ({
   fontFamily: 'inherit',
 })
 
-const groupHeadStyle: React.CSSProperties = {
+// 折叠时市场标签用的短名 —— 组头空间窄,"全球/跨市场"太长。
+// 完整名仍走后端返回的 market_label(筛选条和条目副标题用的是那个)
+const MARKET_CN: Record<string, string> = {
+  a: 'A股', hk: '港股', us: '美股', global: '全球',
+}
+
+const groupHeadStyle = (open: boolean): React.CSSProperties => ({
   display: 'flex',
-  alignItems: 'baseline',
-  justifyContent: 'space-between',
+  alignItems: 'center',
+  gap: 2,
+  width: '100%',
   fontSize: 13,
   color: HUNTER.INK_S,
-  padding: '0 4px 6px',
-}
+  padding: open ? '4px 4px 6px' : '7px 4px',
+  background: 'none',
+  border: 'none',
+  borderBottom: open ? 'none' : `1px solid ${HUNTER.LINE}`,
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+  textAlign: 'left',
+})
 
 const userEmptyStyle: React.CSSProperties = {
   padding: '14px 16px',
