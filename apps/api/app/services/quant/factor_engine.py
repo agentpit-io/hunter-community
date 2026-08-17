@@ -88,41 +88,28 @@ def _compute_momentum_12m_1m(codes: list[str], trade_date: date) -> dict[str, fl
 
 
 def _compute_pe_inv(codes: list[str], trade_date: date) -> dict[str, float]:
-    """PE 倒数 · 需要 TTM 净利润 + 总市值
-    Phase A 简化:走 finance_data_client · 单只票 HTTP 拉 · 慢但先跑通
+    """PE 倒数 · Phase B B1 · 用 AKShare 财务 EPS + 本地 close 算
+    过滤 PE<=0(亏损)和 PE>1000(异常)· 剩下取 1/PE
     """
-    from app.services import finance_data_client as fd
+    from app.services.quant import akshare_client as akc
     out: dict[str, float] = {}
     for code in codes:
-        try:
-            fin = fd.get_governance(code)  # 简版:治理接口带 basic 财务(hackish · v2 换正规 endpoint)
-        except Exception:
-            fin = None
-        # 简版兜底 · 大部分票拿不到就跳过
-        if not fin:
-            continue
-        pe = fin.get("pe_ttm") or fin.get("pe")
+        pe = akc.get_pe_ttm(code, trade_date)
         if pe and 0 < pe < 1000:
             out[code] = 1.0 / pe
     return out
 
 
 def _compute_roe(codes: list[str], trade_date: date) -> dict[str, float]:
-    """ROE · 从 finance-data 拿 TTM 净利润 + 归母权益
-    Phase A 简化:同 pe_inv · 走 finance_data_client
+    """ROE · Phase B B1 · 用 AKShare 净资产收益率(单期)
+    注意:AKShare 返的是单季度 ROE(不是 TTM)· 但对截面排名不影响
     """
-    from app.services import finance_data_client as fd
+    from app.services.quant import akshare_client as akc
     out: dict[str, float] = {}
     for code in codes:
-        try:
-            fin = fd.get_governance(code)
-        except Exception:
-            fin = None
-        if not fin:
-            continue
-        roe = fin.get("roe_ttm") or fin.get("roe")
-        if roe is not None and -100 < roe < 100:
-            out[code] = roe / 100 if abs(roe) > 1 else roe
+        roe = akc.get_roe(code, trade_date)
+        if roe is not None and -1 < roe < 1:
+            out[code] = roe
     return out
 
 
