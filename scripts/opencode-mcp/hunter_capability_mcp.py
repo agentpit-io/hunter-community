@@ -4,6 +4,23 @@
 但原来只有 HTTP 接口、不是 MCP —— 模型手上够不着。表现是用户点侧栏卡片能用,
 在对话里说"帮我预测茅台走势"却降级成"我无法获取"。
 
+⚠️ **改完这个文件必须 `docker compose restart opencode`。**
+
+bind mount 让文件立刻更新,但 **MCP 是 opencode 启动时 spawn 的子进程** ——
+它跑的还是启动那一刻的那份代码。而 `docker compose up -d opencode`
+对**没有变化的服务是空操作**,不会重启。
+
+这个坑的表现极具误导性:文件明明是新的、工具明明写好了,
+但模型说「我无法访问外部 GitHub」——看起来像是模型能力不足或提示词没写对,
+实际是它压根没看到那几个工具。2026-08-18 `_23` 步 4 实测踩到,
+当时 opencode 已经连续跑了 25 小时。
+
+验证办法(不要靠猜):
+    docker compose exec -T opencode sh -c 'cd /opt/hunter-mcp && python3 -c "
+    import asyncio,sys; sys.path.insert(0,\".\")
+    import hunter_capability_mcp as m
+    asyncio.run(m.list_tools())"'
+
 这个 MCP 不在镜像里,通过 docker-compose 的 bind mount 挂进容器,
 再由 scripts/opencode/gen-config.py 注册进 opencode.json 的 mcp 段
 (镜像自带的 .opencode/opencode.jsonc 注册了另外 4 个,两份配置会合并)。
