@@ -77,6 +77,26 @@ async def _api_digest(body: DigestIn, request: Request):
     return await _digest(user_id, top_n)
 
 
+class RankIn(BaseModel):
+    # 用户可指定要排序的时段 · 空则默认 4 档全展开
+    horizons: list[str] | None = None
+
+
+@router.post("/watchlist/watchlist_rank")
+async def _api_rank(body: RankIn, request: Request):
+    """自选股多时段排序(方案 A)· 替代『逐股跑 stock_deep_analysis』的低效路径。
+
+    用户问『把我的自选排序 / 谁最好 / 分 X 月前景』时,opencode LLM 应调这个 · 一次
+    完成 N 只 × 4 时段横向对比 · 秒级出结构化打分表 + markdown 报告。
+    """
+    user_id = _auth(request)
+    if not user_id:
+        return {"type": "watchlist_rank", "error": "需要登录后才能对自选股排序"}
+    # lazy import 避免启动期就把 rank_agent 拖起来(它 import 了 openai client)
+    from app.services.subagents.watchlist_rank_agent import _rank
+    return await _rank(user_id, body.horizons)
+
+
 class AddIn(BaseModel):
     query: str
 
@@ -146,6 +166,117 @@ async def _api_add(body: AddIn, request: Request):
             f"已把 {top['name']} ({top['code']}) 加入你的自选。"
             if added else
             f"{top['name']} ({top['code']}) 已经在你的自选里了,无需重复添加。"
+        ),
+    }
+
+
+class AddBatchIn(BaseModel):
+    # 每个 query 独立走一次 search+add 流程,任一失败不影响其他条
+    queries: list[str]
+
+
+@router.post("/watchlist/watchlist_add_batch")
+async def _api_add_batch(body: AddBatchIn, request: Request):
+    """批量加自选 · 用户上传截图后 OCR 抽出多只股票的场景。
+
+    典型触发链:用户拖图/粘图 → BFF OCR → 塞成 text part → LLM 从文本里抽 N 个
+    股票名或代码 → 一次性 tool_call watchlist_add_batch({queries: [...]}) →
+    本端点循环 search+add,幂等(已在自选的算 already_added=true,继续下一个)。
+
+    只做逐条串行 —— 东财 suggest 有并发限流,7 只/单次串行 ~2s 已经够快,
+    加并行反而容易被封 IP。
+    """
+    user_id = _auth(request)
+    if not user_id:
+        return {"type": "watchlist_add_batch", "success": False,
+                "error": "unauthorized",
+                "message": "请先在网页登录后再让我批量加自选。"}
+
+    queries = [q.strip() for q in (body.queries or []) if q and q.strip()]
+    if not queries:
+        return {"type": "watchlist_add_batch", "success": False,
+                "error": "empty_queries",
+                "message": "请给我股票名或代码的清单,比如 ['贵州茅台','601899','AAPL']。"}
+
+    # 单次批量上限 · 防 LLM 抽疯了塞 100 条把东财打了
+    if len(queries) > 30:
+        return {"type": "watchlist_add_batch", "success": False,
+                "error": "too_many",
+                "message": f"一次最多加 30 只 · 当前 {len(queries)} 条。"}
+
+    from app.routers.watchlist import search_stocks
+    from app.services.database import add_stock_by_user
+    from app.services.finance_data_client import subscribe as fd_subscribe
+
+    results: list[dict] = []
+    added_n = already_n = not_found_n = failed_n = 0
+
+    for q in queries:
+        entry: dict = {"query": q}
+        try:
+            result = await search_stocks(q=q, limit=3)
+            items = result.get("items") if isinstance(result, dict) else []
+        except Exception as e:
+            logger.warning("[batch_add] search failed for {}: {}", q, e)
+            entry.update({"success": False, "error": "search_failed",
+                          "message": f"查询失败: {type(e).__name__}"})
+            results.append(entry)
+            failed_n += 1
+            continue
+
+        if not items:
+            entry.update({"success": False, "error": "not_found",
+                          "message": f"没找到匹配 '{q}' 的标的"})
+            results.append(entry)
+            not_found_n += 1
+            continue
+
+        top = items[0]
+        try:
+            newly_added = add_stock_by_user(
+                top["code"], top["name"], top["market"],
+                top["exchange"], top["asset_type"], user_id,
+            )
+            try:
+                fd_subscribe(top["code"], top["name"], top["market"],
+                             top["exchange"], top["asset_type"])
+            except Exception:
+                pass   # 订阅失败不影响主流程 · 与 single-add 保持一致
+        except Exception as e:
+            logger.exception("[batch_add] db insert failed for {}: {}", q, e)
+            entry.update({"success": False, "error": "db_error",
+                          "message": f"落库失败: {type(e).__name__}"})
+            results.append(entry)
+            failed_n += 1
+            continue
+
+        entry.update({
+            "success": True,
+            "already_added": not newly_added,
+            "code": top["code"], "name": top["name"],
+            "market": top["market"],
+        })
+        results.append(entry)
+        if newly_added:
+            added_n += 1
+        else:
+            already_n += 1
+
+    return {
+        "type": "watchlist_add_batch",
+        "success": True,
+        "summary": {
+            "total": len(queries),
+            "added": added_n,
+            "already_added": already_n,
+            "not_found": not_found_n,
+            "failed": failed_n,
+        },
+        "results": results,
+        "message": (
+            f"处理 {len(queries)} 只:新加 {added_n} 只 · "
+            f"已在自选 {already_n} 只 · 未找到 {not_found_n} 只"
+            + (f" · 失败 {failed_n} 只" if failed_n else "")
         ),
     }
 

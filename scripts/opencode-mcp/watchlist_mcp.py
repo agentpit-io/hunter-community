@@ -86,21 +86,125 @@ async def list_tools():
             },
         ),
         Tool(
+            name="watchlist_rank",
+            description=(
+                "自选股**多时段排序 / 横向对比**。触发场景:"
+                "\n"
+                "  · 『把我的自选股排一下 / 从好到坏排序 / 谁最好谁最差』"
+                "\n"
+                "  · 『分 3 个月 / 6 个月 / 1 年 / 3 年前景』(即使只提到其中 1-2 档也调这个)"
+                "\n"
+                "  · 『我的自选哪几只最强 / 哪几只应该减』"
+                "\n\n"
+                "**关键**:遇到上述提问,不要为每支股逐一调 stock_deep_analysis(那样"
+                "串行 5+ 分钟且不能横向对比)· 这个 tool 一次调用完成 N 只 × 4 时段的"
+                "结构化排序,秒级返回 markdown 表格 + 结构化打分。"
+                "\n\n"
+                "服务端本地按均线 / 52 周分位 / 量能 / 动量打 3M+6M 分,"
+                "1Y/3Y 因当前数据源未接入长期基本面字段,只出定性标签 + 显式方法学声明"
+                "(告知用户长期视角建议对个别股单独跑深度分析)· 不会向用户暴露"
+                "『数据未 seed』这类内部术语。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "horizons": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": ["3M", "6M", "1Y", "3Y"]},
+                        "description": "要排序的时段 · 用户只提 1-2 档时按用户说的传;"
+                                       "未指定就传 [\"3M\",\"6M\",\"1Y\",\"3Y\"] 或省略",
+                    },
+                    "_hermes_user_id": {
+                        "type": "string",
+                        "description": "内部字段 · 由 hunter-mcp-context plugin 注入 · 请勿填写",
+                    },
+                },
+                "required": [],
+            },
+        ),
+        Tool(
+            name="watchlist_add_batch",
+            description=(
+                "**批量**加自选(自动跳过已在自选的股票 · 幂等)。"
+                "\n\n"
+                "触发场景(命中任一即调,不要拆成多次 watchlist_add):"
+                "\n"
+                "  · 用户上传的截图/图片,消息里出现 [图片 OCR 抽取内容] 段,里头有多只股票"
+                "\n"
+                "  · 用户直接列出 2 只及以上股票:『加自选 茅台 · 五粮液 · 腾讯』"
+                "\n"
+                "  · 用户给了逗号/顿号/换行分隔的清单"
+                "\n\n"
+                "queries 每一项独立走 search+add · 顺序保留 · 单次上限 30 只。"
+                "每条可以是名称或代码,中英文皆可,涵盖 A股/港股/美股/ETF/基金:"
+                "\n"
+                "  · A 股: '贵州茅台' / '600519' / '紫金矿业' / '601899'"
+                "\n"
+                "  · 港股: '腾讯控股' / '00700' (若截图给的是 'H01378' 这种前带 H 的同花顺格式,去掉 H 传 '01378')"
+                "\n"
+                "  · 美股: '苹果' / 'AAPL'"
+                "\n"
+                "  · ETF/基金: '沪深300ETF' / '510300'"
+                "\n\n"
+                "返回 summary + results[] · 每条含 success/already_added/error · "
+                "已在自选的算成功不算错 · 未找到的会一并列出,你把 not_found 里的原始 query "
+                "转述给用户请他确认。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "queries": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "股票名或代码清单 · 每条独立处理 · 顺序保留 · 最多 30 条",
+                        "minItems": 1,
+                        "maxItems": 30,
+                    },
+                    "_hermes_user_id": {
+                        "type": "string",
+                        "description": "内部字段 · 由 hunter-mcp-context plugin 注入 · 请勿填写",
+                    },
+                },
+                "required": ["queries"],
+            },
+        ),
+        Tool(
             name="watchlist_add",
             description=(
-                "把股票/ETF/基金加入当前登录用户的自选。"
-                "用户说『加XX到自选』『把XX加自选』『XX加入自选股』时用。"
-                "支持股票名称(自动查代码,如 '紫金矿业')或直接给代码(如 '601899' / '00700' / 'AAPL')。"
-                "前置:用户必须已登录。返回是否成功 + 已添加项详情 + 前 5 候选(便于名字含糊时追问)。"
+                "把用户口述的股票/ETF/基金加入自选。"
+                "\n\n"
+                "触发场景(命中任一即调,不要预告不要确认):"
+                "\n"
+                "  · 『加自选 X / X 加入自选 / 帮我关注 X / 订阅 X / 收藏 X』"
+                "\n"
+                "  · 『把 X 加到我的自选/股票池/watchlist』"
+                "\n\n"
+                "query 可以是名称或代码,中英文皆可,涵盖:"
+                "\n"
+                "  · A 股: '贵州茅台' / '600519' / '紫金矿业' / '601899'"
+                "\n"
+                "  · 港股: '腾讯控股' / '00700'"
+                "\n"
+                "  · 美股: '苹果' / 'AAPL' / '英伟达' / 'NVDA'"
+                "\n"
+                "  · ETF/基金: '沪深300ETF' / '510300' / '纳指ETF'"
+                "\n\n"
+                "语义:后端复用东财 suggest 解析,取第一个命中直接落库,幂等(重复添加不报错)。"
+                "命中 0 条 → success=false + error=not_found,让模型追问用户完整名字。"
+                "命中多条 → 返回 candidates 里前 5 条,模型可提示用户是否想加别的。"
+                "前置:用户必须已登录。"
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "股票名称或代码,如 '紫金矿业' / '601899' / '00700' / 'AAPL'"
+                        "description": "股票/ETF/基金的名称或代码 · 如 '贵州茅台' / '600519' / 'AAPL' / '00700'",
                     },
-                    "_hermes_user_id": {"type": "string"},
+                    "_hermes_user_id": {
+                        "type": "string",
+                        "description": "内部字段 · 由 hunter-mcp-context plugin 注入 · 请勿填写",
+                    },
                 },
                 "required": ["query"],
             },

@@ -86,6 +86,27 @@ services:
       LLM_BASE_URL: ${LLM_BASE_URL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_DEFAULT_MODEL: ${LLM_DEFAULT_MODEL:-gpt-4o-mini}
+      # Sub-agent 独立 env · 代码里 20+ 处硬编码 fallback = gemini-3-flash-preview
+      # 换基座 LLM 时必须一并透传,否则 DeepSeek/Anthropic 会 400 拒绝 gemini 模型名
+      # → tool 累计重试 > 45s → MCP ReadTimeout → 前端"hermes-api call failed"。
+      ONE_API_MODEL: ${ONE_API_MODEL:-}
+      AGENT_SUB_WL_MODEL: ${AGENT_SUB_WL_MODEL:-}
+      AGENT_SUB_PORT_MODEL: ${AGENT_SUB_PORT_MODEL:-}
+      AGENT_SUB_RESEARCH_MODEL: ${AGENT_SUB_RESEARCH_MODEL:-}
+      AGENT_SUB_EVENT_MODEL: ${AGENT_SUB_EVENT_MODEL:-}
+      AGENT_MODEL_ROUTER: ${AGENT_MODEL_ROUTER:-}
+      AGENT_MODEL_ROUTE_LITE: ${AGENT_MODEL_ROUTE_LITE:-}
+      SIGNAL_ANALYSIS_MODEL: ${SIGNAL_ANALYSIS_MODEL:-}
+      ASSISTANT_MODEL_ROUTE: ${ASSISTANT_MODEL_ROUTE:-}
+      ASSISTANT_MODEL_CHAT: ${ASSISTANT_MODEL_CHAT:-}
+      ASSISTANT_MODEL_COMPRESS: ${ASSISTANT_MODEL_COMPRESS:-}
+      # HTTP 代理透传(Mac Docker Desktop 场景 · 宿主机开了 clash/verge TUN 时)
+      # 容器直连外网被 TUN 劫持后超时 · 显式走宿主机代理绕开。
+      # NO_PROXY 必须列出所有内部服务名,否则 api → postgres/redis/opencode 也会
+      # 试图走代理 → ECONNREFUSED。留空则不注入,不影响非代理环境。
+      HTTP_PROXY: ${HTTP_PROXY_UPSTREAM:-}
+      HTTPS_PROXY: ${HTTPS_PROXY_UPSTREAM:-}
+      NO_PROXY: ${NO_PROXY_UPSTREAM:-localhost,127.0.0.1,api,web,postgres,redis,opencode,llm-shim}
       # 默认留空,让代码去决定(app/providers/forecast/__init__.py → kronos_saas)。
       # **别在这里写 noop** —— compose 的 :- 对"未设"和"设为空"一视同仁,
       # 用户 .env 里留空时这里会把 noop 塞进容器,代码层的默认值永远轮不到生效,

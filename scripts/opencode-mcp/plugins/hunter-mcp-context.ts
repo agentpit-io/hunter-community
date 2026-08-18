@@ -48,6 +48,11 @@ const HUNTER_TOOLS = new Set([
   // 不加进这个 Set 的话,tool.execute.before hook 不注入 _hermes_user_id,
   // 下游 api 拿不到 X-Hunter-User-Id → 401 unauthorized,LLM 会告诉你"请登录"。
   "watchlist_add",
+  // 2026-08-17 · 批量版 · 用户上传截图 OCR 抽出多只时一次性落库
+  "watchlist_add_batch",
+  // 2026-08-18 · 方案 A · 多时段横向排序 · 替代『逐股 stock_deep_analysis』的低效路径
+  // 同样必须走 X-Hunter-User-Id · 否则 api 侧走鉴权分支返 "需要登录后才能对自选股排序"
+  "watchlist_rank",
   // portfolio_mcp
   "portfolio_rebalance",
   "portfolio_stress",
