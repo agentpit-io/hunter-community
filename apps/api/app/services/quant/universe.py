@@ -76,26 +76,56 @@ def query_active_at(index_code: str, on_date: date) -> list[str]:
     return codes
 
 
-def seed_current(index_code: str) -> int:
-    """从 AKShare 拉当前成分 · 首次填 index_component · 返回入库行数"""
-    import akshare as ak
+def _fetch_cons(index_code: str) -> list[str]:
+    """拉指数成分股 —— **走国内 AK 代理,不直连**。
+
+    容器里 `import akshare` 直接调会 RemoteDisconnected(2026-08-18 实测,
+    与指数日线同一个问题)。代理在 139.199.221.232,
+    `index_stock_cons_csindex` 已加入白名单。
+
+    拿不到返回空列表 —— 上层据此跳过,而不是把空当成"这个指数没有成分股"
+    写进库(那会把整个股票池清空)。
+    """
+    import os
+    import requests
+    base = os.getenv("AK_PROXY_URL", "http://139.199.221.232:8765")
+    token = os.getenv("AK_API_TOKEN", "ak-proxy-2026")
     try:
-        df = ak.index_stock_cons_csindex(symbol=index_code)
-    except Exception as e:
-        log.error(f"[universe] AKShare 拉 {index_code} 失败: {e}")
+        r = requests.post(
+            f"{base}/call",
+            json={"func": "index_stock_cons_csindex", "kwargs": {"symbol": index_code}},
+            # 300 秒:代理那边是同步调 AKShare,沪深300 的 300 只实测要 100+ 秒,
+            # 偶尔更久。超时太短的表现是"有时成功有时 seed 0 行",
+            # 而 seed 0 行不报错,只是股票池悄悄回落到 stocks 表
+            headers={"Authorization": f"Bearer {token}"}, timeout=300,
+        )
+        if r.status_code != 200:
+            log.error("[universe] 代理拉 %s 失败 HTTP %s: %s",
+                      index_code, r.status_code, r.text[:200])
+            return []
+        d = r.json()
+    except Exception as e:                                    # noqa: BLE001
+        log.error("[universe] 拉 %s 失败: %s", index_code, e)
+        return []
+
+    rows = d if isinstance(d, list) else (d.get("data") or d.get("records") or [])
+    if not rows:
+        return []
+    # 列名兼容。**找不到就返回空并报错,不猜** —— 猜错了会把指数代码
+    # 当成分股写进去,而那种错要等回测选出一堆不存在的票才会暴露
+    key = next((k for k in ("成分券代码", "code", "constituent_code", "stock_code")
+                if k in rows[0]), None)
+    if not key:
+        log.error("[universe] %s 找不到 code 列 · keys=%s", index_code, list(rows[0])[:10])
+        return []
+    return [str(x[key]).zfill(6) for x in rows if x.get(key)]
+
+
+def seed_current(index_code: str) -> int:
+    """拉当前成分 · 首次填 index_component · 返回入库行数"""
+    codes = _fetch_cons(index_code)
+    if not codes:
         return 0
-    if df is None or df.empty:
-        return 0
-    # 兼容列名(AKShare 版本差异)
-    code_col = None
-    for candidate in ("成分券代码", "code", "constituent_code", "stock_code"):
-        if candidate in df.columns:
-            code_col = candidate
-            break
-    if not code_col:
-        log.error(f"[universe] {index_code} · 找不到 code 列 · cols={list(df.columns)}")
-        return 0
-    codes = [str(c).zfill(6) for c in df[code_col].tolist()]
 
     conn = get_conn(); cur = conn.cursor()
     n = 0
@@ -117,25 +147,25 @@ def reconcile_current(index_code: str) -> dict:
     """diff 当前 vs AKShare 最新 · 加入变动 · 关闭旧
     返回 {added: [...], removed: [...]}
     """
-    import akshare as ak
-    try:
-        df = ak.index_stock_cons_csindex(symbol=index_code)
-    except Exception as e:
-        log.error(f"[universe] AKShare 拉 {index_code} 失败: {e}")
-        return {"error": str(e)}
-    if df is None or df.empty:
-        return {"error": "empty"}
-    code_col = None
-    for cand in ("成分券代码", "code"):
-        if cand in df.columns:
-            code_col = cand
-            break
-    if not code_col:
-        return {"error": "no code column"}
-    new_set = set(str(c).zfill(6) for c in df[code_col].tolist())
+    # 与 seed_current 共用 _fetch_cons —— 两处各写一份取数逻辑,
+    # 改了一处忘另一处就会出现"首次能 seed、每月 reconcile 却一直失败"
+    codes = _fetch_cons(index_code)
+    if not codes:
+        return {"error": "fetch_failed_or_empty", "index": index_code}
+    new_set = set(codes)
     current = set(query_current(index_code))
     added = new_set - current
     removed = current - new_set
+
+    # ⚠️ **拉到的成分数明显偏少时不动库**。
+    # 上游偶发返回半截数据(比如只回 30 只),照单执行会把另外 270 只
+    # 全部 effective_to=今天 —— 等于一次性伪造一场"指数大调整",
+    # 而历史成分表是不可逆的:下个月 reconcile 会以为它们本来就不在。
+    if current and len(new_set) < len(current) * 0.7:
+        log.error("[universe] %s 只拉到 %d 只(库里 %d 只)· 疑似上游返回不全 · 本次不更新",
+                  index_code, len(new_set), len(current))
+        return {"error": "suspicious_shrink", "index": index_code,
+                "fetched": len(new_set), "current": len(current)}
     today = date.today()
 
     conn = get_conn(); cur = conn.cursor()
