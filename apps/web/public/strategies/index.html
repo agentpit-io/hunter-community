@@ -38,9 +38,14 @@ function renderOfficialCards(strategies, isReal) {
       ? `<div><div class="k">API</div><div class="v pos">✅ 真数据</div></div>
          <div><div class="k">因子数</div><div class="v">${s.factors.length}</div></div>
          <div><div class="k">股票池</div><div class="v">${(s.config?.universe||'-').toUpperCase()}</div></div>`
-      : `<div><div class="k">年化*</div><div class="v pos">${fmtPct(s.metrics.ann_ret)}</div></div>
-         <div><div class="k">夏普*</div><div class="v">${s.metrics.sharpe.toFixed(2)}</div></div>
-         <div><div class="k">最大回撤*</div><div class="v neg">${fmtPct(s.metrics.max_dd)}</div></div>`
+      // 官方策略**不再带写死的 metrics**(「_17」 全量排查)——
+      // 它们是一份配置,不是一份成绩单。想知道表现就跑一次回测。
+      // ⚠️ 这里原来是 「s.metrics.ann_ret」,删掉 metrics 之后直接读属性
+      // 会 TypeError → **整页白屏**。上一轮 grep 「metrics_mock」 抓不到它,
+      // 因为它叫 「s.metrics」。教训:删字段要连"谁在读"一起查,不能只搜字段名。
+      : `<div><div class="k">因子数</div><div class="v">${s.factors.length}</div></div>
+         <div><div class="k">股票池</div><div class="v">${(s.config?.universe||'-').toUpperCase()}</div></div>
+         <div><div class="k">换仓</div><div class="v">${REBALANCE_NAME[s.config?.rebalance]||'月度'}</div></div>`
     return `
       <div class="s-card" data-id="${s.id}" ${isFromApi?'data-from-api="1"':''}>
         <div class="row1">

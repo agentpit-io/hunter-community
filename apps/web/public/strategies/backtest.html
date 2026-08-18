@@ -345,7 +345,7 @@ container.innerHTML = `
   // **没有真回测就不画图**(_17 全量排查)。
   //
   // 原来这里在无数据时画一条编的 36 期曲线(1.0 → 1.66,年化约 18%),
-  // 而基准是 `1 + i*0.005` 一条直线 —— 用户截图里那条灰虚线就是它。
+  // 而基准是 「1 + i*0.005」 一条直线 —— 用户截图里那条灰虚线就是它。
   // 一张看起来很专业的图,底下一个真数字都没有。
   //
   // 空图比假图好:空的用户知道要去跑回测,假的他以为已经跑过了。
@@ -359,7 +359,7 @@ container.innerHTML = `
   const dates = realResult.nav_series.map(p => p.date)
   const navs  = realResult.nav_series.map(p => p.nav)
 
-  // 基准 —— 后端返回才画。**不再用 `1 + i*0.005` 这条假直线**:
+  // 基准 —— 后端返回才画。**不再用 「1 + i*0.005」 这条假直线**:
   // 它让每张图都显得"策略跑输了一条稳稳向上的大盘",而那条线是编的
   const benchSeries = realResult.benchmark?.nav_series || null
   const bench = benchSeries ? benchSeries.map(p => p.nav) : null
@@ -627,10 +627,10 @@ container.innerHTML = `
   }
 })()
 
-// 因子贡献 —— **用后端真实返回的 factor_contrib**(`_17` 全量排查)。
+// 因子贡献 —— **用后端真实返回的 factor_contrib**(「_17」 全量排查)。
 //
-// 原来这段是编的:超额 = `metrics.ann_ret - 0.062`(0.062 是写死的基准),
-// 再按权重乘一个 `Math.abs(f.ic)/0.05` 的"微扰"分摊下去,最后还
+// 原来这段是编的:超额 = 「metrics.ann_ret - 0.062」(0.062 是写死的基准),
+// 再按权重乘一个 「Math.abs(f.ic)/0.05」 的"微扰"分摊下去,最后还
 // 硬扣 0.3% 当交易成本。整块没有一个数来自回测。
 //
 // 后端 score_and_select 每只股都返回 factor_contrib(= sign × z × weight),
@@ -669,7 +669,6 @@ if (attribList && positionsForAttrib.length > 0) {
 } else if (attribList) {
   attribList.innerHTML = '<div style="color:var(--muted);font-size:11.5px">跑一次回测后这里会显示各因子的真实贡献</div>'
 }
-}
 
 // 相似策略推荐：随机取 3 个官方（排除当前）
 const currentName = draft.name
@@ -681,11 +680,16 @@ document.getElementById('similar-strategies').innerHTML = similar.map((s,i) => `
       <div class="name" style="font-size:14px">${s.name}</div>
       <span class="chip solid" style="background:var(--brand);color:#fff;font-size:10px">官方</span>
     </div>
-    <div class="desc">${s.desc} · 与你相似度 ${[87,62,54][i]||50}%</div>
+    <!-- 两处假数据一起清(「_17」 全量排查):
+         · s.metrics.* —— 官方策略的写死业绩(删字段后读它会 TypeError → 整页白屏)
+         · 「与你相似度 87%」—— 「[87,62,54][i]」,按位置写死的三个数,
+           跟"你"没有任何关系。真相似度要比因子集合的重合度,那是另一件事。
+         改成显示这个策略的**配置**(它本来就是配置,不是成绩单)。 -->
+    <div class="desc">${s.desc}</div>
     <div class="stats">
-      <div><div class="k">年化</div><div class="v pos">${fmtPct(s.metrics.ann_ret)}</div></div>
-      <div><div class="k">夏普</div><div class="v">${s.metrics.sharpe.toFixed(2)}</div></div>
-      <div><div class="k">回撤</div><div class="v neg">${fmtPct(s.metrics.max_dd)}</div></div>
+      <div><div class="k">因子数</div><div class="v">${s.factors.length}</div></div>
+      <div><div class="k">股票池</div><div class="v">${(s.config?.universe||'-').toUpperCase()}</div></div>
+      <div><div class="k">持仓</div><div class="v">Top ${s.config?.top_n||20}</div></div>
     </div>
   </div>
 `).join('')
