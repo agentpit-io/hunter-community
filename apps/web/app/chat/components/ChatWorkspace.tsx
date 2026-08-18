@@ -480,9 +480,7 @@ export default function ChatWorkspace({
       const h: Record<string, string> = {}
       const tk = localStorage.getItem('hunter_token') || ''
       if (tk) h['Authorization'] = `Bearer ${tk}`
-      const r = await fetch(
-        `/api/chat/skills/staged?session=${encodeURIComponent(sessionId)}`,
-        { headers: h, cache: 'no-store' })
+      const r = await fetch('/api/chat/skills/staged', { headers: h, cache: 'no-store' })
       if (!r.ok) return
       const d = await r.json()
       if (d?.total > 0) { setStagedOpen(true); setStagedTick((n) => n + 1) }
@@ -786,7 +784,6 @@ export default function ChatWorkspace({
           stagedOpen && sessionId ? (
             <SkillStagedCard
               key={stagedTick}
-              session={sessionId}
               onInstalled={(msg) => {
                 setStagedOpen(false)
                 // 把结果**作为一条助手消息**插进对话,而不是弹 toast ——

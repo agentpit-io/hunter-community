@@ -153,13 +153,16 @@ async def list_tools():
                 "暂存一个 SKILL,**不写磁盘** —— 用户看完确认卡才真正安装。"
                 " content 传完整的 SKILL.md(含 frontmatter):从仓库直接取的原样传,"
                 "需要改写 frontmatter 的(比如 Claude Code 的 slash command)改好再传。"
+                " **frontmatter 必须带 hunter: 段**,否则装进去用户在能力列表里点不动它 ——"
+                "别人仓库的 SKILL 基本都没有,需要你补:display_name(给人看的名字)、"
+                "icon、category(快速判断/综合分析/投研报告/估值建模/事件与筛选/组合级/尽调风控 之一)、"
+                "prompt_tpl(用户点它时填进输入框的话,中文占位符如 {股票})。"
                 " note 写**你为什么装它**,一句话即可 —— 用户在确认卡上看这句决定要不要留。"
                 " 全部暂存完之后告诉用户「已准备好 N 个,请确认」,**不要自己宣布安装完成**。"
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "session": {"type": "string", "description": "会话标识 · 用当前 session id"},
                     "repo": {"type": "string"},
                     "name": {"type": "string",
                              "description": "SKILL 名 · 小写字母数字下划线,会成为目录名"},
@@ -167,17 +170,13 @@ async def list_tools():
                     "source_path": {"type": "string", "description": "来自仓库的哪个文件(可选)"},
                     "note": {"type": "string", "description": "为什么装它 · 给用户看"},
                 },
-                "required": ["session", "name", "content"],
+                "required": ["name", "content"],
             },
         ),
         Tool(
             name="skill_staged",
-            description="查这个会话已经暂存了哪些(装到一半忘了装过什么时用)。",
-            inputSchema={
-                "type": "object",
-                "properties": {"session": {"type": "string"}},
-                "required": ["session"],
-            },
+            description="查你已经暂存了哪些(装到一半忘了装过什么时用)。不需要参数。",
+            inputSchema={"type": "object", "properties": {}},
         ),
     ]
 def _headers(args: dict) -> dict:

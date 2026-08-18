@@ -398,31 +398,29 @@ async def install_from_repo(body: InstallIn, request: Request):
 # ══════════════════════════════════════════════════════════════
 
 class StagedCommitIn(BaseModel):
-    session: str
     # 空 = 全装。给了就只装勾选的这几个
     names: list[str] | None = None
 
 
 @router.get("/chat/skills/staged")
-async def get_staged(session: str, request: Request):
+async def get_staged(request: Request):
     """确认卡的数据源 —— **返回正文全文,不截断**。
 
     `_18` 的原则是「装之前必须让用户看见内容」。这里截断了就看不全,
     前端自己决定折叠多少。
     """
-    _uid(request)
     from app.services import skill_stage
-    return skill_stage.peek(session or "default")
+    return skill_stage.peek(_uid(request))
 
 
 @router.post("/chat/skills/staged/commit")
 async def commit_staged(body: StagedCommitIn, request: Request):
     """用户确认 → 落盘。"""
-    _uid(request)
+    uid = _uid(request)
     from app.services import skill_stage
 
     existing = [s for s in _builtins() if not s.get("builtin", True)]
-    got = skill_stage.peek(body.session or "default")
+    got = skill_stage.peek(uid)
     want = len(body.names) if body.names else got["total"]
     if len(existing) + want > MAX_CUSTOM:
         raise HTTPException(
@@ -430,7 +428,7 @@ async def commit_staged(body: StagedCommitIn, request: Request):
             f"最多 {MAX_CUSTOM} 个自定义能力(现有 {len(existing)},这批 {want})· "
             f"可以在确认卡上只勾选需要的几个,或先删掉不用的")
     try:
-        res = skill_stage.commit(body.session or "default", body.names)
+        res = skill_stage.commit(uid, body.names)
     except ValueError as e:
         raise HTTPException(400, str(e))
     # _after_write() 会调 opencode 的 /skill/refresh(我们自己加的端点)——
@@ -440,6 +438,5 @@ async def commit_staged(body: StagedCommitIn, request: Request):
 
 @router.post("/chat/skills/staged/discard")
 async def discard_staged(body: StagedCommitIn, request: Request):
-    _uid(request)
     from app.services import skill_stage
-    return {"discarded": skill_stage.discard(body.session or "default")}
+    return {"discarded": skill_stage.discard(_uid(request))}

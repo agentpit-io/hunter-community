@@ -62,6 +62,9 @@ interface Capability {
   brand?: string
   /** 依赖没就绪的项 · 用于置灰与 title 提示 */
   missing: string[]
+  /** false = 用户自己装的 · 侧栏也要标出来(`_23`)——
+   *  与数据源的「你自己的」一致:用户得能一眼分出哪些是自己加的 */
+  builtin: boolean
 }
 
 const RECENT_N = 5
@@ -112,7 +115,7 @@ export default function CapabilityPanel({ onPick, onManage, refreshKey }: Props)
       key: i.key, name: i.name, icon: i.icon,
       prompt_tpl: i.prompt_tpl, kind: i.kind,
       status: i.status, hint: i.hint, brand: i.brand,
-      missing: i.blocked_by || [],
+      missing: i.blocked_by || [], builtin: i.builtin !== false,
     })))
     return m
   }, [caps])
@@ -250,6 +253,10 @@ export default function CapabilityPanel({ onPick, onManage, refreshKey }: Props)
                     有的秒回有的要等一分钟 */}
                 {s.kind === 'tool' && (
                   <span style={{ fontSize: 9, color: HUNTER.SOFT, flexShrink: 0 }}>🔧</span>
+                )}
+                {/* 用户自己装的标一下 —— 与数据源「你自己的」同一套语义 */}
+                {!s.builtin && (
+                  <span style={{ fontSize: 8.5, color: HUNTER.THEME, flexShrink: 0 }}>你装的</span>
                 )}
                 {locked && <Lock size={9} strokeWidth={1.6} style={{ color: HUNTER.SOFT, flexShrink: 0 }} />}
               </button>

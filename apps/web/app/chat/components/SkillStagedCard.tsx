@@ -49,13 +49,12 @@ async function api(method: string, path: string, body?: any) {
 }
 
 interface Props {
-  session: string
   /** 装完之后把可抄的用法回给聊天 */
   onInstalled: (msg: string) => void
   onDismiss: () => void
 }
 
-export default function SkillStagedCard({ session, onInstalled, onDismiss }: Props) {
+export default function SkillStagedCard({ onInstalled, onDismiss }: Props) {
   const [data, setData] = useState<Staged | null>(null)
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const [open, setOpen] = useState<string | null>(null)
@@ -63,7 +62,7 @@ export default function SkillStagedCard({ session, onInstalled, onDismiss }: Pro
   const [err, setErr] = useState('')
 
   useEffect(() => {
-    api('GET', `/chat/skills/staged?session=${encodeURIComponent(session)}`)
+    api('GET', '/chat/skills/staged')
       .then((d: Staged) => {
         setData(d)
         // 默认全选 —— 模型已经筛过一轮了,再让用户从零勾一遍是重复劳动。
@@ -71,7 +70,7 @@ export default function SkillStagedCard({ session, onInstalled, onDismiss }: Pro
         setPicked(new Set(d.items.map((i) => i.name)))
       })
       .catch((e) => setErr(e.message))
-  }, [session])
+  }, [])
 
   const toggle = useCallback((n: string) => {
     setPicked((s) => {
@@ -85,8 +84,7 @@ export default function SkillStagedCard({ session, onInstalled, onDismiss }: Pro
     if (!data || picked.size === 0) return
     setBusy(true); setErr('')
     try {
-      const r = await api('POST', '/chat/skills/staged/commit',
-        { session, names: [...picked] })
+      const r = await api('POST', '/chat/skills/staged/commit', { names: [...picked] })
       // 装完给**能直接抄的一句话**,不是"已保存"。
       // `_18` 的教训:用户不知道接下来该说什么才能用上它
       const tips = data.items
@@ -118,7 +116,7 @@ export default function SkillStagedCard({ session, onInstalled, onDismiss }: Pro
 
   async function discard() {
     setBusy(true)
-    try { await api('POST', '/chat/skills/staged/discard', { session }) } catch { /* 忽略 */ }
+    try { await api('POST', '/chat/skills/staged/discard', {}) } catch { /* 忽略 */ }
     setBusy(false)
     onDismiss()
   }

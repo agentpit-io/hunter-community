@@ -295,12 +295,14 @@ async def list_capabilities(request: Request):
             "status": "ready" if st["state"] in ("ready", "partial") else "blocked",
         })
 
-    # 类目顺序沿用 SKILL 的,工具独有的类目(接入与自查)排在最后 ——
-    # 不在两处各维护一份顺序表
+    # 用户自己装的**单独成一组并置顶**(`_23`)—— 与数据源的「你自己的」一致。
+    # 混在内置类目里的话,用户装完找不到自己刚装的那个;而这恰恰是他
+    # 最想立刻试一下的东西。分组也让"哪些是我加的"一眼可见,便于清理。
+    USER_GROUP = "你装的"
     order = {c: i for i, c in enumerate(skill_files.CATEGORY_ORDER)}
     groups: dict[str, list] = {}
     for i in items:
-        groups.setdefault(i["category"], []).append(i)
+        groups.setdefault(USER_GROUP if not i["builtin"] else i["category"], []).append(i)
     grouped = [
         {
             "category": c,
@@ -310,7 +312,9 @@ async def list_capabilities(request: Request):
             # 工具是"直接做",前者更需要被读到
             "items": sorted(v, key=lambda i: (i["kind"] != "skill", i["name"])),
         }
-        for c, v in sorted(groups.items(), key=lambda kv: order.get(kv[0], 99))
+        # 「你装的」排最前(-1),其余按 CATEGORY_ORDER,未收录的落末尾
+        for c, v in sorted(groups.items(),
+                           key=lambda kv: -1 if kv[0] == USER_GROUP else order.get(kv[0], 99))
     ]
 
     ready = sum(1 for i in items if i["status"] == "ready")

@@ -14,6 +14,16 @@
 暂存区把"模型编排"和"落盘"切开:模型爱写多少写多少,都在内存里;
 用户看完整体再决定要不要。
 
+## 为什么按 user_id 存,不按会话
+
+第一版让模型传 `session`。实测发现:**模型根本不知道 opencode 的 session id** ——
+它只能编一个(比如 "uzi-install")。而前端按自己知道的 session 查,两边对不上,
+于是"暂存成功了、确认卡永远不弹",而模型那边一切正常。
+
+改成按 `user_id`(X-Hunter-User-Id,plugin 已经在注入)。两边都知道这个值,
+不需要任何一方去猜。代价是同一用户同时装两个仓库会混在一起 ——
+但那不是真实场景,而"让模型填一个它不知道的 ID"是必然出错的设计。
+
 ## 为什么在内存而不是临时目录
 
 暂存的内容随时可能被丢弃,而且**一个会话一份**。落到磁盘就要考虑
@@ -44,6 +54,18 @@ MAX_STAGED = 40
 # 暂存区存活时间。超过就当用户已经走开了
 TTL_SEC = 30 * 60
 
+# 给模型看的 hunter: 段样板。
+# 别人仓库的 SKILL 基本都没有这一段(它是我们的扩展),而**缺了它
+# 用户在能力列表里点不动那个 SKILL** —— 装完看得见、用不了,
+# 而他不知道为什么。所以缺失时把样板原样回给模型让它照填。
+_TPL_TEMPLATE = """
+hunter:
+  display_name: "给人看的名字"
+  icon: "⭐"
+  category: "快速判断|综合分析|投研报告|估值建模|事件与筛选|组合级|尽调风控"
+  prompt_tpl: "用它分析 {股票}"
+"""
+
 
 @dataclass
 class StagedSkill:
@@ -61,7 +83,7 @@ class StagedSkill:
 
 
 _lock = threading.Lock()
-# session_id -> {"repo": str, "at": float, "items": {name: StagedSkill}}
+# user_id -> {"repo": str, "at": float, "items": {name: StagedSkill}}
 _store: dict[str, dict] = {}
 
 
@@ -76,7 +98,7 @@ def _gc() -> None:
         logger.debug("[skill_stage] 清理 {} 个过期暂存", len(dead))
 
 
-def stage(session: str, repo: str, name: str, content: str,
+def stage(user: str, repo: str, name: str, content: str,
           source_path: str = "", note: str = "") -> dict:
     """暂存一个 SKILL。同名覆盖 —— 模型可能先写一版再改。"""
     from app.services import skill_files
@@ -94,7 +116,7 @@ def stage(session: str, repo: str, name: str, content: str,
 
     with _lock:
         _gc()
-        slot = _store.setdefault(session, {"repo": repo, "at": time.time(), "items": {}})
+        slot = _store.setdefault(user, {"repo": repo, "at": time.time(), "items": {}})
         slot["at"] = time.time()
         slot["repo"] = repo or slot.get("repo", "")
         if clean not in slot["items"] and len(slot["items"]) >= MAX_STAGED:
@@ -111,6 +133,18 @@ def stage(session: str, repo: str, name: str, content: str,
 
     out = {"staged": clean, "total": n,
            "hint": f"已暂存 {n} 个 · 尚未写入磁盘,等用户确认"}
+
+    # 没有 hunter.prompt_tpl 的 SKILL **在能力列表里点不动** ——
+    # 用户装完看得见但用不了,而他不知道为什么。
+    # 外来仓库的 frontmatter 基本都没有 hunter: 段,所以这条几乎必然触发。
+    # 与 coupling 警告同一套路:回给模型让它补,实测它会照改
+    if "prompt_tpl" not in body:
+        out["warning_tpl"] = (
+            f"{clean} 缺 hunter.prompt_tpl —— 装进去用户在能力列表里**点不动它**。"
+            "请在 frontmatter 顶部补一段(注意 category 只能是那 7 个之一):"
+            + _TPL_TEMPLATE
+            + "补完同名再 stage 一次(会覆盖)。"
+        )
     if port["coupling"]:
         # **回给模型一句提醒,而不是默默收下。**
         # 它可能以为自己改干净了,实际还留着 "读 .cache/xxx.json"。
@@ -124,14 +158,14 @@ def stage(session: str, repo: str, name: str, content: str,
     return out
 
 
-def peek(session: str) -> dict:
+def peek(user: str) -> dict:
     """看暂存了什么 —— 确认卡的数据源。
 
     **返回正文全文**,不截断。`_18` 的原则是「装之前必须让用户看见内容」,
     截断了就看不全。前端自己决定折叠多少。
     """
     with _lock:
-        slot = _store.get(session)
+        slot = _store.get(user)
         if not slot:
             return {"repo": "", "items": [], "total": 0}
         items = [asdict(v) for v in slot["items"].values()]
@@ -143,13 +177,13 @@ def peek(session: str) -> dict:
     }
 
 
-def discard(session: str) -> int:
+def discard(user: str) -> int:
     with _lock:
-        slot = _store.pop(session, None)
+        slot = _store.pop(user, None)
     return len(slot["items"]) if slot else 0
 
 
-def commit(session: str, names: list[str] | None = None) -> dict:
+def commit(user: str, names: list[str] | None = None) -> dict:
     """落盘 —— **只有这一步真写磁盘**,而它由用户触发,不由模型触发。
 
     `names` 为空 = 全部;给了就只装这几个(用户在确认卡上勾选)。
@@ -157,7 +191,7 @@ def commit(session: str, names: list[str] | None = None) -> dict:
     from app.services import skill_files
 
     with _lock:
-        slot = _store.get(session)
+        slot = _store.get(user)
         if not slot or not slot["items"]:
             raise ValueError("没有待确认的 SKILL —— 暂存可能已过期(30 分钟)")
         picked = ([v for k, v in slot["items"].items() if k in set(names)]
@@ -180,11 +214,11 @@ def commit(session: str, names: list[str] | None = None) -> dict:
             failed.append({"name": s.name, "error": str(e)[:200]})
 
     with _lock:
-        slot = _store.get(session)
+        slot = _store.get(user)
         if slot:
             for n in written:
                 slot["items"].pop(n, None)
             if not slot["items"]:
-                _store.pop(session, None)
+                _store.pop(user, None)
 
     return {"written": written, "failed": failed, "count": len(written)}

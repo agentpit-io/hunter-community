@@ -157,7 +157,6 @@ async def cap_skill_repo_read(body: RepoReadIn, request: Request):
 
 
 class StageIn(BaseModel):
-    session: str
     repo: str = ""
     name: str
     content: str
@@ -172,11 +171,14 @@ async def cap_skill_stage(body: StageIn, request: Request):
     模型爱暂存多少都行,全在内存里。用户在确认卡上看完整体再决定 ——
     直接写盘的话"确认"就成了走过场:东西已经生效了。
     """
-    _auth(request)
+    # 暂存按 **user_id** 存,不按模型给的 session ——
+    # 模型不知道 opencode 的 session id,让它填就是让它编,而前端按
+    # 自己的身份查,两边永远对不上(实测踩到:暂存成功但确认卡不弹)
+    uid = _auth(request) or "anon"
     from app.services import skill_stage
     try:
         return skill_stage.stage(
-            session=body.session.strip() or "default",
+            user=uid,
             repo=body.repo.strip(), name=body.name,
             content=body.content, source_path=body.source_path, note=body.note,
         )
@@ -187,15 +189,15 @@ async def cap_skill_stage(body: StageIn, request: Request):
 
 
 class StagedQueryIn(BaseModel):
-    session: str = "default"
+    pass
 
 
 @router.post("/skill_staged")
 async def cap_skill_staged(body: StagedQueryIn, request: Request):
     """模型自查暂存了什么 —— 它可能装到一半忘了已经装过哪些。"""
-    _auth(request)
+    uid = _auth(request) or "anon"
     from app.services import skill_stage
-    got = skill_stage.peek(body.session or "default")
+    got = skill_stage.peek(uid)
     # 正文不回给模型 —— 它自己刚写的,回一遍纯属浪费上下文。
     # 用户那份确认卡走公开端点,那里才要全文
     return {

@@ -53,6 +53,13 @@ const HUNTER_TOOLS = new Set([
   // 2026-08-18 · 方案 A · 多时段横向排序 · 替代『逐股 stock_deep_analysis』的低效路径
   // 同样必须走 X-Hunter-User-Id · 否则 api 侧走鉴权分支返 "需要登录后才能对自选股排序"
   "watchlist_rank",
+  // 2026-08-18 · `_23` 从 GitHub 导入 SKILL · 暂存区按 user_id 存,
+  // 不注入的话 api 侧 user_id=(none),暂存进匿名桶 → 前端按自己的身份查,
+  // 查到的是空的 → 确认卡永远不弹,而模型那边一切"成功"。实测踩到过。
+  "skill_repo_open",
+  "skill_repo_read",
+  "skill_stage",
+  "skill_staged",
   // portfolio_mcp
   "portfolio_rebalance",
   "portfolio_stress",
