@@ -462,9 +462,62 @@ def read_file(text: str, path: str) -> dict:
     if not p or ".." in p.split("/"):
         raise InstallError(f"非法路径 {path!r}")
     content = _raw(owner, repo, ref, p)[:_MAX_FILE]
-    return {
+    d = {
         "path": p,
         "content": content,
         "lines": len(content.splitlines()),
         "risks": scan_risks(content),
+    }
+    if p.endswith(".md"):
+        d.update(portability(content))
+    return d
+
+
+# SKILL 正文里出现这些,说明它**不是独立的方法论** —— 它依赖仓库里的
+# 脚本、缓存目录或 Python 模块。照搬装进来,模型会去跑不存在的东西。
+_COUPLING = [
+    (r"\.cache/", "读作者自己的缓存目录"),
+    (r"scripts/[\w./-]+\.py", "调作者仓库里的 Python 脚本"),
+    (r"python\s+-c\s", "内联执行 Python"),
+    (r"python\s+[\w./-]+\.py", "跑作者的脚本"),
+    (r"\bfrom\s+[\w.]+\s+import\b", "import 作者的模块"),
+    (r"\brun\.py\b", "调仓库入口脚本"),
+    (r"\bnpm\s+run\b|\bnode\s+[\w./-]+\.js", "跑 Node 脚本"),
+]
+
+
+def portability(md: str) -> dict:
+    """判断一份 SKILL.md 能不能原样搬过来。
+
+    **这是实测逼出来的判定。** UZI-Skill 的 5 个 SKILL.md 里只有 1 个是纯
+    方法论,其余 4 个都写着"读 `.cache/600519.SH/panel.json`"
+    "调 `scripts/fetch_lhb.py`" —— 那些文件在我们这儿不存在。
+
+    原样装进去的后果不是"少点功能",是**模型会照着去跑不存在的脚本**,
+    然后要么报错要么编一个结果。比不装更糟。
+
+    但正文本身往往是有价值的(deep-analysis 那份 1102 行,51 评委 + DCF 指引)。
+    所以正确的处理不是丢掉,是**让模型改写**:把"读 .cache/xxx.json"
+    换成"调 hunter 的工具拿数据"。它读得懂正文要什么数据,改得动。
+    """
+    found = []
+    for pat, why in _COUPLING:
+        m = re.search(pat, md)
+        if m:
+            found.append({"why": why, "excerpt": md[max(0, m.start() - 40):m.end() + 40]
+                          .replace("\n", " ")})
+    if not found:
+        return {"portable": True, "coupling": [],
+                "advice": "纯方法论,可以原样安装。"}
+    return {
+        "portable": False,
+        "coupling": found,
+        "advice": (
+            "这份 SKILL **依赖作者仓库里的脚本或缓存目录**,那些在本系统里不存在。"
+            "原样装进来,模型会照着去跑不存在的东西 —— 比不装更糟。"
+            " 但正文的方法论本身可能是有价值的:请**改写**它 —— "
+            "把「读某个缓存文件」「跑某个脚本」换成调本系统已有的工具"
+            "(行情/K线/财务/龙虎榜这些我们都有),再 skill_stage。"
+            " 改写完**要在 note 里说明你改了什么**,让用户知道装进去的不是原版。"
+        ),
     }

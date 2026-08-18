@@ -53,6 +53,11 @@ class StagedSkill:
     note: str = ""               # 模型为什么装它(给用户看)
     risks: list = field(default_factory=list)
     lines: int = 0
+    # 暂存的这份还残留着对作者仓库的依赖吗(`_23` 实测发现)。
+    # UZI-Skill 的 5 个 SKILL.md 里 4 个写着"读 .cache/xxx.json""跑 scripts/fetch_lhb.py"——
+    # 模型该把这些改写成调我们的工具。**没改干净的必须在确认卡上标出来**,
+    # 否则用户装进去,用的时候模型会去跑不存在的脚本,而他不知道为什么
+    coupling: list = field(default_factory=list)
 
 
 _lock = threading.Lock()
@@ -75,7 +80,7 @@ def stage(session: str, repo: str, name: str, content: str,
           source_path: str = "", note: str = "") -> dict:
     """暂存一个 SKILL。同名覆盖 —— 模型可能先写一版再改。"""
     from app.services import skill_files
-    from app.services.skill_install import scan_risks
+    from app.services.skill_install import portability, scan_risks
 
     # 名字直接进文件系统路径,而内容来自网络 —— 这条校验不能省
     clean = skill_files.validate_name((name or "").strip())
@@ -96,14 +101,27 @@ def stage(session: str, repo: str, name: str, content: str,
             raise ValueError(
                 f"暂存已满({MAX_STAGED} 个)—— 一次装这么多多半不是本意,"
                 f"先确认这批,再装下一批")
+        port = portability(body)
         slot["items"][clean] = StagedSkill(
             name=clean, content=body, source_path=source_path, note=note,
             risks=scan_risks(body), lines=len(body.splitlines()),
+            coupling=port["coupling"],
         )
         n = len(slot["items"])
 
-    return {"staged": clean, "total": n,
-            "hint": f"已暂存 {n} 个 · 尚未写入磁盘,等用户确认"}
+    out = {"staged": clean, "total": n,
+           "hint": f"已暂存 {n} 个 · 尚未写入磁盘,等用户确认"}
+    if port["coupling"]:
+        # **回给模型一句提醒,而不是默默收下。**
+        # 它可能以为自己改干净了,实际还留着 "读 .cache/xxx.json"。
+        # 不提醒的话这份就带着残留进了确认卡,用户看不出问题
+        out["warning"] = (
+            f"{clean} 里还有 {len(port['coupling'])} 处对作者仓库的依赖"
+            f"({'、'.join(c['why'] for c in port['coupling'][:3])})—— "
+            f"这些文件在本系统不存在。要么改写成调我们的工具再暂存一次(同名会覆盖),"
+            f"要么在 note 里说清楚这份需要用户自行部署原仓库才能完整工作。"
+        )
+    return out
 
 
 def peek(session: str) -> dict:
