@@ -4,33 +4,41 @@
 // ═════════════════════════════════════════════════════════════════
 // 常量：20 因子
 // ═════════════════════════════════════════════════════════════════
+// ⚠️ **这里不放 ic / ann / vol**(_17 全量排查)。
+//
+// 原来每个因子都写着 `ic: 0.062, ann: 0.085, vol: 0.22` —— 20 个因子
+// 60 个数字全是编的。因子广场直接把它们当"历史表现"渲染出来,
+// 而真实的 IC 要靠 ic_engine 算(本地 factor_ic 表 0 行)。
+//
+// 现在:真 IC 从 /api/quant/factors/ic-ranking 拉,没有就显示 "—"。
+// **一个因子有没有用,是这套系统最核心的问题 —— 不能用编的数回答。**
 const FACTORS = [
   // 价值 4
-  { key: 'pe_inv',        cat: '价值', name: '市盈率倒数',    icon: '💰', desc: '1 / TTM PE · 低估值分数高', ic: 0.062, ann: 0.085, vol: 0.22 },
-  { key: 'pb_inv',        cat: '价值', name: '市净率倒数',    icon: '💰', desc: '1 / PB · 破净股偏防御',    ic: 0.048, ann: 0.062, vol: 0.24 },
-  { key: 'dividend_yield',cat: '价值', name: '股息率',        icon: '💰', desc: '近 12 月现金分红 / 市值', ic: 0.056, ann: 0.078, vol: 0.18 },
-  { key: 'ev_ebitda_inv', cat: '价值', name: 'EV/EBITDA 倒数',icon: '💰', desc: '企业价值 / 息税折旧摊销前利润 倒数', ic: 0.041, ann: 0.055, vol: 0.21 },
+  { key: 'pe_inv',        cat: '价值', name: '市盈率倒数',    icon: '💰', desc: '1 / TTM PE · 低估值分数高' },
+  { key: 'pb_inv',        cat: '价值', name: '市净率倒数',    icon: '💰', desc: '1 / PB · 破净股偏防御' },
+  { key: 'dividend_yield',cat: '价值', name: '股息率',        icon: '💰', desc: '近 12 月现金分红 / 市值' },
+  { key: 'ev_ebitda_inv', cat: '价值', name: 'EV/EBITDA 倒数',icon: '💰', desc: '企业价值 / 息税折旧摊销前利润 倒数' },
   // 质量 4
-  { key: 'roe',           cat: '质量', name: 'ROE',           icon: '🏆', desc: 'TTM 净利润 / 平均归母权益 · 巴菲特最爱', ic: 0.071, ann: 0.092, vol: 0.19 },
-  { key: 'roa',           cat: '质量', name: 'ROA',           icon: '🏆', desc: '剔除杠杆的经营效率',      ic: 0.052, ann: 0.071, vol: 0.18 },
-  { key: 'gross_margin',  cat: '质量', name: '毛利率',        icon: '🏆', desc: '(营收 - 成本) / 营收 · 护城河', ic: 0.043, ann: 0.059, vol: 0.17 },
-  { key: 'debt_ratio_inv',cat: '质量', name: '1/负债率',      icon: '🏆', desc: '低杠杆抗风险',            ic: 0.032, ann: 0.043, vol: 0.16 },
+  { key: 'roe',           cat: '质量', name: 'ROE',           icon: '🏆', desc: 'TTM 净利润 / 平均归母权益 · 巴菲特最爱' },
+  { key: 'roa',           cat: '质量', name: 'ROA',           icon: '🏆', desc: '剔除杠杆的经营效率' },
+  { key: 'gross_margin',  cat: '质量', name: '毛利率',        icon: '🏆', desc: '(营收 - 成本) / 营收 · 护城河' },
+  { key: 'debt_ratio_inv',cat: '质量', name: '1/负债率',      icon: '🏆', desc: '低杠杆抗风险' },
   // 成长 2
-  { key: 'revenue_growth_yoy',  cat: '成长', name: '营收同比', icon: '🚀', desc: '最近季营收 vs 去年', ic: 0.058, ann: 0.080, vol: 0.27 },
-  { key: 'earnings_growth_yoy', cat: '成长', name: '净利同比', icon: '🚀', desc: '最近季归母净利 vs 去年', ic: 0.049, ann: 0.068, vol: 0.29 },
+  { key: 'revenue_growth_yoy',  cat: '成长', name: '营收同比', icon: '🚀', desc: '最近季营收 vs 去年' },
+  { key: 'earnings_growth_yoy', cat: '成长', name: '净利同比', icon: '🚀', desc: '最近季归母净利 vs 去年' },
   // 动量 3
-  { key: 'momentum_1m',     cat: '动量', name: '1 月动量',    icon: '📈', desc: '近 20 日涨幅 · 短反转', ic: -0.031, ann: 0.042, vol: 0.24, note: '反向 IC' },
-  { key: 'momentum_6m',     cat: '动量', name: '6 月动量',    icon: '📈', desc: '近 120 日涨幅', ic: 0.053, ann: 0.072, vol: 0.26 },
-  { key: 'momentum_12m_1m', cat: '动量', name: '12M-1M 动量', icon: '📈', desc: '剔除最近 1 月的 11 月涨幅 · 学术经典', ic: 0.068, ann: 0.089, vol: 0.24 },
+  { key: 'momentum_1m',     cat: '动量', name: '1 月动量',    icon: '📈', desc: '近 20 日涨幅 · 短反转', note: '反向 IC' },
+  { key: 'momentum_6m',     cat: '动量', name: '6 月动量',    icon: '📈', desc: '近 120 日涨幅' },
+  { key: 'momentum_12m_1m', cat: '动量', name: '12M-1M 动量', icon: '📈', desc: '剔除最近 1 月的 11 月涨幅 · 学术经典' },
   // 技术/资金 5
-  { key: 'kronos',    cat: 'ML',   name: 'Kronos 技术', icon: '🧠', desc: '清华 Kronos 时序大模型输出',  ic: 0.089, ann: 0.115, vol: 0.31 },
-  { key: 'ma_align',  cat: '技术', name: '均线趋势',    icon: '📉', desc: 'MA5/10/20/60 多头排列打分',   ic: 0.037, ann: 0.051, vol: 0.28 },
-  { key: 'macd',      cat: '技术', name: 'MACD 动量',   icon: '📉', desc: 'MACD_bar / ATR14',            ic: 0.028, ann: 0.036, vol: 0.30 },
-  { key: 'main_flow', cat: '资金', name: '主力净流入',  icon: '💵', desc: '5 日主力资金净流入占比',       ic: 0.061, ann: 0.083, vol: 0.29 },
-  { key: 'rsi',       cat: '技术', name: 'RSI 超买卖',  icon: '📉', desc: 'RSI14 分段映射',              ic: 0.021, ann: 0.027, vol: 0.27 },
+  { key: 'kronos',    cat: 'ML',   name: 'Kronos 技术', icon: '🧠', desc: '清华 Kronos 时序大模型输出' },
+  { key: 'ma_align',  cat: '技术', name: '均线趋势',    icon: '📉', desc: 'MA5/10/20/60 多头排列打分' },
+  { key: 'macd',      cat: '技术', name: 'MACD 动量',   icon: '📉', desc: 'MACD_bar / ATR14' },
+  { key: 'main_flow', cat: '资金', name: '主力净流入',  icon: '💵', desc: '5 日主力资金净流入占比' },
+  { key: 'rsi',       cat: '技术', name: 'RSI 超买卖',  icon: '📉', desc: 'RSI14 分段映射' },
   // 低波 & 其他 2
-  { key: 'vol_20d_inv',cat: '波动', name: '低波动',     icon: '🛡', desc: '低波异象 · 稳定跑赢波动',      ic: 0.044, ann: 0.065, vol: 0.15 },
-  { key: 'candle_5d',  cat: '技术', name: '近5日 K 线', icon: '📉', desc: '近 5 日阳线比例',              ic: 0.019, ann: 0.023, vol: 0.28 },
+  { key: 'vol_20d_inv',cat: '波动', name: '低波动',     icon: '🛡', desc: '低波异象 · 稳定跑赢波动' },
+  { key: 'candle_5d',  cat: '技术', name: '近5日 K 线', icon: '📉', desc: '近 5 日阳线比例' },
 ]
 
 const CAT_ORDER = ['价值', '质量', '成长', '动量', 'ML', '技术', '资金', '波动']
@@ -39,76 +47,60 @@ const CAT_ICON = { '价值': '💰', '质量': '🏆', '成长': '🚀', '动量
 // ═════════════════════════════════════════════════════════════════
 // 常量：6 官方精选策略
 // ═════════════════════════════════════════════════════════════════
+// ⚠️ **这里不放 metrics**(`_17` 全量排查)。
+//
+// 原来 6 个官方策略每个都带 `metrics: {ann_ret:0.152, sharpe:1.28, ...}` ——
+// 全是编的,而策略广场把它们当"历史表现"渲染成卡片上的年化/夏普/回撤。
+// 用户据此挑策略,挑的是一组不存在的业绩。
+//
+// **官方策略是一份配置,不是一份成绩单。** 想知道表现就跑一次回测 ——
+// 那时的数字才是真的,而且带着"这次回测的成色"一起给出来。
 const OFFICIAL_STRATEGIES = [
   {
     id: 'official_deep_value', icon: '💎', name: '深度价值',
     desc: '低估值 + 高分红 · 抗跌型长期持仓',
     factors: [ { key: 'pe_inv', w: 40 }, { key: 'pb_inv', w: 30 }, { key: 'dividend_yield', w: 30 } ],
     config: { universe: 'hs300', top_n: 20, rebalance: 'Q', cost_bps: 15, benchmark: '000300' },
-    metrics: { ann_ret: 0.152, sharpe: 1.28, max_dd: -0.118 }
   },
   {
     id: 'official_high_div', icon: '🌾', name: '高股息防御',
     desc: '收租型 · 熊市抗跌 · 极稳组合',
     factors: [ { key: 'dividend_yield', w: 50 }, { key: 'vol_20d_inv', w: 30 }, { key: 'debt_ratio_inv', w: 20 } ],
     config: { universe: 'a_all', top_n: 20, rebalance: 'H', cost_bps: 15, benchmark: '000300' },
-    metrics: { ann_ret: 0.135, sharpe: 1.55, max_dd: -0.082 }
   },
   {
     id: 'official_quality_momo', icon: '🎯', name: '质量+动量',
     desc: '主流经典 · Barra 简化版 · 均衡型',
     factors: [ { key: 'roe', w: 35 }, { key: 'gross_margin', w: 15 }, { key: 'momentum_12m_1m', w: 35 }, { key: 'momentum_6m', w: 15 } ],
     config: { universe: 'hs300', top_n: 20, rebalance: 'M', cost_bps: 15, benchmark: '000300' },
-    metrics: { ann_ret: 0.184, sharpe: 1.42, max_dd: -0.143 }
   },
   {
     id: 'official_small_growth', icon: '🌱', name: '小盘成长',
     desc: '中证 500 · 高弹性 · 牛市攻击型',
     factors: [ { key: 'revenue_growth_yoy', w: 40 }, { key: 'momentum_6m', w: 30 }, { key: 'roe', w: 30 } ],
     config: { universe: 'zz500', top_n: 30, rebalance: 'M', cost_bps: 15, benchmark: '000905' },
-    metrics: { ann_ret: 0.221, sharpe: 1.15, max_dd: -0.263 }
   },
   {
     id: 'official_hs300_enhance', icon: '📊', name: '沪深 300 增强',
     desc: '基准增强 · 稳定跑赢 · 机构风格',
     factors: [ { key: 'pe_inv', w: 20 }, { key: 'roe', w: 30 }, { key: 'momentum_12m_1m', w: 30 }, { key: 'vol_20d_inv', w: 20 } ],
     config: { universe: 'hs300', top_n: 30, rebalance: 'M', cost_bps: 15, benchmark: '000300' },
-    metrics: { ann_ret: 0.168, sharpe: 1.35, max_dd: -0.128 }
   },
   {
     id: 'official_hk_high_div', icon: '🇭🇰', name: '港股高息',
     desc: '港股通 · 收租型 · 汇率对冲',
     factors: [ { key: 'dividend_yield', w: 60 }, { key: 'pe_inv', w: 20 }, { key: 'roe', w: 20 } ],
     config: { universe: 'hk_all', top_n: 20, rebalance: 'H', cost_bps: 25, benchmark: 'HSI' },
-    metrics: { ann_ret: 0.098, sharpe: 1.18, max_dd: -0.153 }
   },
 ]
 
 // ═════════════════════════════════════════════════════════════════
 // 常量：Top 20 持仓（硬编码 · 后端接入后由 scan API 返回）
 // ═════════════════════════════════════════════════════════════════
-const TOP_HOLDINGS = [
-  { rank: 1, code: '600519', mkt: 'SH', name: '贵州茅台', score: 2.34 },
-  { rank: 2, code: '000651', mkt: 'SZ', name: '格力电器', score: 2.18 },
-  { rank: 3, code: '000858', mkt: 'SZ', name: '五粮液',   score: 2.05 },
-  { rank: 4, code: '600036', mkt: 'SH', name: '招商银行', score: 1.97 },
-  { rank: 5, code: '300750', mkt: 'SZ', name: '宁德时代', score: 1.88 },
-  { rank: 6, code: '601318', mkt: 'SH', name: '中国平安', score: 1.76 },
-  { rank: 7, code: '000333', mkt: 'SZ', name: '美的集团', score: 1.68 },
-  { rank: 8, code: '002594', mkt: 'SZ', name: '比亚迪',   score: 1.55 },
-  { rank: 9, code: '600887', mkt: 'SH', name: '伊利股份', score: 1.47 },
-  { rank: 10,code: '600900', mkt: 'SH', name: '长江电力', score: 1.42 },
-  { rank: 11,code: '300760', mkt: 'SZ', name: '迈瑞医疗', score: 1.35 },
-  { rank: 12,code: '601166', mkt: 'SH', name: '兴业银行', score: 1.29 },
-  { rank: 13,code: '600690', mkt: 'SH', name: '海尔智家', score: 1.24 },
-  { rank: 14,code: '601288', mkt: 'SH', name: '农业银行', score: 1.18 },
-  { rank: 15,code: '601225', mkt: 'SH', name: '陕西煤业', score: 1.12 },
-  { rank: 16,code: '601088', mkt: 'SH', name: '中国神华', score: 1.07 },
-  { rank: 17,code: '600809', mkt: 'SH', name: '山西汾酒', score: 1.02 },
-  { rank: 18,code: '002415', mkt: 'SZ', name: '海康威视', score: 0.96 },
-  { rank: 19,code: '002714', mkt: 'SZ', name: '牧原股份', score: 0.91 },
-  { rank: 20,code: '600436', mkt: 'SH', name: '片仔癀',   score: 0.87 },
-]
+// TOP_HOLDINGS 已删(`_17` 全量排查)——
+// 原来是 20 只写死的"持仓"(茅台 2.34 / 格力 2.18 / 五粮液 2.05 …),
+// **没有任何地方引用它**。留着的风险是将来有人以为那是真数据接上去。
+// 真持仓走 /api/quant/scan 与回测返回的 positions。
 
 // 股票池名字
 const UNIVERSE_NAME = {
@@ -194,7 +186,6 @@ function strategyFromApi(row) {
     factors,
     weights,
     config: row.config || {},
-    metrics_mock: { ann_ret: 0.184, sharpe: 1.42, max_dd: -0.143 },  // Phase C4 上真数据
     created_at: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
     _from_api: true,
   }
@@ -313,17 +304,33 @@ function askHunterFromWorkbench() {
 }
 function askHunterFromBacktest() {
   const d = loadDraft()
-  const m = d._metrics || { ann_ret: 0.184, sharpe: 1.42, max_dd: -0.143, win_rate: 0.62 }
-  const prompt = [
-    `我用【${draftFactorNames(d)}】策略回测 3 年结果:`,
-    `· 年化收益 ${fmtPct(m.ann_ret)} (基准 +6.2%)`,
-    `· 夏普 ${m.sharpe.toFixed(2)}`,
-    `· 最大回撤 ${fmtPct(m.max_dd)} (2024-Q4)`,
-    `· 月度胜率 ${(m.win_rate*100).toFixed(0)}%`,
-    '',
-    '这些指标合理吗? 在什么市场环境下会失效? 我该注意什么?'
-  ].join('\n')
-  location.href = '/chat?q=' + encodeURIComponent(prompt)
+  // **这是全部假数据里最糟的一处**(`_17` 全量排查):
+  // 原来是 `d._metrics || {ann_ret:0.184, sharpe:1.42, max_dd:-0.143, win_rate:0.62}` ——
+  // 没跑过回测时把写死的数字**当成真结果发给模型**,让它分析"这些指标合理吗"。
+  // 模型会认真点评一组根本不存在的业绩,而用户以为那是自己策略的表现。
+  // 连"基准 +6.2%""2024-Q4"这些也是编进 prompt 的。
+  const real = JSON.parse(localStorage.getItem('quant_backtest_result') || 'null')
+  const m = real?.metrics || d._metrics
+  if (!m) {
+    alert('还没有回测结果 —— 先到「策略工作台」跑一次回测,再让 Hunter 分析。')
+    return
+  }
+  const q = real?.quality
+  const lines = [
+    `我用【${draftFactorNames(d)}】策略回测,区间 ${real?.start || '?'} → ${real?.end || '?'}:`,
+    `· 年化收益 ${fmtPct(m.ann_ret)}`,
+    `· 夏普 ${(m.sharpe ?? 0).toFixed(2)}`,
+    `· 最大回撤 ${fmtPct(m.max_dd)}`,
+  ]
+  if (m.win_rate != null) lines.push(`· 期胜率 ${(m.win_rate*100).toFixed(0)}%(共 ${m.n_periods || '?'} 期)`)
+  if (m.turnover != null) lines.push(`· 平均换手 ${(m.turnover*100).toFixed(0)}%`)
+  // 把**成色**一起告诉模型 —— 不说的话它会当成一个可信结果来点评,
+  // 而用户最需要知道的恰恰是"这个结果能不能信"
+  if (!real?.benchmark) lines.push('· 注:基准未接入,没有超额收益数据')
+  if (q && q.survivorship_ok === false) lines.push('· 注:股票池用的是当前成分,存在幸存者偏差,收益可能偏高')
+  if (m.n_periods && m.n_periods < 12) lines.push(`· 注:只有 ${m.n_periods} 期,样本不足一年`)
+  lines.push('', '这些指标合理吗? 在什么市场环境下会失效? 我该注意什么?')
+  location.href = '/chat?q=' + encodeURIComponent(lines.join('\n'))
 }
 function askHunterAboutOfficial(strategy) {
   const prompt = `给我详细讲一下【${strategy.name}】这个官方策略。适用什么市场环境? 主要风险有哪些? 与"${strategy.factors.map(f=>factorByKey(f.key).name).slice(0,2).join(' + ')}"这种搭配的经典理论依据是什么?`
@@ -419,7 +426,6 @@ function openSaveDialog(afterSave) {
       factors: d.factors,
       weights: d.weights,
       config: d.config,
-      metrics_mock: { ann_ret: 0.184, sharpe: 1.42, max_dd: -0.143 },
       created_at: Date.now(),
     }
     // C3 · 先试 API · 失败 fallback localStorage

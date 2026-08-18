@@ -73,9 +73,13 @@ function renderCard(f) {
       <div class="head"><span>${f.name}</span><span class="cat">${f.cat}</span></div>
       <div class="desc">${f.desc}${f.note?` · <b style="color:var(--dn)">${f.note}</b>`:''}</div>
       <div class="metrics">
-        <div class="metric"><div class="k">IC</div><div class="v ${f.ic>=0?'pos':'neg'}">${(f.ic>=0?'+':'')+f.ic.toFixed(3)}</div></div>
-        <div class="metric"><div class="k">年化</div><div class="v pos">${fmtPct(f.ann)}</div></div>
-        <div class="metric"><div class="k">波动</div><div class="v">${(f.vol*100).toFixed(0)}%</div></div>
+        <!-- IC 由 /api/quant/factors/ic-ranking 异步填(见下方 loadIC)。
+             这里先显示 "—" 而不是占位数字 —— 因子有没有用是这套系统最核心的
+             问题,拿编的数回答等于把结论也编了。年化/波动同理:
+             它们要靠分档回测算,ic_engine 现在不产出这两个,所以不显示 -->
+        <div class="metric"><div class="k">IC</div><div class="v" data-ic>—</div></div>
+        <div class="metric"><div class="k">IR</div><div class="v" data-ir>—</div></div>
+        <div class="metric"><div class="k">样本</div><div class="v" data-n>—</div></div>
       </div>
     </div>
   `

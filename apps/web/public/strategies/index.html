@@ -81,9 +81,15 @@ const mineHtml = mine.length === 0 ? `
           ${m.factors.slice(0,4).map(k => `<span>${factorByKey(k).name} ${m.weights[k]||0}%</span>`).join('')}
         </div>
         <div class="stats">
-          <div><div class="k">年化*</div><div class="v pos">${fmtPct(m.metrics_mock.ann_ret)}</div></div>
-          <div><div class="k">夏普*</div><div class="v">${m.metrics_mock.sharpe.toFixed(2)}</div></div>
-          <div><div class="k">最大回撤*</div><div class="v neg">${fmtPct(m.metrics_mock.max_dd)}</div></div>
+          <!-- 原来这三个读的是 metrics_mock(写死 0.184/1.42/-0.143),
+               连从 API 拿到的真策略也会被挂上。带个 * 号不够 ——
+               用户不会去找脚注,他看到的就是"这策略年化 18.4%"。
+               现在:只显示真跑过的回测结果,没跑过就提示去跑一次 -->
+          ${m.metrics ? `
+          <div><div class="k">年化</div><div class="v ${m.metrics.ann_ret>=0?'pos':'neg'}">${fmtPct(m.metrics.ann_ret)}</div></div>
+          <div><div class="k">夏普</div><div class="v">${(m.metrics.sharpe ?? 0).toFixed(2)}</div></div>
+          <div><div class="k">最大回撤</div><div class="v neg">${fmtPct(m.metrics.max_dd)}</div></div>`
+          : `<div style="grid-column:1/-1;color:var(--muted);font-size:11.5px">尚未回测 · 点开跑一次看表现</div>`}
         </div>
       </div>
     `).join('')}
@@ -331,7 +337,9 @@ document.querySelectorAll('.s-card').forEach(card => {
       weights: strat.factors ? Object.fromEntries(strat.factors.map(f=>[f.key,f.w])) : strat.weights,
       config: strat.config,
       name: strat.name,
-      _metrics: strat.metrics || strat.metrics_mock,
+      // 只带真回测结果 —— 没有就让 backtest 页显示"—",
+      // 而不是把策略广场卡片上的数字延续过去
+      _metrics: strat.metrics || null,
       updated_at: Date.now(),
     }
     saveDraft(draft)

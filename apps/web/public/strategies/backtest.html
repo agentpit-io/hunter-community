@@ -24,7 +24,9 @@ const isReal = !!realResult
 document.body.innerHTML = renderShell(
   'backtest',
   '策略广场 / 回测结果',
-  `· ${draft.name || '未命名策略'} · ${isReal ? realResult.start + ' → ' + realResult.end + ' · ✅ 真数据' : '3 年回测 · 2023-08 → 2026-07(mock)'}`,
+  `· ${draft.name || '未命名策略'} · ${isReal
+    ? realResult.start + ' → ' + realResult.end + ' · ✅ 真回测'
+    : '尚未回测'}`,
   `<button class="btn small" id="btn-share">🔗 分享</button>
    <button class="btn small" id="btn-save">💾 保存策略</button>
    <button class="btn small ask-hunter" id="btn-ask">💬 让 Hunter 详细分析</button>`
@@ -142,7 +144,7 @@ container.innerHTML = `
     <div id="nav-chart" style="width:100%;height:320px"></div>
     <div style="display:flex;gap:20px;margin-top:10px;padding-left:20px;font-size:12px">
       <span style="display:flex;align-items:center;gap:6px"><span style="width:20px;height:3px;background:#b56b2d"></span>策略 · ${draft.name || '当前组合'}</span>
-      <span style="display:flex;align-items:center;gap:6px"><span style="width:20px;height:3px;background:#a2a49d"></span>基准 · ${BENCHMARK_NAME[cfg.benchmark]}</span>
+      ${bench ? `<span style="display:flex;align-items:center;gap:6px"><span style="width:20px;height:3px;background:#a2a49d"></span>基准 · ${BENCHMARK_NAME[cfg.benchmark] || cfg.benchmark}</span>` : ''}
       ${isReal ? `<span style="background:#EEF5F1;color:#2C6B55;padding:2px 8px;border-radius:6px;font-size:11">✅ 真回测 · ${realResult.nav_series?.length||0} 期 · ${realResult.duration_ms||0}ms</span>` : ''}
       <span style="margin-left:auto;color:var(--muted)">悬浮曲线看某日详情</span>
     </div>
@@ -191,7 +193,9 @@ container.innerHTML = `
         </div>
       </div>
       <div style="color:var(--muted);font-size:11.5px;margin-bottom:12px">
-        超额收益 <b style="color:var(--brand-dark);font-family:var(--serif);font-size:14px">${fmtPct(metrics.ann_ret - 0.062)}</b> 拆解到各因子：
+        ${bench
+          ? `超额收益 <b style="color:var(--brand-dark);font-family:var(--serif);font-size:14px">${fmtPct(metrics.ann_ret - bench.ann_ret)}</b> 拆解到各因子:`
+          : '最后一期持仓里,各因子的**打分贡献**(不是收益归因 —— 那要有基准):'}
       </div>
       <div class="attrib" id="attrib-list"></div>
       <div style="margin-top:12px;padding:10px 12px;background:var(--tag-ok-bg);color:var(--tag-ok-fg);border-radius:8px;font-size:11.5px;line-height:1.6">
@@ -338,21 +342,27 @@ container.innerHTML = `
   if (!el || !window.echarts) return
   const chart = echarts.init(el)
 
-  // 真回测 · 用 realResult.nav_series [{date, nav}, ...]
-  // 无真数据兜底:mock 36 期
-  let dates, navs
-  if (isReal && realResult.nav_series?.length) {
-    dates = realResult.nav_series.map(p => p.date)
-    navs  = realResult.nav_series.map(p => p.nav)
-  } else {
-    dates = Array.from({length: 36}, (_, i) => `2023-${String((i%12)+1).padStart(2,'0')}`)
-    navs  = [1, 1.01, 1.03, 1.02, 1.06, 1.11, 1.09, 1.07, 1.13, 1.19, 1.16, 1.14,
-             1.20, 1.28, 1.25, 1.22, 1.30, 1.36, 1.32, 1.29, 1.36, 1.42, 1.40, 1.38,
-             1.46, 1.51, 1.48, 1.45, 1.53, 1.58, 1.55, 1.52, 1.59, 1.63, 1.66, 1.66]
+  // **没有真回测就不画图**(_17 全量排查)。
+  //
+  // 原来这里在无数据时画一条编的 36 期曲线(1.0 → 1.66,年化约 18%),
+  // 而基准是 `1 + i*0.005` 一条直线 —— 用户截图里那条灰虚线就是它。
+  // 一张看起来很专业的图,底下一个真数字都没有。
+  //
+  // 空图比假图好:空的用户知道要去跑回测,假的他以为已经跑过了。
+  if (!isReal || !realResult.nav_series?.length) {
+    el.innerHTML = `<div style="padding:48px 20px;text-align:center;color:var(--muted);font-size:13px;line-height:1.9">
+      还没有回测数据<br>
+      <span style="font-size:11.5px">到「策略工作台」配好因子权重,点『跑回测』</span>
+    </div>`
+    return
   }
+  const dates = realResult.nav_series.map(p => p.date)
+  const navs  = realResult.nav_series.map(p => p.nav)
 
-  // 基准 hs300 · 简版 · 后续接真 benchmark
-  const bench = navs.map((_, i) => 1 + i * 0.005)
+  // 基准 —— 后端返回才画。**不再用 `1 + i*0.005` 这条假直线**:
+  // 它让每张图都显得"策略跑输了一条稳稳向上的大盘",而那条线是编的
+  const benchSeries = realResult.benchmark?.nav_series || null
+  const bench = benchSeries ? benchSeries.map(p => p.nav) : null
 
   chart.setOption({
     grid: {left: 55, right: 30, top: 25, bottom: 40},
@@ -372,10 +382,12 @@ container.innerHTML = `
        itemStyle: {color: '#b56b2d'},
        areaStyle: {color: 'rgba(181,107,45,0.06)'},
        symbol: 'none'},
-      {name: '基准', type: 'line', data: bench, smooth: true,
+      // 基准线只在真有数据时画。没有就**只画策略这一条** ——
+      // 补一条假线会让用户以为"策略跑输大盘",而那条线是编的
+      ...(bench ? [{name: '基准', type: 'line', data: bench, smooth: true,
        lineStyle: {color: '#a2a49d', width: 1.6, type: 'dashed'},
        itemStyle: {color: '#a2a49d'},
-       symbol: 'none'},
+       symbol: 'none'}] : []),
     ],
   })
   window.addEventListener('resize', () => chart.resize())
@@ -615,39 +627,48 @@ container.innerHTML = `
   }
 })()
 
-// 归因：按因子权重比例分配超额收益
+// 因子贡献 —— **用后端真实返回的 factor_contrib**(`_17` 全量排查)。
+//
+// 原来这段是编的:超额 = `metrics.ann_ret - 0.062`(0.062 是写死的基准),
+// 再按权重乘一个 `Math.abs(f.ic)/0.05` 的"微扰"分摊下去,最后还
+// 硬扣 0.3% 当交易成本。整块没有一个数来自回测。
+//
+// 后端 score_and_select 每只股都返回 factor_contrib(= sign × z × weight),
+// 回测的 positions 里带着。把最后一期所有持仓的贡献按因子汇总,
+// 就是**真实的打分构成**。
+//
+// 注意语义变了:这是「因子对选股打分的贡献」,不是「对超额收益的归因」——
+// 后者要有基准。名字和说明都跟着改,不能沿用"超额收益拆解"的说法。
 const attribList = document.getElementById('attrib-list')
-const excess = metrics.ann_ret - 0.062
-if (draft.factors.length > 0) {
-  const totalW = draft.factors.reduce((a,k) => a + (draft.weights[k]||0), 0) || 1
-  // 每因子贡献 ≈ (自身IC/平均IC) * 自身权重 * 超额，简化为按权重 + 微扰
-  const contribs = draft.factors.map((k,i) => {
-    const f = factorByKey(k)
-    const share = (draft.weights[k]||0) / totalW
-    // 加权因子的 IC 相对权重（相对到 factor 平均 0.05）作为微扰
-    const boost = Math.max(0.6, Math.min(1.4, Math.abs(f.ic) / 0.05))
-    return { k, name: f.name, w: draft.weights[k]||0, contrib: excess * share * boost }
-  })
-  // 归一到总超额（含成本）
-  const sumC = contribs.reduce((a,c)=>a+c.contrib, 0) || 1
-  const scale = (excess - 0.003) / sumC  // 留 0.3% 给交易成本
-  contribs.forEach(c => c.contrib *= scale)
-  const maxAbs = Math.max(0.02, ...contribs.map(c => Math.abs(c.contrib)))
-  contribs.sort((a,b) => b.contrib - a.contrib)
-
-  attribList.innerHTML = contribs.map(c => `
+const positionsForAttrib = realResult?.positions || []
+if (attribList && positionsForAttrib.length > 0) {
+  const agg = {}
+  for (const p of positionsForAttrib) {
+    for (const [k, v] of Object.entries(p.factor_contrib || {})) {
+      agg[k] = (agg[k] || 0) + v
+    }
+  }
+  const n = positionsForAttrib.length
+  const rows = Object.entries(agg)
+    .map(([k, sum]) => ({ k, name: (factorByKey(k)?.name || k), avg: sum / n }))
+    .sort((a, b) => b.avg - a.avg)
+  if (rows.length === 0) {
+    attribList.innerHTML = '<div style="color:var(--muted);font-size:11.5px">这次回测没有返回因子贡献数据</div>'
+  } else {
+    const maxAbs = Math.max(0.01, ...rows.map(r => Math.abs(r.avg)))
+    attribList.innerHTML = rows.map(r => `
     <div class="attrib-row">
-      <span class="name">${c.name} (${c.w}%)</span>
-      <div class="bar"><div class="fill ${c.contrib<0?'neg':''}" style="width:${Math.min(95, Math.abs(c.contrib)/maxAbs*80)}%"></div></div>
-      <span class="val ${c.contrib>=0?'pos':'neg'}">${fmtPct(c.contrib)}</span>
-    </div>
-  `).join('') + `
-    <div class="attrib-row">
-      <span class="name" style="color:var(--muted)">交易成本</span>
-      <div class="bar"><div class="fill neg" style="width:6%"></div></div>
-      <span class="val neg">-0.3%</span>
-    </div>
-  `
+      <span class="name">${r.name}</span>
+      <div class="bar"><div class="fill ${r.avg<0?'neg':''}" style="width:${Math.min(95, Math.abs(r.avg)/maxAbs*80)}%"></div></div>
+      <span class="val ${r.avg>=0?'pos':'neg'}">${r.avg>=0?'+':''}${r.avg.toFixed(3)}</span>
+    </div>`).join('')
+      + `<div style="margin-top:8px;color:var(--muted);font-size:11px">
+           数值是 z-score 加权贡献的均值(${n} 只持仓),不是收益率。
+         </div>`
+  }
+} else if (attribList) {
+  attribList.innerHTML = '<div style="color:var(--muted);font-size:11.5px">跑一次回测后这里会显示各因子的真实贡献</div>'
+}
 }
 
 // 相似策略推荐：随机取 3 个官方（排除当前）
