@@ -107,17 +107,40 @@ export async function listMessages(sessionId: string): Promise<Message[]> {
   })
 }
 
+export interface SendAttachment {
+  /** "data:image/png;base64,..." · InputBox 内联读进来 */
+  dataUrl: string
+  mime: string
+  filename: string
+}
+
 export interface SendMessageArgs {
   sessionId: string
   text: string
   agent?: string
   model?: { providerID: string; modelID: string }
+  /** 图片附件 · 走 BFF 的 image → text OCR 拦截 · LLM 收到的还是纯文本 part */
+  attachments?: SendAttachment[]
 }
 
 export async function sendMessage(args: SendMessageArgs): Promise<any> {
-  const body: any = {
-    parts: [{ type: 'text', text: args.text }],
+  // 图片 part 排在前面 · text 排最后:BFF 会把 image parts 转成 text
+  // ([图片 OCR 抽取内容]...) · 顺序上先"图后文"对模型更自然 —— 用户是"先给背
+  //  景后提问",翻过来变成"先提问再给一堆 OCR 文字"会显得脱节。
+  // opencode 支持 file part {type:"file", mime, url, filename?}, BFF 侧只匹配 image/*。
+  const parts: any[] = []
+  for (const a of args.attachments || []) {
+    parts.push({
+      type: 'file',
+      mime: a.mime,
+      url: a.dataUrl,
+      filename: a.filename,
+    })
   }
+  // text 允许空 —— 仅上传图片场景 · BFF 拿到 OCR 文本后已经能推工具
+  parts.push({ type: 'text', text: args.text || '' })
+
+  const body: any = { parts }
   if (args.agent) body.agent = args.agent
   if (args.model) body.model = args.model
   return req(

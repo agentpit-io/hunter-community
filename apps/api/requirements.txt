@@ -36,3 +36,8 @@ argon2-cffi==23.1.0
 # email validation for pydantic EmailStr
 email-validator==2.2.0
 
+# OCR · 中文识别 · 用户上传截图 → 抽取股票名/代码 → 批量加自选
+# 底层 tesseract 二进制在 Dockerfile 里装; pytesseract 只是薄 Python 封装
+pytesseract==0.3.13
+Pillow==11.0.0
+

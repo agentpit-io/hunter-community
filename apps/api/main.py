@@ -236,6 +236,10 @@ app.include_router(chat_skill_router.router, prefix="/api")
 from app.routers import internal_tools as internal_tools_router
 app.include_router(internal_tools_router.router, prefix="/api")
 
+# ── OCR 桥接 · 供 web BFF 拦截用户上传截图后抽文本(批量加自选走这条链)──
+from app.routers import internal_ocr as internal_ocr_router
+app.include_router(internal_ocr_router.router, prefix="/api")
+
 # ── 用户自定义 MCP · P0 MVP · 用户可自加 Polygon/Alpha Vantage/自研 MCP ──
 from app.routers import user_mcp as user_mcp_router
 from app.routers import internal_user_mcp as internal_user_mcp_router

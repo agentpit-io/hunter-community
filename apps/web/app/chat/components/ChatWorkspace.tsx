@@ -17,7 +17,7 @@ import { useOpencodeSSE } from '../lib/useSSE'
 import { ensureLocalSession } from '../../lib/localSession'
 import { condenseMemory } from '../lib/profileClient'
 import MessageList from './MessageList'
-import InputBox from './InputBox'
+import InputBox, { type Attachment as InputAttachment } from './InputBox'
 import SessionHeader from './SessionHeader'
 import DebateProgressCard, { type DebatePhase } from './DebateProgressCard'
 import KpredProgressCard from './KpredProgressCard'
@@ -411,12 +411,15 @@ export default function ChatWorkspace({
     }
   }
 
-  const handleSend = async (text: string) => {
+  const handleSend = async (text: string, attachments?: InputAttachment[]) => {
     if (!sessionId || busy) return
 
     // ── 多专家辩论 SKILL ──
+    // 辩论/预测这类 SKILL 走本地专用管线,不接图片 —— 有附件就先给个提示
+    // 让用户明白他刚才拖进来的图不会走进这些流程,而是走普通 chat。
+    const hasAttachments = !!attachments && attachments.length > 0
     const isDebateByPattern = /做\s*多\s*空\s*辩\s*论/.test(text)
-    if (pendingSkillKey === 'debate' || isDebateByPattern) {
+    if (!hasAttachments && (pendingSkillKey === 'debate' || isDebateByPattern)) {
       onSkillConsumed?.()
       void handleDebateSend(text, sessionId)
       return
@@ -425,7 +428,7 @@ export default function ChatWorkspace({
     // ── Kronos 走势预测 SKILL (Sprint E) ──
     // 模式匹配: "用 Kronos 预测" 是 SKILL 模板固定短语
     const isKpredByPattern = /用\s*Kronos\s*预测/i.test(text) || /Kronos.*未来.*天走势/i.test(text)
-    if (pendingSkillKey === 'forecast' || isKpredByPattern) {
+    if (!hasAttachments && (pendingSkillKey === 'forecast' || isKpredByPattern)) {
       onSkillConsumed?.()
       void handleKpredSend(text, sessionId)
       return
@@ -437,13 +440,16 @@ export default function ChatWorkspace({
     const isFirstUserMsg = !messages.some((m) => m.role === 'user')
 
     const tempId = `tmp_user_${Date.now()}`
+    // 用户可视的乐观气泡:文本 + 附件占位("📎 图片 N 张")· 服务端持久化的是 OCR 文本
+    // 服务器 SSE 回来后会替换成真消息(那时只有 text part) · 差异用户看不出
+    const bubbleText = text || (hasAttachments ? `📎 图片 ${attachments!.length} 张` : '')
     setMessages((prev) => [
       ...prev,
       {
         id: tempId,
         sessionID: sessionId,
         role: 'user',
-        parts: [{ type: 'text', text }],
+        parts: [{ type: 'text', text: bubbleText }],
         time: { created: Date.now() },
       },
     ])
@@ -455,6 +461,11 @@ export default function ChatWorkspace({
         text,
         agent: currentAgent || undefined,
         model: providerID && modelID ? { providerID, modelID } : undefined,
+        attachments: attachments?.map((a) => ({
+          dataUrl: a.dataUrl,
+          mime: a.mime,
+          filename: a.filename,
+        })),
       })
 
       // 自动生成标题 · 若这是首条 user msg 且当前 session title 是"新对话"或空

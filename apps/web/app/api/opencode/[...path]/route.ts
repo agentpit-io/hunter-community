@@ -18,6 +18,9 @@ const OPENCODE_USER = process.env.OPENCODE_SERVER_USERNAME || 'opencode'
 const OPENCODE_PW = process.env.OPENCODE_SERVER_PASSWORD || ''
 // hermes-api:会话归属的权威数据源(它已有 JWT 中间件,鉴权只在一处做)
 const HERMES_API = process.env.HERMES_API_URL || 'http://127.0.0.1:8000'
+// /api/internal/* 的共享 secret · 用户上传图片走 OCR 内部端点也用这条
+// (与 docker-compose api 服务 HUNTER_INTERNAL_KEY 同源 · 缺了 OCR 会 401)
+const INTERNAL_KEY = process.env.HUNTER_INTERNAL_KEY || 'hunter-internal-local'
 
 // undici 默认 headersTimeout=300s(5 分钟)· LLM+多 tool 编排单条 message 可能更长
 // 用自定义 Agent 加长到 10 分钟 · 与文件末尾 maxDuration=600 对齐
@@ -124,6 +127,74 @@ async function owns(token: string, sessionId: string): Promise<boolean | 'unauth
   if (r.status === 401) return 'unauthorized'
   if (!r.ok) return null
   return !!r.data?.owned
+}
+
+// ─── OCR · 用户上传图片时把 image part 转成 text part ─────────
+//
+// 当前 LLM(deepseek-v4-pro)不吃视觉,若原样把 image part 转下去 opencode 会报错
+// 或 LLM 抱怨"我看不到图"。所以在 BFF 层就把 image 拦下,调 hermes-api 的
+// /api/internal/ocr/extract 抽文本,替换成 [图片 OCR 抽取内容] 的 text part,
+// 下游 opencode + LLM 完全无感知,还是当纯文本处理。
+//
+// 图片是 base64 data URL(前端 InputBox 内联) · OCR 端点两种格式都吃。
+
+async function ocrExtract(imageDataUrlOrB64: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${HERMES_API}/api/internal/ocr/extract`, {
+      method: 'POST',
+      headers: {
+        'X-Hunter-Internal-Key': INTERNAL_KEY,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ image_base64: imageDataUrlOrB64 }),
+      cache: 'no-store',
+    })
+    if (!res.ok) {
+      const txt = await res.text().catch(() => '')
+      console.warn('[bff.ocr] extract failed status=%d body=%s', res.status, txt.slice(0, 200))
+      return null
+    }
+    const data = await res.json().catch(() => null) as { text?: string } | null
+    return data?.text ?? null
+  } catch (e) {
+    console.warn('[bff.ocr] unreachable:', (e as Error).message)
+    return null
+  }
+}
+
+/** 把 opencode FilePartInput(image/*) 换成 TextPartInput([图片 OCR 抽取内容]…)
+ *  非 image 的 part 原样返回 · OCR 失败也回 text part 兜底,不让消息为空。 */
+async function imagePartsToText(parts: any[]): Promise<any[]> {
+  const out: any[] = []
+  for (const p of parts) {
+    const isImage =
+      p?.type === 'file' &&
+      typeof p?.mime === 'string' &&
+      p.mime.toLowerCase().startsWith('image/')
+    if (!isImage) {
+      out.push(p)
+      continue
+    }
+    const dataUrl: string = p.url || p.data || ''
+    const filename: string = p.filename || 'upload'
+    const text = dataUrl ? await ocrExtract(dataUrl) : null
+    // metadata 透传(hermes_token 就在这里 · 别丢了 · 会导致下游认不出用户)
+    const meta = p.metadata
+    if (text && text.trim()) {
+      out.push({
+        type: 'text',
+        text: `[图片 OCR 抽取内容 · 来源: ${filename} · engine: tesseract]\n${text}`,
+        ...(meta ? { metadata: meta } : {}),
+      })
+    } else {
+      out.push({
+        type: 'text',
+        text: `[图片 OCR 失败 · 来源: ${filename} · 请让用户手动列出股票名或代码]`,
+        ...(meta ? { metadata: meta } : {}),
+      })
+    }
+  }
+  return out
 }
 
 // ─── 路径识别 ────────────────────────────────────────────────
@@ -414,7 +485,18 @@ async function handle(req: Request, segs: string[]): Promise<Response> {
         const raw = await req.text()
         const body = raw ? JSON.parse(raw) : {}
 
-        // token 必须塞进 **parts[0].metadata**,不能只放 body 顶层 ——
+        // ① 先把 image parts OCR 成 text parts —— 必须在 hermes_token 注入之前:
+        //   image → text 会新造 part 对象,原来 parts[0] 的 metadata 就丢了,
+        //   下面 token 注入还是往新 parts[0] 塞,顺序对得上就没事。
+        //   跳过纯文本对话(全都不是 image · imagePartsToText 直接原样返回)。
+        if (Array.isArray(body.parts) && body.parts.length > 0 &&
+            body.parts.some((p: any) => p?.type === 'file' &&
+                                        typeof p?.mime === 'string' &&
+                                        p.mime.toLowerCase().startsWith('image/'))) {
+          body.parts = await imagePartsToText(body.parts)
+        }
+
+        // ② token 必须塞进 **parts[0].metadata**,不能只放 body 顶层 ——
         // opencode 的 PromptInput schema 没有顶层 metadata 字段,会被直接剥掉,
         // hunter-auth plugin 因此永远读不到,日志刷"无 hermes_token",
         // 下游所有 hunter tool 退化到 fallback_user_id(开源版没有这个值)→
@@ -449,7 +531,7 @@ async function handle(req: Request, segs: string[]): Promise<Response> {
 - 用户只想看结果 · 直接给分析和结论 · 不要暴露内部推理
 - 若 tool 返回英文 · 必须**翻译成中文**呈现
 
-【工具 · 硬性 · 允许下列 9 个 · 其他一律禁用】
+【工具 · 硬性 · 允许下列 11 个 · 其他一律禁用】
 
 ⚠️ 这份清单**必须与镜像里 .opencode/opencode.jsonc 注册的 MCP 一致**。
    工具名 = {MCP 名}_{tool 名},MCP 名当前是 watchlist / portfolio / uzi / hunter_user。
@@ -465,7 +547,24 @@ async function handle(req: Request, segs: string[]): Promise<Response> {
 - \`uzi_stock_deep_analysis\` · 深度分析(基本面+技术面+资金面) · 参数 {"code":"600519"} ·
    用户问「深度分析/详细看看/基本面如何」时用此
 
-── B. 我的自选与组合（4 个 · 涉及"我的自选/持仓/组合/风险画像"时必用）──
+── B. 我的自选与组合（6 个 · 涉及"我的自选/持仓/组合/风险画像"时必用）──
+- \`watchlist_watchlist_add\` · 把**单只**股票/ETF/基金加进当前用户自选(**写操作 · 幂等**) ·
+   参数 {"query":"贵州茅台"} 或 {"query":"600519"} · 名称/代码/中英文皆可,含 A股/港股/美股/ETF ·
+   **用户说「加自选 X / 关注 X / 订阅 X / 收藏 X / 把 X 加到我的自选」→ 立即调用,不预告不确认** ·
+   成功后简要复述"已把 {name} ({code}) 加入自选" 即可,不需重复卡片内容;
+   若返回 error=not_found 就把 query 转述给用户,请他给完整名字或代码
+- \`watchlist_watchlist_add_batch\` · **批量**加自选(2 只及以上时用 · 幂等 · 上限 30) ·
+   参数 {"queries":["贵州茅台","601899","AAPL","510300"]} ·
+   **触发信号**(命中任一即用批量,不要拆成多次 add):
+     ① 消息里出现 [图片 OCR 抽取内容] 段 —— 用户上传截图,你从中抽 code/name 组数组
+     ② 用户一句话列了 ≥2 只:"加自选 茅台 五粮液 腾讯 · 都加进去"
+     ③ 逗号/顿号/换行分隔的清单
+   **截图 OCR 时特殊处理**:
+     · 数字 6 位是 A 股代码(如 600519 601899 000933)
+     · 数字 5 位或带 H 前缀(H01378)是港股 → 去掉 H · 传 "01378"
+     · 数字 6 位以 688 开头是科创板(A股)
+     · 汉字带空格如"新 和 成"合并成"新和成"再传;OCR 常见的形似字("Ol378"→"01378")用上下文修正
+   返回 summary+results[] · 已在自选的算成功 · not_found 的把原始 query 转告用户请他确认
 - \`watchlist_watchlist_digest\` · 当前用户自选清单今日 Top3 涨/跌+AI 归因富卡片 ·
    无参数 · 用户问「我的自选/我的股票 今天谁最强/最弱/自选股日报」时用此
 - \`portfolio_portfolio_rebalance\` · 组合级建议富卡片(当前权重 vs 目标+加/减仓动作) ·
@@ -547,6 +646,9 @@ async function handle(req: Request, segs: string[]): Promise<Response> {
 ✅ 正确: 用户问"如果紫金跌 20% 我组合亏多少" → 调 \`portfolio_portfolio_stress({"shock_code":"601899","shock_pct":-20})\`
 ✅ 正确: 用户问"我持仓怎么调" → 调 \`portfolio_portfolio_rebalance({})\` (前置未录 shares 时 tool 自身会返回引导态)
 ✅ 正确: 用户说"设置我风险偏保守 · 现金 5 万" → 调 \`portfolio_update_risk_profile({"risk_tolerance":"low","cash_balance":50000})\`
+✅ 正确: 用户说"帮我加自选 贵州茅台"/"把 00700 加入自选"/"关注一下 AAPL" → 立即调 \`watchlist_watchlist_add({"query":"贵州茅台"})\` · 不要先问"你确定吗"
+✅ 正确: 消息含 [图片 OCR 抽取内容] · 里头列了 "豪迈科技 002595 / 紫金矿业 601899 / 神火股份 000933 / 中国宏桥 H01378 / 新 和 成 002001 / 长城汽车 H02333 / 世华科技 688093" · 一次性调 \`watchlist_watchlist_add_batch({"queries":["002595","601899","000933","01378","002001","02333","688093"]})\` (港股 H 前缀去掉 · 汉字空格合并) · 不要拆成 7 次 add
+✅ 正确: 用户说"加自选 茅台 · 五粮液 · 腾讯 · AAPL" → 一次性调 \`watchlist_watchlist_add_batch({"queries":["贵州茅台","五粮液","腾讯控股","AAPL"]})\`
 ❌ 错误: 用户问"我的自选谁最强" → 回复"请提供股票代码" (违规 · 必须调 watchlist_watchlist_digest)
 ❌ 错误: 用户问"茅台走势" → 调 \`bash({"command":"python3 -c 'import yfinance...'"})\`
 ❌ 错误: 调 \`truesource_get_quote\` / \`akshare_ak_spot_a\` / \`kronos_kronos_forecast\` —— 这些工具在本部署里**不存在**,调用必失败`
