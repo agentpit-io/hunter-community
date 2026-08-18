@@ -218,6 +218,26 @@ def run_backtest(strategy: dict, start: date, end: date, user_id: str | None = N
         "factor_contrib": p.get("factor_contrib", {}),
     } for p in last_picks]
 
+    # ── 基准(`_17` §2)────────────────────────────────────────
+    # 之前后端完全没有基准,而前端画了一条 `1 + i*0.005` 的假直线,
+    # 并显示"基准 +6.2% · 超额 -7.4%"。现在用真指数日线算。
+    #
+    # **同一套调仓日**:基准和策略在完全相同的时点取值,否则超额收益里
+    # 会混进日期错配带来的噪音。
+    bench = _benchmark_nav(strategy["config"].get("benchmark", "000300"), schedule)
+    if bench:
+        # 超额 = 策略每期收益 − 基准每期收益。IR = 超额均值 / 超额标准差(年化)
+        # 用 _nav(含起点)而不是 nav_series —— 后者为了跟策略曲线对齐
+        # 已经去掉了起点,拿它算逐期收益会少一期且首期算错
+        b_nav = bench["_nav"]
+        ex = [(nav[i] / nav[i-1] - 1) - (b_nav[i] / b_nav[i-1] - 1)
+              for i in range(1, min(len(nav), len(b_nav)))]
+        if ex:
+            mu = sum(ex) / len(ex)
+            sd = math.sqrt(sum((x - mu) ** 2 for x in ex) / len(ex))
+            metrics["ir"] = round((mu * 12) / (sd * math.sqrt(12)), 3) if sd > 0 else 0
+            metrics["excess_win_rate"] = round(sum(1 for x in ex if x > 0) / len(ex), 4)
+
     # ── 成色标记(`_17` §5)────────────────────────────────────
     # 用户拿到一个漂亮的回测,看不出里面有没有幸存者偏差。
     # **让他知道成色,比修好它更急** —— 修要等历史成分累积一两年,
@@ -242,9 +262,10 @@ def run_backtest(strategy: dict, start: date, end: date, user_id: str | None = N
         "positions": positions,
         "cost_used": cost_bps * sum(turnover_hist),
         "duration_ms": int((time.time() - t0) * 1000),
-        # 基准还没实现(`_17` §2)。**显式给 null 而不是省略** ——
-        # 省略了前端读到 undefined 会走回落逻辑,又画出一条假基准线
-        "benchmark": None,
+        # 取不到指数数据时显式给 null(而不是省略,也不是补一条平线)——
+        # 前端据此把基准线整块隐藏。补出来的基准会让超额收益看起来很漂亮。
+        # `_nav` 是内部字段,不发给前端(它含起点,与曲线不对齐,发过去只会误用)
+        "benchmark": {k: v for k, v in bench.items() if k != "_nav"} if bench else None,
         "quality": quality,
         # 实际调仓频率 · 与用户所选可能不同,见 quality.rebalance_note
         "rebalance_used": "M",
@@ -393,4 +414,51 @@ def bootstrap_backtest(
         "full_end": full_end.isoformat(),
         "kronos_excluded": "kronos" in [f["key"] for f in strategy["factors"]],
         "percentiles": percentiles,
+    }
+
+
+def _benchmark_nav(bench_code: str, schedule: list) -> dict | None:
+    """按同一套调仓日算基准净值(`_17` §2)。
+
+    **取不到就返回 None,绝不补平线。** 之前前端用 `1 + i*0.005` 画基准 ——
+    那条线让每张图都显得"策略跑输了一条稳稳向上的大盘",而它是编的。
+    宁可不画,也不能画一条假的:用户会据此判断策略好坏。
+
+    只要有一个调仓日取不到指数收盘价,整段就作废 —— 缺一个点用前值补,
+    那一期的基准收益会变成 0,超额收益凭空多出一截。
+    """
+    from app.services.quant import index_kline as ik
+
+    if not bench_code or bench_code not in ik.INDEX_CODES:
+        return None
+    closes = [ik.close_on_or_before(bench_code, d) for d in schedule]
+    if any(c is None for c in closes):
+        missing = sum(1 for c in closes if c is None)
+        log.info("[backtest] 基准 %s 缺 %d/%d 个调仓日的收盘价 · 不画基准",
+                 bench_code, missing, len(schedule))
+        return None
+
+    nav = [1.0]
+    for i in range(1, len(closes)):
+        nav.append(nav[-1] * (closes[i] / closes[i - 1]))
+
+    m = _calc_metrics(nav)
+    # ⚠️ **和策略的 nav_series 对齐**。
+    #
+    # 策略那边是 `for i in range(len(schedule)-1)` 里 append,
+    # 每条记的是 `(schedule[i], 走完 i→i+1 之后的净值)` —— 共 len-1 条。
+    # 基准的 nav 有 len(schedule) 个点(含起点 1.0)。
+    # 直接返回全部就会多出一个点:echarts 的 xAxis 只有 42 个日期,
+    # 基准 43 个值 —— 两条线整体错位一格,而图上看不出来。
+    series = [{"date": schedule[i].isoformat(), "nav": round(nav[i + 1], 4)}
+              for i in range(len(nav) - 1)]
+    return {
+        "code": bench_code,
+        "name": ik.INDEX_CODES[bench_code][1],
+        "nav_series": series,
+        # 原始 nav(含起点)· 算超额收益时要用,前端不看
+        "_nav": nav,
+        "ann_ret": m["ann_ret"],
+        "max_dd": m["max_dd"],
+        "sharpe": m["sharpe"],
     }

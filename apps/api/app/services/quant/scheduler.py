@@ -94,6 +94,24 @@ def monthly_index_refresh():
     return results
 
 
+def daily_index_kline() -> dict:
+    """每日补指数日线(`_17` §2)。
+
+    只补最近 10 天 —— 全量 5900+ 行首次回填时拉一次就够,
+    之后每天只可能多一根。拉全量既慢又给上游添无谓压力。
+    """
+    from datetime import date, timedelta
+    from app.services.quant import index_kline as ik
+    out = {}
+    end = date.today()
+    start = end - timedelta(days=10)
+    for code in ik.INDEX_CODES:
+        r = ik.backfill(code, start, end)
+        out[code] = r.get("written", 0) if not r.get("error") else r["error"]
+    log.info("[quant.scheduler] 指数日线: %s", out)
+    return out
+
+
 def register(scheduler):
     """外部传入已有 AsyncIOScheduler · 我只加 job(不 start · 由 caller 决定)"""
     from apscheduler.triggers.cron import CronTrigger
@@ -101,6 +119,15 @@ def register(scheduler):
         lambda: asyncio.create_task(asyncio.to_thread(daily_recompute)),
         CronTrigger(hour=17, minute=0),   # 17:00 CST · 收盘后 30 分钟
         id="quant_daily_recompute",
+        replace_existing=True,
+    )
+    # `_17` · 指数日线 —— 回测基准的数据源。
+    # 16:30 跑,比因子(17:00)早半小时:回测要用它,而它只依赖交易所收盘,
+    # 不依赖我们自己的任何计算,没必要排在后面。
+    scheduler.add_job(
+        lambda: asyncio.create_task(asyncio.to_thread(daily_index_kline)),
+        CronTrigger(hour=16, minute=30),
+        id="quant_daily_index_kline",
         replace_existing=True,
     )
     # D-2 · IC 30 分钟后跑(等 factor_value 写完)
