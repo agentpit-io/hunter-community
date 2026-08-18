@@ -41,10 +41,24 @@ def compute_spec_hash(strategy: dict, start: date, end: date) -> str:
 # rebalance 日历
 # ═══════════════════════════════════════════════════════════════
 
+# 一年多少个调仓期 —— 年化换算与 IR 年化都要用它。
+# 旧版把这个数硬编码成 12(见 `_calc_metrics` 里的 `** (12.0 / n)`),
+# 支持多频率之后必须跟着变,否则周频回测的年化会被低估 4 倍多。
+PERIODS_PER_YEAR = {"W": 52, "M": 12, "Q": 4, "H": 2}
+
+
 def _rebalance_dates(start: date, end: date, freq: str = "M") -> list[date]:
-    """生成 rebalance 日期 · Phase A 只支持 M(每月第一个交易日)"""
-    if freq != "M":
-        # v2 加 W / Q / H
+    """生成 rebalance 日期 —— 支持 W / M / Q / H(`_17` §3)。
+
+    旧版是 `if freq != "M": freq = "M"` —— 而前端下拉给了四个选项。
+    用户选了季度,跑的还是月度,**他会以为自己在对比不同频率,
+    而两次跑的是同一个东西**。
+
+    取每个周期内的**第一个交易日**。用 klines 里真实存在的日期,
+    不自己造交易日历 —— 造出来的日历遇到调休就错,而错了没人发现。
+    """
+    freq = (freq or "M").upper()
+    if freq not in PERIODS_PER_YEAR:
         freq = "M"
     conn = get_conn()
     cur = conn.cursor()
@@ -59,13 +73,24 @@ def _rebalance_dates(start: date, end: date, freq: str = "M") -> list[date]:
     conn.close()
     if not all_days:
         return []
-    # 每月第一个交易日
+
+    def _bucket(d: date):
+        if freq == "M":
+            return (d.year, d.month)
+        if freq == "Q":
+            return (d.year, (d.month - 1) // 3)
+        if freq == "H":
+            return (d.year, (d.month - 1) // 6)
+        # 周:用 ISO 周 —— 跨年那周不会被拆成两段
+        iso = d.isocalendar()
+        return (iso[0], iso[1])
+
     seen = set()
     result = []
     for d in all_days:
-        key = (d.year, d.month)
-        if key not in seen:
-            seen.add(key)
+        k = _bucket(d)
+        if k not in seen:
+            seen.add(k)
             result.append(d)
     return result
 
@@ -75,33 +100,52 @@ def _rebalance_dates(start: date, end: date, freq: str = "M") -> list[date]:
 # ═══════════════════════════════════════════════════════════════
 
 def _period_return(codes: list[str], dt0: date, dt1: date) -> float:
-    """等权持仓 · 从 dt0 到 dt1 的收益率"""
+    """等权持仓 · 从 dt0 到 dt1 的收益率。
+
+    **每只股各取各的价格**(`_17` §6.2)。
+
+    旧版的 SQL 是:
+        ts IN ((SELECT MAX(ts) ... <= dt0), (SELECT MAX(ts) ... <= dt1))
+    两个子查询对**全池取一个共同日期**。停牌股在那两天没有行情 →
+    `len(series) < 2` → **直接从收益里剔除**。
+
+    表现是停牌股按"不存在"处理,而不是按"停牌期间零收益"处理 ——
+    分母少了一只,而停牌往往发生在坏消息前后,所以方向是**偏高**。
+
+    现在:每只股独立取"该日期或之前最近一个交易日"的收盘价。
+    取不到的按 0 收益计入(仍占仓位),而不是从分母里消失。
+    """
     if not codes or dt0 >= dt1:
         return 0.0
     conn = get_conn()
     cur = conn.cursor()
+    # DISTINCT ON 让每只股各自取最近一条 —— 一次查询拿两个时点
     cur.execute(
-        """SELECT code, ts, close FROM klines
-           WHERE code = ANY(%s) AND period='daily' AND ts IN (
-             (SELECT MAX(ts) FROM klines WHERE code = ANY(%s) AND period='daily' AND ts <= %s),
-             (SELECT MAX(ts) FROM klines WHERE code = ANY(%s) AND period='daily' AND ts <= %s)
-           )""",
-        (codes, codes, dt0, codes, dt1),
+        """SELECT code, p0, p1 FROM (
+             SELECT c.code,
+               (SELECT close FROM klines k WHERE k.code=c.code AND k.period='daily'
+                  AND k.ts <= %s AND k.close IS NOT NULL
+                ORDER BY k.ts DESC LIMIT 1) AS p0,
+               (SELECT close FROM klines k WHERE k.code=c.code AND k.period='daily'
+                  AND k.ts <= %s AND k.close IS NOT NULL
+                ORDER BY k.ts DESC LIMIT 1) AS p1
+             FROM (SELECT unnest(%s::text[]) AS code) c
+           ) t""",
+        (dt0, dt1, codes),
     )
-    by_code: dict[str, list] = {}
-    for c, t, close in cur.fetchall():
-        by_code.setdefault(c, []).append((t, float(close) if close else None))
+    rows = cur.fetchall()
     cur.close()
     conn.close()
 
     rets = []
-    for c, series in by_code.items():
-        if len(series) < 2:
-            continue
-        series.sort(key=lambda x: x[0])
-        p0, p1 = series[0][1], series[-1][1]
-        if p0 and p1 and p0 > 0:
-            rets.append(p1 / p0 - 1)
+    for _c, p0, p1 in rows:
+        if p0 and p1 and float(p0) > 0:
+            rets.append(float(p1) / float(p0) - 1)
+        else:
+            # 拿不到价格(停牌/新股/数据缺)——**按 0 收益计入,不剔除**。
+            # 剔除会让分母变小,等于假设"没数据的那只没买" ——
+            # 而它其实占着仓位
+            rets.append(0.0)
     return sum(rets) / len(rets) if rets else 0.0
 
 
@@ -109,7 +153,7 @@ def _period_return(codes: list[str], dt0: date, dt1: date) -> float:
 # 指标
 # ═══════════════════════════════════════════════════════════════
 
-def _calc_metrics(nav: list[float]) -> dict:
+def _calc_metrics(nav: list[float], ppy: int = 12) -> dict:
     """回测指标。
 
     **返回的每一项都必须是真算出来的。**`_17` 的教训:前端有一行
@@ -125,14 +169,15 @@ def _calc_metrics(nav: list[float]) -> dict:
                 "calmar": 0, "vol": 0, "win_rate": None, "n_periods": 0}
     rets = [nav[i] / nav[i-1] - 1 for i in range(1, len(nav))]
     n = len(rets)
-    # 假设月频 · 12 段/年
-    ann_ret = (nav[-1] / nav[0]) ** (12.0 / n) - 1 if n > 0 else 0
+    # `ppy` = 一年多少期。旧版硬编码 12(假设月频)—— 支持 W/Q/H 之后
+    # 必须跟着变,否则周频回测的年化会被低估 4 倍多,而那个数看起来很正常
+    ann_ret = (nav[-1] / nav[0]) ** (float(ppy) / n) - 1 if n > 0 else 0
     mean_r = sum(rets) / n
     var = sum((r - mean_r) ** 2 for r in rets) / n
-    ann_vol = math.sqrt(var * 12)
+    ann_vol = math.sqrt(var * ppy)
     sharpe = ann_ret / ann_vol if ann_vol > 0 else 0
     downside = [r for r in rets if r < 0]
-    downside_std = math.sqrt(sum(r*r for r in downside) / len(downside)) * math.sqrt(12) if downside else 0
+    downside_std = math.sqrt(sum(r*r for r in downside) / len(downside)) * math.sqrt(ppy) if downside else 0
     sortino = ann_ret / downside_std if downside_std > 0 else 0
     peak = nav[0]
     max_dd = 0.0
@@ -169,19 +214,40 @@ def _calc_metrics(nav: list[float]) -> dict:
 # ═══════════════════════════════════════════════════════════════
 
 def _calc_turnover(prev: list[str], curr: list[str]) -> float:
-    """单边换手率 · 简版:出仓比例"""
+    """单边换手率 —— 按**权重变化**算(`_17` §6.1)。
+
+    旧版是"出仓只数 / 上期只数",注释自己写着「简版」。它在两处失真:
+
+    1. **持仓数变了不算数**。上期 20 只、这期 30 只,10 只全留着 ——
+       旧版算 0% 换手,而实际每只的权重从 5% 掉到 3.33%,要卖出三分之一。
+    2. **单边定义错**。买入那半边完全没算进去。
+
+    正确做法:等权组合下每只权重 = 1/N,
+    单边换手 = Σ|w_new - w_old| / 2 —— 分母 2 是因为买卖各算一次,
+    而 cost_bps 是**单边**费率。
+
+    低估换手 = 低估成本 = 回测收益偏高,而这个偏差在结果里看不出来。
+    """
     if not prev:
-        return 1.0
-    prev_set = set(prev)
-    curr_set = set(curr)
-    out = len(prev_set - curr_set) / len(prev_set)
-    return out
+        return 1.0          # 首期建仓 · 全额买入
+    if not curr:
+        return 1.0          # 清仓
+    wp = 1.0 / len(prev)
+    wc = 1.0 / len(curr)
+    codes = set(prev) | set(curr)
+    total = sum(abs((wc if c in curr else 0.0) - (wp if c in prev else 0.0))
+                for c in codes)
+    return total / 2.0
 
 
 def run_backtest(strategy: dict, start: date, end: date, user_id: str | None = None) -> dict:
     """执行回测 · 返回完整结果 · positions 含 factor_contrib(C4.2)"""
     t0 = time.time()
-    schedule = _rebalance_dates(start, end)
+    freq = (strategy["config"].get("rebalance") or "M").upper()
+    if freq not in PERIODS_PER_YEAR:
+        freq = "M"
+    ppy = PERIODS_PER_YEAR[freq]
+    schedule = _rebalance_dates(start, end, freq)
     if len(schedule) < 2:
         return {"error": "no_dates", "message": f"起止时间内无 rebalance 日 · start={start} end={end}"}
 
@@ -205,7 +271,7 @@ def run_backtest(strategy: dict, start: date, end: date, user_id: str | None = N
         turnover_hist.append(turnover)
         nav_series.append({"date": dt0.isoformat(), "nav": round(nav[-1], 4)})
 
-    metrics = _calc_metrics(nav)
+    metrics = _calc_metrics(nav, ppy)
     metrics["turnover"] = round(sum(turnover_hist) / len(turnover_hist), 3) if turnover_hist else 0
 
     # C4.2 · 最后一期持仓保留 factor_contrib · 便于前端"贡献表"
@@ -224,7 +290,7 @@ def run_backtest(strategy: dict, start: date, end: date, user_id: str | None = N
     #
     # **同一套调仓日**:基准和策略在完全相同的时点取值,否则超额收益里
     # 会混进日期错配带来的噪音。
-    bench = _benchmark_nav(strategy["config"].get("benchmark", "000300"), schedule)
+    bench = _benchmark_nav(strategy["config"].get("benchmark", "000300"), schedule, ppy)
     if bench:
         # 超额 = 策略每期收益 − 基准每期收益。IR = 超额均值 / 超额标准差(年化)
         # 用 _nav(含起点)而不是 nav_series —— 后者为了跟策略曲线对齐
@@ -235,7 +301,7 @@ def run_backtest(strategy: dict, start: date, end: date, user_id: str | None = N
         if ex:
             mu = sum(ex) / len(ex)
             sd = math.sqrt(sum((x - mu) ** 2 for x in ex) / len(ex))
-            metrics["ir"] = round((mu * 12) / (sd * math.sqrt(12)), 3) if sd > 0 else 0
+            metrics["ir"] = round((mu * ppy) / (sd * math.sqrt(ppy)), 3) if sd > 0 else 0
             metrics["excess_win_rate"] = round(sum(1 for x in ex if x > 0) / len(ex), 4)
 
     # ── 成色标记(`_17` §5)────────────────────────────────────
@@ -248,11 +314,12 @@ def run_backtest(strategy: dict, start: date, end: date, user_id: str | None = N
     # 换仓频率:UI 上能选 W/M/Q/H,而 _rebalance_dates 强制月频。
     # 选了没生效**必须说出来** —— 否则用户以为自己在对比不同频率,
     # 两次跑的其实是同一个东西
-    want_freq = strategy["config"].get("rebalance", "M")
-    if want_freq != "M":
+    # 引擎现在真支持 W/M/Q/H 了,只在用户填了个不认识的值时提示
+    want_freq = (strategy["config"].get("rebalance") or "M").upper()
+    if want_freq not in PERIODS_PER_YEAR:
         quality = {**quality, "rebalance_note": (
-            f"你选了「{want_freq}」,但回测引擎目前只支持月频 —— "
-            f"这次跑的是月度调仓。")}
+            f"不认识的换仓频率「{want_freq}」—— 这次按月度跑。"
+            f"可选:W 周 / M 月 / Q 季 / H 半年。")}
 
     return {
         "start": start.isoformat(),
@@ -268,7 +335,7 @@ def run_backtest(strategy: dict, start: date, end: date, user_id: str | None = N
         "benchmark": {k: v for k, v in bench.items() if k != "_nav"} if bench else None,
         "quality": quality,
         # 实际调仓频率 · 与用户所选可能不同,见 quality.rebalance_note
-        "rebalance_used": "M",
+        "rebalance_used": freq,
     }
 
 
@@ -417,7 +484,7 @@ def bootstrap_backtest(
     }
 
 
-def _benchmark_nav(bench_code: str, schedule: list) -> dict | None:
+def _benchmark_nav(bench_code: str, schedule: list, ppy: int = 12) -> dict | None:
     """按同一套调仓日算基准净值(`_17` §2)。
 
     **取不到就返回 None,绝不补平线。** 之前前端用 `1 + i*0.005` 画基准 ——
@@ -442,7 +509,7 @@ def _benchmark_nav(bench_code: str, schedule: list) -> dict | None:
     for i in range(1, len(closes)):
         nav.append(nav[-1] * (closes[i] / closes[i - 1]))
 
-    m = _calc_metrics(nav)
+    m = _calc_metrics(nav, ppy)
     # ⚠️ **和策略的 nav_series 对齐**。
     #
     # 策略那边是 `for i in range(len(schedule)-1)` 里 append,

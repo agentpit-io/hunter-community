@@ -61,18 +61,58 @@ def _fetch_all_periods(code: str, start_year: str):
     return df
 
 
+# A 股法定披露时限 —— **按报告期分档**(`_17` §4)。
+#
+# 原来统一用 45 天 buffer。但披露时限差别很大:
+#
+#   一季报  3/31 期末 → 4/30 截止 →  30 天   45 天够 ✅
+#   半年报  6/30      → 8/31     →  62 天   45 天**差 17 天** ❌
+#   三季报  9/30      → 10/31    →  31 天   45 天够 ✅
+#   年报   12/31      → 4/30     → 120 天   45 天**差 75 天** ❌
+#
+# 年报差 75 天意味着:回测在 2 月中就用上了 4 月才公告的数据 ——
+# 那时市场根本不知道。ROE / 毛利率 / 净利同比这些因子的回测表现
+# 会**系统性偏乐观**,而这种偏差在结果里完全看不出来。
+#
+# 各档都比法定截止多留几天:法定是"最晚",实务上还有延期和更正。
+_REPORT_LAG_DAYS = {12: 125, 6: 67, 9: 36, 3: 35}
+_DEFAULT_LAG_DAYS = 125          # 认不出月份时按最保守的年报算
+
+
+def _knowable_on(report_period: str, trade_date: date) -> bool:
+    """这期财报在 `trade_date` 那天,市场知道了吗。
+
+    `report_period` 形如 "2025-12-31" / "20251231"。
+    认不出月份时按最保守(年报 125 天)处理 —— **宁可少用一期数据,
+    也不能用一期还没公告的**。
+    """
+    s = str(report_period).replace("-", "")[:8]
+    if len(s) < 6 or not s[:6].isdigit():
+        return False
+    y, m = int(s[:4]), int(s[4:6])
+    try:
+        period_end = date(y, m, 1)
+    except ValueError:
+        return False
+    lag = _REPORT_LAG_DAYS.get(m, _DEFAULT_LAG_DAYS)
+    # 期末按当月月底算(用下月 1 号减一天,避免手写各月天数)
+    ny, nm = (y + 1, 1) if m == 12 else (y, m + 1)
+    period_end = date(ny, nm, 1) - timedelta(days=1)
+    return period_end + timedelta(days=lag) <= trade_date
+
+
 def get_financial_summary(code: str, trade_date: date) -> dict | None:
-    """按 trade_date 筛某期财报(不 cache · 走 _fetch_all_periods 拿全 · 过滤)
-    45 天 buffer 避免未来函数
+    """按 trade_date 筛某期财报 —— 只取**那天已经公告了**的那一期。
+
+    与旧版的区别:旧版统一 45 天 buffer,对年报差 75 天(见 `_REPORT_LAG_DAYS`)。
     """
     start_year = str(trade_date.year - 2)   # 多拉 1 年 · 保证前几期能找到
     df = _fetch_all_periods(code, start_year)
     if df is None:
         return None
-    cutoff = trade_date - timedelta(days=45)
     df2 = df.copy()
     df2["_dt"] = df2["日期"].astype(str)
-    df2 = df2[df2["_dt"] <= cutoff.isoformat()]
+    df2 = df2[df2["_dt"].apply(lambda s: _knowable_on(s, trade_date))]
     if len(df2) == 0:
         return None
     r = df2.iloc[-1]
