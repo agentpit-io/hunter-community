@@ -104,6 +104,19 @@ CATALOG: list[ToolEntry] = [
               needs_data=[], note="纯本地写库 · 不依赖任何数据源",
               prompt_tpl="把 {股票} 加入我的自选",
               category="组合级"),
+    # 2026-08-18 补登记。MCP 侧(watchlist_mcp.py:89)与 SKILL
+    # (skills/watchlist_rank/)都加了,但这份注册表漏了 —— 后果不是"少一行":
+    # SKILL 的 needs_tools 指向一个"未注册"的工具,于是它在能力库里被判成
+    # **broken**(灰的、点不了),而工具本身其实是好的。
+    # scripts/check_tools.py 抓到了这处漂移。
+    # 依赖读 watchlist_rank_agent.py:366/368 核实:get_quote + get_kline_with_fallback
+    ToolEntry("watchlist_watchlist_rank", "自选股排序", "watchlist", ToolOrigin.IMAGE,
+              "N 只自选 × 3M/6M/1Y/3Y 横向打分排序 · 一次调用出表",
+              needs_data=["a.quote", "a.kline"], markets=["a"],
+              note="替代「逐只跑深度分析」—— 那样串行 5+ 分钟且不能横向对比。"
+                   "1Y/3Y 因长期基本面字段未接入,只出定性标签并显式声明方法学",
+              prompt_tpl="把我的自选股按 3 个月 / 6 个月 / 1 年 / 3 年前景从好到坏排一下",
+              category="组合级"),
 
     # ── 组合级 · portfolio server ─────────────────────────────
     ToolEntry("portfolio_portfolio_rebalance", "组合再平衡", "portfolio", ToolOrigin.IMAGE,
