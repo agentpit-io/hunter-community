@@ -169,7 +169,9 @@ def commit(session: str, names: list[str] | None = None) -> dict:
     written, failed = [], []
     for s in picked:
         try:
-            skill_files.save(s.name, s.content)
+            # 用 save_raw 不用 save:导入的是**完整原文**,
+            # 拆开重拼会丢作者自定义的 frontmatter 字段
+            skill_files.save_raw(s.name, s.content)
             written.append(s.name)
         except Exception as e:                                # noqa: BLE001
             # 一个失败不该让其余的也不装 —— 但**必须报出来**。

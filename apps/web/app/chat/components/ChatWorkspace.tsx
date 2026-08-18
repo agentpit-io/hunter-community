@@ -21,6 +21,7 @@ import InputBox from './InputBox'
 import SessionHeader from './SessionHeader'
 import DebateProgressCard, { type DebatePhase } from './DebateProgressCard'
 import KpredProgressCard from './KpredProgressCard'
+import SkillStagedCard from './SkillStagedCard'
 import { runDebate, listSessionDebates, type DebateProgressEvent, type DebateDepth } from '../lib/debateClient'
 import { runKpred, listSessionKpreds, extractDays, type KpredProgressEvent } from '../lib/kpredClient'
 
@@ -159,6 +160,10 @@ export default function ChatWorkspace({
 }: Props) {
   const [messages, setMessages] = useState<Message[]>([])
   const [busy, setBusy] = useState(false)
+  // 模型装 SKILL 时会往暂存区写(内存,没落盘)。每轮结束查一次 ——
+  // **不轮询**:暂存只可能由刚才那轮产生,空转轮询是白费请求
+  const [stagedTick, setStagedTick] = useState(0)
+  const [stagedOpen, setStagedOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   // 多专家辩论 · 6 阶段进度 · null 表示未在辩论中
@@ -460,8 +465,29 @@ export default function ChatWorkspace({
       setError(`发送失败: ${e?.message || e}`)
     } finally {
       setBusy(false)
+      // 这一轮里模型可能暂存了 SKILL · 查一次
+      void checkStaged()
     }
   }
+
+  /** 查暂存区 —— 有东西就把确认卡亮出来(`_23` 步 4)。
+   *
+   *  查不到/报错**一律静默**:绝大多数对话跟装 SKILL 无关,
+   *  为它弹个错误提示是纯噪音。 */
+  const checkStaged = useCallback(async () => {
+    if (!sessionId) return
+    try {
+      const h: Record<string, string> = {}
+      const tk = localStorage.getItem('hunter_token') || ''
+      if (tk) h['Authorization'] = `Bearer ${tk}`
+      const r = await fetch(
+        `/api/chat/skills/staged?session=${encodeURIComponent(sessionId)}`,
+        { headers: h, cache: 'no-store' })
+      if (!r.ok) return
+      const d = await r.json()
+      if (d?.total > 0) { setStagedOpen(true); setStagedTick((n) => n + 1) }
+    } catch { /* 静默 */ }
+  }, [sessionId])
 
   /**
    * 多专家辩论专用 send · 不走 opencode
@@ -755,7 +781,26 @@ export default function ChatWorkspace({
           }
         }}
         extraBottom={
-          debate ? (
+          // 待确认的 SKILL 排在最前 —— 它需要用户做决定,
+          // 而进度条只是告知。要动手的事优先于要看的事
+          stagedOpen && sessionId ? (
+            <SkillStagedCard
+              key={stagedTick}
+              session={sessionId}
+              onInstalled={(msg) => {
+                setStagedOpen(false)
+                // 把结果**作为一条助手消息**插进对话,而不是弹 toast ——
+                // 装了什么、接下来怎么用,这些是对话的一部分,该留在记录里
+                setMessages((prev) => [...prev, {
+                  id: `staged-${Date.now()}`,
+                  role: 'assistant',
+                  parts: [{ type: 'text', text: msg }],
+                  time: { created: Date.now() },
+                } as any])
+              }}
+              onDismiss={() => setStagedOpen(false)}
+            />
+          ) : debate ? (
             <DebateProgressCard
               phase={debate.phase}
               pct={debate.pct}

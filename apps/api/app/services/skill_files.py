@@ -278,3 +278,52 @@ def is_user_skill(name: str) -> bool:
         return (USER_SKILLS_DIR / validate_name(name) / "SKILL.md").is_file()
     except SkillWriteError:
         return False
+
+
+def save_raw(name: str, content: str) -> Path:
+    """写一份**已经是完整 SKILL.md 的原文**(`_23`)。
+
+    与 `save(fields, body)` 的区别:那个收结构化字段再 `render()` 出 frontmatter,
+    用于「用户在表单里填」。这个收原文,用于**从别人仓库导入** ——
+    人家的 frontmatter 已经写好了,再拆开重拼只会丢字段
+    (比如他自定义的键、多层嵌套的结构)。
+
+    缺 `hunter:` 段不影响加载:`_load_one()` 已经为这种情况留了默认值
+    (display_name 回落到 name、分类进「其他」)。缺的只是显示得更好看,
+    不是能不能用。
+
+    换行一律 LF —— 同 `save()`:文件要挂进 Linux 容器被 opencode 解析,
+    YAML frontmatter 对回车符敏感,值会带上尾随回车且肉眼看不出。
+    """
+    clean = validate_name(name)
+    text = (content or "").replace("\r\n", "\n").replace("\r", "\n")
+    if not text.strip():
+        raise ValueError(f"{clean}: 内容是空的")
+
+    # ⚠️ **frontmatter 里的 name 必须改成目录名。**
+    #
+    # 实测:UZI 的 trap-detector 写着 `name: trap-detector`(带连字符)。
+    # 而 `_load_one()` 取 key 用的是 `fm["name"] or 目录名` —— 于是
+    # 目录叫 uzi_trap_detector、key 却是 trap-detector,两边对不上:
+    #   · 删除按目录名走,而 UI 上显示的是 key → 用户删不掉他看到的那个
+    #   · 别的 SKILL 用 needs_tools 引用它时,引哪个名字都可能错
+    #   · trap-detector 带连字符,我们自己的 validate_name() 根本不接受 ——
+    #     等于从外部绕过了命名约束
+    #
+    # 只改 name 这一行,其余 frontmatter(version/author/自定义键)原样保留。
+    if re.search(r"^---\s*\n", text):
+        head, sep, rest = text.partition("\n---")
+        if sep:
+            if re.search(r"^name:\s*.+$", head, re.M):
+                head = re.sub(r"^name:\s*.+$", f"name: {clean}", head, count=1, flags=re.M)
+            else:
+                head = head.rstrip("\n") + f"\nname: {clean}"
+            text = head + sep + rest
+
+    USER_SKILLS_DIR.mkdir(parents=True, exist_ok=True)
+    d = USER_SKILLS_DIR / clean
+    d.mkdir(exist_ok=True)
+    (d / "SKILL.md").write_text(text, encoding="utf-8", newline="\n")
+    load_all(force=True)          # 让本进程立刻看到;opencode 那边另外 refresh
+    logger.info("[skill_files] 导入用户 SKILL {} ({} 行)", d, len(text.splitlines()))
+    return d / "SKILL.md"
