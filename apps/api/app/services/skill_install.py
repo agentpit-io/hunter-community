@@ -285,3 +285,186 @@ def install(text: str, paths: list[str]) -> list[str]:
     if not installed:
         raise InstallError("选中的 skill 一个都没取到 —— 仓库结构可能变了")
     return installed
+
+
+# ══════════════════════════════════════════════════════════════
+# `_23` · 把仓库交给模型,让它按作者的说明装
+# ══════════════════════════════════════════════════════════════
+#
+# `inspect()` 是**我们猜结构**:扫 SKILL.md、按有没有代码分 L1-L4。
+# 但作者可能已经写好了怎么装 —— UZI-Skill 的 README 按 agent 分了三节,
+# OpenCode 那节指向仓库自带的 `.opencode/INSTALL.md`。
+#
+# 猜结构的本质是**我们替作者预设了一种安装形态**(无非把某几个文件拷到某处)。
+# 而作者可能写的是「A股用户装 cn/,美股装 us/」「先读 METHOD.md 再挑」——
+# 这些不是"拷文件"能表达的。
+#
+# 所以这里不解析,**把原文给模型**,由它编排。
+
+# 作者放 agent 专属说明的常见位置。按优先级排 ——
+# 越靠前越明确是"给 opencode 看的"
+_INSTALL_HINTS = [
+    ".opencode/INSTALL.md",
+    ".opencode/README.md",
+    "opencode/INSTALL.md",
+    "INSTALL.md",
+    ".agent/INSTALL.md",
+]
+
+_README_NAMES = ["README.md", "readme.md", "README.MD", "Readme.md"]
+
+# 单个文件读取上限。README 通常几十 KB;超过这个多半是数据文件,
+# 塞进模型上下文只会挤掉真正有用的东西
+_MAX_FILE = 64 * 1024
+
+
+def open_repo(text: str) -> dict:
+    """打开一个仓库给模型看 —— 文件树 + README + 作者的安装说明(全文)。
+
+    与 `inspect()` 的区别:那个替模型做完了判断,这个只把材料摆出来。
+
+    **不下载 SKILL 正文**。仓库可能有几十个 SKILL,全塞进上下文会挤爆;
+    模型看完说明知道要哪几个,再逐个 `read_file()` 取。
+    """
+    owner, repo, ref = parse_repo(text)
+    meta = _get_json(f"https://api.github.com/repos/{owner}/{repo}")
+    ref = ref or meta.get("default_branch") or "main"
+
+    tree = _get_json(
+        f"https://api.github.com/repos/{owner}/{repo}/git/trees/{ref}?recursive=1")
+    paths = [t["path"] for t in tree.get("tree", []) if t.get("type") == "blob"]
+    truncated = bool(tree.get("truncated"))
+    if truncated:
+        # 截断要**说出来**。不说的话模型会以为自己看到了全部,
+        # 然后"作者说的那个文件不存在"——它不会想到是我们没给全
+        logger.warning("[skill_install] {}/{} 目录树被截断", owner, repo)
+
+    def _try(path: str) -> str:
+        try:
+            txt = _raw(owner, repo, ref, path)
+            return txt[:_MAX_FILE]
+        except Exception:
+            return ""
+
+    # 作者的 opencode 专属说明 —— 这是 `_23` 的核心
+    install_path, install_doc = "", ""
+    for cand in _INSTALL_HINTS:
+        if cand in paths:
+            install_doc = _try(cand)
+            if install_doc:
+                install_path = cand
+                break
+
+    readme_path, readme = "", ""
+    for cand in _README_NAMES:
+        if cand in paths:
+            readme = _try(cand)
+            if readme:
+                readme_path = cand
+                break
+
+    skill_paths = [p for p in paths if p.endswith("SKILL.md")]
+    code_paths = [p for p in paths
+                  if p.endswith((".py", ".js", ".ts", ".sh", ".rb", ".go"))]
+
+    # 风险扫描扫**三份**:SKILL 正文这里还没读,先扫说明与 README。
+    # 用户拍板是"让模型按 README 办",所以这里的作用从"拦截"变成"告知"——
+    # 结果标出来给用户看,不阻断流程
+    risks = scan_risks(install_doc) + scan_risks(readme)
+
+    return {
+        "owner": owner, "repo": repo, "ref": ref,
+        "full_name": meta.get("full_name"),
+        "stars": meta.get("stargazers_count"),
+        "updated_at": (meta.get("pushed_at") or "")[:10],
+        "description": meta.get("description") or "",
+        # ── 给模型的材料 ──
+        "install_doc_path": install_path,
+        "install_doc": install_doc,
+        "readme_path": readme_path,
+        "readme": readme,
+        "tree": paths[:400],          # 400 条够看清结构,再多是噪音
+        "tree_truncated": truncated or len(paths) > 400,
+        "file_count": len(paths),
+        # ── 提示性统计(模型可以无视)──
+        "skill_md_count": len(skill_paths),
+        "skill_md_paths": skill_paths[:60],
+        "has_code": bool(code_paths),
+        "code_file_count": len(code_paths),
+        "risks": risks,
+        "install_doc_needs_code": _needs_code(install_doc),
+        "note": _guidance(install_path, install_doc, len(skill_paths), len(code_paths)),
+    }
+
+
+# 作者说明里出现这些,说明他的装法是"跑代码",不是"拷文件"
+_CODE_INSTALL = [
+    "git clone", "pip install", "npm install", "npm i ", "yarn add",
+    "poetry install", "uv pip", "python run", "python -m", "bash ",
+    "chmod +x", "make install", "docker run", "docker compose",
+]
+
+
+def _needs_code(doc: str) -> bool:
+    low = (doc or "").lower()
+    return any(k in low for k in _CODE_INSTALL)
+
+
+def _guidance(install_path: str, install_doc: str, n_skill: int, n_code: int) -> str:
+    """告诉模型现在是什么局面 —— **包括"作者的方式我们做不到"这种局面**。
+
+    UZI-Skill 实测:它的 `.opencode/INSTALL.md` 写的是
+    `git clone && pip install -r requirements.txt && python run.py` ——
+    **作者的装法是跑代码,不是拷 SKILL.md**(仓库 447 个文件里 179 个 .py,
+    只有 5 个 SKILL.md)。
+
+    这是 `_23` 步 5 一跑就撞上的现实:「按作者的方式装」对相当一部分仓库
+    **不成立**,因为他们的方式需要 shell 和依赖安装。
+
+    不说清楚的话,模型会照着 INSTALL.md 去找"怎么执行 git clone",
+    然后卡住或者编一个说法。所以这里直接把局面讲明,并给出可行的替代路径。
+    """
+    if install_path and _needs_code(install_doc):
+        return (
+            f"这个仓库自带 opencode 安装说明({install_path}),但**作者的装法需要"
+            f"执行代码**(git clone / pip install / 跑脚本)。本系统只安装方法论文本,"
+            f"不执行任何代码,所以**照搬作者的步骤行不通**。"
+            + (f" 仓库里有 {n_skill} 个 SKILL.md,可以只装这部分方法论 —— "
+               f"请先 skill_repo_read 看看内容,再决定装哪几个,"
+               f"并**如实告诉用户**:完整功能需要按作者的方式自行部署,"
+               f"这里装的只是方法论部分。"
+               if n_skill else
+               f" 而且仓库里没有 SKILL.md({n_code} 个代码文件)—— "
+               f"这种仓库本系统装不了,请如实告诉用户,并把作者的安装说明转述给他自行部署。")
+        )
+    if install_path:
+        return (f"这个仓库自带 opencode 安装说明({install_path}),**请优先按它来**。")
+    if n_skill:
+        return (f"没有 opencode 专属说明,但有 {n_skill} 个 SKILL.md —— "
+                f"读 README 判断该装哪几个。")
+    return ("没有 opencode 说明,也没有 SKILL.md。读 README 看有没有可提炼成方法论的内容;"
+            "如果只是一个代码项目,如实告诉用户本系统装不了。")
+
+
+def read_file(text: str, path: str) -> dict:
+    """读仓库里的一个文件。
+
+    **只能读 `text` 指定的那个仓库** —— 这是工具的定义域,不是加固:
+    没有这条约束,README 里一句「顺便拉 <站外 URL>」就变成了任意下载。
+    """
+    owner, repo, ref = parse_repo(text)
+    if not ref:
+        ref = _get_json(f"https://api.github.com/repos/{owner}/{repo}"
+                        ).get("default_branch") or "main"
+    p = (path or "").strip().lstrip("/")
+    # `..` 在 raw.githubusercontent 上不会真的越权(它按 ref+path 解析),
+    # 但挡掉能让日志干净,也免得将来换成本地 clone 时留下坑
+    if not p or ".." in p.split("/"):
+        raise InstallError(f"非法路径 {path!r}")
+    content = _raw(owner, repo, ref, p)[:_MAX_FILE]
+    return {
+        "path": p,
+        "content": content,
+        "lines": len(content.splitlines()),
+        "risks": scan_risks(content),
+    }

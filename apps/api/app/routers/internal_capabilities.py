@@ -103,3 +103,102 @@ async def cap_truesource_scout(body: ScoutIn, request: Request):
     except Exception as e:
         logger.exception("[internal.cap] scout failed symbol={}", body.symbol)
         return {"error": "scout_failed", "message": f"{type(e).__name__}: {e}"[:300]}
+
+
+# ─────────────────────────────────────────────────────────────
+# `_23` · 按作者说明导入 SKILL
+#
+# 三个动作交给模型:打开仓库 / 读文件 / 暂存。
+# **落盘不在这里** —— commit 走用户点击的公开端点,不给模型。
+#
+# 这不是"不信任模型",是把两件事分开:模型负责理解作者的说明并编排,
+# 用户负责决定这批东西要不要真的进自己的环境。
+# ─────────────────────────────────────────────────────────────
+
+class RepoIn(BaseModel):
+    repo: str                      # GitHub 地址或 owner/repo
+
+
+@router.post("/skill_repo_open")
+async def cap_skill_repo_open(body: RepoIn, request: Request):
+    """打开仓库给模型看 —— 文件树 + README + 作者的 opencode 安装说明(全文)。
+
+    这是 `_23` 的入口。与 `inspect()` 的区别:那个替模型做完了判断
+    (扫 SKILL.md、分 L1-L4),这个只把材料摆出来,由模型自己读。
+    """
+    _auth(request)
+    from app.services import skill_install
+    try:
+        return skill_install.open_repo(body.repo.strip())
+    except Exception as e:                                   # noqa: BLE001
+        # 转成结构化 body 而不是抛 —— MCP 会把它交给模型,
+        # 模型能据此告诉用户"这个仓库打不开,原因是…",而不是干等超时
+        return {"error": "repo_open_failed", "message": str(e)[:300]}
+
+
+class RepoReadIn(BaseModel):
+    repo: str
+    path: str
+
+
+@router.post("/skill_repo_read")
+async def cap_skill_repo_read(body: RepoReadIn, request: Request):
+    """读仓库里的一个文件。
+
+    **只能读 `repo` 指定的那个仓库** —— 这是工具的定义域。
+    没有这条约束,README 里一句「顺便拉 <站外 URL>」就成了任意下载。
+    """
+    _auth(request)
+    from app.services import skill_install
+    try:
+        return skill_install.read_file(body.repo.strip(), body.path)
+    except Exception as e:                                   # noqa: BLE001
+        return {"error": "read_failed", "path": body.path, "message": str(e)[:300]}
+
+
+class StageIn(BaseModel):
+    session: str
+    repo: str = ""
+    name: str
+    content: str
+    source_path: str = ""
+    note: str = ""
+
+
+@router.post("/skill_stage")
+async def cap_skill_stage(body: StageIn, request: Request):
+    """暂存一个 SKILL —— **不写磁盘**。
+
+    模型爱暂存多少都行,全在内存里。用户在确认卡上看完整体再决定 ——
+    直接写盘的话"确认"就成了走过场:东西已经生效了。
+    """
+    _auth(request)
+    from app.services import skill_stage
+    try:
+        return skill_stage.stage(
+            session=body.session.strip() or "default",
+            repo=body.repo.strip(), name=body.name,
+            content=body.content, source_path=body.source_path, note=body.note,
+        )
+    except Exception as e:                                   # noqa: BLE001
+        # 名字非法 / 内容超限 / 暂存满 —— 这些模型自己能改,
+        # 所以要把原因原样告诉它,而不是一句 "failed"
+        return {"error": "stage_rejected", "message": str(e)[:300]}
+
+
+class StagedQueryIn(BaseModel):
+    session: str = "default"
+
+
+@router.post("/skill_staged")
+async def cap_skill_staged(body: StagedQueryIn, request: Request):
+    """模型自查暂存了什么 —— 它可能装到一半忘了已经装过哪些。"""
+    _auth(request)
+    from app.services import skill_stage
+    got = skill_stage.peek(body.session or "default")
+    # 正文不回给模型 —— 它自己刚写的,回一遍纯属浪费上下文。
+    # 用户那份确认卡走公开端点,那里才要全文
+    return {
+        "repo": got["repo"], "total": got["total"],
+        "names": [i["name"] for i in got["items"]],
+    }

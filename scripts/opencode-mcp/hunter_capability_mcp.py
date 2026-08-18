@@ -28,7 +28,13 @@ server = Server("hunter-capability-mcp")
 
 # 各 tool 的超时。scout 是主动全量采集(价格+公告+Gemini 搜索),30-60s 起步,
 # 给到 150s;kpred 是 GPU 推理,给 120s。
-_TIMEOUT = {"kpred": 120.0, "truesource_scout": 150.0, "truesource_brief": 60.0}
+_TIMEOUT = {
+    "kpred": 120.0, "truesource_scout": 150.0, "truesource_brief": 60.0,
+    # 仓库操作要打 GitHub API + raw,国内网络下慢,给宽一点。
+    # repo_open 一次取 树 + README + INSTALL.md 三样
+    "skill_repo_open": 90.0, "skill_repo_read": 60.0,
+    "skill_stage": 20.0, "skill_staged": 20.0,
+}
 
 
 @server.list_tools()
@@ -89,9 +95,74 @@ async def list_tools():
                 "required": ["symbol"],
             },
         ),
+        Tool(
+            name="skill_repo_open",
+            description=(
+                "打开一个 GitHub 上的 SKILL 仓库,拿到三样东西:文件树、README 全文、"
+                "以及**作者写给 opencode 的安装说明全文**(仓库带 .opencode/INSTALL.md 时)。"
+                " 用户说「请按照 <github地址> 安装这个 SKILL」时用这个。"
+                " **拿到之后请按作者的说明办** —— 很多作者会按 agent 分别写安装方式,"
+                "他知道该装哪几个、怎么按市场挑,我们不知道。返回里的 install_doc 就是他写的那份;"
+                "没有的话读 readme 自己判断。"
+                " 要看别的文件用 skill_repo_read;决定装什么之后用 skill_stage 逐个暂存。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo": {"type": "string",
+                             "description": "GitHub 地址或 owner/repo,如 wbh604/UZI-Skill"},
+                },
+                "required": ["repo"],
+            },
+        ),
+        Tool(
+            name="skill_repo_read",
+            description=(
+                "读上一步那个仓库里的某个文件(SKILL.md / 文档 / 示例都行)。"
+                "**只能读 repo 指定的那个仓库** —— 站外链接一律读不到。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo": {"type": "string", "description": "同 skill_repo_open 的 repo"},
+                    "path": {"type": "string", "description": "仓库内路径,如 skills/dcf/SKILL.md"},
+                },
+                "required": ["repo", "path"],
+            },
+        ),
+        Tool(
+            name="skill_stage",
+            description=(
+                "暂存一个 SKILL,**不写磁盘** —— 用户看完确认卡才真正安装。"
+                " content 传完整的 SKILL.md(含 frontmatter):从仓库直接取的原样传,"
+                "需要改写 frontmatter 的(比如 Claude Code 的 slash command)改好再传。"
+                " note 写**你为什么装它**,一句话即可 —— 用户在确认卡上看这句决定要不要留。"
+                " 全部暂存完之后告诉用户「已准备好 N 个,请确认」,**不要自己宣布安装完成**。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "session": {"type": "string", "description": "会话标识 · 用当前 session id"},
+                    "repo": {"type": "string"},
+                    "name": {"type": "string",
+                             "description": "SKILL 名 · 小写字母数字下划线,会成为目录名"},
+                    "content": {"type": "string", "description": "完整 SKILL.md 内容"},
+                    "source_path": {"type": "string", "description": "来自仓库的哪个文件(可选)"},
+                    "note": {"type": "string", "description": "为什么装它 · 给用户看"},
+                },
+                "required": ["session", "name", "content"],
+            },
+        ),
+        Tool(
+            name="skill_staged",
+            description="查这个会话已经暂存了哪些(装到一半忘了装过什么时用)。",
+            inputSchema={
+                "type": "object",
+                "properties": {"session": {"type": "string"}},
+                "required": ["session"],
+            },
+        ),
     ]
-
-
 def _headers(args: dict) -> dict:
     h = {"X-Hunter-Internal-Key": INTERNAL_KEY}
     uid = (args or {}).get("_hermes_user_id") or os.getenv("HUNTER_USER_ID", "")

@@ -165,6 +165,32 @@ CATALOG: list[ToolEntry] = [
               prompt_tpl="现场搜集 {股票} 的最新情报",
               category="事件与筛选"),
 
+    # ── 从 GitHub 导入 SKILL(`_23`)· hunter_cap server ───────
+    # 四个工具里**只有 repo_open 露给用户**:它是入口,用户说
+    # 「请按照 <地址> 安装」就是调它。其余三个是模型自己编排时用的中间步骤,
+    # 用户不会主动点"读一个文件"或"暂存一个 SKILL"。
+    ToolEntry("hunter_cap_skill_repo_open", "导入 SKILL", "hunter_cap", ToolOrigin.PLATFORM,
+              "从 GitHub 装别人写的分析方法 · 按作者自己写的说明装",
+              needs_data=[],
+              note="读仓库的 README 与 .opencode/INSTALL.md,按作者的说明装。"
+                   "装什么由模型编排,**落盘前需要你确认一次**",
+              # 措辞刻意贴近 UZI README 里那句「请按照 <链接> 安装并分析…」——
+              # 用户很可能直接从别人的 README 复制那句话过来,两边对得上不会出错
+              prompt_tpl="请按照 {GitHub地址} 安装这个 SKILL",
+              category="接入与自查"),
+    ToolEntry("hunter_cap_skill_repo_read", "读仓库文件", "hunter_cap", ToolOrigin.PLATFORM,
+              "读导入过程中指定仓库里的某个文件",
+              needs_data=[], internal_only=True, category="接入与自查",
+              note="导入 SKILL 的中间步骤 · 模型编排时用"),
+    ToolEntry("hunter_cap_skill_stage", "暂存 SKILL", "hunter_cap", ToolOrigin.PLATFORM,
+              "把一个待安装的 SKILL 放进暂存区(不写磁盘)",
+              needs_data=[], internal_only=True, category="接入与自查",
+              note="导入 SKILL 的中间步骤 · 真正落盘由用户在确认卡上点"),
+    ToolEntry("hunter_cap_skill_staged", "查看暂存", "hunter_cap", ToolOrigin.PLATFORM,
+              "查这个会话已经暂存了哪些 SKILL",
+              needs_data=[], internal_only=True, category="接入与自查",
+              note="导入 SKILL 的中间步骤 · 模型自查用"),
+
     # ── 用户自接数据源的通道 · hunter_user server ─────────────
     ToolEntry("hunter_user_list_my_sources", "列出我接的数据源", "hunter_user", ToolOrigin.IMAGE,
               "查看用户自己在设置里接入的第三方 MCP/API",
