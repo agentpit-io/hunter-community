@@ -24,32 +24,55 @@ INDEX_MAP = {
 
 
 def query_current(index_code: str) -> list[str]:
-    """当前成分股 · effective_to IS NULL"""
+    """当前成分股 · effective_to IS NULL
+
+    同 `query_active_at`:表不存在时返回空而不是抛 —— 让 `resolve()` 的
+    fallback 分支能真的兜住。
+    """
     conn = get_conn(); cur = conn.cursor()
-    cur.execute(
-        """SELECT stock_code FROM index_component
-           WHERE index_code=%s AND effective_to IS NULL
-           ORDER BY stock_code""",
-        (index_code,),
-    )
-    codes = [r[0] for r in cur.fetchall()]
-    cur.close(); conn.close()
+    try:
+        cur.execute(
+            """SELECT stock_code FROM index_component
+               WHERE index_code=%s AND effective_to IS NULL
+               ORDER BY stock_code""",
+            (index_code,),
+        )
+        codes = [r[0] for r in cur.fetchall()]
+    except Exception as e:                                    # noqa: BLE001
+        log.warning("[universe] 查当前成分失败(回落到 stocks 表): %s", e)
+        codes = []
+    finally:
+        cur.close(); conn.close()
     return codes
 
 
 def query_active_at(index_code: str, on_date: date) -> list[str]:
-    """指定日期的成分股(生存者偏差防治)· effective_from <= on_date AND (to IS NULL OR to > on_date)"""
+    """指定日期的成分股(生存者偏差防治)· effective_from <= on_date AND (to IS NULL OR to > on_date)
+
+    **表不存在时返回空而不是抛异常。** `resolve()` 的注释写的是
+    「未 seed 时 fallback」,但它只处理"查到空",不处理"表都还没建" ——
+    于是任何没跑 `sql/20260818_index_component.sql` 的部署,
+    一跑回测就 500(psycopg2.errors.UndefinedTable)。实测踩到。
+
+    开源版用户 clone 下来第一次跑就会撞上这个,而错误信息是一句
+    SQL 报错,他不会想到是缺一个迁移。
+    """
     conn = get_conn(); cur = conn.cursor()
-    cur.execute(
-        """SELECT stock_code FROM index_component
-           WHERE index_code=%s
-             AND effective_from <= %s
-             AND (effective_to IS NULL OR effective_to > %s)
-           ORDER BY stock_code""",
-        (index_code, on_date, on_date),
-    )
-    codes = [r[0] for r in cur.fetchall()]
-    cur.close(); conn.close()
+    try:
+        cur.execute(
+            """SELECT stock_code FROM index_component
+               WHERE index_code=%s
+                 AND effective_from <= %s
+                 AND (effective_to IS NULL OR effective_to > %s)
+               ORDER BY stock_code""",
+            (index_code, on_date, on_date),
+        )
+        codes = [r[0] for r in cur.fetchall()]
+    except Exception as e:                                    # noqa: BLE001
+        log.warning("[universe] 查历史成分失败(回落到 stocks 表): %s", e)
+        codes = []
+    finally:
+        cur.close(); conn.close()
     return codes
 
 
@@ -159,3 +182,42 @@ def _fallback_stocks(universe_key: str, user_id: str | None) -> list[str]:
     codes = [r[0] for r in cur.fetchall()]
     cur.close(); conn.close()
     return codes
+
+
+def quality_at(universe_key: str, on_date: date) -> dict:
+    """这个日期的股票池**成色**怎么样(`_17` §5)。
+
+    `query_active_at()` 按 effective_from <= on_date 查历史成分,逻辑是对的。
+    但 Phase E 的设计是「首次 seed 时 effective_from = today,之后每月累积变更」
+    (`15_phase-e` §3.3)—— 所以**未来一到两年内查任何历史日期都返回空**,
+    回落到 stocks 表(= 今天还活着的股票)。
+
+    也就是说 `01` §10.3 要求的「不用今日成分套 3 年前」,现在恰恰在这么做。
+
+    这不是 bug,是设计的必然阶段。但用户看不出来 —— 他拿到一个漂亮的回测,
+    不知道里面藏着幸存者偏差。**让他知道成色,比修好它更急。**
+
+    返回给回测结果带上,前端据此显示一句提示。
+    """
+    if universe_key not in INDEX_MAP:
+        # 自选股/全 A —— 本来就没有历史成分的概念,不存在这个问题
+        return {"survivorship_ok": True, "source": "stocks",
+                "note": ""}
+
+    index_code, label = INDEX_MAP[universe_key]
+    hist = query_active_at(index_code, on_date)
+    if hist:
+        return {"survivorship_ok": True, "source": "index_component",
+                "count": len(hist), "note": ""}
+
+    cur_codes = query_current(index_code)
+    return {
+        "survivorship_ok": False,
+        "source": "stocks_fallback",
+        "count": len(cur_codes),
+        "note": (
+            f"{label} 在 {on_date} 没有历史成分记录,用的是**当前**股票池 —— "
+            f"退市和被调出的股票不在里面,回测收益会偏高(幸存者偏差)。"
+            f"历史成分表从 2026-08 起按月累积,届时这条会自动消失。"
+        ),
+    }

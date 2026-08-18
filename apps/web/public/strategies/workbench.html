@@ -87,11 +87,16 @@ function renderMiddlePanel() {
         <div class="field-row" style="margin-top:12px">
           <div class="field" style="margin:0">
             <div class="lbl">换仓频率</div>
+            <!-- 周/季/半年 标灰(_17 §3):回测引擎 _rebalance_dates() 里
+                 `if freq != "M": freq = "M"` —— 选了也是按月跑。
+                 **让用户选了没生效,比不让他选更糟**:他会以为自己在对比
+                 不同频率,而两次跑的是同一个东西。
+                 引擎支持四种频率之后把 disabled 去掉即可。 -->
             <select data-cfg="rebalance">
-              <option value="W" ${cfg.rebalance==='W'?'selected':''}>周度</option>
               <option value="M" ${cfg.rebalance==='M'?'selected':''}>月度（推荐）</option>
-              <option value="Q" ${cfg.rebalance==='Q'?'selected':''}>季度</option>
-              <option value="H" ${cfg.rebalance==='H'?'selected':''}>半年</option>
+              <option value="W" disabled>周度（引擎暂不支持）</option>
+              <option value="Q" disabled>季度（引擎暂不支持）</option>
+              <option value="H" disabled>半年（引擎暂不支持）</option>
             </select>
           </div>
           <div class="field" style="margin:0">

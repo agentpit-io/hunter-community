@@ -32,12 +32,24 @@ document.body.innerHTML = renderShell(
 
 const container = document.getElementById('page-content')
 
-// 优先用真回测数据 · 缺字段用 mock 补齐
-const metrics = Object.assign(
-  { ann_ret: 0.184, sharpe: 1.42, max_dd: -0.143, ir: 0.98, win_rate: 0.62, turnover: 0.21 },
-  draft._metrics || {},
-  realResult?.metrics || {},
-)
+// **不再用 mock 补齐**(_17 §1)。
+//
+// 原来这里是 Object.assign({ir:0.98, win_rate:0.62, ...}, realResult.metrics) ——
+// 后端不返回的字段被写死的常量补上,于是页面同屏出现
+// "年化 -1.2%(真)" 和 "信息比率 0.98(假)",用户没法分辨哪个是算的。
+//
+// 现在:后端给什么就显示什么,没给的显示 "—" 并注明原因。
+// 假数字比缺数字危险得多 —— 缺了用户知道自己不知道,假了他以为自己知道。
+const metrics = realResult?.metrics || draft._metrics || {}
+const quality  = realResult?.quality || null
+const bench    = realResult?.benchmark || null
+
+// 后端算不出来的一律显示 "—"。**不要用 || 0 兜底** ——
+// 0.00 看起来像个结论,"—" 才让人知道这里没数
+const num = (v, digits = 2, suffix = '') =>
+  (v === null || v === undefined || Number.isNaN(v)) ? '—' : v.toFixed(digits) + suffix
+const pct = (v) =>
+  (v === null || v === undefined || Number.isNaN(v)) ? '—' : fmtPct(v)
 
 const cfg = draft.config || { universe: 'hs300', top_n: 20, rebalance: 'M', cost_bps: 15, benchmark: '000300' }
 
@@ -55,44 +67,63 @@ container.innerHTML = `
     <span class="sep">·</span>
     <span><b>持仓</b>Top ${cfg.top_n}</span>
     <span class="sep">·</span>
-    <span><b>换仓</b>${REBALANCE_NAME[cfg.rebalance]}</span>
+    <span><b>换仓</b>${REBALANCE_NAME[cfg.rebalance] || '月度'}${
+      realResult?.rebalance_used && realResult.rebalance_used !== cfg.rebalance
+        ? '<span style="color:#B06A32"> (实际:月度)</span>' : ''}</span>
     <span class="sep">·</span>
     <span><b>成本</b>${cfg.cost_bps} bps</span>
     <span class="sep">·</span>
-    <span><b>基准</b>${BENCHMARK_NAME[cfg.benchmark]}</span>
+    <span><b>基准</b>${bench ? (BENCHMARK_NAME[cfg.benchmark] || cfg.benchmark)
+      : '<span style="opacity:.6">未接入</span>'}</span>
   </div>
+
+  <!-- 成色提示(_17 §5)· 用户拿到一个漂亮回测,看不出里面有没有偏差。
+       让他知道成色,比修好它更急 —— 修要等历史成分累积一两年,
+       而误判"这策略能用"是现在就会发生的 -->
+  ${(quality && (!quality.survivorship_ok || quality.rebalance_note)) ? `
+  <div class="quality-warn">
+    <b>⚠ 这次回测的成色</b>
+    ${quality.survivorship_ok ? '' : `<div>· ${quality.note}</div>`}
+    ${quality.rebalance_note ? `<div>· ${quality.rebalance_note}</div>` : ''}
+    ${metrics.n_periods && metrics.n_periods < 12
+      ? `<div>· 只跑了 <b>${metrics.n_periods}</b> 期(不足一年)—— 样本太少,指标参考价值有限。</div>` : ''}
+    ${bench ? '' : '<div>· 基准未接入,无法判断是否跑赢大盘。</div>'}
+  </div>` : ''}
 
   <!-- 6 指标卡 -->
   <div class="metric-grid">
     <div class="m-card">
       <div class="k">年化收益</div>
-      <div class="v pos">${fmtPct(metrics.ann_ret)}</div>
-      <div class="sub">基准 +6.2% · 超额 ${fmtPct(metrics.ann_ret - 0.062)}</div>
+      <div class="v ${metrics.ann_ret>=0?'pos':'neg'}">${pct(metrics.ann_ret)}</div>
+      <div class="sub">${bench ? `基准 ${pct(bench.ann_ret)} · 超额 ${pct(metrics.ann_ret - bench.ann_ret)}`
+        : '基准未接入 · 无法算超额'}</div>
     </div>
     <div class="m-card">
       <div class="k">夏普比率</div>
-      <div class="v ${metrics.sharpe>=1?'pos':''}">${metrics.sharpe.toFixed(2)}</div>
-      <div class="sub">${metrics.sharpe>=1.5?'卓越':metrics.sharpe>=1?'优秀':'一般'} · &gt;1 稳定 · &gt;1.5 卓越</div>
+      <div class="v ${metrics.sharpe>=1?'pos':''}">${num(metrics.sharpe)}</div>
+      <div class="sub">&gt;1 稳定 · &gt;1.5 卓越</div>
     </div>
     <div class="m-card">
       <div class="k">最大回撤</div>
-      <div class="v neg">${fmtPct(metrics.max_dd)}</div>
-      <div class="sub">2024-Q4 · 基准同期 -21.1%</div>
+      <div class="v neg">${pct(metrics.max_dd)}</div>
+      <div class="sub">${bench ? `基准同期 ${pct(bench.max_dd)}` : '基准未接入'}</div>
     </div>
     <div class="m-card">
       <div class="k">信息比率</div>
-      <div class="v ${metrics.ir>=0.5?'pos':''}">${metrics.ir.toFixed(2)}</div>
-      <div class="sub">超额收益稳定性 · &gt;0.5 合格</div>
+      <div class="v ${metrics.ir>=0.5?'pos':''}">${num(metrics.ir)}</div>
+      <div class="sub">${metrics.ir==null ? '需要基准才能计算' : '超额收益稳定性 · &gt;0.5 合格'}</div>
     </div>
     <div class="m-card">
       <div class="k">月度胜率</div>
-      <div class="v">${(metrics.win_rate*100).toFixed(0)}%</div>
-      <div class="sub">36 月中 ${Math.round(36*metrics.win_rate)} 月跑赢基准</div>
+      <div class="v">${metrics.win_rate==null?'—':(metrics.win_rate*100).toFixed(0)+'%'}</div>
+      <div class="sub">${metrics.n_periods
+        ? `${metrics.n_periods} 期中 ${Math.round(metrics.n_periods*metrics.win_rate)} 期为正`
+        : '—'}<br><span style="opacity:.7">这是绝对胜率 · 不是跑赢基准的比例</span></div>
     </div>
     <div class="m-card">
       <div class="k">平均换手</div>
-      <div class="v">${(metrics.turnover*100).toFixed(0)}%</div>
-      <div class="sub">月换手 · 年成交成本 ≈ ${((metrics.turnover*12*cfg.cost_bps)/100).toFixed(2)}%</div>
+      <div class="v">${metrics.turnover==null?'—':(metrics.turnover*100).toFixed(0)+'%'}</div>
+      <div class="sub">${metrics.turnover==null?'—':`月换手 · 年成交成本 ≈ ${((metrics.turnover*12*cfg.cost_bps)/100).toFixed(2)}%`}</div>
     </div>
   </div>
 

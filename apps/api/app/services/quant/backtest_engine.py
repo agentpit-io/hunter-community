@@ -110,8 +110,19 @@ def _period_return(codes: list[str], dt0: date, dt1: date) -> float:
 # ═══════════════════════════════════════════════════════════════
 
 def _calc_metrics(nav: list[float]) -> dict:
+    """回测指标。
+
+    **返回的每一项都必须是真算出来的。**`_17` 的教训:前端有一行
+    `Object.assign({ir: 0.98, win_rate: 0.62, ...}, realResult.metrics)`——
+    后端不返回的字段被 mock 里的常量补上了,于是页面同屏出现
+    "年化 -1.2%(真)" 和 "信息比率 0.98(假)"。用户没法分辨哪个是算的。
+
+    所以这里补齐前端要用的全部字段。**算不出来的宁可给 None 也不给数** ——
+    None 让前端显示"—",一个假数会被当成结论。
+    """
     if len(nav) < 2:
-        return {"ann_ret": 0, "sharpe": 0, "sortino": 0, "max_dd": 0, "calmar": 0, "vol": 0}
+        return {"ann_ret": 0, "sharpe": 0, "sortino": 0, "max_dd": 0,
+                "calmar": 0, "vol": 0, "win_rate": None, "n_periods": 0}
     rets = [nav[i] / nav[i-1] - 1 for i in range(1, len(nav))]
     n = len(rets)
     # 假设月频 · 12 段/年
@@ -130,6 +141,11 @@ def _calc_metrics(nav: list[float]) -> dict:
         dd = v / peak - 1
         if dd < max_dd: max_dd = dd
     calmar = ann_ret / abs(max_dd) if max_dd < 0 else 0
+    # 胜率:**绝对胜率**(赚钱的期数占比),不是"跑赢基准的期数"。
+    # 两者不是一回事,前端那句"36 月中 22 月跑赢基准"用的是后者的说法 ——
+    # 而后者要有基准才算得出(见 §2,基准还没实现)。
+    # 这里给绝对胜率并在字段名上分清楚,免得再被当成超额胜率。
+    win_rate = sum(1 for r in rets if r > 0) / n
     return {
         "ann_ret": round(ann_ret, 4),
         "vol": round(ann_vol, 4),
@@ -137,6 +153,14 @@ def _calc_metrics(nav: list[float]) -> dict:
         "sortino": round(sortino, 3),
         "max_dd": round(max_dd, 4),
         "calmar": round(calmar, 3),
+        "win_rate": round(win_rate, 4),
+        # **实际跑了几期**。用户那次只有 8 期,而页面写着"36 月中 22 月" ——
+        # 把真实期数摆出来,用户自己就能判断这个结果有没有意义
+        "n_periods": n,
+        # 超额胜率与信息比率要有基准才算得出。显式给 None 而不是省略 ——
+        # 省略了前端 `metrics.ir` 拿到 undefined,又会走回落逻辑
+        "ir": None,
+        "excess_win_rate": None,
     }
 
 
@@ -194,6 +218,22 @@ def run_backtest(strategy: dict, start: date, end: date, user_id: str | None = N
         "factor_contrib": p.get("factor_contrib", {}),
     } for p in last_picks]
 
+    # ── 成色标记(`_17` §5)────────────────────────────────────
+    # 用户拿到一个漂亮的回测,看不出里面有没有幸存者偏差。
+    # **让他知道成色,比修好它更急** —— 修要等历史成分累积一两年,
+    # 而误判"这策略能用"是现在就会发生的。
+    from app.services.quant import universe as _universe
+    quality = _universe.quality_at(strategy["config"].get("universe", "hs300"),
+                                   schedule[0])
+    # 换仓频率:UI 上能选 W/M/Q/H,而 _rebalance_dates 强制月频。
+    # 选了没生效**必须说出来** —— 否则用户以为自己在对比不同频率,
+    # 两次跑的其实是同一个东西
+    want_freq = strategy["config"].get("rebalance", "M")
+    if want_freq != "M":
+        quality = {**quality, "rebalance_note": (
+            f"你选了「{want_freq}」,但回测引擎目前只支持月频 —— "
+            f"这次跑的是月度调仓。")}
+
     return {
         "start": start.isoformat(),
         "end": end.isoformat(),
@@ -202,6 +242,12 @@ def run_backtest(strategy: dict, start: date, end: date, user_id: str | None = N
         "positions": positions,
         "cost_used": cost_bps * sum(turnover_hist),
         "duration_ms": int((time.time() - t0) * 1000),
+        # 基准还没实现(`_17` §2)。**显式给 null 而不是省略** ——
+        # 省略了前端读到 undefined 会走回落逻辑,又画出一条假基准线
+        "benchmark": None,
+        "quality": quality,
+        # 实际调仓频率 · 与用户所选可能不同,见 quality.rebalance_note
+        "rebalance_used": "M",
     }
 
 
