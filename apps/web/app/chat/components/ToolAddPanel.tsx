@@ -79,6 +79,27 @@ export default function ToolAddPanel({ onClose, onDone }: Props) {
         <button onClick={onClose} style={iconBtn}><X size={13} strokeWidth={2} /></button>
       </div>
 
+      {/* 推荐能力 —— `_24` §8.2④。
+          AKShare 从「数据源」移到了这里:它有一千多个函数,按数据源建模
+          得枚举一千多条,做不到;做成 MCP 之后模型自己 search 再 call。
+
+          这个按钮只**预填表单**,不替用户跑服务 —— 服务得他自己起,
+          因为 AKShare 是 Python 库,而且上游多在国内。
+          地址填的是 localhost,**不是我们的任何机器**:
+          这个能力存在的意义就是让他不依赖我们。 */}
+      <div style={recBox}>
+        <div style={{ fontWeight: 600, marginBottom: 3 }}>📦 AKShare · 一千多个 A 股数据接口</div>
+        <div style={{ marginBottom: 6 }}>
+          龙虎榜、十大股东、券商研报、南向资金、宏观…… 它是 Python 库不是 HTTP 服务,
+          需要你自己跑一个(仓库里带了,<code>tools/akshare-mcp</code> 一条 docker 命令),
+          跑起来之后点这里预填。
+        </div>
+        <button style={recBtn} onClick={() => {
+          setName('AKShare'); setSlug('akshare'); setTransport('sse')
+          setEndpoint('http://host.docker.internal:8931/sse'); setTested(null)
+        }}>预填 AKShare 的接入信息</button>
+      </div>
+
       <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
         <input value={name} onChange={(e) => setName(e.target.value)}
           placeholder="显示名,如「我的行情源」" style={input} />
@@ -150,4 +171,15 @@ const warnBox: React.CSSProperties = {
 const errBox: React.CSSProperties = {
   padding: '7px 9px', borderRadius: 6, fontSize: 11.5,
   background: '#FBEEEA', color: '#9B3A22', lineHeight: 1.6,
+}
+
+const recBox: React.CSSProperties = {
+  marginBottom: 10, padding: '8px 10px', borderRadius: 7,
+  border: `1px solid ${HUNTER.LINE}`, background: HUNTER.PAPER,
+  fontSize: 11, lineHeight: 1.65, color: HUNTER.INK_S,
+}
+const recBtn: React.CSSProperties = {
+  padding: '4px 10px', fontSize: 10.5, borderRadius: 6,
+  background: 'transparent', color: HUNTER.THEME,
+  border: `1px solid ${HUNTER.LINE}`, cursor: 'pointer', fontFamily: 'inherit',
 }

@@ -1,0 +1,8 @@
+# AKShare 本体。它自己会拉一大堆(pandas/requests/lxml/beautifulsoup4…),
+# 镜像因此不小(~1.5G)—— 这是 AKShare 的成本,不是这个包加的。
+akshare>=1.14.0
+# MCP Python SDK · FastMCP 在 mcp>=1.2 里
+mcp>=1.2.0
+# SSE 传输要 uvicorn/starlette,mcp 的 extras 不一定带全,显式列出
+uvicorn>=0.30.0
+starlette>=0.37.0
