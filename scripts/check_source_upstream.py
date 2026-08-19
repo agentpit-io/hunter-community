@@ -75,7 +75,15 @@ def check_order_covers_all() -> None:
             f"UPSTREAM_ORDER 没收录 {sorted(missing)} —— "
             f"它们会排在侧栏最末尾。想调位置就补进 UPSTREAM_ORDER"
         )
-    stale = set(catalog.UPSTREAM_ORDER) - used
+    # 只给用户接自己的源用的来源 —— 它们**本来就不会有官方源在用**,
+    # 不该报 stale。`_24` §8.2② 新增了五个(腾讯/新浪/Finnhub/Polygon/
+    # AlphaVantage),加上原来的 cls/tushare。
+    #
+    # 不加白名单的话每次跑校验都会看到一条"已经没有任何源在用"的告警 ——
+    # 而告警一旦变成常态就没人看了,真出问题时也会被一起忽略。
+    USER_ONLY = {"cls", "tushare", "tencent", "sina",
+                 "finnhub", "polygon", "alphavantage", "custom"}
+    stale = set(catalog.UPSTREAM_ORDER) - used - USER_ONLY
     if stale:
         warns.append(
             f"UPSTREAM_ORDER 里 {sorted(stale)} 已经没有任何源在用 —— "
@@ -132,14 +140,22 @@ def main() -> int:
     filled = sum(1 for s in catalog.CATALOG if s.upstream)
     print(f"数据源 {total} 条 · 已核实上游 {filled} 条")
 
-    # 按来源分组的实际结果 —— 直接打出来,肉眼就能看出分组是否合理
-    print("\n按来源分组:")
-    for g in catalog.grouped_by_upstream():
-        if g["total"] == 0 and g["upstream"] == "user":
-            print(f"  {g['label']:<14} (空 · 步 2 建表后可用)")
-            continue
-        mk = "/".join(g["markets"])
-        print(f"  {g['label']:<14} {g['ready']}/{g['total']:<3} [{mk}]")
+    # 注册表按上游的分布 —— 肉眼看分组是否合理。
+    #
+    # ⚠️ **直接读 CATALOG,不走 `grouped_by_upstream()`。**
+    # `_24` §3.1 把官方货架撤了,那个函数现在只返回用户自己的源
+    #(校验时没有用户,于是永远是一个空组)。继续走它的结果是:
+    # 这段输出永远空白,而校验照样打印"✅ 全部通过" ——
+    # 一个看起来在工作、实际什么都没检查的脚本,比没有更糟。
+    from collections import Counter
+    by_up = Counter(x.upstream or "(空)" for x in catalog.CATALOG)
+    print("")
+    print("注册表的上游分布(不是 UI 分组 —— UI 已撤架):")
+    for up, n in by_up.most_common():
+        label = catalog.UPSTREAM_LABEL.get(up, up)
+        mk = "/".join(sorted({x.market.value for x in catalog.CATALOG
+                              if (x.upstream or "(空)") == up}))
+        print(f"  {label:<14} {n:<3} [{mk}]")
 
     for w in warns:
         print(f"\n⚠️  {w}")

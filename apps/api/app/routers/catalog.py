@@ -44,12 +44,12 @@ async def list_sources(
     if mk and mk not in {m.value for m in catalog.Market}:
         raise HTTPException(400, f"未知市场 {market!r} · 可选 a/hk/us/global")
 
+    user_id = getattr(request.state, "user_id", None)
     if by == "market":
-        groups = catalog.grouped()
+        groups = catalog.grouped(user_id=user_id)
         if mk:
             groups = [g for g in groups if g["market"] == mk]
     else:
-        user_id = getattr(request.state, "user_id", None)
         groups = catalog.grouped_by_upstream(user_id=user_id)
         if mk:
             # 按市场筛时,组内条目过滤后**重算计数** —— 直接沿用总数会让
@@ -78,9 +78,8 @@ async def list_sources(
     #
     # 口径也从"解锁了几个"换成"你接了几个、覆盖哪些数据类型" ——
     # 前者是货架视角(还有多少没买),后者才是用户自己的视角。
-    user_uid = getattr(request.state, "user_id", None)
-    user_items = ([catalog.to_dict(s) for s in catalog._user_sources(user_uid)]
-                  if user_uid else [])
+    user_items = ([catalog.to_dict(s) for s in catalog._user_sources(user_id)]
+                  if user_id else [])
     total = len(user_items)
     ready = sum(1 for i in user_items
                 if i["status"] not in ("unavailable", "need_key"))

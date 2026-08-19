@@ -604,15 +604,24 @@ def _user_sources(user_id: str) -> list[DataSource]:
     return out
 
 
-def grouped() -> list[dict]:
-    """按市场分组 —— 旧结构,保留给还在用它的调用方(check_sources.py / 概览页)。
+def grouped(user_id: str | None = None) -> list[dict]:
+    """按市场分组 —— 概览页在用。
 
-    UI 侧栏已换成 `grouped_by_upstream()`。这个函数不删,因为
-    `scripts/check_sources.py` 和概览统计还在用,删了就是为了改 UI 顺手弄坏校验。
+    `_24` §3.1:**这条路也要撤架。**只改 `grouped_by_upstream()` 是不够的 ——
+    概览页读的是这个函数,只撤一半的结果是"侧栏干净了,概览页还在陈列
+    我们的 33 条商品"。实测就是这样:by=upstream 只剩用户的 6 条,
+    而 by=market 照样返回 14+8+7+4=33 条。
+
+    现在分的是**用户自己那些源**在各市场的分布,回答的是
+    「我接的源覆盖了哪些市场」—— 那是他自己的东西,展示它不是推销。
+
+    ⚠️ `scripts/check_sources.py` 探活时需要的是**官方注册表**,
+    不是用户的源。它应当直接读 `CATALOG`,不要走这个函数。
     """
+    src = _user_sources(user_id) if user_id else []
     out = []
     for m in MARKET_ORDER:
-        items = [to_dict(s) for s in by_market(m)]
+        items = [to_dict(x) for x in src if x.market == m]
         # 叫 ready 不叫 usable 是有意的:通道在、凭证齐 ≠ 已经验证过能出数。
         # 从没调用过的源(status=unknown)也算 ready —— 它没有任何已知障碍,
         # 但我们**没有资格**说它可用。整件事的意义就是不夸大能力。

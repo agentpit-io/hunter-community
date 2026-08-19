@@ -65,6 +65,20 @@ def _num(v: Any) -> float | None:
     return None if f != f else f
 
 
+def _int_or_none(v) -> int | None:
+    """成交量取不到就是 **None,不是 0**(CLAUDE.md 铁律「空的比假的好」)。
+
+    `int(x or 0)` 会把"没取到"变成 0,而 0 在成交量上是个**看起来像结论的
+    数字** —— 它读作"这天没人交易"(停牌),而不是"我们不知道"。
+    模型拿到 0 会认真解释"该股当日零成交,可能停牌或流动性枯竭"。
+
+    展示层遇到 None 要显示 `—` 而不是 0(online_analysis.py 的 K 线摘要
+    已经这么做了)。
+    """
+    n = _num(v)
+    return None if n is None else int(n)
+
+
 # ── 内置映射 ──────────────────────────────────────────────────
 #
 # 结构:BUILTIN[upstream][kind] = {我们的字段: JSONPath}
@@ -300,7 +314,7 @@ def _columnar(payload: Any, spec: dict) -> dict:
             "ts": _date(g("trade_date")),
             "open": _num(g("open")), "high": _num(g("high")),
             "low": _num(g("low")), "close": _num(g("close")),
-            "volume": int(_num(g("vol")) or 0),
+            "volume": _int_or_none(g("vol")),
         })
     # Tushare 返回是**倒序**的(最新在前)· 我们全链路用正序
     rows.reverse()
@@ -450,7 +464,7 @@ def _tencent_kline(payload: Any) -> dict:
             continue
         rows.append({"ts": ts, "open": _num(it[1]), "close": c,
                      "high": _num(it[3]), "low": _num(it[4]),
-                     "volume": int(_num(it[5]) or 0)})
+                     "volume": _int_or_none(it[5])})
     return {"rows": rows}
 
 
@@ -508,6 +522,6 @@ def _yahoo_chart(payload: Any) -> dict:
             "ts": _dt.datetime.utcfromtimestamp(int(t)).strftime("%Y-%m-%d"),
             "open": _num(at("open")), "high": _num(at("high")),
             "low": _num(at("low")), "close": c,
-            "volume": int(_num(at("volume")) or 0),
+            "volume": _int_or_none(at("volume")),
         })
     return {"rows": rows}

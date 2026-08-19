@@ -18,7 +18,7 @@ export default function OverviewPage({ sources, tools, skills }: Props) {
     <div style={wrapStyle}>
       <h1 style={titleStyle}>能力库 · 全景</h1>
       <p style={subtitleStyle}>
-        当前部署已装的所有能力 · 一屏看健康 · 找到问题直接进 tab 处理
+        你接的数据源和装的能力 · 一屏看健康 · 找到问题直接进 tab 处理
       </p>
 
       <Card
@@ -32,6 +32,8 @@ export default function OverviewPage({ sources, tools, skills }: Props) {
           label: g.label, ready: g.ready, total: g.total,
         })) || []}
         href={buildQuery({ tab: 'sources' })}
+        emptyHint="Hunter 不自带数据 —— 接一个进来才能查行情、K线、公告。腾讯财经零配置,点一下就能用。"
+        emptyCta="去接一个 →"
       />
 
       <Card
@@ -68,17 +70,26 @@ export default function OverviewPage({ sources, tools, skills }: Props) {
   )
 }
 
-function Card({ icon, label, summary, groups, href, extra }: {
+function Card({ icon, label, summary, groups, href, extra, emptyHint, emptyCta }: {
   icon: string
   label: string
   summary?: Summary
   groups: { label: string; ready: number; total: number }[]
   href: string
   extra?: string
+  /** total=0 时显示的一句话 —— 说清楚要做什么,而不是展示一个 0 */
+  emptyHint?: string
+  emptyCta?: string
 }) {
   const total = summary?.total ?? 0
   const ready = summary?.ready ?? 0
   const pct = total > 0 ? Math.round((ready / total) * 100) : 0
+  // `_24` §3.1 撤架后,新用户这里必然是 0。
+  //
+  // 「0 / 0 就绪」加一条空进度条读起来像**坏了**,而它其实是正常的初始
+  // 状态 —— 我们本来就不自带数据。所以 0 的时候整张卡换一种说法:
+  // 说清楚要做什么,而不是展示一个 0。
+  const empty = total === 0
   return (
     <Link href={href} style={cardStyle}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -86,14 +97,20 @@ function Card({ icon, label, summary, groups, href, extra }: {
           <span style={{ fontSize: 20 }}>{icon}</span>
           <span style={{ fontSize: 15, fontWeight: 600, color: HUNTER.INK }}>{label}</span>
         </div>
-        <span style={{ fontSize: 13, color: HUNTER.INK_F }}>
-          {ready} / {total} 就绪
+        <span style={{ fontSize: 13, color: empty ? HUNTER.THEME : HUNTER.INK_F }}>
+          {empty ? (emptyCta || '去添加 →') : `${ready} / ${total} 就绪`}
         </span>
       </div>
 
-      <div style={progressBgStyle}>
-        <div style={{ ...progressBarStyle, width: `${pct}%` }} />
-      </div>
+      {empty ? (
+        <div style={{ marginTop: 8, fontSize: 11.5, lineHeight: 1.65, color: HUNTER.INK_F }}>
+          {emptyHint}
+        </div>
+      ) : (
+        <div style={progressBgStyle}>
+          <div style={{ ...progressBarStyle, width: `${pct}%` }} />
+        </div>
+      )}
 
       <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: '4px 12px' }}>
         {groups.map((g, i) => (

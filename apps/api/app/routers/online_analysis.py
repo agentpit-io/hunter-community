@@ -255,7 +255,8 @@ async def start_analysis(request: Request, payload: StartAnalysisIn):
                 kline_rows = await asyncio.to_thread(fd_get_kline, ticker, "daily", 20)
                 if kline_rows:
                     lines = [
-                        f"{r['ts']}: 收盘={r['close']:.2f} 成交量={r['volume']}"
+                        f"{r['ts']}: 收盘={r['close']:.2f} "
+                        f"成交量={r['volume'] if r.get('volume') is not None else '—'}"
                         for r in kline_rows
                     ]
                     prefetched_kline = "\n".join(lines)
