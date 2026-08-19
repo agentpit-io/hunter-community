@@ -198,8 +198,76 @@ def _us_quote_via_gateway(symbol: str) -> dict | None:
     }
 
 
+# 港股主表 CSV(`_24` §8.2⑤)· 由 scripts/gen_hk_master_csv.py 从港交所官方
+# ListOfSecurities 生成,随仓库分发,挂载在 /opt/hunter-data。
+#
+# 它把 hk.master 这条从「平台自建」降级成「仓库里的一个文件」——
+# 原来它走我们的网关或我们的库,开源用户拿不到,而它其实只是一张
+# 静态对照表:不是服务、不需要 key、不需要实时。
+_HK_CSV = os.getenv("HUNTER_HK_MASTER_CSV", "/opt/hunter-data/hk_master.csv")
+_hk_csv_cache: dict[str, dict] | None = None
+
+
+def _hk_from_csv(code: str) -> dict | None:
+    """从 CSV 查。文件不存在或读不出来返回 None(由调用方回落)。
+
+    整份读进内存缓存:2800 行、88KB,一次读完比每次扫文件划算得多,
+    而且这张表在进程生命周期内不会变(要更新得重跑生成脚本)。
+    """
+    global _hk_csv_cache
+    if _hk_csv_cache is None:
+        _hk_csv_cache = {}
+        try:
+            import csv as _csv
+            with open(_HK_CSV, encoding="utf-8") as f:
+                # 前三行是 # 注释(来源与生成日期)—— 过滤掉再交给 DictReader,
+                # 否则表头会被解析成第一条数据
+                rows = _csv.DictReader(
+                    (ln for ln in f if not ln.startswith("#")))
+                for r in rows:
+                    c = (r.get("code") or "").strip()
+                    if c:
+                        _hk_csv_cache[c] = r
+            log.info("[hk_master] 载入 CSV %s · %d 条", _HK_CSV, len(_hk_csv_cache))
+        except FileNotFoundError:
+            log.info("[hk_master] 没有 CSV(%s)· 回落到库/网关", _HK_CSV)
+        except Exception as e:                                 # noqa: BLE001
+            log.warning("[hk_master] 读 CSV 失败: %s", e)
+    r = _hk_csv_cache.get(code)
+    if not r:
+        return None
+    lot = (r.get("lot_size") or "").strip()
+    return {
+        "code": r["code"],
+        # ⚠️ 港交所公开数据里**只有英文名**。原来那张表的中文名是我们
+        # 自己补的,不在公开数据里 —— 这里不臆造,name 直接给英文名。
+        # 宁可显示英文,也不要从别处凑一份可能对不上的翻译:
+        # 代码-名称对错一个,用户看到的就是另一家公司。
+        "name": r.get("name_en") or "",
+        "name_trad": "",
+        "category": r.get("category") or "",
+        "lot_size": int(lot) if lot.isdigit() else None,
+    }
+
+
 def hk_master(code: str) -> dict | None:
     code = code.zfill(5)
+    # **先查 CSV。**开源版没有我们的库也没有网关,这是唯一能走通的路;
+    # 有库的部署里 CSV 也够用(它就是一张代码对照表),少一次查询
+    hit = _hk_from_csv(code)
+    if hit:
+        return hit
+    # CSV 里没有 = 真的没有。**不回落到我们的网关。**
+    #
+    # CSV 收了股票/ETF/REITs 共 3226 条,覆盖用户会分析的全部标的;
+    # 剩下的是当天发行当天到期的权证和牛熊证,查它们的"主表"没有意义。
+    #
+    # 回落到网关会让开源用户在查一个不存在的代码时,悄悄打一次
+    # hunter.agentpit.io —— 那正是这次要去掉的依赖,而且它还会失败得很慢。
+    if _hk_csv_cache:
+        return None
+    # CSV 没载入成功(文件缺失/读失败)才走老路 —— 这条是给
+    # 有我们的库或网关的部署留的,开源版走不到
     if not _db_available():
         d = _gw_get("/api/v1/hk/master", {"code": code})
         if not d or "code" not in d:

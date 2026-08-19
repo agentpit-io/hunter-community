@@ -257,10 +257,18 @@ _HK: list[DataSource] = [
                upstream="yahoo",  # hk_data_daily.py:180 yahoo_chart(code,'5m') · 同 hk.quote 那个接口
            ),
     # 这两条 2026-08-15 通了 —— 同上,经网关。量级是当天实测值。
-    DataSource("hk.master", "港股主表", Market.HK, DataKind.QUOTE, "finance-data",
-               "/api/v1/hk/master", volume_hint="2,817 只",
-               note="中文名/繁体名/每手股数 · 经 hunter 网关",
-               upstream="internal",  # hk_stock_master 只被 SELECT,无采集器写 —— 是主数据表
+    # `_24` §8.2⑤:这条**不再需要平台**。数据来自港交所官方
+    # ListOfSecurities,由 scripts/gen_hk_master_csv.py 导成
+    # data/hk_master.csv 随仓库分发,3226 条(股票/ETF/REITs)。
+    #
+    # provider 从 finance-data 改成 local、requires_key 改 False ——
+    # 它现在就是仓库里的一个文件,不是我们的服务。
+    DataSource("hk.master", "港股主表", Market.HK, DataKind.QUOTE, "local",
+               volume_hint="3,226 只(股票/ETF/REITs)",
+               requires_key=False,
+               note="代码/英文名/类别/每手股数 · 港交所官方表,随仓库分发。"
+                    "公开数据里没有中文名,不臆造",
+               upstream="hkex",  # 港交所 ListOfSecurities.xlsx —— 官方发布
            ),
     DataSource("hk.kline_db", "港股历史K线(库)", Market.HK, DataKind.KLINE, "finance-data",
                "/api/v1/hk/kline/{code}", volume_hint="日线 69.8万 · 5分钟 74.3万",
