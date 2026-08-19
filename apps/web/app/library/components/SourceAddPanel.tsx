@@ -38,6 +38,9 @@ interface Endpoint {
   headers: Record<string, string>
   verified: boolean
   verified_at: string
+  /** 地址验过了但没 key 跑不完整 —— 见 source_templates.Endpoint.reachable */
+  reachable: boolean
+  reachable_at: string
   default_on: boolean
 }
 interface Template {
@@ -310,9 +313,17 @@ export default function SourceAddPanel({ presetGroup, onClose, onDone }: Props) 
                       <span style={{ flex: 1, minWidth: 0 }}>
                         <span style={{ fontWeight: 600 }}>{e.label}</span>
                         <span style={tagMarket}>{MARKET_LABEL[e.market] || e.market}</span>
+                        {/* 三态。**「地址已验」和「未实测」不能合成一个**:
+                            前者是我们不带 key 打过、拿到 401(地址真实存在,
+                            只差凭证),后者是我们什么都没验过。
+                            合并的话用户看到「未实测」不知道该不该信这个地址。 */}
                         {e.verified
                           ? <span style={tagOk}>已实测 {e.verified_at}</span>
-                          : <span style={tagWarn}>未实测</span>}
+                          : e.reachable
+                            ? <span style={tagPartial} title="我们不带 key 打过这个地址,上游返回 401 —— 地址是对的,填上你的 key 就能用">
+                                地址已验 · 待你的 key
+                              </span>
+                            : <span style={tagWarn}>未实测</span>}
                         <span style={{ ...urlText, display: 'block' }}>{urlOf(e)}</span>
                       </span>
                       <button style={expandBtn} onClick={(ev) => {
@@ -483,6 +494,10 @@ const tagMarket: React.CSSProperties = {
 const tagOk: React.CSSProperties = {
   marginLeft: 4, padding: '0 5px', fontSize: 10, borderRadius: 4,
   background: '#EAF4EE', color: '#2F6A4F',
+}
+const tagPartial: React.CSSProperties = {
+  marginLeft: 4, padding: '0 5px', fontSize: 10, borderRadius: 4,
+  background: '#EEF2FA', color: '#3B5A9A',
 }
 const tagWarn: React.CSSProperties = {
   marginLeft: 4, padding: '0 5px', fontSize: 10, borderRadius: 4,

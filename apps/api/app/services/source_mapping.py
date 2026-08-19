@@ -12,7 +12,8 @@
 言之凿凿的分析,而它建立在空数据上 —— 这比取数失败糟得多。
 所以 `apply()` 拿不到必需字段时抛 `MappingError`,由解析链降级到下一档。
 
-**JSONPath 只支持我们真正用得到的子集**:`$.a.b`、`$.a[0].b`、`$[*].b`。
+**JSONPath 只支持我们真正用得到的子集**:`$.a.b`、`$.a[0].b`、`$[*].b`,
+以及键名带点时的 `$['a.b']`。
 不引第三方 JSONPath 库,因为完整实现里有 filter/递归下降那些语法,
 它们能让用户写出一个遍历整个响应的表达式 —— 那是给自己找的性能问题。
 """
@@ -27,17 +28,34 @@ class MappingError(Exception):
     """映射失败 —— 必需字段没取到。带上到底缺了什么,别只说"失败"。"""
 
 
-_TOKEN = re.compile(r"([^.\[\]]+)|\[(\d+|\*)\]")
+# 四种片段:['带点的键'] / ["同左"] / 普通键 / [下标或*]
+#
+# 方括号取键那两种是为 Alpha Vantage 加的:它的键名里**带点**
+# (`05. price`、`10. change percent`),写成 `$['Global Quote']['05. price']`
+# 会被点号切成三段,取到 None —— 而 None 会被 `_required` 判成
+# "上游结构变了",让人去查上游,其实是我们的路径语法表达不了。
+_TOKEN = re.compile(
+    r"\['([^']*)'\]"          # ['05. price']
+    r"|\[\"([^\"]*)\"\]"       # ["05. price"]
+    r"|([^.\[\]]+)"            # 普通键
+    r"|\[(\d+|\*)\]"           # [0] / [*]
+)
 
 
 def _walk(data: Any, path: str) -> Any:
-    """`$.data.items[0].close` → 值。取不到返回 None(不抛)。"""
+    """`$.data.items[0].close` → 值。取不到返回 None(不抛)。
+
+    键名里有点号时用方括号:`$['Global Quote']['05. price']`。
+    """
     if not path:
         return None
     p = path[2:] if path.startswith("$.") else path[1:] if path.startswith("$") else path
     cur = data
     for m in _TOKEN.finditer(p):
-        key, idx = m.group(1), m.group(2)
+        qkey = m.group(1) if m.group(1) is not None else m.group(2)
+        key, idx = m.group(3), m.group(4)
+        if qkey is not None:
+            key = qkey
         if cur is None:
             return None
         if key is not None:
@@ -172,6 +190,28 @@ BUILTIN: dict[str, dict[str, dict]] = {
         # 单独一个 shape 取"第一个值"
         "kline": {"_shape": "tencent_kline", "_required": _KLINE_REQ},
     },
+    # Alpha Vantage · 2026-08-19 用官方 `demo` key 实测通过(IBM)。
+    #
+    # 它的键名带序号前缀(`05. price`、`10. change percent`)—— 看着像
+    # 可以按序号取,**但不要**:序号是它文档里的展示顺序,不是稳定契约,
+    # 而键名里那个空格和点号一改我们就静默取空。这里按全名匹配。
+    "alphavantage": {
+        "quote": {
+            "price":      "$['Global Quote']['05. price']",
+            "open":       "$['Global Quote']['02. open']",
+            "high":       "$['Global Quote']['03. high']",
+            "low":        "$['Global Quote']['04. low']",
+            "prev_close": "$['Global Quote']['08. previous close']",
+            "change_amt": "$['Global Quote']['09. change']",
+            "volume":     "$['Global Quote']['06. volume']",
+            # `10. change percent` 的值是 **"1.6692%"** —— 带百分号的字符串,
+            # 直接过 _num() 会变 None。所以不取它,用现价和昨收自己算
+            # (`_derive_change` 只在字段缺失时补,不会覆盖已有值)
+            "_derive_change": True,
+            "_required": _QUOTE_REQ,
+        },
+        "kline": {"_shape": "av_daily", "_required": _KLINE_REQ},
+    },
     # 新浪财经 · `var hq_str_sh600519="贵州茅台,1300.000,..."`(34 段,`,` 分隔)
     #
     # ⚠️ 新浪**不直接给涨跌幅**,要用现价和昨收算 —— 见 `_delimited` 里的补算。
@@ -248,10 +288,29 @@ def apply(upstream: str, kind: str, payload: Any, custom: dict | None = None,
         out = _em_klines(payload, spec)
     elif shape == "tencent_kline":
         out = _tencent_kline(payload)
+    elif shape == "av_daily":
+        out = _av_daily(payload)
     elif shape == "jsonp":
         out = _jsonp(payload, spec)
     else:
         out = _flat(payload, spec)
+
+    # 有些上游不给涨跌额/涨跌幅,用现价和昨收补算。
+    #
+    # **放在这里而不是某个 shape 里**:新浪(delimited)和 Alpha Vantage
+    # (flat)都需要它。之前只在 delimited 里实现,结果 Alpha Vantage 声明了
+    # `_derive_change` 却静默不生效 —— 一个"配置写了但没人读"的坑,
+    # 不报错,只是那两个字段永远是空的。
+    #
+    # **只补缺的,不覆盖已有的** —— 腾讯自己给了涨跌幅(下标 32),
+    # 算出来的和它给的可能因四舍五入差一点点,以上游为准。
+    if spec.get("_derive_change"):
+        px, pc = out.get("price"), out.get("prev_close")
+        if px is not None and pc:
+            if out.get("change_amt") is None:
+                out["change_amt"] = round(px - pc, 4)
+            if out.get("change_pct") is None:
+                out["change_pct"] = round((px - pc) / pc * 100, 4)
 
     missing = [f for f in spec.get("_required", []) if out.get(f) in (None, [], "")]
     if missing:
@@ -381,14 +440,6 @@ def _delimited(payload: Any, spec: dict) -> dict:
             n = _num(v)
             out[key] = n * scale[key] if (n is not None and key in scale) else n
 
-    # 新浪不给涨跌额/涨跌幅,用现价和昨收补算。
-    # **只在缺的时候补** —— 腾讯自己给了(下标 31/32),算出来的和它给的
-    # 可能因为四舍五入差一点点,以上游为准
-    if spec.get("_derive_change"):
-        p, pc = out.get("price"), out.get("prev_close")
-        if p is not None and pc:
-            out.setdefault("change_amt", round(p - pc, 4))
-            out.setdefault("change_pct", round((p - pc) / pc * 100, 4))
     return out
 
 
@@ -418,6 +469,33 @@ def _em_klines(payload: Any, spec: dict) -> dict:
             row[name] = _date(parts[i]) if name == "ts" else _num(parts[i])
         if row.get("ts"):
             rows.append(row)
+    return {"rows": rows}
+
+
+def _av_daily(payload: Any) -> dict:
+    """Alpha Vantage TIME_SERIES_DAILY ·
+    `{"Time Series (Daily)": {"2026-08-18": {"1. open": …, "4. close": …}}}`
+
+    日期是**键**不是字段,所以要遍历 dict 而不是 list;而 dict 在 JSON 里
+    无序,必须自己按日期排 —— 不排的话 K 线会乱序,画出来是一团麻,
+    而计算类指标(均线/收益率)会静默算错。
+
+    免费档一次给 100 天(`outputsize=full` 给全量,但那要 key 的额度)。
+    """
+    ts = _walk(payload, "$['Time Series (Daily)']")
+    if not isinstance(ts, dict):
+        return {"rows": []}
+    rows = []
+    for day in sorted(ts):
+        v = ts[day]
+        if not isinstance(v, dict):
+            continue
+        c = _num(v.get("4. close"))
+        if c is None:
+            continue
+        rows.append({"ts": _date(day), "open": _num(v.get("1. open")),
+                     "high": _num(v.get("2. high")), "low": _num(v.get("3. low")),
+                     "close": c, "volume": _int_or_none(v.get("5. volume"))})
     return {"rows": rows}
 
 

@@ -63,6 +63,16 @@ class Endpoint:
     # 实测过吗 · 见文件头。False 会在 UI 上标「未实测」
     verified: bool = False
     verified_at: str = ""              # "2026-08-19"
+    # 第三种状态:**地址验过了,但没有 key 跑不完整**。
+    #
+    # 需要 key 的源我们没有账号,不能标 verified;但"不带 key 打一次"
+    # 能区分两件完全不同的事:
+    #   401/403 → 地址是真的,只是缺凭证        ← reachable=True
+    #   404/DNS 失败 → 地址本身写错了            ← 两个都 False
+    # 只有 verified/未实测两态的话,这两种会长得一模一样,
+    # 而用户看到「未实测」不知道该不该信这个地址。
+    reachable: bool = False
+    reachable_at: str = ""
     # 默认勾不勾。冷门接口默认不勾,免得一次写进去一堆用不上的
     default_on: bool = True
 
@@ -250,10 +260,10 @@ TEMPLATES: list[SourceTemplate] = [
         note="Tushare Pro · token 走 **POST body 的 token 字段**(不是 header)· "
              "免费额度按积分算",
         endpoints=[
-            Endpoint("a", "kline", "https://api.tushare.pro", label="日线行情", method="POST"),
-            Endpoint("a", "financial", "https://api.tushare.pro", label="财务报表", method="POST"),
-            Endpoint("a", "valuation", "https://api.tushare.pro", label="估值指标", method="POST"),
-            Endpoint("a", "capital", "https://api.tushare.pro", label="资金流向",
+            Endpoint("a", "kline", "https://api.tushare.pro", label="日线行情", reachable=True, reachable_at=_TODAY, method="POST"),
+            Endpoint("a", "financial", "https://api.tushare.pro", label="财务报表", reachable=True, reachable_at=_TODAY, method="POST"),
+            Endpoint("a", "valuation", "https://api.tushare.pro", label="估值指标", reachable=True, reachable_at=_TODAY, method="POST"),
+            Endpoint("a", "capital", "https://api.tushare.pro", label="资金流向", reachable=True, reachable_at=_TODAY,
                      method="POST", default_on=False),
         ],
     ),
@@ -265,11 +275,11 @@ TEMPLATES: list[SourceTemplate] = [
              "填在附加 header 里 · 有免费档",
         endpoints=[
             Endpoint("us", "quote", "https://data.alpaca.markets/v2/stocks/{symbol}/quotes/latest",
-                     label="美股行情"),
+                     label="美股行情", reachable=True, reachable_at=_TODAY),
             Endpoint("us", "kline", "https://data.alpaca.markets/v2/stocks/{symbol}/bars"
-                     "?timeframe=1Day&limit=120", label="美股K线"),
+                     "?timeframe=1Day&limit=120", label="美股K线", reachable=True, reachable_at=_TODAY),
             Endpoint("us", "news", "https://data.alpaca.markets/v1beta1/news?symbols={symbol}",
-                     label="美股新闻"),
+                     label="美股新闻", reachable=True, reachable_at=_TODAY),
         ],
     ),
     SourceTemplate(
@@ -279,12 +289,12 @@ TEMPLATES: list[SourceTemplate] = [
         note="Finnhub · 免费档 60 次/分",
         endpoints=[
             Endpoint("us", "quote", "https://finnhub.io/api/v1/quote?symbol={symbol}",
-                     label="美股行情"),
+                     label="美股行情", reachable=True, reachable_at=_TODAY),
             Endpoint("us", "news", "https://finnhub.io/api/v1/company-news?symbol={symbol}",
-                     label="公司新闻"),
+                     label="公司新闻", reachable=True, reachable_at=_TODAY),
             Endpoint("us", "financial",
                      "https://finnhub.io/api/v1/stock/financials-reported?symbol={symbol}",
-                     label="财务报表"),
+                     label="财务报表", reachable=True, reachable_at=_TODAY),
         ],
     ),
     SourceTemplate(
@@ -294,24 +304,32 @@ TEMPLATES: list[SourceTemplate] = [
         note="Polygon.io · 免费档 5 次/分",
         endpoints=[
             Endpoint("us", "quote",
-                     "https://api.polygon.io/v2/aggs/ticker/{symbol}/prev", label="美股行情"),
+                     "https://api.polygon.io/v2/aggs/ticker/{symbol}/prev", label="美股行情", reachable=True, reachable_at=_TODAY),
             Endpoint("us", "kline",
                      "https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/day/2024-01-01/2026-12-31",
-                     label="美股K线"),
+                     label="美股K线", reachable=True, reachable_at=_TODAY),
         ],
     ),
     SourceTemplate(
+        # ✅ 这个来源**完整实测过** —— 它提供官方 `demo` key,
+        # 我们用 demo 拉了 IBM 的行情与日线,映射也对上了
+        # (算出来的涨跌幅 1.6692% 与上游自报的 "1.6692%" 一致)。
+        # 所以它是唯一一个 requires_key=True 却能标 verified 的。
         "alphavantage", True,
         key_in="query", key_name="apikey",
         apply_url="https://www.alphavantage.co/support/#api-key",
-        note="Alpha Vantage · 免费档 **25 次/天**,额度很紧,适合做备用源",
+        note="Alpha Vantage · 免费档 **25 次/天**,额度很紧,适合做备用源。"
+             "想先试试可以把 key 填 `demo`(只对 IBM 有效)",
         endpoints=[
             Endpoint("us", "quote",
                      "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={symbol}",
-                     label="美股行情"),
+                     label="美股行情", verified=True, verified_at=_TODAY,
+                     note="上游不给可直接用的涨跌幅(它给的是带 % 的字符串),"
+                          "我们用现价和昨收补算"),
             Endpoint("us", "kline",
                      "https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={symbol}",
-                     label="美股K线"),
+                     label="美股K线", verified=True, verified_at=_TODAY,
+                     note="免费档一次给 100 个交易日"),
         ],
     ),
 
@@ -382,6 +400,8 @@ def to_dict(t: SourceTemplate) -> dict:
     # 这个来源一共覆盖哪些 kind —— 侧栏/卡片上显示「行情·K线·新闻·资金流」
     d["kinds"] = sorted({e.kind for e in t.endpoints})
     d["verified_count"] = sum(1 for e in t.endpoints if e.verified)
+    d["reachable_count"] = sum(1 for e in t.endpoints
+                               if e.reachable and not e.verified)
     return d
 
 
