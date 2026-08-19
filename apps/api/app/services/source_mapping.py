@@ -83,6 +83,14 @@ def _num(v: Any) -> float | None:
     return None if f != f else f
 
 
+def _scaled_vol(v, spec: dict | None) -> int | None:
+    """K线里的成交量 —— 按 `_vol_scale` 换算成股。取不到仍然是 None。"""
+    n = _num(v)
+    if n is None:
+        return None
+    return int(n * (spec or {}).get("_vol_scale", 1.0))
+
+
 def _int_or_none(v) -> int | None:
     """成交量取不到就是 **None,不是 0**(CLAUDE.md 铁律「空的比假的好」)。
 
@@ -107,6 +115,21 @@ def _int_or_none(v) -> int | None:
 
 _QUOTE_REQ = ["price"]
 _KLINE_REQ = ["rows"]
+
+# ── 成交量的单位约定 ─────────────────────────────────────────
+#
+# **`volume` 一律是「股」。**
+#
+# A 股的上游几乎都给「手」(1 手 = 100 股),港美股给「股」。不统一的话
+# 会出现两种都很难发现的错:
+#   · 跨源对比:东财说 37548、腾讯说 3754800,同一天同一只票 —— 用户
+#     会以为其中一个是错的数据,其实只是单位不同
+#   · 同源内不一致:行情给股、K线给手,算换手率时差 100 倍,
+#     而 100 倍在图上看起来只是"这天量特别大"
+#
+# 所以凡是给「手」的上游都在这里 ×100。**改这个值之前先确认上游单位**,
+# 别照抄:新浪的成交量本来就是股(实测 2990789 对应 29907 手)。
+_SHOU = 100.0
 
 BUILTIN: dict[str, dict[str, dict]] = {
     # Tushare Pro · POST 返回 {code, msg, data:{fields:[...], items:[[...]]}}
@@ -134,6 +157,9 @@ BUILTIN: dict[str, dict[str, dict]] = {
     "eastmoney": {
         # K线与资金流走 `data.klines` 那串逗号文本 —— 列含义见 _EM_KLINE_COLS
         "kline":   {"_shape": "em_klines", "_cols": "kline",
+                    # f56 也是**手** —— 和 quote 的 f47 一致地换算,
+                    # 否则同一个来源的行情与 K 线单位会差 100 倍
+                    "_vol_scale": _SHOU,
                     "_required": _KLINE_REQ},
         "capital": {"_shape": "em_klines", "_cols": "capital",
                     "_required": ["rows"]},
@@ -154,8 +180,10 @@ BUILTIN: dict[str, dict[str, dict]] = {
                   # 名称是字符串,不能过 _num() —— 过了会变成 None,
                   # 表现是卡片标题显示成股票代码而不是"贵州茅台"
                   "_text": ["name"],
+                  # f47 是**手**,统一成股(见 _SHOU)。f48 成交额本来就是元
                   "_scale": {"price": 0.01, "open": 0.01, "high": 0.01, "low": 0.01,
-                             "prev_close": 0.01, "change_amt": 0.01, "change_pct": 0.01},
+                             "prev_close": 0.01, "change_amt": 0.01, "change_pct": 0.01,
+                             "volume": _SHOU},
                   "_required": _QUOTE_REQ},
     },
     # Yahoo chart v8 · {chart:{result:[{meta:{...}, indicators:{quote:[{...}]}}]}}
@@ -179,7 +207,7 @@ BUILTIN: dict[str, dict[str, dict]] = {
                   #   [36] A股是**手**(1 手 = 100 股)→ ×100 统一成股
                   #   [37] A股是**万元**(实测 428876 对应 42.9 亿)→ ×10000 统一成元
                   # 不换算的话成交额小四个数量级,页面上看起来像"这只票没人买"
-                  "_scale": {"amount": 10000.0, "volume": 100.0},
+                  "_scale": {"amount": 10000.0, "volume": _SHOU},
                   # 港股同一个下标单位就不一样了(实测 2026-08-19):
                   #   [36] 直接是**股**,[37] 直接是**元** —— 都不用换算。
                   # 套 A 股那套会把腾讯的成交额算成 64 万亿
@@ -188,7 +216,8 @@ BUILTIN: dict[str, dict[str, dict]] = {
         # K线 · {data:{sh600519:{qfqday:[[日期,开,收,高,低,成交量], …]}}}
         # `data` 底下那个键是**股票代码**,随请求变 —— JSONPath 写不出来,
         # 单独一个 shape 取"第一个值"
-        "kline": {"_shape": "tencent_kline", "_required": _KLINE_REQ},
+        "kline": {"_shape": "tencent_kline", "_vol_scale": _SHOU,
+                  "_required": _KLINE_REQ},
     },
     # Alpha Vantage · 2026-08-19 用官方 `demo` key 实测通过(IBM)。
     #
@@ -287,7 +316,7 @@ def apply(upstream: str, kind: str, payload: Any, custom: dict | None = None,
     elif shape == "em_klines":
         out = _em_klines(payload, spec)
     elif shape == "tencent_kline":
-        out = _tencent_kline(payload)
+        out = _tencent_kline(payload, spec)
     elif shape == "av_daily":
         out = _av_daily(payload)
     elif shape == "jsonp":
@@ -466,7 +495,12 @@ def _em_klines(payload: Any, spec: dict) -> dict:
             continue
         row: dict = {}
         for i, name in enumerate(cols):
-            row[name] = _date(parts[i]) if name == "ts" else _num(parts[i])
+            if name == "ts":
+                row[name] = _date(parts[i])
+            elif name == "volume":
+                row[name] = _scaled_vol(parts[i], spec)
+            else:
+                row[name] = _num(parts[i])
         if row.get("ts"):
             rows.append(row)
     return {"rows": rows}
@@ -499,7 +533,7 @@ def _av_daily(payload: Any) -> dict:
     return {"rows": rows}
 
 
-def _tencent_kline(payload: Any) -> dict:
+def _tencent_kline(payload: Any, spec: dict | None = None) -> dict:
     """腾讯日K · `{data:{sh600519:{qfqday:[[日期,开,收,高,低,成交量], …]}}}`
 
     `data` 底下那个键是**股票代码**(随请求变),JSONPath 表达不出来 ——
@@ -542,7 +576,7 @@ def _tencent_kline(payload: Any) -> dict:
             continue
         rows.append({"ts": ts, "open": _num(it[1]), "close": c,
                      "high": _num(it[3]), "low": _num(it[4]),
-                     "volume": _int_or_none(it[5])})
+                     "volume": _scaled_vol(it[5], spec)})
     return {"rows": rows}
 
 
