@@ -11,7 +11,9 @@
     ② 用户对内置能力的覆盖 —— 改名/改模板/关掉(builtin_key 非空)
     ③ 用户自建能力 —— builtin_key 为空
 """
+import json
 import logging
+import os
 import re
 import time
 
@@ -400,6 +402,76 @@ async def install_from_repo(body: InstallIn, request: Request):
 class StagedCommitIn(BaseModel):
     # 空 = 全装。给了就只装勾选的这几个
     names: list[str] | None = None
+
+
+# ══════════════════════════════════════════════════════════════
+# `_24` §5 · 推荐安装
+#
+# 老板:「给一个入口就是推荐加的 skill,也不写我们的,你可以去看看
+#        github 有哪些 star 多的,然后点一下就能加上,
+#        **这个 skill 算是用户自己加的**」
+#
+# 最后半句是关键:推荐 ≠ 内置。装完之后它出现在「你装的」组里,
+# 和用户自己贴 URL 装的没有任何区别 —— 我们只是省掉他找和贴的过程。
+# ══════════════════════════════════════════════════════════════
+
+_REC_PATH = os.getenv("HUNTER_RECOMMEND_FILE", "/opt/hunter-data/recommended-skills.json")
+
+
+@router.get("/chat/skills/recommended")
+async def list_recommended(request: Request):
+    """推荐清单 —— **零 GitHub API 调用**。
+
+    star 数和可移植性都是文件里的实测快照。为什么不实时查:
+    GitHub 未登录 API 是 60 次/小时,开发过程中就撞到了限流。
+    渲染时才去查的话,限流那一刻整个推荐位是空的,
+    而用户看到的是「这个功能坏了」。只有真的点安装才访问 GitHub。
+
+    **免登录可访问** —— 用户在决定要不要用这个开源版时,
+    「它能装哪些现成能力」是个先决问题,不该拦在登录后面。
+    """
+    try:
+        with open(_REC_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        # 清单缺失不是错误 —— 用户可能自己删了(它就是给人改的)。
+        # 返回空列表让页面显示"还没有推荐",而不是一个 500
+        return {"items": [], "checked_at": "", "missing": True}
+    except Exception as e:                                    # noqa: BLE001
+        raise HTTPException(500, f"推荐清单读不出来:{e}")
+
+    items = [i for i in (data.get("items") or []) if i.get("repo")]
+
+    # 标出已经装过的 —— 装过的按钮要变成"已安装",否则用户会重复点,
+    # 而重复安装的表现是一堆同名 SKILL 覆盖来覆盖去
+    # origin 形如 `github:owner/repo@main` —— 取中间那段和 repo 比。
+    #
+    # ⚠️ **`_23` 之前装的那批没有 origin**(暂存路径当时没记来源),
+    # 所以它们会显示成"未安装"。这是已知的、不打算追溯修的:
+    # 重复装一次的代价是覆盖同名文件,而误判成"已装"会让用户
+    # 以为能力已经有了 —— 后者糟得多。
+    try:
+        installed = set()
+        for sk in skill_files.load_all():
+            if sk.get("builtin", True):
+                continue
+            o = (sk.get("origin") or "").strip().lower()
+            if o.startswith("github:"):
+                installed.add(o[7:].split("@")[0])
+        for i in items:
+            i["installed"] = i["repo"].lower() in installed
+    except Exception:                                          # noqa: BLE001
+        for i in items:
+            i["installed"] = False
+
+    return {
+        "items": items,
+        "checked_at": data.get("checked_at", ""),
+        "note": data.get("note", ""),
+        # 被否掉的也返回 —— 前端折叠显示。
+        # 「为什么不推荐 30500 star 那个」是用户会问的,答案写在这里
+        "rejected": data.get("rejected") or [],
+    }
 
 
 @router.get("/chat/skills/staged")

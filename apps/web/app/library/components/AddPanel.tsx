@@ -14,6 +14,7 @@ import { HUNTER } from '../../lib/hunter-theme'
 import SkillAddPanel from '../../chat/components/SkillAddPanel'
 import ToolAddPanel from '../../chat/components/ToolAddPanel'
 import SourceAddPanel from './SourceAddPanel'
+import RecommendedSkills from './RecommendedSkills'
 import type { TabId } from '../lib/nav'
 
 interface Props {
@@ -35,8 +36,19 @@ export default function AddPanel({ tab, presetGroup, categories, onClose, onDone
         <button onClick={onClose} style={iconBtn} title="关闭"><X size={15} strokeWidth={2} /></button>
       </div>
 
-      {tab === 'skills' && (
-        <SkillAddPanel categories={categories} onClose={onClose} onDone={onDone} />
+      {(tab === 'skills' || tab === 'capabilities') && (
+        <>
+          {/* 推荐排在自建表单**前面**(`_24` §4.2)。
+              删掉依赖平台的那批之后能力页开箱几乎是空的,
+              「推荐安装」不再是锦上添花,而是开箱唯一的内容来源 ——
+              那它就该是打开面板第一眼看到的东西,不是滚到底才有。 */}
+          <div style={{ marginBottom: 14 }}>
+            <div style={sectionTitle}>✨ 推荐安装 · 来自 GitHub 的开源 SKILL</div>
+            <RecommendedSkills onDone={onDone} />
+          </div>
+          <div style={sectionTitle}>✍️ 或者自己写一个</div>
+          <SkillAddPanel categories={categories} onClose={onClose} onDone={onDone} />
+        </>
       )}
 
       {tab === 'tools' && (
@@ -50,8 +62,14 @@ export default function AddPanel({ tab, presetGroup, categories, onClose, onDone
   )
 }
 
+const sectionTitle: React.CSSProperties = {
+  fontSize: 12, fontWeight: 600, color: HUNTER.INK,
+  margin: '0 0 8px',
+}
+
 const TITLE: Record<string, string> = {
   skills: '加一个 SKILL',
+  capabilities: '加一个能力',
   tools: '接入一个工具',
   sources: '添加数据源',
 }

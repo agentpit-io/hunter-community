@@ -125,6 +125,12 @@ def _load_one(skill_dir: Path, builtin: bool) -> dict | None:
         "hint": fm.get("description") or "",
         "brand": h.get("brand") or "",
         "source_url": h.get("source_url") or "",
+        # 从哪个仓库装来的 —— `install()` 写的是顶层 `origin: github:owner/repo@ref`,
+        # `_23` 的暂存路径写的是 `hunter.origin`。两处都认,取到哪个算哪个。
+        #
+        # 推荐位靠它判断"这个仓库装过没有"。判断不出来只是按钮不变灰,
+        # **不会误判成已装** —— 宁可让用户多点一次,也不要让他以为装过了却没有。
+        "origin": str(fm.get("origin") or h.get("origin") or ""),
         "category": h.get("category") or "其他",
         "needs_tools": h.get("needs_tools") or [],
         "needs_data": h.get("needs_data") or [],

@@ -48,6 +48,14 @@ _PUBLIC_PREFIXES = (
     "/api/public/chat_debate/stream/",
     "/api/public/chat_kpred/stream/",
     "/api/chat/skills/detail/",
+    # 推荐安装的 SKILL 清单(`_24` §5)· 一张静态的 GitHub 仓库清单,
+    # 不含任何凭证。免登录是有意的:用户在决定要不要用这个开源版时,
+    # 「它能装哪些现成能力」和「它能接我的 Tushare 吗」是同一类先决问题。
+    #
+    # ⚠️ 只放这一条**精确路径**(结尾没有斜杠,是精确前缀匹配到这个 URL 本身)。
+    # `/api/chat/skills/` 整个放进来会连带把 install / staged / commit
+    # 一起开成免登录 —— 那几个是往磁盘写文件的
+    "/api/chat/skills/recommended",
     # Capability catalog · 只描述"这套部署能拿到什么数据",不含任何凭证
     # (只回 configured=true/false,不回 key 本身;endpoint 路径本来就在开源代码里)
     "/api/catalog/",
