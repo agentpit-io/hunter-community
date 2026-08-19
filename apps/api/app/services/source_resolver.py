@@ -153,6 +153,17 @@ def expand(endpoint: str, code: str) -> str:
     只给 `{symbol}` 的话,用户接东财时得自己想办法拼出那个 `1.` 前缀 ——
     而它是**按股票变的**(60/68 开头是沪、00/30 是深),没法写死在地址里。
     等于"选了已知来源仍然填不对",那"模板"就白给了。
+
+    `_24` §8.2② 又加了三个,因为新预置的来源要:
+
+        腾讯/新浪 {sina}   sh600519 / sz000001   ← 前缀在前,和东财的 `1.` 相反
+        腾讯港股  {code5}  00700                 ← 补足 5 位
+        SEC      {cik10}  0000320193            ← 补足 10 位
+
+    **`{cik10}` 现在只是把输入补零,不做 ticker→CIK 的查询。**用户填 AAPL
+    是查不到的,得填 320193。真做映射要拉 SEC 那张 company_tickers.json
+    再缓存,那是另一件事 —— 这里不假装能换,免得用户以为填 ticker 就行,
+    拿到一个 404 却不知道为什么。模板 note 里写明了要填 CIK。
     """
     raw = (code or "").strip()
     bare = raw.split(".")[0].strip()
@@ -169,6 +180,9 @@ def expand(endpoint: str, code: str) -> str:
                 .replace("{symbol}", bare).replace("{code}", bare)
                 .replace("{secid}", f"116.{bare.zfill(5)}")     # 东财港股用 116.
                 .replace("{ts_code}", f"{bare.zfill(5)}.HK")
+                .replace("{code5}", bare.zfill(5))              # 腾讯港股 hk00700
+                .replace("{sina}", f"hk{bare.zfill(5)}")
+                .replace("{cik10}", bare.zfill(10))
                 .replace("{yahoo}", f"{bare.zfill(4)}.HK"))
 
     if bare.startswith(("60", "68", "11", "51", "52")):
@@ -184,11 +198,19 @@ def expand(endpoint: str, code: str) -> str:
     yahoo = (f"{bare}.SS" if exch == "SH" else
              f"{bare}.SZ" if exch == "SZ" else bare)
 
+    # 腾讯/新浪要 sh600519 —— 前缀在**前**,和东财的 `1.600519` 正好相反。
+    # 字母代码(美股)没有前缀概念,原样给。
+    sina = (f"{exch.lower()}{bare}" if exch in ("SH", "SZ") else
+            f"bj{bare}" if exch == "BJ" else bare)
+
     return (endpoint
             .replace("{symbol}", bare)
             .replace("{code}", bare)
+            .replace("{code5}", bare)
             .replace("{secid}", f"{em}.{bare}" if em else bare)   # 东财
             .replace("{ts_code}", f"{bare}.{exch}" if exch else bare)  # Tushare
+            .replace("{sina}", sina)                              # 腾讯/新浪
+            .replace("{cik10}", bare.zfill(10) if bare.isdigit() else bare)  # SEC
             .replace("{yahoo}", yahoo))
 
 

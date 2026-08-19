@@ -102,6 +102,14 @@ UPSTREAM_LABEL = {
     "hkex":       "港交所",
     "truesource": "TrueSource",
     "internal":   "平台自建",
+    # ↓ `_24` §8.2② 新增。这五个**没有任何官方源在用**,纯粹是给用户接自己的
+    # (下拉里的选项)。`check_source_upstream.py` 会为它们各报一条 warn,
+    # 和 cls/tushare 一样是预期内的,不是漏清理。
+    "tencent":      "腾讯财经",
+    "sina":         "新浪财经",
+    "finnhub":      "Finnhub",
+    "polygon":      "Polygon.io",
+    "alphavantage": "Alpha Vantage",
     # 只给用户自定义源用 —— 没有任何官方源是 custom,所以它不进 UPSTREAM_ORDER。
     # 放在这里是因为 UI 显示中文名走的是这张表,漏了它用户会看到裸的 "custom"
     "custom":     "自定义接口",
