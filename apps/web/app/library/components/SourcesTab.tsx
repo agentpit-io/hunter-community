@@ -127,13 +127,48 @@ export default function SourcesTab({
               /* 「你自己的」空组 —— 这个空状态就是添加入口。
                  它必须显示,否则用户在这个页面上看不到任何
                  "我可以接自己的" 的迹象,而那正是这次改造的主题 */
+              /* `_24` §3.1 空态引导。
+                 撤架之后这是新用户打开数据源页看到的**全部内容** ——
+                 他能不能用起来这个开源版,就取决于这一屏说清楚没有。
+
+                 所以不写"暂无数据"了事,而是:
+                   ① 先说清楚我们不自带数据(不然他会以为是加载失败)
+                   ② 直接把免 key 的来源摆出来,点一下就进表单
+                 免 key 那几个是重点 —— 它们不需要注册任何账号。 */
               <div style={userEmptyStyle}>
-                <div style={{ marginBottom: 8 }}>
-                  你还没有接自己的数据源。接进来之后,<b>取数会优先走你的</b>,
-                  你的拿不到才回落到我们的 —— 并且会明确告诉你这次用的是谁。
+                <div style={{ fontWeight: 600, color: HUNTER.INK, marginBottom: 5 }}>
+                  还没有数据源
                 </div>
-                <button onClick={() => onAdd?.('user')} style={addBtnStyle}>
-                  ＋ 添加我的数据源
+                <div style={{ marginBottom: 10 }}>
+                  Hunter <b>不自带数据</b> —— 你需要接一个进来。
+                  下面这些是我们验证过、地址和参数都已经填好的,
+                  <b>多数不需要注册</b>。
+                </div>
+
+                <div style={{ ...pickLabel }}>🟢 无需 key,点一下就能用</div>
+                <div style={pickRow}>
+                  {FREE_PICKS.map((p) => (
+                    <button key={p.upstream} style={pickBtn}
+                            title={p.hint}
+                            onClick={() => onAdd?.(p.upstream)}>
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div style={{ ...pickLabel, marginTop: 10 }}>🔑 需要你自己去申请 key</div>
+                <div style={pickRow}>
+                  {KEY_PICKS.map((p) => (
+                    <button key={p.upstream} style={pickBtnGhost}
+                            onClick={() => onAdd?.(p.upstream)}>
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+
+                <button onClick={() => onAdd?.('user')}
+                        style={{ ...addBtnStyle, marginTop: 12 }}>
+                  ⚙️ 全部来源 / 自定义接口
                 </button>
               </div>
             ) : (
@@ -229,6 +264,45 @@ const addBtnStyle: React.CSSProperties = {
   color: HUNTER.THEME,
   cursor: 'pointer',
   fontFamily: 'inherit',
+}
+
+// 空态里直接摆出来的快捷入口 —— 与 source_templates.TEMPLATES 的顺序一致。
+//
+// **为什么在前端又写一份来源名**:这里是"引导"不是"清单" ——
+// 只挑最值得第一次点的那几个,而不是把 15 个全列出来
+// (全列出来就又变成一个货架了,正是这次要撤的东西)。
+// 完整清单在表单的下拉里,从 /user_sources/templates 拿。
+const FREE_PICKS = [
+  { upstream: 'tencent',   label: '腾讯财经',   hint: '不需要任何 header,最省事的一个' },
+  { upstream: 'eastmoney', label: '东方财富',   hint: '一次能接行情/资金流/新闻三个接口' },
+  { upstream: 'sina',      label: '新浪财经',   hint: 'A股实时行情' },
+  { upstream: 'yahoo',     label: 'Yahoo',    hint: '美股与港股' },
+  { upstream: 'sec',       label: 'SEC EDGAR', hint: '美股公告与 XBRL 财务' },
+  { upstream: 'cninfo',    label: '巨潮资讯',   hint: 'A股法定披露公告' },
+]
+const KEY_PICKS = [
+  { upstream: 'tushare',      label: 'Tushare' },
+  { upstream: 'alpaca',       label: 'Alpaca' },
+  { upstream: 'finnhub',      label: 'Finnhub' },
+  { upstream: 'polygon',      label: 'Polygon' },
+  { upstream: 'alphavantage', label: 'Alpha Vantage' },
+]
+
+const pickLabel: React.CSSProperties = {
+  fontSize: 11, fontWeight: 600, color: HUNTER.INK_S, marginBottom: 5,
+}
+const pickRow: React.CSSProperties = {
+  display: 'flex', flexWrap: 'wrap', gap: 6,
+}
+const pickBtn: React.CSSProperties = {
+  padding: '5px 12px', borderRadius: 7, fontSize: 12,
+  background: HUNTER.THEME, color: '#fff', border: 'none',
+  cursor: 'pointer', fontFamily: 'inherit',
+}
+const pickBtnGhost: React.CSSProperties = {
+  padding: '5px 12px', borderRadius: 7, fontSize: 12,
+  background: 'transparent', color: HUNTER.INK_S,
+  border: `1px solid ${HUNTER.LINE}`, cursor: 'pointer', fontFamily: 'inherit',
 }
 
 const emptyStyle: React.CSSProperties = {

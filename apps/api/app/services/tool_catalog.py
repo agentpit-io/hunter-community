@@ -84,21 +84,6 @@ class ToolEntry:
 
 CATALOG: list[ToolEntry] = [
     # ── 行情与资讯 · watchlist server ──────────────────────────
-    ToolEntry("watchlist_stock_quickview", "行情速查", "watchlist", ToolOrigin.IMAGE,
-              "实时行情富卡片:价格、涨跌、成交、盘口",
-              needs_data=["a.quote"], markets=["a"],
-              prompt_tpl="查 {股票} 最新股价",
-              category="快速判断"),
-    ToolEntry("watchlist_stock_news", "个股新闻", "watchlist", ToolOrigin.IMAGE,
-              "拉取该股最近的新闻条目",
-              needs_data=["a.news"], markets=["a"],
-              prompt_tpl="看 {股票} 最近的新闻",
-              category="事件与筛选"),
-    ToolEntry("watchlist_watchlist_digest", "自选股速览", "watchlist", ToolOrigin.IMAGE,
-              "一次拿到自选股全部最新行情与异动",
-              needs_data=["a.quote"], markets=["a"],
-              prompt_tpl="我的自选股今天怎么样",
-              category="组合级"),
     ToolEntry("watchlist_watchlist_add", "加自选股", "watchlist", ToolOrigin.IMAGE,
               "把一只股票加进自选列表",
               needs_data=[], note="纯本地写库 · 不依赖任何数据源",
@@ -110,25 +95,8 @@ CATALOG: list[ToolEntry] = [
     # **broken**(灰的、点不了),而工具本身其实是好的。
     # scripts/check_tools.py 抓到了这处漂移。
     # 依赖读 watchlist_rank_agent.py:366/368 核实:get_quote + get_kline_with_fallback
-    ToolEntry("watchlist_watchlist_rank", "自选股排序", "watchlist", ToolOrigin.IMAGE,
-              "N 只自选 × 3M/6M/1Y/3Y 横向打分排序 · 一次调用出表",
-              needs_data=["a.quote", "a.kline"], markets=["a"],
-              note="替代「逐只跑深度分析」—— 那样串行 5+ 分钟且不能横向对比。"
-                   "1Y/3Y 因长期基本面字段未接入,只出定性标签并显式声明方法学",
-              prompt_tpl="把我的自选股按 3 个月 / 6 个月 / 1 年 / 3 年前景从好到坏排一下",
-              category="组合级"),
 
     # ── 组合级 · portfolio server ─────────────────────────────
-    ToolEntry("portfolio_portfolio_rebalance", "组合再平衡", "portfolio", ToolOrigin.IMAGE,
-              "按目标权重算调仓清单与换手成本",
-              needs_data=["a.quote"], markets=["a"],
-              prompt_tpl="按目标权重帮我算一份调仓清单",
-              category="组合级"),
-    ToolEntry("portfolio_portfolio_stress", "组合压力测试", "portfolio", ToolOrigin.IMAGE,
-              "情景冲击下的组合回撤模拟",
-              needs_data=["a.quote", "a.kline"], markets=["a"],
-              prompt_tpl="模拟一次大跌,看我的组合会回撤多少",
-              category="组合级"),
     ToolEntry("portfolio_update_risk_profile", "更新风险画像", "portfolio", ToolOrigin.IMAGE,
               "记录用户风险偏好,后续建议据此调整",
               needs_data=[], note="纯本地写库",
@@ -136,34 +104,8 @@ CATALOG: list[ToolEntry] = [
               category="组合级"),
 
     # ── 深度分析 · uzi server ─────────────────────────────────
-    ToolEntry("uzi_stock_deep_analysis", "深度分析", "uzi", ToolOrigin.IMAGE,
-              "行情+K线+财务+龙虎榜+股东+治理+新闻 七类数据合成结构化研报",
-              # 前四类缺了就没什么可分析的;后三类缺了只是少三段
-              needs_data=["a.quote", "a.kline", "a.financial", "a.news"],
-              optional_data=["a.lhb", "a.fund_holders", "a.governance"],
-              markets=["a", "hk", "us"], slow=True,
-              note="薄代理转发到 /api/internal/uzi/* · 5-10 秒 · "
-                   "股东/治理表上游未 seed,那两段会显示'数据未 seed'",
-              prompt_tpl="对 {股票} 做一次全面分析",
-              category="综合分析"),
 
     # ── 平台自有能力 · hunter_cap server(我们在 Step 3 加的)──
-    ToolEntry("hunter_cap_kpred", "K线预测", "hunter_cap", ToolOrigin.PLATFORM,
-              "Kronos 模型预测未来 N 日开高低收与涨跌幅",
-              needs_data=["global.kronos"], markets=["a"], slow=True,
-              note="经 hunter 网关 · 同一把 key",
-              prompt_tpl="预测 {股票} 未来 5 日走势",
-              category="快速判断"),
-    ToolEntry("hunter_cap_truesource_brief", "情报简报", "hunter_cap", ToolOrigin.PLATFORM,
-              "多标的情报摘要与预警级别",
-              needs_data=["global.truesource_brief"],
-              prompt_tpl="给我 {股票} 的情报摘要与预警",
-              category="事件与筛选"),
-    ToolEntry("hunter_cap_truesource_scout", "主动情报采集", "hunter_cap", ToolOrigin.PLATFORM,
-              "针对单只标的现场搜集情报(Gemini 搜索,耗时较长)",
-              needs_data=["global.truesource_scout"], slow=True,
-              prompt_tpl="现场搜集 {股票} 的最新情报",
-              category="事件与筛选"),
 
     # ── 从 GitHub 导入 SKILL(`_23`)· hunter_cap server ───────
     # 四个工具里**只有 repo_open 露给用户**:它是入口,用户说

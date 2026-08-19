@@ -43,10 +43,9 @@ INTERNAL_KEY = os.getenv("HUNTER_INTERNAL_KEY", "")
 
 server = Server("hunter-capability-mcp")
 
-# 各 tool 的超时。scout 是主动全量采集(价格+公告+Gemini 搜索),30-60s 起步,
-# 给到 150s;kpred 是 GPU 推理,给 120s。
+# 各 tool 的超时。
+# kpred / truesource_* 的条目随工具一起删了(`_24` §4.1)。
 _TIMEOUT = {
-    "kpred": 120.0, "truesource_scout": 150.0, "truesource_brief": 60.0,
     # 仓库操作要打 GitHub API + raw,国内网络下慢,给宽一点。
     # repo_open 一次取 树 + README + INSTALL.md 三样
     "skill_repo_open": 90.0, "skill_repo_read": 60.0,
@@ -57,61 +56,14 @@ _TIMEOUT = {
 @server.list_tools()
 async def list_tools():
     return [
-        Tool(
-            name="kpred",
-            description=(
-                "⚠️ **仅用于未来价格预测** · Kronos 清华金融时序大模型 GPU 推理。"
-                "输入历史 K 线 → 预测未来 N 个交易日(默认 10 天)的开高低收 + 涨跌幅 + 方向判断。"
-                "**必须包含明确的未来时间导向词才用**:"
-                "「未来 N 天 / 下周 / 明天 / 后市 / 会涨会跌 / 涨跌预测 / 走势预测 / 预测走势」。"
-                "**不要用来做以下事**(即使 prompt 里有'走势'两字):"
-                "  · 查历史 K 线数据 / 看走势数据 / 最近 N 天走势 → 用 stock_quickview(它已返 30 天历史 K 线)"
-                "  · 查实时股价 / 最新价 → 用 stock_quickview"
-                "  · 深度基本面分析 → 用 stock_deep_analysis"
-                "**耗时 10-120 秒**(GPU 推理 · 首次冷启可能更久)。"
-                "A 股用 6 位代码(600519),港股 5 位(00700),美股用 ticker(AAPL)。"
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "code": {"type": "string", "description": "股票代码,如 600519"},
-                    "days": {"type": "integer", "description": "预测天数 1-30,默认 10"},
-                },
-                "required": ["code"],
-            },
-        ),
-        Tool(
-            name="truesource_brief",
-            description=(
-                "TrueSource 情报简报 · 指定标的最近 3 天的信号摘要与预警级别。"
-                "用户问「有什么异动/最近有什么信号/盯一下这几只」时用它。"
-                "支持一次传多只,逗号分隔。"
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "symbols": {"type": "string",
-                                "description": "逗号分隔的股票代码,如 600519,300308"},
-                },
-                "required": ["symbols"],
-            },
-        ),
-        Tool(
-            name="truesource_scout",
-            description=(
-                "TrueSource 主动情报采集 · 对单只股票并行跑价格+公告+AI 联网搜索,"
-                "拿最新的一手信息。**耗时 30-60 秒**,只在用户明确要求"
-                "「深挖/查一下最新消息/主动采集」时用,不要在普通问答里调。"
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "symbol": {"type": "string", "description": "股票代码"},
-                    "name": {"type": "string", "description": "股票名称(可选,提高搜索准确度)"},
-                },
-                "required": ["symbol"],
-            },
-        ),
+        # `_24` §4.1 —— kpred / truesource_brief / truesource_scout **已删**。
+        #
+        # 它们是真·平台独有的三个:Kronos 是我们自建的 GPU 模型服务,
+        # TrueSource 是我们自己的爬虫服务器。用户拿不到,留着就是广告。
+        #
+        # **必须从 MCP 里删,光从 tool_catalog 删不够** —— 那只是 UI 上的清单,
+        # 模型看到的是 MCP 的 list_tools。只删清单的话模型照样会调用,
+        # 然后拿到一个 401/404,而用户看到的是"这个 AI 又胡说八道了"。
         Tool(
             name="skill_repo_open",
             description=(

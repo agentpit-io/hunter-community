@@ -70,21 +70,23 @@ async def list_sources(
             g["sources"] = [s for s in g["sources"]
                             if s["status"] not in ("unavailable", "need_key")]
 
-    # summary 走 grouped()(按市场,不含用户源),再把用户源单独加回来。
-    # 不这么做的话用户加了源,列表里能看见但顶部计数不动 —— 又是一处
-    # "用户自己的东西在某个视图里不存在"。
-    all_groups = catalog.grouped()
-    total = sum(g["total"] for g in all_groups)
-    ready = sum(g["ready"] for g in all_groups)
-    blocked = [s for g in all_groups for s in g["sources"] if s["status"] == "unavailable"]
-    need_key = [s for g in all_groups for s in g["sources"] if s["status"] == "need_key"]
-
+    # summary —— `_24` §3.1 撤架后**只统计用户自己的源**。
+    #
+    # 改之前是"官方 33 条 + 用户的",顶部显示 "20/34"。撤架之后官方那批
+    # 在列表里已经看不见了,再算进计数就是**页面上数不出来的数字** ——
+    # 用户看到"3/34"却只能数出 3 条,只会以为哪里坏了。
+    #
+    # 口径也从"解锁了几个"换成"你接了几个、覆盖哪些数据类型" ——
+    # 前者是货架视角(还有多少没买),后者才是用户自己的视角。
     user_uid = getattr(request.state, "user_id", None)
     user_items = ([catalog.to_dict(s) for s in catalog._user_sources(user_uid)]
                   if user_uid else [])
-    total += len(user_items)
-    ready += sum(1 for i in user_items
-                 if i["status"] not in ("unavailable", "need_key"))
+    total = len(user_items)
+    ready = sum(1 for i in user_items
+                if i["status"] not in ("unavailable", "need_key"))
+    need_key = [i for i in user_items if i["status"] == "need_key"]
+    blocked = [i for i in user_items if i["status"] == "unavailable"]
+    kinds = sorted({i["kind"] for i in user_items})
     return {
         "groups": groups,
         "group_by": by,
@@ -96,12 +98,17 @@ async def list_sources(
             "total": total,
             "ready": ready,
             # 侧栏标题直接显示"数据源 20/32",一眼看出还有多少没解锁
-            "headline": f"{ready}/{total}",
+            "headline": (f"{ready}/{total}" if total else "还没接"),
             # 分开数是因为这两种"不可用"用户的动作完全不同:
             # need_key 去申请一把 key 就解决,unavailable 做什么都没用
             "need_key_count": len(need_key),
             "unavailable_count": len(blocked),
             "user_added": len(user_items),
+            # 覆盖了哪些数据类型 —— 撤架后这才是用户真正关心的
+            # (「我能查行情吗」而不是「我解锁了几个」)
+            "kinds": kinds,
+            "kind_labels": [catalog.KIND_LABEL[k] for k in catalog.DataKind
+                            if k.value in kinds],
         },
     }
 
@@ -276,12 +283,49 @@ async def list_capabilities(request: Request):
         if len(tools) == 1:
             represented.add(tools[0])
 
+    # ── SKILL 导入链路的 4 个工具合成 1 张卡(`_24` §4.2)──
+    #
+    # 老板 2026-08-19:「确实应该合并成一张」。
+    #
+    # 它们是一条链路的四个内部步骤(读仓库 → 读文件 → 暂存 → 查暂存),
+    # 用户不需要分别理解。「读仓库文件」单独做成一张能力卡对他没有意义,
+    # 而删掉平台依赖之后能力页只剩 8 张卡,其中 4 张是这条链路的零件 ——
+    # 那一页看起来会像是我们凑数凑出来的。
+    #
+    # **合的是卡片,不是工具。**四个 MCP 工具照旧注册、模型照旧分别调用;
+    # 只是这里把它们折成一条,用 repo_open 的模板(贴 GitHub 地址)。
+    # 同 `_22` 「合的是入口不是实体」。
+    _IMPORT_CHAIN = ["hunter_cap_skill_repo_open", "hunter_cap_skill_repo_read",
+                     "hunter_cap_skill_stage", "hunter_cap_skill_staged"]
+    _chain_entries = [t for t in tool_catalog.pickable() if t.key in _IMPORT_CHAIN]
+    if _chain_entries:
+        head = next((t for t in _chain_entries
+                     if t.key == "hunter_cap_skill_repo_open"), _chain_entries[0])
+        worst = [tool_catalog.status_of(t) for t in _chain_entries]
+        blocked = sorted({b for st in worst for b in st["blocked_by"] + st["need_key_for"]})
+        items.append({
+            "key": head.key, "name": "从 GitHub 导入 SKILL", "icon": "📥",
+            "kind": "tool", "kind_label": "直接执行",
+            "category": head.category or "接入与自查",
+            "hint": "贴一个 GitHub 地址,我读它的 README 按作者说的方式装 —— "
+                    "装完属于你,在「你装的」里",
+            "prompt_tpl": head.prompt_tpl, "brand": "",
+            "builtin": head.origin is not tool_catalog.ToolOrigin.USER,
+            "slow": any(t.slow for t in _chain_entries),
+            "blocked_by": blocked,
+            "status": "ready" if all(
+                tool_catalog.status_of(t)["state"] in ("ready", "partial")
+                for t in _chain_entries) else "blocked",
+            # 前端不用它,但排查"为什么这张卡是灰的"时要能看到是哪一环
+            "merged_from": _IMPORT_CHAIN,
+        })
+
     # ── 工具 ──
     # 只收 pickable 且**没有被 SKILL 代表**的。
     # 剩下的恰好是原来那批「根本没有入口」的工具 —— 这一步同时消除了
     # 重复、又补上了缺口,而不用删任何方法论。
     for t in tool_catalog.pickable():
-        if t.key in represented:
+        if t.key in represented or t.key in _IMPORT_CHAIN:
             continue
         st = tool_catalog.status_of(t)
         items.append({

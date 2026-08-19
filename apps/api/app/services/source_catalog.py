@@ -484,8 +484,36 @@ def grouped_by_upstream(user_id: str | None = None) -> list[dict]:
         "sources": user_items,
     })
 
-    # ② 官方源按 UPSTREAM_ORDER 排。不在 ORDER 里的落到末尾,
-    #    但**不静默丢弃** —— 丢了就等于这条源在 UI 上消失,又是一次静默失败。
+    # ② 官方源 —— `_24` §3.1 **撤架,不再陈列**。
+    #
+    # 老板 2026-08-19:「让用户自己添加,不要我们这么多,
+    #                  **这样会让用户觉得我们在推销我们自己的产品**」
+    #
+    # 33 条官方源里 26 条要我们的平台 key,打开页面就是一个"多数商品标着
+    # 需付费解锁"的商品目录 —— 这跟开源项目该有的样子是反的。
+    #
+    # **CATALOG 本身没删,删的是陈列。**那 33 条现在的用途是:
+    #   · source_templates 的预填知识(哪个 URL、什么参数)
+    #   · source_mapping 的字段映射
+    #   · check_source_upstream.py 的校验基准
+    # 它们从"我们卖给你的货"变成"我们帮你填好的知识"(§2 推论 1)。
+    if _SHELF:
+        out.extend(_official_groups())
+    return out
+
+
+# 官方货架开关。开源版恒为关 —— 留这个常量不是为了让人打开它,
+# 而是让"为什么这里空着"有个可查的落点(有人会以为是 bug)。
+_SHELF = False
+
+
+def _official_groups() -> list[dict]:
+    """原来的官方源分组 —— 现在没有调用方(`_SHELF` 恒 False)。
+
+    保留函数体是因为 SaaS 那条线的逻辑与此同源,删掉之后两边对不上;
+    而且它是"我们曾经这样陈列"的唯一记录。
+    """
+    out: list[dict] = []
     seen = set()
     for up in UPSTREAM_ORDER + sorted({s.upstream for s in CATALOG} - set(UPSTREAM_ORDER)):
         if up in seen:

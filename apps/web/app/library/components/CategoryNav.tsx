@@ -62,11 +62,19 @@ export default function CategoryNav({ query, sources, caps, onAdd, onReset }: Pr
           onClick={() => onAdd?.()}
           title={actionable ? ADD_HINT[query.tab] : '先选一个分类(数据源 / 工具箱 / SKILL)'}
         >＋ 添加</button>
-        <button
-          style={mgmtBtnStyle(!actionable)} disabled={!actionable}
-          onClick={onReset}
-          title={actionable ? RESET_HINT[query.tab] : '先选一个分类'}
-        >{RESET_LABEL[query.tab] || '↻ 恢复初始'}</button>
+        {/* 数据源那条按钮 `_24` §3.1 **删了**。
+            它原来叫「↻ 一键用官方默认」,做的是"停用你自己的源、全部走官方"。
+            那个功能的前提是我们还在提供数据 —— 撤架之后前提没了,
+            留着就等于留一个「其实不用配也能用,只要你买我们的 key」的按钮,
+            和这次改造直接冲突。
+            能力那条保留:它删的是用户自己加的东西,和平台无关。 */}
+        {query.tab !== 'sources' && (
+          <button
+            style={mgmtBtnStyle(!actionable)} disabled={!actionable}
+            onClick={onReset}
+            title={actionable ? RESET_HINT[query.tab] : '先选一个分类'}
+          >{RESET_LABEL[query.tab] || '↻ 恢复初始'}</button>
+        )}
       </div>
     </nav>
   )
@@ -77,15 +85,10 @@ const ADD_HINT: Record<string, string> = {
   capabilities: '装一个 SKILL,或接入自己的 MCP 工具',
 }
 
-// 数据源那条**不叫"恢复初始"** —— 它做的是"停用你自己的源、全部走官方",
-// 而且**不删除**,随时能切回来。叫"恢复初始"会让人以为要丢东西,
-// 于是不敢点;而它恰恰是排查问题时最该点的那个按钮
 const RESET_LABEL: Record<string, string> = {
-  sources: '↻ 一键用官方默认',
   capabilities: '↻ 恢复初始',
 }
 const RESET_HINT: Record<string, string> = {
-  sources: '停用你自己接的全部数据源,改走官方源 · 不删除,随时可切回',
   capabilities: '删掉你自己加的全部 SKILL 与工具 · 内置的不受影响',
 }
 

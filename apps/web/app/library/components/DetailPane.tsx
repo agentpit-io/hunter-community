@@ -112,13 +112,15 @@ function UserSourceActions({ item, onChanged }: {
     finally { setBusy(''); onChanged?.() }
   }
 
-  // 停用/启用**不在这里**做单条开关 —— 左下角「一键用官方默认」已经覆盖了
+  // `_24` §3.1:左下角那个「一键用官方默认」已经删掉(撤架后它没有意义),
+  // 所以删除确认里不能再指向它
   // "我想暂时不用自己的源"这个场景,而且是批量的。这里再放一个单条开关,
   // 两处语义相近但作用范围不同,用户会分不清点哪个。真需要单条停用时再加。
 
   async function remove() {
     if (!window.confirm(`删除「${item.name}」?地址和 key 都会一并删掉,无法恢复。\n\n` +
-                        `如果只是想暂时不用它,用左下角的「一键用官方默认」——那个是停用,可以切回来。`)) return
+                        `删掉之后要重新填一遍地址和 key —— key 我们只回显末 4 位,`
+                        + `等于你得去翻原始凭证。只是想暂时停用的话,在详情里关掉开关即可。`)) return
     setBusy('del')
     try { await call('DELETE', `/${id}`); onChanged?.() }
     catch (e: any) { setRes({ ok: false, stage: 'error', reason: e.message }) }
