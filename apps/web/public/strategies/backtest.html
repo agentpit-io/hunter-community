@@ -27,9 +27,9 @@ document.body.innerHTML = renderShell(
   `· ${draft.name || '未命名策略'} · ${isReal
     ? realResult.start + ' → ' + realResult.end + ' · ✅ 真回测'
     : '尚未回测'}`,
-  `<button class="btn small" id="btn-share">🔗 分享</button>
-   <button class="btn small" id="btn-save">💾 保存策略</button>
-   <button class="btn small ask-hunter" id="btn-ask">💬 让 Hunter 详细分析</button>`
+  `<button class="btn small" id="btn-share"><span class="hi hi-link"></span>分享</button>
+   <button class="btn small" id="btn-save"><span class="hi hi-save"></span>保存策略</button>
+   <button class="btn small ask-hunter" id="btn-ask"><span class="hi hi-seal"></span>让 Hunter 详细分析</button>`
 )
 
 const container = document.getElementById('page-content')
@@ -153,7 +153,7 @@ container.innerHTML = `
   <!-- C4.1 · 分档收益 · 单因子有效性验证 -->
   <div class="chart-panel">
     <div class="hd">
-      <div class="title">📊 因子分档验证</div>
+      <div class="title"><span class="hi hi-chart" style="color:var(--brand)"></span> 因子分档验证</div>
       <div class="actions">
         <select id="qt-factor" class="btn small" style="border:1px solid var(--divider);background:var(--bg)"></select>
         <select id="qt-buckets" class="btn small" style="border:1px solid var(--divider);background:var(--bg)">
@@ -172,7 +172,7 @@ container.innerHTML = `
   <!-- C4.2 · 最后一期持仓贡献 · 每只股票各因子贡献值 -->
   <div class="chart-panel">
     <div class="hd">
-      <div class="title">🧩 最后一期持仓 · 因子贡献</div>
+      <div class="title"><span class="hi hi-puzzle" style="color:var(--brand)"></span> 最后一期持仓 · 因子贡献</div>
       <div class="actions">
         <span style="color:var(--muted);font-size:11.5px">仅显示 Top 15 · 正值绿 / 负值红</span>
       </div>
@@ -200,14 +200,14 @@ container.innerHTML = `
       <div class="attrib" id="attrib-list"></div>
       <div style="margin-top:12px;padding:10px 12px;background:var(--tag-ok-bg);color:var(--tag-ok-fg);border-radius:8px;font-size:11.5px;line-height:1.6">
         <b>解读</b> · 分散多风格是抗风险关键 · 若单因子失效，其他因子可顶上。
-        <span style="color:var(--brand);cursor:pointer;text-decoration:underline" id="btn-ask-explain">让 Hunter 详细解读 →</span>
+        <span style="color:var(--brand);cursor:pointer;text-decoration:underline;display:inline-flex;align-items:center;gap:4px" id="btn-ask-explain">让 Hunter 详细解读 <span class="hi hi-arrow-r"></span></span>
       </div>
     </div>
 
     <!-- 持仓变化 -->
     <div class="chart-panel">
       <div class="hd">
-        <div class="title">🔄 持仓变化</div>
+        <div class="title"><span class="hi hi-refresh" style="color:var(--brand)"></span> 持仓变化</div>
         <div class="actions">
           <button class="btn small ghost">近 6 次</button>
           <button class="btn small">全部</button>
@@ -219,7 +219,7 @@ container.innerHTML = `
         <div class="tl-item"><div class="date">2026-06-01</div><div class="stocks"><span class="in">+ 中国平安 · 农业银行</span><br><span class="out">- 中远海控 · 万科A</span><div style="color:var(--muted);font-size:11px;margin-top:4px">换仓 2 只 · 金融 ROE 修复</div></div></div>
         <div class="tl-item"><div class="date">2026-05-01</div><div class="stocks"><span style="color:var(--muted)">当月无变化 · 持仓稳定</span></div></div>
         <div style="text-align:center;padding:10px 0;color:var(--brand);font-size:12px;cursor:pointer">
-          展开全部 36 次调仓 →
+          展开全部 36 次调仓 <span class="hi hi-arrow-r"></span>
         </div>
       </div>
     </div>
@@ -230,7 +230,7 @@ container.innerHTML = `
     <div class="hd">
       <div class="title">🎲 Bootstrap 稳健性检验 · 100 次随机 1 年窗口</div>
       <div class="actions">
-        <button class="btn small primary" id="btn-run-bootstrap">▶ 跑 100 次</button>
+        <button class="btn small primary" id="btn-run-bootstrap"><span class="hi hi-play"></span>跑 100 次</button>
       </div>
     </div>
     <div style="color:var(--muted);font-size:11.5px;margin-bottom:12px">
@@ -259,7 +259,7 @@ container.innerHTML = `
   <!-- C6 · 半自动下单 CSV 导出 -->
   <div class="chart-panel" id="orders-panel">
     <div class="hd">
-      <div class="title">📥 生成券商下单清单(CSV)</div>
+      <div class="title"><span class="hi hi-download" style="color:var(--brand)"></span> 生成券商下单清单(CSV)</div>
       <div class="actions"><span style="color:var(--muted);font-size:11.5px">按当前持仓 + 等权 + 最新 close 生成</span></div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:12px">
@@ -283,7 +283,7 @@ container.innerHTML = `
         </select>
       </div>
       <div class="field" style="display:flex;align-items:flex-end">
-        <button class="btn primary" id="btn-gen-orders" style="width:100%">📥 下载 CSV</button>
+        <button class="btn primary" id="btn-gen-orders" style="width:100%"><span class="hi hi-download"></span>下载 CSV</button>
       </div>
     </div>
     <div id="ord-status" style="color:var(--muted);font-size:11.5px;min-height:16px"></div>
@@ -302,14 +302,14 @@ container.innerHTML = `
         每交易日 15:30 收盘后自动推送持仓变动 · 支持 WeChat / 飞书群机器人
       </div>
     </div>
-    <button class="btn ask-hunter" id="btn-ask-2">💬 问 Hunter</button>
-    <button class="btn primary" id="btn-subscribe">🔔 订阅每日推送</button>
+    <button class="btn ask-hunter" id="btn-ask-2"><span class="hi hi-seal"></span>问 Hunter</button>
+    <button class="btn primary" id="btn-subscribe"><span class="hi hi-bell"></span>订阅每日推送</button>
   </div>
 
   <!-- 相似策略 -->
   <div class="chart-panel">
     <div class="hd">
-      <div class="title">💡 你可能还会喜欢</div>
+      <div class="title"><span class="hi hi-lightbulb" style="color:var(--brand)"></span> 你可能还会喜欢</div>
       <div class="actions"><button class="btn small ghost">仅看官方</button></div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px" id="similar-strategies"></div>
@@ -531,7 +531,7 @@ container.innerHTML = `
     } catch (e) {
       status.textContent = '❌ ' + e.message
     } finally {
-      btn.disabled = false; btn.textContent = '▶ 跑 100 次'
+      btn.disabled = false; btn.innerHTML = '<span class="hi hi-play"></span>跑 100 次'
     }
   })
 })()
@@ -580,7 +580,7 @@ container.innerHTML = `
       status.textContent = '❌ 生成失败: ' + e.message
       status.style.color = 'var(--danger)'
     } finally {
-      btn.disabled = false; btn.textContent = '📥 下载 CSV'
+      btn.disabled = false; btn.innerHTML = '<span class="hi hi-download"></span>下载 CSV'
     }
   })
 })()
@@ -676,7 +676,7 @@ const similar = OFFICIAL_STRATEGIES.filter(s => s.name !== currentName).slice(0,
 document.getElementById('similar-strategies').innerHTML = similar.map((s,i) => `
   <div class="s-card" data-id="${s.id}">
     <div class="row1">
-      <div class="icon">${s.icon}</div>
+      <div class="icon"><span class="hi hi-${s.icon}"></span></div>
       <div class="name" style="font-size:14px">${s.name}</div>
       <span class="chip solid" style="background:var(--brand);color:#fff;font-size:10px">官方</span>
     </div>

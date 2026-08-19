@@ -11,8 +11,8 @@
 <script src="app.js"></script>
 <script>
 document.body.innerHTML = renderShell('workbench', '策略广场 / 策略工作台', '选因子 · 调权重 · 看今日 Top 20 · 一键回测', `
-  <button class="btn small" id="btn-ask">💬 问 Hunter</button>
-  <button class="btn small" id="btn-save">💾 保存</button>
+  <button class="btn small ask-hunter" id="btn-ask"><span class="hi hi-seal"></span>问 Hunter</button>
+  <button class="btn small" id="btn-save"><span class="hi hi-save"></span>保存</button>
 `)
 
 let draft = loadDraft()
@@ -23,7 +23,7 @@ function renderLeftPanel() {
     <div class="empty" style="padding:30px 20px">
       <div class="ic">🎯</div>
       <div class="msg" style="font-size:13px">还没选因子</div>
-      <a href="/strategies/factors.html" class="btn small">→ 去因子广场</a>
+      <a href="/strategies/factors.html" class="btn small"><span class="hi hi-arrow-r"></span>去因子广场</a>
     </div>
   ` : draft.factors.map(k => {
     const f = factorByKey(k)
@@ -49,7 +49,7 @@ function renderLeftPanel() {
       <div id="factor-pills">${factorsHtml}</div>
       <a href="/strategies/factors.html" class="btn" style="width:100%;margin-top:10px">+ 从因子广场加因子</a>
       <div style="margin-top:14px;padding:10px 12px;background:var(--tag-cool-bg);color:var(--tag-cool-fg);border-radius:8px;font-size:11.5px;line-height:1.6">
-        <b>💡 tip</b> · 权重和不必等于 100%，系统会归一化。<br>
+        <b><span class="hi hi-lightbulb" style="color:var(--brand);vertical-align:-.18em"></span> tip</b> · 权重和不必等于 100%，系统会归一化。<br>
         <b>价值 40% + 质量 30% + 动量 20% + 低波 10%</b> = Barra 四因子经典配比
       </div>
     </div>
@@ -118,7 +118,7 @@ function renderMiddlePanel() {
 
       <!-- 因子暴露雷达图 · SVG 静态示意 -->
       <div style="padding:16px 18px;border-bottom:1px solid var(--line)">
-        <div class="p-hd" style="margin-bottom:8px">📊 因子暴露</div>
+        <div class="p-hd" style="margin-bottom:8px"><span class="hi hi-chart" style="color:var(--brand)"></span> 因子暴露</div>
         <svg viewBox="0 0 240 200" style="width:100%;height:180px">
           <polygon points="120,20 200,70 180,170 60,170 40,70" fill="none" stroke="#deddd5" stroke-width="1"/>
           <polygon points="120,50 176,86 164,146 76,146 64,86" fill="none" stroke="#efeee8" stroke-width="1"/>
@@ -143,13 +143,13 @@ function renderMiddlePanel() {
       <!-- 跑回测 -->
       <div style="padding:16px 18px">
         <button id="btn-backtest" class="btn primary" style="width:100%;height:44px;font-size:14px">
-          ▶ 跑 3 年回测
+          <span class="hi hi-play"></span>跑 3 年回测
         </button>
         <div style="text-align:center;color:var(--muted);font-size:11px;margin-top:8px">
           回测区间 2023-08 → 2026-07 · 结果页可改
         </div>
         <button class="btn ask-hunter" style="width:100%;margin-top:10px;height:38px" id="btn-ask-2">
-          💬 让 Hunter 解读这个组合
+          <span class="hi hi-seal"></span>让 Hunter 解读这个组合
         </button>
       </div>
     </div>
@@ -160,18 +160,18 @@ function renderRightPanel() {
   return `
     <div class="panel" style="padding:0;overflow:hidden">
       <div style="padding:16px 18px 12px;border-bottom:1px solid var(--line)">
-        <div class="p-hd" style="margin-bottom:6px">🎯 今日 Top <span id="topn-cnt">${draft.config.top_n||20}</span> <span class="cnt" id="topn-date">加载中...</span></div>
+        <div class="p-hd" style="margin-bottom:6px"><span class="hi hi-target" style="color:var(--brand)"></span> 今日 Top <span id="topn-cnt">${draft.config.top_n||20}</span> <span class="cnt" id="topn-date">加载中...</span></div>
         <div style="color:var(--muted);font-size:11.5px">
           改因子/权重后点"刷新" · 或按下方"跑回测"
-          <span style="background:#EEF5F1;color:#2C6B55;padding:1px 6px;border-radius:4px;margin-left:6px;font-size:10px">✅ 真数据</span>
+          <span style="background:#EEF5F1;color:#2C6B55;padding:1px 6px;border-radius:4px;margin-left:6px;font-size:10px"><span class="hi hi-check" style="vertical-align:-.15em"></span> 真数据</span>
         </div>
       </div>
       <div id="picks-body" style="max-height:calc(100vh - 240px);overflow-y:auto;padding:16px 18px;color:var(--muted);font-size:12px">
         选因子后点"刷新" · 或点"跑回测"直接调 API
       </div>
       <div style="padding:12px 18px;border-top:1px solid var(--line);background:var(--panel);color:var(--muted);font-size:11px;display:flex;gap:14px">
-        <button id="btn-refresh-picks" class="btn small" style="height:26px;padding:0 10px">🔄 刷新 Top N</button>
-        <span style="margin-left:auto;color:var(--brand);cursor:pointer" id="btn-export">导出 CSV →</span>
+        <button id="btn-refresh-picks" class="btn small" style="height:26px;padding:0 10px"><span class="hi hi-refresh"></span>刷新 Top N</button>
+        <span style="margin-left:auto;color:var(--brand);cursor:pointer;display:inline-flex;align-items:center;gap:4px" id="btn-export">导出 CSV <span class="hi hi-arrow-r"></span></span>
       </div>
     </div>
   `
@@ -224,7 +224,7 @@ container.innerHTML = `
 <!-- E-3 · 因子相关性热力图 · 全宽面板 -->
 <div class="chart-panel" id="corr-panel" style="display:none;margin:12px 20px">
   <div class="hd">
-    <div class="title">🔗 因子相关性 · 热力图(Pearson)</div>
+    <div class="title"><span class="hi hi-link" style="color:var(--brand)"></span> 因子相关性 · 热力图(Pearson)</div>
     <div class="actions">
       <select id="corr-method" class="btn small" style="border:1px solid var(--divider);background:var(--bg)">
         <option value="pearson">Pearson · 线性</option>
@@ -334,7 +334,7 @@ document.getElementById('btn-backtest').addEventListener('click', async () => {
     location.href = '/strategies/backtest.html'
   } catch (e) {
     toast('回测失败: ' + e.message, 'warn')
-    btn.classList.remove('loading'); btn.textContent = '▶ 跑 3 年回测'
+    btn.classList.remove('loading'); btn.innerHTML = '<span class="hi hi-play"></span>跑 3 年回测'
   }
 })
 

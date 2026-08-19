@@ -10,7 +10,7 @@
 <script src="app.js"></script>
 <script>
 document.body.innerHTML = renderShell('factors', '策略广场 / 因子广场', '20 个因子 · 点击卡片选/取消 · 组合到工作台', `
-  <a href="/strategies/workbench.html" class="btn small primary">→ 打开工作台</a>
+  <a href="/strategies/workbench.html" class="btn small primary"><span class="hi hi-arrow-r"></span>打开工作台</a>
 `)
 
 let draft = loadDraft()
@@ -120,7 +120,7 @@ html += `
       <div class="s" id="cta-list">${draft.factors.length ? draft.factors.map(k=>factorByKey(k).name).join(' · ') : '选几个因子开始组合'}</div>
     </div>
     <a href="/strategies/workbench.html" class="btn primary" id="cta-btn" style="height:40px;padding:0 20px">
-      → 进入策略工作台
+      <span class="hi hi-arrow-r"></span>进入策略工作台
     </a>
   </div>
 </div>

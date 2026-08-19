@@ -10,8 +10,8 @@
 <script src="app.js"></script>
 <script>
 document.body.innerHTML = renderShell('marketplace', '策略广场', '发现好策略 · 一键跟随 · 或自己搭一个', `
-  <a href="/strategies/factors.html" class="btn small">📚 因子广场</a>
-  <a href="/strategies/workbench.html" class="btn small primary">+ 新建策略</a>
+  <a href="/strategies/factors.html" class="btn small"><span class="hi hi-book"></span>因子广场</a>
+  <a href="/strategies/workbench.html" class="btn small primary"><span class="hi hi-plus"></span>新建策略</a>
 `)
 
 const container = document.getElementById('page-content')
@@ -35,7 +35,7 @@ function renderOfficialCards(strategies, isReal) {
       ? s.factors.slice(0,4).map(f => `<span>${(FACTORS.find(x=>x.key===f.key)?.name)||f.key} ${f.weight_pct}%</span>`).join('')
       : s.factors.slice(0,4).map(f => `<span>${factorByKey(f.key).name} ${f.w}%</span>`).join('')
     const statsHtml = isFromApi
-      ? `<div><div class="k">API</div><div class="v pos">✅ 真数据</div></div>
+      ? `<div><div class="k">API</div><div class="v pos"><span class="hi hi-check"></span> 真数据</div></div>
          <div><div class="k">因子数</div><div class="v">${s.factors.length}</div></div>
          <div><div class="k">股票池</div><div class="v">${(s.config?.universe||'-').toUpperCase()}</div></div>`
       // 官方策略**不再带写死的 metrics**(「_17」 全量排查)——
@@ -49,9 +49,9 @@ function renderOfficialCards(strategies, isReal) {
     return `
       <div class="s-card" data-id="${s.id}" ${isFromApi?'data-from-api="1"':''}>
         <div class="row1">
-          <div class="icon">${s.icon || '⭐'}</div>
+          <div class="icon"><span class="hi hi-${s.icon || 'star'}"></span></div>
           <div class="name">${s.name}</div>
-          <span class="chip solid" style="background:var(--brand);color:#fff">${isReal?'✅ 官方 · API':'官方精选'}</span>
+          <span class="chip solid" style="background:var(--brand);color:#fff">${isReal?'官方 · API':'官方精选'}</span>
         </div>
         <div class="desc">${s.description || s.desc || ''}</div>
         <div class="factors">${displayFactors}</div>
@@ -68,16 +68,16 @@ const officialHtml = renderOfficialCards(OFFICIAL_STRATEGIES, false)
 const mine = loadMine()
 const mineHtml = mine.length === 0 ? `
   <div class="empty">
-    <div class="ic">🧩</div>
+    <div class="ic"><span class="hi hi-puzzle" style="font-size:42px"></span></div>
     <div class="msg">还没有保存的策略</div>
-    <a href="/strategies/factors.html" class="btn primary">→ 去挑因子搭一个</a>
+    <a href="/strategies/factors.html" class="btn primary"><span class="hi hi-arrow-r"></span>去挑因子搭一个</a>
   </div>
 ` : `
   <div class="strategy-grid">
     ${mine.map(m => `
       <div class="s-card" data-id="${m.id}" data-mine="1">
         <div class="row1">
-          <div class="icon" style="background:var(--panel);color:var(--muted)">✎</div>
+          <div class="icon" style="background:var(--panel);color:var(--muted);border-color:var(--line)"><span class="hi hi-edit"></span></div>
           <div class="name">${m.name}</div>
           <span class="chip" style="background:var(--panel-2);color:var(--muted)">我的</span>
         </div>
@@ -106,29 +106,29 @@ container.innerHTML = `
 
   <!-- 顶部说明条 -->
   <div class="meta-bar" style="margin-bottom:24px">
-    <span>👋 <b>新用户</b>选一张官方卡片，5 秒看到今日 top 20</span>
+    <span><span class="hi hi-hand" style="color:var(--brand);vertical-align:-.18em"></span> <b>新用户</b>选一张官方卡片，5 秒看到今日 top 20</span>
     <span class="sep">·</span>
-    <span>💡 <b>进阶</b>去 <a href="/strategies/factors.html" style="color:var(--brand)">因子广场</a> 挑因子搭组合</span>
+    <span><span class="hi hi-lightbulb" style="color:var(--brand);vertical-align:-.18em"></span> <b>进阶</b>去 <a href="/strategies/factors.html" style="color:var(--brand)">因子广场</a> 挑因子搭组合</span>
     <span class="sep">·</span>
-    <span>💬 <b>不确定</b>？去 <a href="/chat" style="color:var(--brand)">对话</a> 里问 Hunter 推荐</span>
+    <span><span class="hi hi-chat" style="color:var(--brand);vertical-align:-.18em"></span> <b>不确定</b>？去 <a href="/chat" style="color:var(--brand)">对话</a> 里问 Hunter 推荐</span>
   </div>
 
   <!-- 官方精选 -->
   <div class="cat-hd">
-    ⭐ 官方精选 <span class="sub" id="official-sub">加载中... · 每季度重审</span>
+    <span class="hi hi-star" style="color:var(--brand)"></span> 官方精选 <span class="sub" id="official-sub">加载中... · 每季度重审</span>
   </div>
   <div class="strategy-grid" id="official-grid">${officialHtml}</div>
 
   <!-- 我的策略 -->
   <div class="cat-hd" style="margin-top:36px">
-    ✎ 我的策略 <span class="sub">${mine.length ? `${mine.length} 个 · 点击查看回测` : '暂无 · 去工作台搭一个'}</span>
-    ${mine.length ? `<a href="/strategies/workbench.html" style="margin-left:auto;color:var(--brand);font-size:12px">+ 新建</a>` : ''}
+    <span class="hi hi-edit" style="color:var(--brand)"></span> 我的策略 <span class="sub">${mine.length ? `${mine.length} 个 · 点击查看回测` : '暂无 · 去工作台搭一个'}</span>
+    ${mine.length ? `<a href="/strategies/workbench.html" style="margin-left:auto;color:var(--brand);font-size:12px;display:inline-flex;align-items:center;gap:4px"><span class="hi hi-plus"></span>新建</a>` : ''}
   </div>
   ${mineHtml}
 
   <!-- C5 · 社区精选 · 只显示 is_public + 有回测的 -->
   <div class="cat-hd" style="margin-top:36px">
-    🌐 社区精选 <span class="sub" id="lb-sub">加载中…</span>
+    <span class="hi hi-globe" style="color:var(--brand)"></span> 社区精选 <span class="sub" id="lb-sub">加载中…</span>
     <span style="margin-left:auto;display:flex;gap:6px;align-items:center">
       <select id="lb-period" class="btn small" style="border:1px solid var(--divider);background:var(--bg)">
         <option value="30d">30 天</option>
@@ -192,7 +192,7 @@ container.innerHTML = `
         <div class="s-card" data-id="${s.id}" data-lb="1" style="position:relative">
           <button class="btn-fork" data-fork-id="${s.id}" title="Fork 到我的" style="position:absolute;top:8px;right:8px;padding:4px 10px;font-size:11px;background:var(--brand);color:#fff;border:0;border-radius:6px;cursor:pointer">Fork</button>
           <div class="row1">
-            <div class="icon" style="background:var(--panel);color:var(--muted)">🌐</div>
+            <div class="icon" style="background:var(--panel);color:var(--muted);border-color:var(--line)"><span class="hi hi-globe"></span></div>
             <div class="name">${s.name}${s.fork_from ? ' <span style="color:var(--muted);font-size:11px">· fork</span>' : ''}</div>
             <span class="chip" style="background:var(--tag-ok-bg);color:var(--tag-ok-fg)">社区</span>
           </div>
@@ -263,16 +263,16 @@ container.innerHTML = `
           if (apiMine.length === 0) {
             grid.outerHTML = `
               <div class="empty">
-                <div class="ic">🧩</div>
+                <div class="ic"><span class="hi hi-puzzle" style="font-size:42px"></span></div>
                 <div class="msg">还没有保存的策略</div>
-                <a href="/strategies/factors.html" class="btn primary">→ 去挑因子搭一个</a>
+                <a href="/strategies/factors.html" class="btn primary"><span class="hi hi-arrow-r"></span>去挑因子搭一个</a>
               </div>`
           } else {
             grid.innerHTML = apiMine.map(m => `
               <div class="s-card" data-id="${m.id}" data-mine="1" style="position:relative">
                 <button class="btn-del" data-del-id="${m.id}" title="删除" style="position:absolute;top:8px;right:8px;background:transparent;border:0;color:var(--muted);font-size:16px;cursor:pointer">×</button>
                 <div class="row1">
-                  <div class="icon" style="background:var(--panel);color:var(--muted)">✎</div>
+                  <div class="icon" style="background:var(--panel);color:var(--muted);border-color:var(--line)"><span class="hi hi-edit"></span></div>
                   <div class="name">${m.name}</div>
                   <span class="chip" style="background:var(--panel-2);color:var(--muted)">我的 · 账户</span>
                 </div>

@@ -57,37 +57,37 @@ const CAT_ICON = { '价值': '💰', '质量': '🏆', '成长': '🚀', '动量
 // 那时的数字才是真的,而且带着"这次回测的成色"一起给出来。
 const OFFICIAL_STRATEGIES = [
   {
-    id: 'official_deep_value', icon: '💎', name: '深度价值',
+    id: 'official_deep_value', icon: 'gem', name: '深度价值',
     desc: '低估值 + 高分红 · 抗跌型长期持仓',
     factors: [ { key: 'pe_inv', w: 40 }, { key: 'pb_inv', w: 30 }, { key: 'dividend_yield', w: 30 } ],
     config: { universe: 'hs300', top_n: 20, rebalance: 'Q', cost_bps: 15, benchmark: '000300' },
   },
   {
-    id: 'official_high_div', icon: '🌾', name: '高股息防御',
+    id: 'official_high_div', icon: 'rice', name: '高股息防御',
     desc: '收租型 · 熊市抗跌 · 极稳组合',
     factors: [ { key: 'dividend_yield', w: 50 }, { key: 'vol_20d_inv', w: 30 }, { key: 'debt_ratio_inv', w: 20 } ],
     config: { universe: 'a_all', top_n: 20, rebalance: 'H', cost_bps: 15, benchmark: '000300' },
   },
   {
-    id: 'official_quality_momo', icon: '🎯', name: '质量+动量',
+    id: 'official_quality_momo', icon: 'target', name: '质量+动量',
     desc: '主流经典 · Barra 简化版 · 均衡型',
     factors: [ { key: 'roe', w: 35 }, { key: 'gross_margin', w: 15 }, { key: 'momentum_12m_1m', w: 35 }, { key: 'momentum_6m', w: 15 } ],
     config: { universe: 'hs300', top_n: 20, rebalance: 'M', cost_bps: 15, benchmark: '000300' },
   },
   {
-    id: 'official_small_growth', icon: '🌱', name: '小盘成长',
+    id: 'official_small_growth', icon: 'sprout', name: '小盘成长',
     desc: '中证 500 · 高弹性 · 牛市攻击型',
     factors: [ { key: 'revenue_growth_yoy', w: 40 }, { key: 'momentum_6m', w: 30 }, { key: 'roe', w: 30 } ],
     config: { universe: 'zz500', top_n: 30, rebalance: 'M', cost_bps: 15, benchmark: '000905' },
   },
   {
-    id: 'official_hs300_enhance', icon: '📊', name: '沪深 300 增强',
+    id: 'official_hs300_enhance', icon: 'hs300', name: '沪深 300 增强',
     desc: '基准增强 · 稳定跑赢 · 机构风格',
     factors: [ { key: 'pe_inv', w: 20 }, { key: 'roe', w: 30 }, { key: 'momentum_12m_1m', w: 30 }, { key: 'vol_20d_inv', w: 20 } ],
     config: { universe: 'hs300', top_n: 30, rebalance: 'M', cost_bps: 15, benchmark: '000300' },
   },
   {
-    id: 'official_hk_high_div', icon: '🇭🇰', name: '港股高息',
+    id: 'official_hk_high_div', icon: 'hk', name: '港股高息',
     desc: '港股通 · 收租型 · 汇率对冲',
     factors: [ { key: 'dividend_yield', w: 60 }, { key: 'pe_inv', w: 20 }, { key: 'roe', w: 20 } ],
     config: { universe: 'hk_all', top_n: 20, rebalance: 'H', cost_bps: 25, benchmark: 'HSI' },
@@ -344,17 +344,20 @@ function renderShell(activeTab, title, subTitle, actions) {
   return `
 <div class="app">
   <nav class="railbar">
-    <a href="/chat" class="rail-icon brand" title="猎鹿人">🦌</a>
-    <a href="/chat" class="rail-icon" title="对话">💬<span class="lbl">对话</span></a>
-    <a href="/watchlist" class="rail-icon" title="自选">★<span class="lbl">自选</span></a>
-    <a href="/strategies/index.html" class="rail-icon active" title="策略中心"><span style="font-size:15px">📊</span><span class="lbl">策略中心</span></a>
-    <a href="/push" class="rail-icon" title="推送">🔔<span class="lbl">推送</span></a>
+    <a href="/chat" class="rail-icon brand" title="猎鹿人"><span class="hi hi-deer"></span></a>
+    <a href="/chat" class="rail-icon" title="对话"><span class="hi hi-chat"></span><span class="lbl">对话</span></a>
+    <a href="/watchlist" class="rail-icon" title="自选"><span class="hi hi-star"></span><span class="lbl">自选</span></a>
+    <a href="/strategies/index.html" class="rail-icon active" title="策略中心"><span class="hi hi-chart"></span><span class="lbl">策略</span></a>
+    <a href="/push" class="rail-icon" title="推送"><span class="hi hi-bell"></span><span class="lbl">推送</span></a>
     <div class="rail-spacer"></div>
-    <a href="/chat" class="rail-icon" title="账户">A<span class="lbl">账户</span></a>
+    <a href="/chat" class="rail-icon" title="账户"><span class="hi hi-user"></span><span class="lbl">账户</span></a>
   </nav>
   <div class="main">
     <div class="topbar">
-      <a href="/strategies/index.html" style="color:var(--text)"><div class="title">策略中心</div></a>
+      <a href="/strategies/index.html" style="color:var(--text);display:inline-flex;align-items:center;gap:8px">
+        <span class="hi hi-deer" style="font-size:22px;color:var(--brand)"></span>
+        <div class="title">策略中心</div>
+      </a>
       <div class="sub">· ${subTitle}</div>
       <div class="actions">${actions || ''}</div>
     </div>
@@ -396,7 +399,7 @@ function openSaveDialog(afterSave) {
   const d = loadDraft()
   const defaultName = d.name || `${draftFactorNames(d).split(' · ').slice(0,3).join('+')}`
   const modal = openModal(`
-    <div class="modal-hd">💾 保存为我的策略 <span class="close" data-close>×</span></div>
+    <div class="modal-hd"><span class="hi hi-save" style="color:var(--brand)"></span> 保存为我的策略 <span class="close" data-close>×</span></div>
     <div class="modal-body">
       <div class="field" style="margin-bottom:12px">
         <div class="lbl">策略名称</div>
@@ -404,7 +407,7 @@ function openSaveDialog(afterSave) {
       </div>
       <label style="display:flex;gap:8px;align-items:center;padding:10px 12px;background:var(--panel);border-radius:8px;cursor:pointer;margin-bottom:12px">
         <input type="checkbox" id="save-public" style="accent-color:var(--brand)">
-        <span style="font-size:12px;color:var(--text)">🌐 <b>同时分享到社区</b>(其他用户可看/fork)</span>
+        <span style="font-size:12px;color:var(--text);display:inline-flex;align-items:center;gap:5px"><span class="hi hi-globe" style="color:var(--brand)"></span> <b>同时分享到社区</b>(其他用户可看/fork)</span>
       </label>
       <div style="color:var(--muted);font-size:12px;line-height:1.7">
         · 保存后可在 <b style="color:var(--text)">策略广场 · 我的策略</b> 找到<br>
@@ -474,7 +477,7 @@ async function deleteMyStrategy(id) {
 // 订阅推送 dialog
 function openSubscribeDialog() {
   openModal(`
-    <div class="modal-hd">🔔 订阅每日推送 <span class="close" data-close>×</span></div>
+    <div class="modal-hd"><span class="hi hi-bell" style="color:var(--brand)"></span> 订阅每日推送 <span class="close" data-close>×</span></div>
     <div class="modal-body">
       <div style="line-height:1.75;color:var(--text)">
         每交易日 <b>15:30 收盘后</b>，推送当日策略 <b>Top 20 持仓与变动</b>：
