@@ -107,6 +107,12 @@ TEMPLATES: list[SourceTemplate] = [
             Endpoint("a", "quote", "https://qt.gtimg.cn/q={sina}",
                      label="A股实时行情", verified=True, verified_at=_TODAY,
                      note="返回的不是 JSON,是 v_sh600519=\"~分隔\" 的文本,我们内置了解析"),
+            Endpoint("a", "kline",
+                     "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
+                     "?param={sina},day,,,320,qfq",
+                     label="A股日K线(前复权)", verified=True, verified_at=_TODAY,
+                     note="⭐ **免费 A 股 K 线首选** —— 实测 4/4 稳定。"
+                          "东财那条虽然数据更长,但它的分片会轮换(见东财 K线的说明)"),
             Endpoint("hk", "quote", "https://qt.gtimg.cn/q=hk{code5}",
                      label="港股实时行情", verified=False,
                      note="港股代码补足 5 位,如 00700 → hk00700"),
@@ -138,17 +144,24 @@ TEMPLATES: list[SourceTemplate] = [
             ),
             Endpoint(
                 "a", "kline",
-                "https://push2delay.eastmoney.com/api/qt/stock/kline/get"
-                "?secid={secid}&klt=101&fqt=1&beg=0&end=20500101&lmt=120"
+                # ⚠️ 这条**默认不勾,且标未实测** —— 见下面的 note。
+                # 数据本身是好的(1600+ 行,列序核对无误),问题在可达性。
+                "https://82.push2his.eastmoney.com/api/qt/stock/kline/get"
+                "?secid={secid}&klt=101&fqt=1&beg=20200101&end=20500101"
                 "&fields1=f1,f2,f3&fields2=f51,f52,f53,f54,f55,f56,f57",
-                label="日K线", verified=True, verified_at=_TODAY, headers=_UA,
-                note="⚠️ **必须带 beg 和 end** —— 不带的话 HTTP 仍然 200,"
-                     "但返回 rc:102 / data:null,是静默出空",
+                label="日K线", verified=False, headers=_UA, default_on=False,
+                note="⚠️ **不稳定,建议改用腾讯的 A股日K线**。"
+                     "东财 K线走 N.push2his 分片,而**能通的分片会轮换** —— "
+                     "同一分钟内 82. 是 5/5,十分钟后变 0/4,同时 7. 变成 4/4。"
+                     "写死任何一个分片都会时灵时不灵。"
+                     "另外:必须带 beg/end(不带返回 rc:102),"
+                     "且行情能用的 push2delay 对 K线只返回空数组",
             ),
             Endpoint(
                 "a", "capital",
-                "https://push2delay.eastmoney.com/api/qt/stock/fflow/kline/get"
-                "?secid={secid}&lmt=60&klt=101&fields1=f1,f2,f3&fields2=f51,f52,f53,f54,f55",
+                "https://82.push2his.eastmoney.com/api/qt/stock/fflow/kline/get"
+                "?secid={secid}&lmt=60&klt=101&fields1=f1,f2,f3"
+                "&fields2=f51,f52,f53,f54,f55,f56",
                 label="资金流向", verified=True, verified_at=_TODAY, headers=_UA,
             ),
             Endpoint(

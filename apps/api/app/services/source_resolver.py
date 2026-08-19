@@ -63,6 +63,10 @@ class UserSource:
     headers: dict
     field_map: dict
     timeout_ms: int
+    # `_24`:映射要按市场区分单位(腾讯 A股成交额是万元、港股是元)。
+    # 放最后并给默认值 —— `UserSource(*r)` 是按位置构造的,
+    # 插在中间会把后面所有字段错位一格,而那种错不报错、只是值全乱
+    market: str = ""
 
 
 def _candidates(uid: str, market: str, kind: str) -> list[UserSource]:
@@ -81,7 +85,7 @@ def _candidates(uid: str, market: str, kind: str) -> list[UserSource]:
         cur = conn.cursor()
         cur.execute(
             "SELECT id, name, upstream, endpoint, requires_key, key_in, key_name, "
-            "       key_prefix, api_key_enc, headers, field_map, timeout_ms "
+            "       key_prefix, api_key_enc, headers, field_map, timeout_ms, market "
             "FROM user_data_sources "
             "WHERE user_id=%s AND market=%s AND kind=%s AND enabled "
             "  AND (cooldown_until IS NULL OR cooldown_until < NOW()) "
@@ -241,11 +245,49 @@ def _fetch_one(src: UserSource, symbol: str) -> dict:
     kw = {"headers": headers}
     if params:
         kw["params"] = params
-    with httpx.Client(timeout=timeout, follow_redirects=True) as c:
-        r = c.post(ep, json=body, **kw) if body is not None else c.get(ep, **kw)
+
+    # ── 连接层断开要重试 ──────────────────────────────────────
+    #
+    # 东财的 K线分片(`82.push2his`)实测**时好时坏**:同一个地址同一分钟内
+    # 6 次里断 3 次,`RemoteProtocolError: Server disconnected`。
+    # 换 host、换参数、换响应大小都试过,规律只有"看运气"。
+    #
+    # 用户看到的是「这个源时灵时不灵」,而他会归咎于我们 ——
+    # 毕竟地址是我们预填的。
+    #
+    # **只重试连接层错误(断开/超时),不重试 HTTP 状态码。**
+    # 4xx/5xx 是上游明确的回答,重试只是把同一个答案再要一遍;
+    # 而 GET 是幂等的,连接断了重来一次没有副作用。
+    # POST 不重试 —— 它可能已经在上游产生了效果,我们无从判断。
+    attempts = 1 if body is not None else 3
+    last: Exception | None = None
+    for i in range(attempts):
+        try:
+            with httpx.Client(timeout=timeout, follow_redirects=True) as c:
+                r = (c.post(ep, json=body, **kw) if body is not None
+                     else c.get(ep, **kw))
+            break
+        except (httpx.RemoteProtocolError, httpx.ConnectError,
+                httpx.ConnectTimeout, httpx.ReadTimeout) as e:
+            last = e
+            if i == attempts - 1:
+                raise
+            time.sleep(0.4 * (i + 1))                     # 0.4s → 0.8s
     if not r.is_success:
         raise RuntimeError(f"HTTP {r.status_code}")
-    return r.json()
+    # **不是所有上游都返回 JSON。**腾讯/新浪给的是
+    # `v_sh600519="1~贵州茅台~..."` 这种位置分隔的文本,东财新闻给的是
+    # JSONP(`x({...})`)—— 直接 `.json()` 会抛 JSONDecodeError,
+    # 而那个错会在测试面板上显示成 "connect 阶段失败",
+    # 让用户以为是网络不通,去查地址和防火墙 —— 其实已经取回来了。
+    #
+    # 取不动就把原文塞进 `_raw` 交给映射层。认识这个形状的映射
+    # (delimited / jsonp)自己会去读;不认识的照旧会因为拿不到必需字段
+    # 而明确报"结构不对",不会静默通过。
+    try:
+        return r.json()
+    except Exception:                                     # noqa: BLE001
+        return {"_raw": r.text}
 
 
 def try_user(market: str, kind: str, symbol: str) -> dict | None:
@@ -270,7 +312,8 @@ def try_user(market: str, kind: str, symbol: str) -> dict | None:
     for s in srcs:
         try:
             raw = _fetch_one(s, symbol)
-            data = source_mapping.apply(s.upstream, kind, raw, s.field_map or None)
+            data = source_mapping.apply(s.upstream, kind, raw, s.field_map or None,
+                                        market=s.market)
             _mark(s.id, True)
             request_ctx.record(SourceUse(
                 market=market, kind=kind, used=f"user:{s.id}", used_label=s.name,

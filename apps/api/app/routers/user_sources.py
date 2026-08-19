@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field
 from app.services import source_templates
 from app.services.database import get_conn
 from app.services.mcp_crypto import encrypt, decrypt, key_hint
-from app.services.source_catalog import DataKind, Market
+from app.services.source_catalog import DataKind, Market, UPSTREAM_LABEL
 
 router = APIRouter(prefix="/user_sources", tags=["user-sources"])
 
@@ -77,12 +77,21 @@ def _validate_slot(upstream: str, market: str, kind: str) -> None:
     if kind not in _VALID_KINDS:
         raise HTTPException(400, f"未知数据类型 {kind!r}")
     tpl = source_templates.get(upstream)
-    if tpl and tpl.kinds and kind not in tpl.kinds:
-        raise HTTPException(
-            400,
-            f"{upstream} 不提供「{kind}」这类数据 —— 这个组合是填错了,"
-            f"它支持的是 {', '.join(tpl.kinds)}"
-        )
+    # `_24` §3.2:模板从「一个 kinds 列表」换成了 `endpoints`(每条带自己的
+    # market+kind+url)。这里跟着从 `tpl.kinds` 改成从 endpoints 推。
+    #
+    # **只校验 kind,不校验 (market, kind) 组合。**模板里 Yahoo 只列了
+    # 美股/港股的接口,但用户完全可能拿 Yahoo 的地址去接 A 股(600519.SS
+    # 是查得到的)—— 我们预置的是"我们验过的",不是"只准这么用"。
+    # 卡死组合等于把预填从便利变成限制。
+    if tpl and tpl.endpoints:
+        allowed = {e.kind for e in tpl.endpoints}
+        if kind not in allowed:
+            raise HTTPException(
+                400,
+                f"{upstream} 不提供「{kind}」这类数据 —— 这个组合是填错了,"
+                f"它支持的是 {', '.join(sorted(allowed))}"
+            )
 
 
 _COLS = ("id, user_id, name, upstream, market, kind, endpoint, requires_key, "
@@ -273,6 +282,138 @@ async def create_source(body: SourceIn, request: Request):
 
 def _json(v: dict) -> str:
     return json.dumps(v or {}, ensure_ascii=False)
+
+
+# ═════════════════════════════════════════════════════════════════
+# POST /api/user_sources/bulk · 一次加一整个「来源套餐」
+# ═════════════════════════════════════════════════════════════════
+
+class BulkEndpointIn(BaseModel):
+    market: str
+    kind: str
+    endpoint: str
+    label: str = ""
+    headers: dict = Field(default_factory=dict)
+    field_map: dict = Field(default_factory=dict)
+
+
+class BulkCreateIn(BaseModel):
+    upstream: str
+    endpoints: list[BulkEndpointIn]
+    # 整组共用一把 key —— 这就是这个接口存在的理由(`_24` §3.2)
+    requires_key: bool = False
+    api_key: Optional[str] = None
+    key_in: str = "header"
+    key_name: str = "Authorization"
+    key_prefix: str = ""
+    timeout_ms: int = 15000
+
+
+@router.post("/bulk")
+async def bulk_create(body: BulkCreateIn, request: Request):
+    """一次提交写 N 行 —— 老板点名的「一个源拉 K线、新闻,接口不一样」。
+
+    表单第 1 步选来源、第 2 步勾接口,提交后每条勾选的接口写一行
+    `user_data_sources`。**key 只填一次,复制进选中的每一行。**
+
+    ## 部分成功不回滚
+
+    勾了 4 条,3 条写成功、1 条撞唯一索引(那个槽位已经配过)——
+    整体回滚等于因为一条重复把另外 3 条也丢掉,而用户想要的显然是那 3 条。
+
+    所以返回三段:
+
+        created  真写进去了
+        skipped  槽位已存在 / 超额度 —— 不是错,是"这条没动"
+        failed   地址不合法之类 —— 是错,要显示出来
+
+    **三段都要返回,不能只返回 created。**只给成功的那批,用户会以为
+    自己勾的 4 条都生效了,直到某天发现新闻源根本没接上。
+
+    ## 为什么 key 校验在循环外
+
+    勾了「需要 key」却没填,4 条会报 4 遍同一件事。先拦掉,一次说清。
+    """
+    uid = _uid(request)
+
+    if not body.endpoints:
+        raise HTTPException(400, "至少要勾一个接口")
+    if not source_templates.is_known(body.upstream):
+        raise HTTPException(400, f"未知来源 {body.upstream!r} · 请从下拉里选")
+    if body.key_in not in _VALID_KEY_IN:
+        raise HTTPException(400, f"key 位置必须是 {'/'.join(sorted(_VALID_KEY_IN))}")
+    if body.requires_key and not (body.api_key or "").strip():
+        raise HTTPException(400, "勾了「需要 key」就必须填 key —— 不需要的话把勾去掉")
+
+    tpl = source_templates.get(body.upstream)
+    label = UPSTREAM_LABEL.get(body.upstream, body.upstream)
+    raw = (body.api_key or "").strip()
+    enc = encrypt(raw) if raw else None
+    hint = key_hint(raw) if raw else ""
+
+    created: list[dict] = []
+    skipped: list[dict] = []
+    failed: list[dict] = []
+
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("SELECT count(*) FROM user_data_sources WHERE user_id=%s", (uid,))
+        used = cur.fetchone()[0]
+
+        for item in body.endpoints:
+            slot = f"{item.market}·{item.kind}"
+            name = f"{label} · {item.label}" if item.label else f"{label} · {item.kind}"
+
+            if used + len(created) >= MAX_SOURCES_PER_USER:
+                skipped.append({"slot": slot, "name": name,
+                                "reason": f"已达上限 {MAX_SOURCES_PER_USER} 个,这条没加"})
+                continue
+            try:
+                ep = _validate_endpoint(item.endpoint)
+                _validate_slot(body.upstream, item.market, item.kind)
+            except HTTPException as e:
+                failed.append({"slot": slot, "name": name, "reason": e.detail})
+                continue
+
+            # 模板里那条接口自带的 header(SEC 的 UA、新浪的 Referer)
+            # 与用户填的合并 —— **用户填的优先**,他改了就是想改
+            tpl_ep = source_templates.endpoint_of(body.upstream, item.market, item.kind)
+            hdrs = dict(tpl_ep.headers) if tpl_ep else {}
+            hdrs.update(item.headers or {})
+
+            try:
+                # 每条一个 savepoint —— 不然一条撞唯一索引会把整个事务
+                # 置为 aborted,后面所有 INSERT 全部失败。
+                # 那正是"部分成功不回滚"最容易被悄悄破坏的地方
+                cur.execute("SAVEPOINT sp")
+                cur.execute(f"""
+                    INSERT INTO user_data_sources
+                      (user_id, name, upstream, market, kind, endpoint, requires_key,
+                       key_in, key_name, key_prefix, api_key_enc, api_key_hint,
+                       headers, field_map, timeout_ms)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s)
+                    RETURNING {_COLS}
+                """, (uid, name[:60], body.upstream, item.market, item.kind, ep,
+                      body.requires_key, body.key_in, body.key_name.strip(),
+                      body.key_prefix, enc, hint,
+                      _json(hdrs), _json(item.field_map), body.timeout_ms))
+                created.append(_row(cur.fetchone()))
+                cur.execute("RELEASE SAVEPOINT sp")
+            except Exception as e:                            # noqa: BLE001
+                cur.execute("ROLLBACK TO SAVEPOINT sp")
+                if "idx_uds_user_slot" in str(e):
+                    skipped.append({"slot": slot, "name": name,
+                                    "reason": "这个槽位你已经配过一条了 —— 想换就去改那一条"})
+                else:
+                    failed.append({"slot": slot, "name": name, "reason": str(e)[:160]})
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {"created": created, "skipped": skipped, "failed": failed,
+            "summary": f"加了 {len(created)} 个"
+                       + (f",跳过 {len(skipped)} 个" if skipped else "")
+                       + (f",失败 {len(failed)} 个" if failed else "")}
 
 
 # ═════════════════════════════════════════════════════════════════
@@ -519,7 +660,7 @@ async def test_saved_source(sid: int, request: Request, symbol: str = "600519"):
     try:
         cur.execute(
             "SELECT id, name, upstream, endpoint, requires_key, key_in, key_name, "
-            "       key_prefix, api_key_enc, headers, field_map, timeout_ms, kind "
+            "       key_prefix, api_key_enc, headers, field_map, timeout_ms, kind, market "
             "FROM user_data_sources WHERE id=%s AND user_id=%s", (sid, uid))
         row = cur.fetchone()
     finally:
@@ -528,7 +669,9 @@ async def test_saved_source(sid: int, request: Request, symbol: str = "600519"):
         raise HTTPException(404, "数据源不存在")
 
     from app.services import source_mapping, source_resolver
-    src = source_resolver.UserSource(*row[:12])
+    # row[:12] 对齐 UserSource 的前 12 个位置字段;market 是第 14 列,
+    # 单独传 —— 它在 dataclass 里排在 kind 后面,不能跟着切片走
+    src = source_resolver.UserSource(*row[:12], market=row[13])
     kind = row[12]
 
     t0 = time.time()
@@ -544,7 +687,8 @@ async def test_saved_source(sid: int, request: Request, symbol: str = "600519"):
     # 连通了,再看映射 —— 这两步分开报,因为用户的下一步动作完全不同:
     # 连不上 → 改地址/网络;映射失败 → 改映射或换来源
     try:
-        mapped = source_mapping.apply(src.upstream, kind, raw, src.field_map or None)
+        mapped = source_mapping.apply(src.upstream, kind, raw, src.field_map or None,
+                                      market=src.market)
     except source_mapping.MappingError as e:
         await _to_thread(source_resolver._mark, sid, False, str(e))
         return {"ok": False, "stage": "mapping", "duration_ms": _ms(t0),
