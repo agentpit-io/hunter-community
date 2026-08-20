@@ -1,7 +1,8 @@
 ﻿'use client'
 import { useEffect, useState } from 'react'
-import { Trash2, Loader2, Sparkles, CalendarDays, Hash, Wallet, Info } from 'lucide-react'
+import { Trash2, Loader2, Sparkles, CalendarDays, Hash, Wallet, Info, Plus } from 'lucide-react'
 import Sidebar from '../components/Sidebar'
+import AddStockModal, { emitWatchlistChanged } from '../components/AddStockModal'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || ''
 
@@ -70,6 +71,7 @@ export default function WatchlistManagePage() {
   const [items, setItems] = useState<Item[]>([])
   const [loading, setLoading] = useState(true)
   const [confirmDel, setConfirmDel] = useState<Item | null>(null)
+  const [showAdd, setShowAdd] = useState(false)
 
   const load = async () => {
     setLoading(true)
@@ -82,10 +84,20 @@ export default function WatchlistManagePage() {
   }
   useEffect(() => { load() }, [])
 
+  // 跨组件事件:侧栏 modal / 本页 modal / hard-delete 都会 dispatch
+  // 'watchlist:changed',本页 reload 保持数据同步。
+  useEffect(() => {
+    const h = () => load()
+    window.addEventListener('watchlist:changed', h)
+    return () => window.removeEventListener('watchlist:changed', h)
+  }, [])
+
   const handleHardDelete = async () => {
     if (!confirmDel) return
     await authFetch(`${API_BASE}/api/watchlist/${confirmDel.code}/hard`, { method: 'DELETE' })
     setConfirmDel(null)
+    // 广播 · 侧栏(/api/watchlist)同步刷新
+    emitWatchlistChanged()
     load()
   }
 
@@ -96,14 +108,25 @@ export default function WatchlistManagePage() {
       <Sidebar />
       <div className="flex-1 ml-52">
       <div className="px-10 py-8 border-b" style={{ borderColor: 'var(--border)' }}>
-        <h1 className="text-2xl font-bold" style={{ color: 'var(--text)' }}>自选股管理</h1>
-        <p className="text-sm mt-1.5" style={{ color: 'var(--text-muted)' }}>
-          管理你的自选股列表，价格提醒请在个股 K 线或分时页面设置
-        </p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold" style={{ color: 'var(--text)' }}>自选股管理</h1>
+            <p className="text-sm mt-1.5" style={{ color: 'var(--text-muted)' }}>
+              管理你的自选股列表，价格提醒请在个股 K 线或分时页面设置
+            </p>
+          </div>
+          <button onClick={() => setShowAdd(true)}
+            className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+            style={{ background: 'var(--blue)', color: 'white' }}
+            title="添加自选股">
+            <Plus className="w-4 h-4" />
+            <span>添加自选股</span>
+          </button>
+        </div>
         <div className="mt-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs"
           style={{ background: 'rgba(176,106,50,0.06)', color: 'var(--text-muted)' }}>
           <Info className="w-3.5 h-3.5" style={{ color: 'var(--blue)' }} />
-          想添加新的自选股？请点击左侧菜单的 <span style={{ color: 'var(--blue)', fontWeight: 500 }}>"+ 添加自选股"</span>，添加后会自动出现在这里。
+          点击右上角 <span style={{ color: 'var(--blue)', fontWeight: 500 }}>"+ 添加自选股"</span> 或左侧菜单同名按钮均可添加，添加后自动出现在这里与侧栏。
         </div>
       </div>
 
@@ -147,6 +170,7 @@ export default function WatchlistManagePage() {
           onCancel={() => setConfirmDel(null)}
           onConfirm={handleHardDelete} />
       )}
+      {showAdd && <AddStockModal onClose={() => setShowAdd(false)} />}
       </div>
     </div>
   )
@@ -226,7 +250,7 @@ function EmptyState() {
       </div>
       <div className="text-base font-semibold mb-2" style={{ color: 'var(--text)' }}>还没有自选股</div>
       <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-        请先到左侧菜单点 <span style={{ color: 'var(--blue)', fontWeight: 500 }}>"+ 添加自选股"</span> 加几只股票/ETF/基金
+        点右上角 <span style={{ color: 'var(--blue)', fontWeight: 500 }}>"+ 添加自选股"</span>（或左侧菜单同名按钮）加几只股票/ETF/基金
       </p>
     </div>
   )
