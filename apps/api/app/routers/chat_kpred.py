@@ -123,7 +123,9 @@ def _list_session_kpreds(user_id: str, session_id: str, limit: int = 20) -> list
 class KpredStartIn(BaseModel):
     stock_query: str = Field(..., min_length=1, max_length=100)
     days: int = Field(5, ge=1, le=30, description="预测天数 · 1-30")
-    question: str = Field("", max_length=500)
+    # question 只用于留档展示,前端会把完整用户原文塞过来 · 500 太紧,长问题一发就 422。
+    # 提到 2000 保留一定收敛,防止误粘超长文本把 DB 也撑坏。
+    question: str = Field("", max_length=2000)
     session_id: Optional[str] = Field(None)
 
 

@@ -601,11 +601,19 @@ def get_stocks() -> list[dict]:
 
 
 def add_stock(code: str, name: str, market: str, exchange: str, asset_type: str = "stock") -> bool:
+    # remove_stock 也是软删除(只置 enabled=FALSE),旧 DO NOTHING 让"删后重加"变哑操作。
+    # 冲突时复活并刷元数据,与 add_stock_by_user 对齐。
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
         "INSERT INTO stocks (code, name, market, exchange, asset_type) VALUES (%s, %s, %s, %s, %s) "
-        "ON CONFLICT (code) DO NOTHING RETURNING code",
+        "ON CONFLICT (code) DO UPDATE SET "
+        "  enabled = TRUE, "
+        "  name = EXCLUDED.name, "
+        "  market = EXCLUDED.market, "
+        "  exchange = EXCLUDED.exchange, "
+        "  asset_type = EXCLUDED.asset_type "
+        "RETURNING code",
         (code, name, market, exchange, asset_type),
     )
     result = cur.fetchone()
@@ -772,11 +780,22 @@ def get_all_stocks_by_user(user_id: str) -> list[dict]:
 
 def add_stock_by_user(code: str, name: str, market: str, exchange: str,
                       asset_type: str, user_id: str) -> bool:
+    # remove_stock_by_user 是软删除(只置 enabled=FALSE),旧写法 ON CONFLICT DO NOTHING
+    # 会让"删除后重加"变哑操作 —— 行还在但 enabled 保持 FALSE,list 过滤 enabled=TRUE
+    # 就看不到,前端只能看到"添加成功"的假消息。改成冲突时把 enabled 复活并刷元数据
+    # (name/market/exchange/asset_type 可能因为交易所变更或名称调整需要更新)。
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(
         "INSERT INTO stocks (code, name, market, exchange, asset_type, user_id) "
-        "VALUES (%s, %s, %s, %s, %s, %s) ON CONFLICT (code, user_id) DO NOTHING RETURNING code",
+        "VALUES (%s, %s, %s, %s, %s, %s) "
+        "ON CONFLICT (code, user_id) DO UPDATE SET "
+        "  enabled = TRUE, "
+        "  name = EXCLUDED.name, "
+        "  market = EXCLUDED.market, "
+        "  exchange = EXCLUDED.exchange, "
+        "  asset_type = EXCLUDED.asset_type "
+        "RETURNING code",
         (code, name, market, exchange, asset_type, user_id),
     )
     result = cur.fetchone()

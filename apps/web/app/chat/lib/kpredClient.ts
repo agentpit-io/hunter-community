@@ -74,7 +74,23 @@ export async function startKpred(args: KpredStartArgs): Promise<KpredStartResp> 
     let msg = text.slice(0, 200)
     try {
       const j = JSON.parse(text)
-      msg = j?.detail || j?.message || msg
+      // FastAPI 校验错误的 detail 是数组:[{loc, msg, type}, ...],直接拼字符串
+      // 会得到 "[object Object]",定位信息全丢。展开成 "field: msg" 便于排障。
+      const d = j?.detail
+      if (Array.isArray(d)) {
+        msg = d
+          .map((it) => {
+            const field = Array.isArray(it?.loc) ? it.loc.slice(1).join('.') : ''
+            return field ? `${field}: ${it?.msg || ''}` : (it?.msg || JSON.stringify(it))
+          })
+          .join('; ')
+      } else if (typeof d === 'string') {
+        msg = d
+      } else if (d && typeof d === 'object') {
+        msg = JSON.stringify(d)
+      } else if (j?.message) {
+        msg = j.message
+      }
     } catch {}
     throw new Error(`${res.status}: ${msg}`)
   }

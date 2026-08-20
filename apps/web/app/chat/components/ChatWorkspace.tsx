@@ -613,18 +613,61 @@ export default function ChatWorkspace({
     setError(null)
 
     // 抽股票查询: SKILL 模板 "用 Kronos 预测 {股票} 未来 N 天走势"
-    // 抽出 "{...}"之间的 · 兜底整条
+    //
+    // 抽取优先级:
+    // 1) 括号里的内容(SKILL 模板留的坑位 · 用户意图最明确)—— 兼容
+    //    "{股票代码：002463}" / "【沪电股份】" / "[002463]" 这种混合形态。
+    // 2) 兜底:从 "预测" 到"未来/走势/N 天/日"之间的片段。
+    //    停止边界里**不要**放裸 \d —— 股票代码本身就是数字,一遇 "0" 就截断,
+    //    "预测 002463 未来 10 天" 会只捕到 "0"。只有 "N天/N日" 才算天数边界。
     let stockQuery = ''
-    const m1 = text.match(/预测\s*(.+?)\s*(?:未来|走势|\d)/)
-    if (m1) stockQuery = m1[1]
-    else {
-      const m2 = text.match(/预测\s*(.+?)$/)
-      if (m2) stockQuery = m2[1]
-      else stockQuery = text
+    const bm = text.match(/[{【\[]\s*([^}】\]]+?)\s*[}】\]]/)
+    if (bm) {
+      stockQuery = bm[1]
+    } else {
+      const m1 = text.match(/预测\s*(.+?)\s*(?:未来|走势|\d+\s*[天日])/)
+      if (m1) stockQuery = m1[1]
+      else {
+        const m2 = text.match(/预测\s*(.+?)$/)
+        if (m2) stockQuery = m2[1]
+        else stockQuery = text
+      }
     }
-    // 剥占位符括号 + 常见杂字符
+    // 剥占位符括号 + 常见杂字符(括号已在上面消耗过,这里兜底剩余)
     stockQuery = stockQuery.replace(/[{}【】\[\]（）()<>《》「」『』]/g, '').trim()
+    // 剥常见 label 前缀:"股票代码：002463" → "002463" · "股票名称:沪电股份" → "沪电股份"
+    stockQuery = stockQuery.replace(
+      /^(股票代码|股票名称|股票|代码|名称|ticker|symbol)\s*[:：]\s*/i, '',
+    ).trim()
     stockQuery = stockQuery.replace(/(未来|走势|\d+\s*[天日]|Kronos|预测)/gi, '').trim()
+
+    // 抽完关键词后什么都不剩(常见于用户没把 SKILL 模板里的 {股票} 换成实际标的
+    // 就直接发送)· 这时后端 Pydantic 会因 stock_query min_length=1 抛 422 ·
+    // 与其甩个 "422: [object Object]" 给用户,不如在这里就拦下给明确提示。
+    if (!stockQuery) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `tmp_user_${Date.now()}`,
+          sessionID: sid,
+          role: 'user',
+          parts: [{ type: 'text', text }],
+          time: { created: Date.now() },
+        },
+        {
+          id: `kpred_no_stock_${Date.now()}`,
+          sessionID: sid,
+          role: 'assistant',
+          parts: [{
+            type: 'text',
+            text: '没识别到要预测的股票 · 请在指令中包含股票名或代码，例如「用 Kronos 预测 **贵州茅台** 未来 5 天走势」。',
+          }],
+          time: { created: Date.now() + 1 },
+        },
+      ])
+      setBusy(false)
+      return
+    }
 
     const days = extractDays(text)   // 默认 5
     const isFirstUserMsg = !messages.some((m) => m.role === 'user')
@@ -643,9 +686,13 @@ export default function ChatWorkspace({
 
     setKpred({ phase: 'start', pct: 5, text: '正在启动 Kronos 预测...' })
 
+    // 后端 question 字段 max_length=2000 · 前端再兜一层 500 字符截断,
+    // 长文本用户不常见,但 SKILL 模板里塞大段说明的场景要防住。
+    const question = text.length > 500 ? text.slice(0, 500) : text
+
     try {
       const final = await runKpred(
-        { stockQuery, days, question: text, sessionId: sid },
+        { stockQuery, days, question, sessionId: sid },
         (ev: KpredProgressEvent) => {
           setKpred((prev) => ({
             phase: ev.phase as any,
