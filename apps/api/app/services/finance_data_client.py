@@ -667,32 +667,19 @@ def _f(v, default: float = 0.0) -> float:
 # ── akshare 兜底（非 watchlist 股票数据陈旧时自动补充） ──────────────────────
 
 def _get_kline_akshare(bare: str, limit: int = 120) -> list[dict]:
-    """从 akshare 拉任意 A 股 K 线（不依赖 watchlist，前复权日线）。"""
+    """从 akshare 拉任意 A 股 K 线(不依赖 watchlist · 前复权日线)。
+
+    2026-08-18 · 改走共享 `agents.data_sources.akshare_kline.fetch_kline` ·
+    该模块内置**腾讯优先 · 东财兜底**双通道:
+      · Docker Desktop for Mac 下东财 CDN(push2.eastmoney.com)对 vpnkit 出网
+        差异化拒绝(TLS 完成后立刻断连)· 独占 ak.stock_zh_a_hist 就挂
+      · 腾讯 qt.gtimg.cn 无此限制 · 实测 8s 拿 252 根日线
+      · 与 internal_uzi.py::_akshare_kline 一致 · 单点维护双通道逻辑
+    """
     try:
-        import akshare as ak
-        from datetime import datetime, timedelta
-        end = datetime.now()
-        start = end - timedelta(days=limit * 2)
-        df = ak.stock_zh_a_hist(
-            symbol=bare, period="daily",
-            start_date=start.strftime("%Y%m%d"),
-            end_date=end.strftime("%Y%m%d"),
-            adjust="qfq",
-        )
-        if df is None or df.empty:
-            return []
-        rows = df.tail(limit)
-        return [
-            {
-                "ts":     str(r.get("日期", ""))[:10],
-                "open":   _f(r.get("开盘")),
-                "high":   _f(r.get("最高")),
-                "low":    _f(r.get("最低")),
-                "close":  _f(r.get("收盘")),
-                "volume": int(r.get("成交量") or 0),
-            }
-            for _, r in rows.iterrows()
-        ]
+        from agents.data_sources.akshare_kline import fetch_kline
+        bars = fetch_kline(bare, days=limit)
+        return bars[-limit:] if bars else []
     except Exception:
         return []
 

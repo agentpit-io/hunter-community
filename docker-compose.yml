@@ -76,7 +76,8 @@ services:
       # 平台 key · 解锁左侧全部工具与 SKILL(免费申请 hunter.agentpit.io/dev/api-keys)
       # 留空也能跑:聊天用你自己的 LLM key,工具则在 UI 左下角「解锁全部工具」里填 key
       HUNTER_API_KEY: ${HUNTER_API_KEY:-}
-      HUNTER_UPSTREAM_URL: ${HUNTER_UPSTREAM_URL:-https://hunter.agentpit.io}
+      # 独立运行模式 · 兜底默认改成空 · .env 里显式清空即真清空 · 不再默默指回平台
+      HUNTER_UPSTREAM_URL: ${HUNTER_UPSTREAM_URL:-}
       # P4 · pluggable providers
       # 默认留空 = 自动选:配了 key 走 hunter 网关,没配则 akshare(A股免 key)
       DATA_SOURCE_PROVIDER: ${DATA_SOURCE_PROVIDER:-}
