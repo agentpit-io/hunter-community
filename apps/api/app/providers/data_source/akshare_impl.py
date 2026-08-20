@@ -2,9 +2,19 @@
 
 Wraps the sync akshare library in asyncio.to_thread. Rate-limited by
 the underlying free public data feeds — not for high-QPS use.
+
+2026-08-20 · quote 收敛到共享层:
+  · get_quote 走 agents.data_sources.akshare_quote.fetch_quote(东财 → 腾讯)
+  · 腾讯解析复用 source_mapping._delimited(spec 驱动 · §5.2/§5.3 单位约定沉淀于此)
+  · 不再手写 _tencent_quote_sync —— 那份下标 [6] 写错了、盲目 ×100 会重造 §5.3 坑
+  · TODO: get_kline 也该走 agents.data_sources.akshare_kline.fetch_kline
+    · 见 apps/api/agents/data_sources/akshare_kline.py · 留给下一轮
 """
 import asyncio
 from typing import Any
+
+from loguru import logger
+
 from .base import IDataSource
 
 
@@ -19,24 +29,11 @@ class AkshareDataSource(IDataSource):
             ) from e
 
     async def get_quote(self, code: str) -> dict:
-        import akshare as ak
-        df = await asyncio.to_thread(ak.stock_zh_a_spot_em)
-        matched = df[df["代码"] == code]
-        if matched.empty:
-            raise ValueError(f"stock not found: {code}")
-        row = matched.iloc[0]
-        return {
-            "code": code,
-            "name": str(row.get("名称", "")),
-            "price": _f(row.get("最新价")),
-            "change_pct": _f(row.get("涨跌幅")),
-            "volume": _f(row.get("成交量")),
-            "amount": _f(row.get("成交额")),
-            "high": _f(row.get("最高")),
-            "low": _f(row.get("最低")),
-            "open": _f(row.get("今开")),
-            "prev_close": _f(row.get("昨收")),
-        }
+        from agents.data_sources.akshare_quote import fetch_quote
+        q = await asyncio.to_thread(fetch_quote, code, "A")
+        if q is None:
+            raise ValueError(f"stock not found or all quote sources failed: {code}")
+        return q
 
     async def get_kline(self, code: str, days: int = 30) -> dict:
         import akshare as ak
