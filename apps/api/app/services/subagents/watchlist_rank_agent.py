@@ -332,19 +332,14 @@ def _score_3y(financials: list | None) -> dict:
 # ═════════════════════════════════════════════════════════════════
 
 def _fetch_financials_sync(code: str, market: str) -> list | None:
-    """拉 25 期季报 · 港股当前 finance-data 无数据 · 直接返 None 不重试。"""
-    if market != "A":
-        return None
-    sym = fd.to_symbol(code)
-    if not sym:
-        return None
-    try:
-        r = fd._get(f"/api/v1/financial/{sym}")
-        if isinstance(r, list) and r:
-            return r
-    except Exception as e:
-        logger.warning("[wl_rank] {} financial HTTP 失败: {}", code, e)
-    return None
+    """拉 A 股财报 · 走共享层 agents.data_sources.akshare_financials · 港股当前无。
+
+    2026-08-20 · 独立运行模式 · fd._get(/api/v1/financial) 已切断
+    · 双通道(同花顺 abstract_ths → 东财 abstract)统一维护于共享层
+    · _pct_str 归一化、字段映射、按报告期升序都在共享层实现
+    """
+    from agents.data_sources.akshare_financials import fetch_financials
+    return fetch_financials(code, market)
 
 
 async def _fetch_one(stock: dict) -> dict:
