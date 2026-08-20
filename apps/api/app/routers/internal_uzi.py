@@ -61,37 +61,13 @@ def _akshare_kline(bare: str, days: int = 30) -> list[dict]:
 
 
 def _akshare_financials(bare: str) -> dict | None:
-    """akshare 财务摘要 · 返 dict 兼容 _fmt_financials 期望的字段名。"""
-    try:
-        import akshare as ak
-        df = ak.stock_financial_abstract(symbol=bare)
-    except Exception as e:
-        logger.warning("[uzi] akshare financials fallback failed code={} err={}", bare, e)
-        return None
-    if df is None or df.empty:
-        return None
-    date_cols = [c for c in df.columns if str(c).isdigit() and len(str(c)) == 8]
-    if not date_cols:
-        return None
-    date_cols.sort(reverse=True)
-    latest = date_cols[0]
-    mapping = {
-        "基本每股收益":         "s_fa_eps_basic",
-        "每股净资产":           "s_fa_bps",
-        "净资产收益率(ROE)":    "du_return_on_equity",
-        "毛利率":               "sales_gross_profit",
-    }
-    out: dict = {"m_timetag": latest}
-    for _, row in df.iterrows():
-        name = str(row.get("指标", "")).strip()
-        if name in mapping:
-            v = row.get(latest)
-            if v is not None and str(v).strip() and str(v) != "nan":
-                try:
-                    out[mapping[name]] = round(float(v), 4)
-                except (TypeError, ValueError):
-                    pass
-    return out if len(out) > 1 else None
+    """akshare 财务摘要 · 返 dict 兼容 _fmt_financials 期望的字段名。
+
+    2026-08-20 · 收敛到共享层 · 双通道(同花顺 → 东财)统一维护
+    · 与 watchlist_rank_agent 走同一份实现 · 消除 §9 铁律 3 违反。
+    """
+    from agents.data_sources.akshare_financials import latest as _latest_financials
+    return _latest_financials(bare)
 
 
 def _akshare_news(bare: str, limit: int = 8) -> list[dict]:
@@ -453,7 +429,9 @@ async def deep_analysis(body: DeepAnalysisIn, request: Request):
         results = await asyncio.gather(
             asyncio.to_thread(fd.get_quote, code),
             asyncio.to_thread(fd.get_kline, code, "daily", 30),
-            asyncio.to_thread(fd._get, f"/api/v1/financial/{sym}") if sym else asyncio.sleep(0, result=None),
+            # 财报走 shared akshare(§9 铁律 3 · 独立部署时 fd._get 会打空)
+            # · 主路径直接是 akshare · 不再作为 fd fallback 的备胎
+            asyncio.to_thread(_akshare_financials, code.split(".")[0]) if code.split(".")[0].isdigit() else asyncio.sleep(0, result=None),
             asyncio.to_thread(fd.get_lhb, code, 30),
             asyncio.to_thread(fd.get_fund_holders, code),
             asyncio.to_thread(fd.get_governance, code),
@@ -489,9 +467,7 @@ async def deep_analysis(body: DeepAnalysisIn, request: Request):
         if not bundle.get("kline"):
             fb_tasks.append(asyncio.to_thread(_akshare_kline, _bare, 30))
             fb_slots.append("kline")
-        if not bundle.get("financials"):
-            fb_tasks.append(asyncio.to_thread(_akshare_financials, _bare))
-            fb_slots.append("financials")
+        # financials 已在主 gather 里走 shared akshare · 这里不再重复补
         if not bundle.get("news"):
             fb_tasks.append(asyncio.to_thread(_akshare_news, _bare, 8))
             fb_slots.append("news")
