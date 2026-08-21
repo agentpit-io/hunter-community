@@ -202,6 +202,40 @@ def inspect(text: str) -> dict:
 
 # ── 安装 ──────────────────────────────────────────────────────
 
+def _author_tpl(fm: dict) -> str:
+    """作者自己写的提问模板 —— 有就用他的。
+
+    找两个位置:`hunter.prompt_tpl`(我们的扩展)与顶层 `prompt_tpl`
+    (有些作者会直接写在顶层)。都没有就返回空,由调用方兜底。
+    """
+    h = fm.get("hunter")
+    if isinstance(h, dict) and str(h.get("prompt_tpl") or "").strip():
+        return str(h["prompt_tpl"]).strip()
+    return str(fm.get("prompt_tpl") or "").strip()
+
+
+# 看起来是"跟个股有关"的词。命中才在兜底模板里带上 {股票}。
+_STOCKY = ("股", "stock", "equity", "ticker", "投研", "研报", "财报",
+           "estimate", "valuation", "earnings", "portfolio", "龙虎榜")
+
+
+def _fallback_tpl(name: str, desc: str) -> str:
+    """作者没写模板时的兜底。
+
+    ⚠️ **不要一律套 `分析 {股票}`。**推荐清单里混着 API 文档类的 SKILL
+    (stripe / seedance1.5-api / ctp-api / wtpy),给它们套上
+    「用 stripe 分析 {股票}」是句没有意义的话 —— 双击卡片就把这句发出去,
+    模型只能硬着头皮编。
+
+    判不出是不是个股相关时给一句**中性祈使句**,让用户自己补 ——
+    比给一个方向错的模板好。
+    """
+    blob = f"{name} {desc}".lower()
+    if any(w in blob for w in _STOCKY):
+        return f"用 {name} 分析 {{股票}}"
+    return f"使用 {name} —— "
+
+
 def install(text: str, paths: list[str]) -> list[str]:
     """下载 tarball 并**只解压选中 skill 的目录**。返回装好的 skill 名。
 
@@ -252,13 +286,22 @@ def install(text: str, paths: list[str]) -> list[str]:
             logger.warning("[skill_install] 取不到 {}", member)
             continue
 
-        fm = (re.match(r"^---\s*\n(.*?)\n---\s*\n?(.*)$", content, re.S)
-              or [None, "", content])
-        front, body = (fm[1], fm[2]) if fm[0] else ("", content)
-        name = str((re.search(r"^name:\s*(.+)$", front, re.M)
-                    or [None, sp.split("/")[-2]])[1]).strip().strip('"')
-        desc = str((re.search(r"^description:\s*(.+)$", front, re.M)
-                    or [None, ""])[1]).strip().strip('"')
+        # ⚠️ **复用 skill_files 的解析器,不要在这里自己写正则。**
+        #
+        # 原来这里用 `^description:\s*(.+)$` 抓描述 —— 遇到 YAML 块标量
+        #     description: |
+        #       多行内容
+        # 会把值抓成**字面的 "|"**。实测 tigersking520/stock-analysis-skill
+        # 装完之后 description 与 prompt_tpl 都是一个竖线,
+        # tradingagents-analysis 是 ">-"。
+        #
+        # **不报错**:卡片能显示、能装、能加载,只是那两栏是个符号,
+        # 而双击卡片会把这个符号当成提问发给模型。
+        #
+        # 同一件事两处实现、只改一处 —— 交接稿 §9 铁律 3。
+        fm_data, body = skill_files._parse_frontmatter(content)
+        name = str(fm_data.get("name") or sp.split("/")[-2]).strip()
+        desc = str(fm_data.get("description") or "").strip()
 
         slug = re.sub(r"[^a-z0-9_]+", "_", name.lower()).strip("_") or "imported_skill"
         try:
@@ -272,7 +315,19 @@ def install(text: str, paths: list[str]) -> list[str]:
             "description": desc,
             "icon": "📦",
             "category": "其他",
-            "prompt_tpl": desc[:80] or f"使用 {name}",
+            # ⚠️ **提问模板不能拿描述凑数。**
+            #
+            # 原来是 `desc[:80]` —— 而 description 写的是"这个 SKILL 是什么"
+            #(「个股深度分析的核心工作流。当用户要求…时触发」),不是
+            # 一句用户会问的话。双击卡片把它发出去,模型收到的是一段**描述**,
+            # 于是它去**解释这个 SKILL 的工作流**,而不是执行分析。
+            # 实测 deep-analysis 就是这样:回答开头是
+            #     "I will explain the core workflow of my ... skill"
+            #
+            # 作者写了 hunter.prompt_tpl 就用他的;没写就用一句**祈使句**,
+            # 让模型知道要动手而不是介绍自己。
+            "prompt_tpl": (_author_tpl(fm_data)
+                           or _fallback_tpl(name, desc)),
             "source_url": f"https://github.com/{owner}/{repo}",
             "brand": owner,
             # 装的是哪个 commit / 丢了什么,日后排查"某功能不好使"全靠它 ——

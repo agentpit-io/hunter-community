@@ -61,7 +61,23 @@ def _parse_frontmatter(text: str) -> tuple[dict, str]:
     cur_list: list | None = None     # 当前正在累积的数组
     cur_key: str | None = None
 
-    for line in raw.splitlines():
+    # ⚠️ **必须认 YAML 的块标量**(`|` `|-` `>` `>-`)。
+    #
+    # 网上下载的 SKILL 常写成:
+    #     description: |
+    #       第一行
+    #       第二行
+    # 而原来的逐行解析会把值读成**字面的 "|"** —— 实测
+    # tigersking520/stock-analysis-skill 的 description 和 prompt_tpl
+    # 都变成了 `"|"`,tradingagents-analysis 变成 `">-"`。
+    #
+    # 它不报错:界面上显示一个竖线,卡片能点、能装、能加载,
+    # 只是那一栏是个符号。而双击卡片会把这个符号当成提问发给模型。
+    lines_it = raw.splitlines()
+    n = 0
+    while n < len(lines_it):
+        line = lines_it[n]
+        n += 1
         if not line.strip() or line.lstrip().startswith("#"):
             continue
         indent = len(line) - len(line.lstrip())
@@ -77,6 +93,26 @@ def _parse_frontmatter(text: str) -> tuple[dict, str]:
         k, _, v = s.partition(":")
         k, v = k.strip(), v.strip()
         cur_list = None
+
+        # 块标量:值是 | / |- / > / >- 时,把后面缩进更深的行全收进来
+        if v in ("|", "|-", "|+", ">", ">-", ">+"):
+            buf = []
+            while n < len(lines_it):
+                nxt = lines_it[n]
+                if nxt.strip() and (len(nxt) - len(nxt.lstrip())) <= indent:
+                    break            # 缩进回到同级或更浅 = 块结束
+                buf.append(nxt.strip())
+                n += 1
+            # `>` 折叠成一行,`|` 保留换行。两者都去掉尾部空行
+            joined = (" " if v.startswith(">") else chr(10)).join(
+                x for x in buf if x or v.startswith("|"))
+            val = joined.strip()
+            if indent == 0:
+                cur_map = None
+                data[k] = val
+            else:
+                (cur_map if cur_map is not None else data)[k] = val
+            continue
 
         if indent == 0:
             cur_map = None

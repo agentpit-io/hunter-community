@@ -484,10 +484,38 @@ async def list_recommended(request: Request):
         for i in items:
             i["installed"] = False
 
+    # ── 容量自查 ────────────────────────────────────────────
+    #
+    # 2026-08-21 踩过:推荐清单合计 23 个 SKILL,而 MAX_CUSTOM 当时是 20 ——
+    # **按我们自己的推荐清单全装一遍必然超**,而做推荐位时没回头看这个常量。
+    # 用户装到第 3 个仓才被拦下,报的是一句干巴巴的"最多 20 个"。
+    #
+    # 这里把两个数摆在一起返回,并在清单本身就装不下时打一条 ERROR ——
+    # 让"推荐了却装不下"这件事在**我们改清单的时候**就暴露,
+    # 而不是等用户装到一半。
+    need = sum(int(i.get("total") or 0) for i in items)
+    try:
+        installed_n = len([x for x in skill_files.load_all()
+                           if not x.get("builtin", True)])
+    except Exception:                                          # noqa: BLE001
+        installed_n = 0
+    if need > MAX_CUSTOM:
+        log.error("[recommended] 推荐清单合计 %d 个 SKILL,超过上限 %d —— "
+                  "用户按清单全装会被拦下。改大 MAX_CUSTOM 或精简清单",
+                  need, MAX_CUSTOM)
+
     return {
         "items": items,
         "checked_at": data.get("checked_at", ""),
         "note": data.get("note", ""),
+        # 前端据此提示"全装需要 N 个位置,你还剩 M 个"
+        "capacity": {
+            "installed": installed_n,
+            "max": MAX_CUSTOM,
+            "remaining": max(0, MAX_CUSTOM - installed_n),
+            "need_for_all": need,
+            "fits": need + installed_n <= MAX_CUSTOM,
+        },
         # 被否掉的也返回 —— 前端折叠显示。
         # 「为什么不推荐 30500 star 那个」是用户会问的,答案写在这里
         "rejected": data.get("rejected") or [],
