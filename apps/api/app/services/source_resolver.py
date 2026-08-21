@@ -33,6 +33,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -67,6 +68,9 @@ class UserSource:
     # 放最后并给默认值 —— `UserSource(*r)` 是按位置构造的,
     # 插在中间会把后面所有字段错位一格,而那种错不报错、只是值全乱
     market: str = ""
+    # HTTP 动词。多数源是 GET;巨潮公告只吃 POST(实测 GET→500)。
+    # 同 market —— 放最后并给默认值,`UserSource(*r)` 是按位置构造的
+    http_method: str = "GET"
 
 
 def _candidates(uid: str, market: str, kind: str) -> list[UserSource]:
@@ -85,7 +89,7 @@ def _candidates(uid: str, market: str, kind: str) -> list[UserSource]:
         cur = conn.cursor()
         cur.execute(
             "SELECT id, name, upstream, endpoint, requires_key, key_in, key_name, "
-            "       key_prefix, api_key_enc, headers, field_map, timeout_ms, market "
+            "       key_prefix, api_key_enc, headers, field_map, timeout_ms, market, http_method "
             "FROM user_data_sources "
             "WHERE user_id=%s AND market=%s AND kind=%s AND enabled "
             "  AND (cooldown_until IS NULL OR cooldown_until < NOW()) "
@@ -187,7 +191,12 @@ def expand(endpoint: str, code: str) -> str:
                 .replace("{code5}", bare.zfill(5))              # 腾讯港股 hk00700
                 .replace("{sina}", f"hk{bare.zfill(5)}")
                 .replace("{cik10}", bare.zfill(10))
-                .replace("{yahoo}", f"{bare.zfill(4)}.HK"))
+                # ⚠️ Yahoo 港股要**四位**:0700.HK。
+                # `zfill(4)` 对 "00700"(5 位)是空操作,拼出 00700.HK ——
+                # 而那个地址**返回 200 且结构完整,只是 price 是 null**,
+                # 于是被映射层判成"上游结构变了",让人去查 Yahoo 改没改接口。
+                # 先 lstrip 掉前导零再补到 4 位才对(00700→700→0700)。
+                .replace("{yahoo}", f"{(bare.lstrip('0') or '0').zfill(4)}.HK"))
 
     if bare.startswith(("60", "68", "11", "51", "52")):
         exch, em = "SH", "1"
@@ -218,9 +227,57 @@ def expand(endpoint: str, code: str) -> str:
             .replace("{yahoo}", yahoo))
 
 
+# ── SEC 的 ticker → CIK 对照 ──────────────────────────────────
+#
+# SEC 的接口按 **CIK**(10 位数字)索引,不认 ticker:
+#     data.sec.gov/submissions/CIK0000320193.json   200
+#     data.sec.gov/submissions/CIKAAPL.json         404
+#
+# 之前 `{cik10}` 只做补零,用户填 AAPL 就拼出 CIKAAPL → 404,而 404
+# 看起来像"这家公司没有备案",实际是我们没做转换。文档里写了"得填 CIK",
+# 但**没人会记住一串数字** —— 该我们查。
+#
+# SEC 自己发布了对照表(company_tickers.json,约 10000 家,600KB),
+# 免费、无需 key,只要 UA 带联系邮箱。进程内缓存一次。
+_CIK_MAP: dict[str, str] | None = None
+_SEC_UA = {"User-Agent": os.getenv("SEC_USER_AGENT",
+                                   "Hunter Community admin@example.com")}
+
+
+def _cik_of(ticker: str) -> str | None:
+    """AAPL → 0000320193。查不到返回 None(调用方保持原样,让上游报 404)。"""
+    global _CIK_MAP
+    if _CIK_MAP is None:
+        _CIK_MAP = {}
+        try:
+            with httpx.Client(timeout=30, follow_redirects=True) as c:
+                d = c.get("https://www.sec.gov/files/company_tickers.json",
+                          headers=_SEC_UA).json()
+            # 它的结构是 {"0": {cik_str, ticker, title}, "1": {...}} ——
+            # 一个**用序号当键的对象**,不是数组
+            for v in (d.values() if isinstance(d, dict) else []):
+                t = str(v.get("ticker") or "").upper()
+                if t:
+                    _CIK_MAP[t] = str(v.get("cik_str") or "").zfill(10)
+            logger.info("[sec] 载入 ticker→CIK 对照 {} 条", len(_CIK_MAP))
+        except Exception as e:                                # noqa: BLE001
+            # 拉不到就退化成"不转换" —— 不抛,否则一次网络抖动会让所有
+            # SEC 源一起挂掉,而它们本来只是少了一层便利
+            logger.warning("[sec] 拉 ticker→CIK 失败(本次不转换): {}", e)
+    return _CIK_MAP.get(ticker.upper()) or None
+
+
 def _fetch_one(src: UserSource, symbol: str) -> dict:
     """打一次用户的源并映射。任何一步失败都抛异常,由上层降级。"""
-    ep = expand(src.endpoint, symbol)
+    # 地址里要 CIK 而用户给的是 ticker(字母)→ 先查对照表换成数字。
+    # **只在真的需要时才查**(地址里有 {cik10} 且代码不是纯数字),
+    # 这样非 SEC 的源不会因此多一次网络请求
+    sym = symbol
+    if "{cik10}" in src.endpoint and not str(symbol).strip().isdigit():
+        hit = _cik_of(str(symbol).strip())
+        if hit:
+            sym = hit
+    ep = expand(src.endpoint, sym)
     headers = {k: str(v) for k, v in (src.headers or {}).items()}
     params: dict = {}
     body: dict | None = None
@@ -259,13 +316,23 @@ def _fetch_one(src: UserSource, symbol: str) -> dict:
     # 4xx/5xx 是上游明确的回答,重试只是把同一个答案再要一遍;
     # 而 GET 是幂等的,连接断了重来一次没有副作用。
     # POST 不重试 —— 它可能已经在上游产生了效果,我们无从判断。
-    attempts = 1 if body is not None else 3
+    # 动词:模板声明的优先,其次看有没有 body(key 放在 body 里就必须 POST)
+    verb = (src.http_method or "GET").upper()
+    if body is not None:
+        verb = "POST"
+
+    # POST 不重试 —— 它可能已经在上游产生了效果,我们无从判断
+    attempts = 1 if verb != "GET" else 3
     last: Exception | None = None
     for i in range(attempts):
         try:
             with httpx.Client(timeout=timeout, follow_redirects=True) as c:
-                r = (c.post(ep, json=body, **kw) if body is not None
-                     else c.get(ep, **kw))
+                if verb == "GET":
+                    r = c.get(ep, **kw)
+                else:
+                    # 没有 key body 时也要能 POST —— 巨潮就是这种:
+                    # 参数全在 URL query 上,但它只接受 POST 动词
+                    r = c.post(ep, json=body, **kw) if body is not None else c.post(ep, **kw)
             break
         except (httpx.RemoteProtocolError, httpx.ConnectError,
                 httpx.ConnectTimeout, httpx.ReadTimeout) as e:

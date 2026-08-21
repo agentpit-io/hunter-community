@@ -479,10 +479,16 @@ async def init_db():
               last_err       TEXT,
               call_count     BIGINT     NOT NULL DEFAULT 0,
               error_count    BIGINT     NOT NULL DEFAULT 0,
+              http_method   VARCHAR(8)  NOT NULL DEFAULT 'GET',
               created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
               updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """)
+        # `_24` P0.5 · 补列(同 sql/20260821_user_source_method.sql)。
+        # 建表语句里不能直接加 —— 已经跑起来的库不会重建表,
+        # 只有 ALTER 才能补上。ADD COLUMN IF NOT EXISTS 是幂等的。
+        cur.execute("ALTER TABLE user_data_sources ADD COLUMN IF NOT EXISTS "
+                    "http_method VARCHAR(8) NOT NULL DEFAULT 'GET'")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_uds_user_lookup "
                     "ON user_data_sources(user_id, market, kind) WHERE enabled")
         # 同一 (market, kind, upstream) 只允许一条 —— 允许两条的话

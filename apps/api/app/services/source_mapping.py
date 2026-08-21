@@ -193,6 +193,28 @@ BUILTIN: dict[str, dict[str, dict]] = {
                   "_required": _QUOTE_REQ},
         "kline": {"_shape": "yahoo_chart", "_required": _KLINE_REQ},
     },
+    # SEC EDGAR · 两个接口两种结构,都不是普通对象数组
+    "sec": {
+        # submissions:`filings.recent` 是**列式**的 —— 每个字段一个等长数组
+        # (form[] / filingDate[] / accessionNumber[] …,实测 1001 条),
+        # 不是 [{form, date}, …]。要按下标横着拼回来。
+        "announce":  {"_shape": "sec_filings", "_required": ["items"]},
+        # companyconcept:`units` 底下的键是**货币代码**(USD / EUR…),
+        # 随公司变,JSONPath 写不出来 —— 取第一个。
+        "financial": {"_shape": "sec_concept", "_required": ["rows"]},
+    },
+    # 巨潮资讯 · A股法定披露平台 · POST 才有响应(实测 GET→500)
+    # `{announcements: [{secName, announcementTitle, announcementTime, adjunctUrl}]}`
+    "cninfo": {
+        "announce": {"_shape": "list", "_list": "$.announcements",
+                     "title": "announcementTitle", "url": "adjunctUrl",
+                     "published_at": "announcementTime", "source": "secName",
+                     # announcementTime 是**毫秒时间戳**(1786723200000),
+                     # adjunctUrl 是**相对路径**(finalpage/2026-08-15/xxx.PDF)——
+                     # 两个都要后处理,见 `_post_cninfo`
+                     "_post": "cninfo",
+                     "_required": ["items"]},
+    },
     # 腾讯财经 · `v_sh600519="1~贵州茅台~600519~1299.10~..."`(88 段,`~` 分隔)
     #
     # 下标是 2026-08-19 实测数出来的,**不是照文档抄的** ——
@@ -319,6 +341,10 @@ def apply(upstream: str, kind: str, payload: Any, custom: dict | None = None,
         out = _tencent_kline(payload, spec)
     elif shape == "av_daily":
         out = _av_daily(payload)
+    elif shape == "sec_filings":
+        out = _sec_filings(payload)
+    elif shape == "sec_concept":
+        out = _sec_concept(payload)
     elif shape == "jsonp":
         out = _jsonp(payload, spec)
     else:
@@ -414,10 +440,47 @@ def _list(payload: Any, spec: dict) -> dict:
     if not isinstance(arr, list):
         return {"items": []}
     keys = [k for k in spec if not k.startswith("_")]
-    return {"items": [
+    items = [
         {k: (it.get(spec[k]) if isinstance(it, dict) else None) for k in keys}
         for it in arr
-    ]}
+    ]
+    post = spec.get("_post")
+    if post == "cninfo":
+        items = [_post_cninfo(x) for x in items]
+    return {"items": items}
+
+
+def _post_cninfo(row: dict) -> dict:
+    """巨潮的两个字段不能原样给模型。
+
+    · `announcementTime` 是**毫秒时间戳**。原样给出去,模型会把
+      1786723200000 当成一个数字读,或者干脆编一个日期。
+    · `adjunctUrl` 是**相对路径** `finalpage/2026-08-15/xxx.PDF`。
+      模型拿到它没法访问,而它看起来又像个链接 —— 会被当成可点的引用附在
+      回答里,用户点了 404。补上域名才是一个真链接。
+    """
+    import datetime as _dt
+    t = row.get("published_at")
+    if isinstance(t, (int, float)) and t > 1e11:          # 毫秒
+        try:
+            # ⚠️ **要按北京时间转,不能用 utcfromtimestamp。**
+            # 巨潮给的时间戳是北京时间当天零点(1786723200000),
+            # 按 UTC 转会**退一天**:实测算出 2026-08-14,而同一条记录的
+            # adjunctUrl 里写着 finalpage/**2026-08-15**/。
+            #
+            # 差一天在公告上是实质错误 —— 半年报"8-14 发布"和"8-15 发布"
+            # 会影响"这消息出来之后股价怎么走"的判断。而它不报错,
+            # 只是一个看起来很正常的日期。
+            row["published_at"] = (
+                _dt.datetime.utcfromtimestamp(t / 1000)
+                + _dt.timedelta(hours=8)
+            ).strftime("%Y-%m-%d")
+        except (OverflowError, OSError, ValueError):
+            pass
+    u = row.get("url")
+    if isinstance(u, str) and u and not u.startswith("http"):
+        row["url"] = "http://static.cninfo.com.cn/" + u.lstrip("/")
+    return row
 
 
 def _raw_text(payload: Any) -> str:
@@ -504,6 +567,83 @@ def _em_klines(payload: Any, spec: dict) -> dict:
         if row.get("ts"):
             rows.append(row)
     return {"rows": rows}
+
+
+# SEC 的备案表单类型 —— 只留投研会看的。
+#
+# 不筛的话 1001 条里绝大多数是 **Form 4**(高管持股变动),一天好几条,
+# 会把真正重要的 10-K / 10-Q / 8-K 冲到列表外面。模型看到的是"最近的备案",
+# 而最近的全是内部人交易申报。
+_SEC_FORMS = {"10-K", "10-Q", "8-K", "20-F", "40-F", "6-K",
+              "DEF 14A", "S-1", "424B4"}
+_SEC_MAX = 40
+
+
+def _sec_filings(payload: Any) -> dict:
+    """SEC submissions · `filings.recent` 是列式的,按下标拼回对象数组。"""
+    rec = _walk(payload, "$.filings.recent")
+    if not isinstance(rec, dict):
+        return {"items": []}
+    forms = rec.get("form") or []
+    if not isinstance(forms, list):
+        return {"items": []}
+
+    def col(name: str, i: int):
+        a = rec.get(name)
+        return a[i] if isinstance(a, list) and i < len(a) else None
+
+    cik = str(_walk(payload, "$.cik") or "").lstrip("0")
+    name = _walk(payload, "$.name") or ""
+    items = []
+    for i, form in enumerate(forms):
+        if form not in _SEC_FORMS:
+            continue
+        acc = str(col("accessionNumber", i) or "")
+        doc = col("primaryDocument", i) or ""
+        # 拼成真能打开的地址 —— accessionNumber 在路径里要去掉连字符,
+        # 而在文件名里要保留。给相对路径等于给一个点不开的链接
+        url = (f"https://www.sec.gov/Archives/edgar/data/{cik}/"
+               f"{acc.replace('-', '')}/{doc}") if cik and acc else ""
+        items.append({
+            "title": f"{form} · {col('reportDate', i) or col('filingDate', i) or ''}",
+            "form": form,
+            "published_at": _date(col("filingDate", i)),
+            "url": url,
+            "source": name,
+        })
+        if len(items) >= _SEC_MAX:
+            break
+    return {"items": items}
+
+
+def _sec_concept(payload: Any) -> dict:
+    """SEC companyconcept · `units` 底下键是货币代码,取第一个。
+
+    每条是一个**区间**(start/end/val)加上它出自哪份表(form/fy/fp)。
+    按 `end` 升序 —— 同一个财年会有多次申报(10-Q 报了 10-K 又报一次),
+    原始顺序不保证有序。
+    """
+    units = _walk(payload, "$.units")
+    if not isinstance(units, dict) or not units:
+        return {"rows": []}
+    unit = next(iter(units))
+    arr = units[unit]
+    if not isinstance(arr, list):
+        return {"rows": []}
+    rows = []
+    for x in arr:
+        if not isinstance(x, dict):
+            continue
+        v = _num(x.get("val"))
+        if v is None:
+            continue
+        rows.append({"ts": _date(x.get("end")), "start": _date(x.get("start")),
+                     "value": v, "unit": unit, "form": x.get("form"),
+                     "fy": x.get("fy"), "fp": x.get("fp"),
+                     "filed": _date(x.get("filed"))})
+    rows.sort(key=lambda r: r["ts"] or "")
+    return {"rows": rows, "tag": _walk(payload, "$.tag"),
+            "label": _walk(payload, "$.label")}
 
 
 def _av_daily(payload: Any) -> dict:
