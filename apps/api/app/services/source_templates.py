@@ -236,23 +236,14 @@ TEMPLATES: list[SourceTemplate] = [
                           "只填 600519 会返回 totalRecordNum:0 而**不报错**"),
         ],
     ),
-    SourceTemplate(
-        "hkex", False,
-        note="港交所披露易 · 免 key,但**它返回的是网页不是 API**,需要解析 HTML —— "
-             "内置映射覆盖不到,建议配合自定义映射使用",
-        builtin_map=False,
-        endpoints=[
-            Endpoint("hk", "announce", "https://www1.hkexnews.hk/search/titlesearch.xhtml",
-                     label="披露易公告", verified=False, headers=_UA,
-                     note="返回 HTML,不是 JSON"),
-        ],
-    ),
-
-    # ── 🔑 需要 key ────────────────────────────────────────────
+    # 港交所 —— `_24` P0.5 老板已定**不做**,整条从预置里删掉。
     #
-    # ⚠️ 下面这批**地址全部照文档写,一条都没实测过**(没有 key 就跑不了)。
-    # `_24` §8.2③ 拍板:逐个申请免费档 key 实测,跑通才把 verified 改 True。
-    # 在那之前 UI 上一律显示「未实测」。
+    # 它返回的是**网页不是 API**(titlesearch.xhtml),要写 HTML 解析器。
+    # 而港股 K线/行情能从腾讯和 Yahoo 拿,港交所唯一独占的是披露文件 PDF,
+    # 目前没有任何 SKILL 消费它 —— 投解析工作进去没有回报。
+    #
+    # 留在预置里的代价不是"多一条",是**用户会去点它,然后拿到一个
+    # 永远失败的源**。等真有 SKILL 需要披露文件再回来做。
     SourceTemplate(
         "tushare", True,
         key_in="body", key_name="token",

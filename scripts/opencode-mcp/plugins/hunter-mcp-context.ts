@@ -83,7 +83,17 @@ function stripServerPrefix(name: string): string {
   // hunter_cap_ 是 _12 Step 3 新加的 MCP(gen-config.py 里注册成 hunter_cap)。
   // 漏了它的话 hunter_cap_kpred 剥不掉前缀 → 匹配不到白名单 → 不注入身份,
   // api 侧日志是 user_id=(none)。加白名单和加前缀**两处都要改**,少一处都不生效。
-  for (const prefix of ["watchlist_", "portfolio_", "uzi_", "usermcp_", "hunter_cap_"]) {
+  // ⚠️ `hunter_user_` 是 2026-08-21 补的。镜像把这个 MCP 注册成 **hunter_user**,
+  // 而这里写的是 `usermcp_`(旧名)—— 名字漂移之后前缀剥不掉,
+  // `hunter_user_list_my_sources` 匹配不到白名单,身份就不注入。
+  //
+  // 表现**不是报错**,是模型在回答里说:
+  //     「由于未获取到您的用户身份,暂无法访问您自定义的第三方数据源」
+  // —— 用户配的数据源等于不存在,而日志里只有一行 user_id=(none)。
+  // 上面那段注释已经警告过这个坑("加白名单和加前缀两处都要改"),
+  // 这次栽的是第三处:**MCP 注册名换了,前缀表没跟着换**。
+  for (const prefix of ["watchlist_", "portfolio_", "uzi_",
+                        "usermcp_", "hunter_user_", "hunter_cap_"]) {
     if (name.startsWith(prefix)) {
       const rest = name.slice(prefix.length)
       // watchlist_stock_quickview → stock_quickview（如果剥掉后依然命中，采用短名）
