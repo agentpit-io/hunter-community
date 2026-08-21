@@ -566,7 +566,37 @@ def get_orderbook(code: str) -> dict | None:
 
 
 def get_money_flow(code: str) -> dict | None:
-    """资金流向（今日）。"""
+    """资金流向(今日)· **用户自己的 capital 源优先**。
+
+    同 get_quote / get_news:加一层在前面,用户没配就逐字节走原路径。
+
+    用户源返回的是 `rows`(按日的时间序列,末条是最近一天),
+    而这里要的是**今天一天**的净额 —— 取末条即可。
+    """
+    try:
+        from app.services import source_resolver
+        hit = source_resolver.try_user(_market_of(code), "capital", code)
+        rows = (hit or {}).get("rows") or []
+        if rows:
+            r = rows[-1]
+            # ⚠️ **形状必须和下面官方分支返回的一致**,少一个键上层就 KeyError
+            # 或静默显示 0(`_13` §3.2 那类静默失败)。
+            # 用户源给不出的(big/large 拆分口径不同)显式补 None,不要缺键。
+            main = r.get("main_net")
+            if main is not None:
+                return {
+                    "main_net":  main,
+                    # 东财的 f55 是大单、f56 是超大单;主力 = 大单+超大单。
+                    # 我们的字段名沿用官方那套(big=超大单 large=大单)
+                    "big_net":   r.get("xlarge_net"),
+                    "large_net": r.get("large_net"),
+                    "mid_net":   r.get("medium_net"),
+                    "small_net": r.get("small_net"),
+                    "date":      r.get("ts") or "",
+                }
+    except Exception as e:                                     # noqa: BLE001
+        logger.warning("[money_flow] 用户源取数失败(回落官方): {}", e)
+
     sym = to_symbol(code)
     if not sym:
         return None
@@ -606,9 +636,14 @@ def get_news(code: str, limit: int = 20) -> list[dict]:
     同一天的公司公告和媒体报道摆在一起时,公告是原始事实、报道是转述。
     列表被截断时该先丢报道。
     """
-    sym = to_symbol(code)
-    if not sym:
-        return []
+    # ⚠️ **用户源必须放在 `to_symbol` 判断之前。**
+    #
+    # `to_symbol()` 是给**官方那条路**用的(它要 600519.SH 这种格式),
+    # 对美股返回 None。原来先判它再走用户源,结果是:
+    # 用户接了 SEC 公告源、`try_user` 也能取到 40 条,但 `get_news("AAPL")`
+    # 在第一行就 return [] 了 —— 用户源根本没机会被问到。
+    #
+    # 官方路径要什么格式是官方路径自己的事,不该拦住用户的源。
 
     # ── 用户自己的源优先(同 get_quote,加一层在前面不动原路径)──
     user_items: list[dict] = []
@@ -621,7 +656,10 @@ def get_news(code: str, limit: int = 20) -> list[dict]:
             raw_items = (hit or {}).get("items") or []
             # ⚠️ 公告要按代码过滤 —— 巨潮的参数错一点就会返回别家公司的公告,
             # 而那些看起来和真的一模一样(见 source_mapping.cninfo_keep_only)
-            if kind == "announce" and raw_items:
+            # 只对**巨潮**做代码过滤 —— SEC 的条目没有 secCode,
+            # 而且它的地址本来就按 CIK 精确定位,不存在"返回别家公司"的问题
+            if kind == "announce" and raw_items and any(
+                    x.get("sec_code") for x in raw_items):
                 from app.services import source_mapping as _sm
                 before = len(raw_items)
                 raw_items = _sm.cninfo_keep_only(raw_items, code)
@@ -647,6 +685,12 @@ def get_news(code: str, limit: int = 20) -> list[dict]:
 
     if len(user_items) >= limit:
         return user_items[:limit]
+
+    # 官方路径要 600519.SH 这种格式,拿不到就只能到此为止 ——
+    # 但用户源的结果已经在手上了,照样返回
+    sym = to_symbol(code)
+    if not sym:
+        return user_items
 
     data = _get("/api/v1/news", {"symbols": sym, "limit": limit})
     if not isinstance(data, list):

@@ -127,8 +127,25 @@ def fetch_financials(bare: str, market: str = "A") -> list[dict] | None:
       1. 同花顺 stock_financial_abstract_ths · 主路径 · 25-80 行季报 · 字段全
       2. 东财 stock_financial_abstract · fallback · 缺增速字段
 
-    港股 / 美股返 None(当前无独立数据源 · 坦白说不支持)。
+    港股 / 美股:AKShare 这条没有独立数据源,但**用户可能自己接了**
+    (比如 SEC EDGAR 的 XBRL 财务)—— 先问他的源,没有才返 None。
     """
+    # ── 用户自己的 financial 源优先 ────────────────────────────
+    #
+    # 加在最前面而不是只补美股分支:用户接了 A 股财报源(Tushare 之类)
+    # 时也该优先走他的。没配就返回 None,后面逐字节走原路径。
+    try:
+        from app.services import source_resolver
+        mk = (market or "A").lower()
+        hit = source_resolver.try_user(mk, "financial", bare)
+        rows = (hit or {}).get("rows") or []
+        if rows:
+            logger.info("[akshare_financials] {} 走用户自己的源 · {} 行",
+                        bare, len(rows))
+            return rows
+    except Exception as e:                                     # noqa: BLE001
+        logger.warning("[akshare_financials] 用户源失败(回落): {}", e)
+
     if (market or "A").upper() != "A":
         return None
     rows = _fetch_ths(bare)
