@@ -539,16 +539,27 @@ def _polygon_prev(payload: Any) -> dict:
     r = _walk(payload, "$.results[0]")
     if not isinstance(r, dict):
         return {}
+    # ⚠️ `/prev` 返回的是**那一天的完整 K 线**:o/h/l/c 都属于同一天。
+    #
+    # 第一版把 `prev_close` 填成了 `o` —— 但 `o` 是**那天的开盘价**,
+    # 不是"上一日收盘"。模型照着说「上一交易日收盘 317.45」,
+    # 而那天真实收盘是 311.3(开盘 317.455)。数字是真的、来源是对的,
+    # 只是**贴错了标签**,而错标签比错数字更难发现。
+    #
+    # 真正的 prev_close 需要**再前一天**的数据,这个接口给不了 ——
+    # 所以留 None,不编。同理不给 change_amt/change_pct:
+    # 标准口径是"相对上一日收盘",我们算不出来;
+    # 用 c-o 冒充会得到一个**看起来合理但定义不同**的涨跌幅。
     c = _num(r.get("c"))
-    o = _num(r.get("o"))
-    return {"price": c, "open": o, "high": _num(r.get("h")),
-            "low": _num(r.get("l")), "prev_close": o,
+    return {"price": c,
+            "open": _num(r.get("o")), "high": _num(r.get("h")),
+            "low": _num(r.get("l")),
+            "prev_close": None, "change_amt": None, "change_pct": None,
             "volume": _int_or_none(r.get("v")),
-            "change_amt": (round(c - o, 4) if c is not None and o is not None else None),
-            "change_pct": (round((c - o) / o * 100, 4)
-                           if c is not None and o else None),
             "as_of": _ms_date(r.get("t")),
-            "note": "免费档为前一交易日收盘,非实时"}
+            "note": "这是 {} 当日的收盘价(Polygon 免费档无实时);"
+                    "涨跌幅需要再前一日数据,本接口给不了".format(
+                        _ms_date(r.get("t")) or "上一交易日")}
 
 
 def _polygon_aggs(payload: Any, spec: dict) -> dict:

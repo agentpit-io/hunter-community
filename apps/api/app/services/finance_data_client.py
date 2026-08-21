@@ -240,6 +240,46 @@ def _market_of(code: str) -> str:
     return "a"
 
 
+def _user_valuation(code: str) -> dict:
+    """用户配的估值源(PE/PB/市值)· 没配返回空 dict。
+
+    ## 为什么必须有这个入口
+
+    实测:用户接了 Tushare 的 `daily_basic`(PE 19.61 / PB 6.43),
+    在对话里问「茅台的市盈率市净率是多少」,模型答的是 **PE 21.46 / PB 6.75**
+    —— 两个来源都对不上,**是它自己编的**。
+
+    根因不是模型坏,是**估值这个类型没有任何入口**:`try_user` 只挂在
+    quote/kline/news/announce/capital/financial 上,valuation 配了也碰不到。
+    模型手上没有工具能拿到,于是从训练数据里凑了两个看起来合理的数。
+
+    「空的比假的好」在这里的含义是:**要么给真值,要么让它拿不到而明说**。
+    现在把真值接上,把编的机会拿掉。
+
+    挂在 quote 上而不是单开一个工具:用户问估值时模型调的就是行情工具
+    (它没有单独的估值工具),再造一个它也不知道该用。
+    """
+    try:
+        from app.services import source_resolver
+        hit = source_resolver.try_user(_market_of(code), "valuation", code)
+        rows = (hit or {}).get("rows") or []
+        if not rows:
+            return {}
+        r = rows[-1]
+        out = {}
+        # 列名保持上游原样(用户对着 Tushare 文档能对上),这里只挑常用的
+        for k in ("pe", "pe_ttm", "pb", "ps", "ps_ttm", "dv_ratio", "dv_ttm",
+                  "total_mv", "circ_mv", "turnover_rate"):
+            if r.get(k) is not None:
+                out[k] = r[k]
+        if out:
+            out["valuation_date"] = r.get("ts") or r.get("trade_date") or ""
+        return out
+    except Exception as e:                                     # noqa: BLE001
+        logger.warning("[quote] 用户估值源失败: {}", e)
+        return {}
+
+
 def get_quote(code: str) -> dict | None:
     """实时报价快照（含五档盘口）· SaaS or provider fallback."""
     # ── 用户自己的数据源优先(`_21` §6)──────────────────────────
@@ -272,6 +312,8 @@ def get_quote(code: str) -> dict | None:
                 # 五档盘口:多数第三方行情接口不给,补空而不是漏键 ——
                 # 漏键会让上层 q["bid1"] 直接 KeyError
                 **{f"bid{i}": None for i in range(1, 6)},
+                # 用户配了估值源就带上 PE/PB —— 没配就是空,不占位
+                **_user_valuation(code),
                 **{f"bid{i}v": 0 for i in range(1, 6)},
                 **{f"ask{i}": None for i in range(1, 6)},
                 **{f"ask{i}v": 0 for i in range(1, 6)},

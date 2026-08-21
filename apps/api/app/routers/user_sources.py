@@ -386,6 +386,19 @@ async def bulk_create(body: BulkCreateIn, request: Request):
             hdrs = dict(tpl_ep.headers) if tpl_ep else {}
             hdrs.update(item.headers or {})
 
+            # ⚠️ **method 与 body 以模板为准,客户端没传就从模板补。**
+            #
+            # 它们不是用户填的东西 —— 是这条接口的固有属性(巨潮只吃 POST、
+            # Tushare 靠 body 里的 api_name 区分接口)。让客户端负责传过来,
+            # 等于给它一个"传漏了就静默坏掉"的机会:实测用户用重建前的旧页面
+            # 加了 Tushare,method 存成 GET、body 存成 {},三条接口全部
+            # 「必需字段 rows 没取到」—— 而错误指向映射,根因在写入。
+            #
+            # 客户端**显式传了**才覆盖(自定义接口那种模板没有的情况)。
+            verb = (item.method or "").upper() or (
+                (tpl_ep.method if tpl_ep else "GET") or "GET")
+            body_tpl = item.body or (dict(tpl_ep.body) if tpl_ep else {})
+
             try:
                 # 每条一个 savepoint —— 不然一条撞唯一索引会把整个事务
                 # 置为 aborted,后面所有 INSERT 全部失败。
@@ -402,7 +415,7 @@ async def bulk_create(body: BulkCreateIn, request: Request):
                       body.requires_key, body.key_in, body.key_name.strip(),
                       body.key_prefix, enc, hint,
                       _json(hdrs), _json(item.field_map), body.timeout_ms,
-                      (item.method or "GET").upper(), _json(item.body)))
+                      verb, _json(body_tpl)))
                 created.append(_row(cur.fetchone()))
                 cur.execute("RELEASE SAVEPOINT sp")
             except Exception as e:                            # noqa: BLE001

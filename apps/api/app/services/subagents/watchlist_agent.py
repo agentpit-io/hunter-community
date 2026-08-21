@@ -139,6 +139,10 @@ async def _quickview(code: str, user_id: Optional[str] = None) -> dict:
         f"今日：开 {q.get('open', 0):.2f} 高 {q.get('high', 0):.2f} "
         f"低 {q.get('low', 0):.2f} 成交额 {q.get('amount', 0) / 1e8:.1f} 亿\n"
         f"{pos_in_range}"
+        # 估值也喂给写短评的 LLM —— 它看得到真实 PE/PB 才不会瞎说
+        + ((chr(10) + "估值:PE {} · PE(TTM) {} · PB {}({})".format(
+            q.get("pe"), q.get("pe_ttm"), q.get("pb"), q.get("valuation_date")))
+           if q.get("pe") is not None else "")
     )
     ai_comment = await asyncio.to_thread(_llm_short, _QUICKVIEW_SYS, llm_input, 100)
 
@@ -172,6 +176,20 @@ async def _quickview(code: str, user_id: Optional[str] = None) -> dict:
             "low": round(low52, 2),
             "position": range_pos,
         },
+        # 估值 —— 用户配了估值源(Tushare daily_basic 之类)才有,没配就是 {}。
+        #
+        # ⚠️ **必须原样透出去。**`get_quote()` 里已经带了 PE/PB,但这个函数
+        # 重新组装返回体时把它们丢了 —— 于是模型问「茅台市盈率多少」时
+        # 手上没有这个数,**它就自己编了一个**(实测答 PE 21.46 / PB 6.75,
+        # 而 Tushare 是 19.61 / 6.43,腾讯是 19.54 / 6.33,两个都对不上)。
+        #
+        # 取数层拿到了数据、组装层把它丢掉,是最难查的一类:
+        # 数据源测试是绿的,日志里也看不出什么,只有回答是错的。
+        "valuation": {k: q[k] for k in
+                      ("pe", "pe_ttm", "pb", "ps", "ps_ttm", "dv_ratio",
+                       "dv_ttm", "total_mv", "circ_mv", "turnover_rate",
+                       "valuation_date")
+                      if q.get(k) is not None},
         "ai_comment": ai_comment or "行情正常，暂无特别信号。",
         "in_watchlist": in_wl,
         "actions": [
