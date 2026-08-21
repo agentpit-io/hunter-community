@@ -26,7 +26,18 @@ from app.services.database import get_conn
 log = logging.getLogger(__name__)
 router = APIRouter()
 
-MAX_CUSTOM = 20          # 每人自建上限,防滥用
+# 每人自定义能力上限。
+#
+# ⚠️ 原来是 20 —— 那是「用户在表单里一个一个手写」年代定的防滥用数字。
+# 而 `_24` §5 的推荐位是**一次装一整个仓**:光我们自己推荐的 5 个仓
+# 就有 23 个 SKILL(cc-equity-research 9 + agent-skills 7 + UZI 5 + 2),
+# **按推荐清单全装一遍必然超**。实测用户装到第 3 个仓就被拦下:
+#     「装 algoderiv/agent-skills 失败:最多 20 个自定义能力」
+#
+# 真正的约束不是磁盘,是**模型的上下文** —— opencode 会把每个 SKILL 的
+# 名字与描述注入系统提示,装太多会挤掉真正有用的东西。100 是个宽松但
+# 仍有意义的数字;真要更多可以用 env 调,但调之前想清楚上面这句。
+MAX_CUSTOM = int(os.getenv("HUNTER_MAX_CUSTOM_SKILLS", "100"))
 MAX_TPL_LEN = 500        # 模板长度上限
 
 # 内置能力。key 一旦发布不要改(用户的覆盖记录靠它关联)。
@@ -227,7 +238,9 @@ async def create_skill(body: SkillIn, request: Request):
     name, tpl = _validate(body.name, body.prompt_tpl)
     existing = [s for s in _builtins() if not s.get("builtin", True)]
     if len(existing) >= MAX_CUSTOM:
-        raise HTTPException(400, f"最多创建 {MAX_CUSTOM} 个自定义能力,请先删除不用的")
+        raise HTTPException(
+            400, f"已有 {len(existing)} 个自定义能力,上限 {MAX_CUSTOM} —— "
+                 f"删掉不用的,或调 HUNTER_MAX_CUSTOM_SKILLS")
 
     slug = _slugify(name, body.slug)
     if any(s["key"] == slug for s in _builtins() if s.get("builtin", True)):
@@ -384,7 +397,14 @@ async def install_from_repo(body: InstallIn, request: Request):
     _uid(request)
     existing = [s for s in _builtins() if not s.get("builtin", True)]
     if len(existing) + len(body.paths) > MAX_CUSTOM:
-        raise HTTPException(400, f"最多 {MAX_CUSTOM} 个自定义能力,请先删除不用的")
+        # 说清楚**差多少** —— 只说"超了"用户不知道该删几个,
+        # 也不知道是不是自己勾多了
+        over = len(existing) + len(body.paths) - MAX_CUSTOM
+        raise HTTPException(
+            400,
+            f"你已有 {len(existing)} 个能力,这个仓要装 {len(body.paths)} 个,"
+            f"合计超出上限 {MAX_CUSTOM} 共 {over} 个 —— "
+            f"少勾 {over} 个,或先删掉不用的")
     try:
         installed = skill_install.install(body.repo, body.paths)
     except skill_install.InstallError as e:
