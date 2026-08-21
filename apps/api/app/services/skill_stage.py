@@ -205,7 +205,12 @@ def commit(user: str, names: list[str] | None = None) -> dict:
         try:
             # 用 save_raw 不用 save:导入的是**完整原文**,
             # 拆开重拼会丢作者自定义的 frontmatter 字段
-            skill_files.save_raw(s.name, s.content)
+            # 带上来源仓库 —— 能力页按来源分组要靠它。
+            # `install()` 那条路早就在写 origin,这条路一直没写,
+            # 结果同样是"从 GitHub 装的",一半有来源一半没有。
+            skill_files.save_raw(
+                s.name, s.content,
+                origin=("github:" + slot["repo"]) if slot.get("repo") else "")
             written.append(s.name)
         except Exception as e:                                # noqa: BLE001
             # 一个失败不该让其余的也不装 —— 但**必须报出来**。

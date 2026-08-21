@@ -286,7 +286,7 @@ def is_user_skill(name: str) -> bool:
         return False
 
 
-def save_raw(name: str, content: str) -> Path:
+def save_raw(name: str, content: str, origin: str = "") -> Path:
     """写一份**已经是完整 SKILL.md 的原文**(`_23`)。
 
     与 `save(fields, body)` 的区别:那个收结构化字段再 `render()` 出 frontmatter,
