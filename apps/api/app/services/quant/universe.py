@@ -76,20 +76,79 @@ def query_active_at(index_code: str, on_date: date) -> list[str]:
     return codes
 
 
-def _fetch_cons(index_code: str) -> list[str]:
-    """拉指数成分股 —— **走国内 AK 代理,不直连**。
+def _cons_direct(index_code: str) -> list[str]:
+    """直连 AKShare 拉成分股。慢(沪深300 实测 100+ 秒),但不依赖任何人。
 
-    容器里 `import akshare` 直接调会 RemoteDisconnected(2026-08-18 实测,
-    与指数日线同一个问题)。代理在 139.199.221.232,
-    `index_stock_cons_csindex` 已加入白名单。
+    带硬超时:akshare 底层的 requests 没有超时,卡住就是永久卡住,
+    而它是在 seed 流程里被调的 —— 卡住的表现是整个启动流程不动。
+    """
+    import concurrent.futures as cf
+    import warnings
+    try:
+        warnings.filterwarnings("ignore")
+        import akshare as ak
+    except Exception as e:                                    # noqa: BLE001
+        log.warning("[universe] akshare 不可用: %s", e)
+        return []
+
+    def _do():
+        return ak.index_stock_cons_csindex(symbol=index_code)
+
+    ex = cf.ThreadPoolExecutor(max_workers=1)
+    try:
+        df = ex.submit(_do).result(timeout=300)
+        ex.shutdown(wait=False)
+    except Exception as e:                                    # noqa: BLE001
+        log.warning("[universe] 直连拉 %s 成分股失败: %s", index_code, type(e).__name__)
+        return []
+    try:
+        recs = df.to_dict("records")
+    except Exception:                                         # noqa: BLE001
+        return []
+    return _pick_codes(recs, index_code)
+
+
+def _pick_codes(rows: list[dict], index_code: str) -> list[str]:
+    """从返回记录里取出股票代码列。**找不到就返回空并报错,不猜** ——
+    猜错了会把指数代码当成分股写进去,而那种错要等回测选出一堆
+    不存在的票才会暴露。"""
+    if not rows:
+        return []
+    key = next((k for k in ("成分券代码", "code", "constituent_code", "stock_code")
+                if k in rows[0]), None)
+    if not key:
+        log.error("[universe] %s 找不到 code 列 · keys=%s", index_code, list(rows[0])[:10])
+        return []
+    return [str(x[key]).zfill(6) for x in rows if x.get(key)]
+
+
+def _fetch_cons(index_code: str) -> list[str]:
+    """拉指数成分股 —— **先直连 AKShare,代理只在用户显式配置时用**。
+
+    原来这里只走我们自己的 AK 代理(139.199.221.232),地址和 token 都写死在
+    默认值里 —— 开源用户装完就在用我们的服务器,不知情也没法不用。
+
+    那条「容器直连会 RemoteDisconnected」的结论是在**生产 GCP 服务器**上得出的,
+    海外 IP 被限。本地中国网络实测(2026-08-21):
+    `index_stock_cons_csindex` 直连成功,300 行。所以代理对开源用户不是必需的。
 
     拿不到返回空列表 —— 上层据此跳过,而不是把空当成"这个指数没有成分股"
     写进库(那会把整个股票池清空)。
     """
     import os
     import requests
-    base = os.getenv("AK_PROXY_URL", "http://139.199.221.232:8765")
-    token = os.getenv("AK_API_TOKEN", "ak-proxy-2026")
+
+    # ① 直连 AKShare(中证指数官网源)
+    rows = _cons_direct(index_code)
+    if rows:
+        return rows
+
+    # ② 代理 —— 没配 AK_PROXY_URL 就到此为止,不再默认连我们的服务器
+    base = os.getenv("AK_PROXY_URL", "").rstrip("/")
+    token = os.getenv("AK_API_TOKEN", "")
+    if not base:
+        log.warning("[universe] %s 直连拿不到成分股,且未配置 AK_PROXY_URL", index_code)
+        return []
     try:
         r = requests.post(
             f"{base}/call",
@@ -97,7 +156,7 @@ def _fetch_cons(index_code: str) -> list[str]:
             # 300 秒:代理那边是同步调 AKShare,沪深300 的 300 只实测要 100+ 秒,
             # 偶尔更久。超时太短的表现是"有时成功有时 seed 0 行",
             # 而 seed 0 行不报错,只是股票池悄悄回落到 stocks 表
-            headers={"Authorization": f"Bearer {token}"}, timeout=300,
+            headers={"Authorization": f"Bearer {token}"} if token else {}, timeout=300,
         )
         if r.status_code != 200:
             log.error("[universe] 代理拉 %s 失败 HTTP %s: %s",
@@ -109,16 +168,7 @@ def _fetch_cons(index_code: str) -> list[str]:
         return []
 
     rows = d if isinstance(d, list) else (d.get("data") or d.get("records") or [])
-    if not rows:
-        return []
-    # 列名兼容。**找不到就返回空并报错,不猜** —— 猜错了会把指数代码
-    # 当成分股写进去,而那种错要等回测选出一堆不存在的票才会暴露
-    key = next((k for k in ("成分券代码", "code", "constituent_code", "stock_code")
-                if k in rows[0]), None)
-    if not key:
-        log.error("[universe] %s 找不到 code 列 · keys=%s", index_code, list(rows[0])[:10])
-        return []
-    return [str(x[key]).zfill(6) for x in rows if x.get(key)]
+    return _pick_codes(rows, index_code)
 
 
 def seed_current(index_code: str) -> int:
