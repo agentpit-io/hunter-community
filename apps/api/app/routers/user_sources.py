@@ -296,6 +296,8 @@ class BulkEndpointIn(BaseModel):
     # 模板里声明的动词。巨潮公告只吃 POST(实测 GET→500),
     # 不存下来的话取数层只能一律按 GET 打
     method: str = "GET"
+    # 单地址 RPC 的 POST body 模板(Tushare)· 见 source_templates.Endpoint.body
+    body: dict = Field(default_factory=dict)
     headers: dict = Field(default_factory=dict)
     field_map: dict = Field(default_factory=dict)
 
@@ -393,14 +395,14 @@ async def bulk_create(body: BulkCreateIn, request: Request):
                     INSERT INTO user_data_sources
                       (user_id, name, upstream, market, kind, endpoint, requires_key,
                        key_in, key_name, key_prefix, api_key_enc, api_key_hint,
-                       headers, field_map, timeout_ms, http_method)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s)
+                       headers, field_map, timeout_ms, http_method, body_tpl)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s::jsonb)
                     RETURNING {_COLS}
                 """, (uid, name[:60], body.upstream, item.market, item.kind, ep,
                       body.requires_key, body.key_in, body.key_name.strip(),
                       body.key_prefix, enc, hint,
                       _json(hdrs), _json(item.field_map), body.timeout_ms,
-                      (item.method or "GET").upper()))
+                      (item.method or "GET").upper(), _json(item.body)))
                 created.append(_row(cur.fetchone()))
                 cur.execute("RELEASE SAVEPOINT sp")
             except Exception as e:                            # noqa: BLE001
@@ -664,7 +666,7 @@ async def test_saved_source(sid: int, request: Request, symbol: str = "600519"):
     try:
         cur.execute(
             "SELECT id, name, upstream, endpoint, requires_key, key_in, key_name, "
-            "       key_prefix, api_key_enc, headers, field_map, timeout_ms, kind, market, http_method "
+            "       key_prefix, api_key_enc, headers, field_map, timeout_ms, kind, market, http_method, body_tpl "
             "FROM user_data_sources WHERE id=%s AND user_id=%s", (sid, uid))
         row = cur.fetchone()
     finally:
@@ -675,7 +677,8 @@ async def test_saved_source(sid: int, request: Request, symbol: str = "600519"):
     from app.services import source_mapping, source_resolver
     # row[:12] 对齐 UserSource 的前 12 个位置字段;market 是第 14 列,
     # 单独传 —— 它在 dataclass 里排在 kind 后面,不能跟着切片走
-    src = source_resolver.UserSource(*row[:12], market=row[13], http_method=row[14])
+    src = source_resolver.UserSource(*row[:12], market=row[13],
+                                     http_method=row[14], body_tpl=row[15] or {})
     kind = row[12]
 
     t0 = time.time()

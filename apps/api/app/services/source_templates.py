@@ -60,6 +60,15 @@ class Endpoint:
     note: str = ""
     # 附加 header(不含 auth)。SEC 的 UA、新浪的 Referer 走这里
     headers: dict = field(default_factory=dict)
+    # POST body 模板 —— **给单地址 RPC 用的**。
+    #
+    # Tushare 四个接口共用 `https://api.tushare.pro` 一个地址,靠 body 里的
+    # `api_name` 区分。只有 (market, kind, endpoint) 三元组表达不了这件事:
+    # 四条记录的 endpoint 完全一样,取数层发出去的也一样,结果是
+    # 「请指定正确的接口名」(实测 code=40101)。
+    #
+    # 值里的 `{ts_code}` 等占位符走 source_resolver.expand() 同一套。
+    body: dict = field(default_factory=dict)
     # 实测过吗 · 见文件头。False 会在 UI 上标「未实测」
     verified: bool = False
     verified_at: str = ""              # "2026-08-19"
@@ -258,11 +267,26 @@ TEMPLATES: list[SourceTemplate] = [
         note="Tushare Pro · token 走 **POST body 的 token 字段**(不是 header)· "
              "免费额度按积分算",
         endpoints=[
-            Endpoint("a", "kline", "https://api.tushare.pro", label="日线行情", reachable=True, reachable_at=_TODAY, method="POST"),
-            Endpoint("a", "financial", "https://api.tushare.pro", label="财务报表", reachable=True, reachable_at=_TODAY, method="POST"),
-            Endpoint("a", "valuation", "https://api.tushare.pro", label="估值指标", reachable=True, reachable_at=_TODAY, method="POST"),
-            Endpoint("a", "capital", "https://api.tushare.pro", label="资金流向", reachable=True, reachable_at=_TODAY,
-                     method="POST", default_on=False),
+            # ⚠️ 四条的 endpoint **完全一样** —— Tushare 是单地址 RPC,
+            # 靠 body 里的 api_name 区分。所以 body 模板是必须的,不是可选。
+            Endpoint("a", "kline", "https://api.tushare.pro", label="日线行情",
+                     method="POST", verified=True, verified_at=_TODAY,
+                     body={"api_name": "daily", "params": {"ts_code": "{ts_code}"},
+                           "fields": "ts_code,trade_date,open,high,low,close,vol,amount"}),
+            Endpoint("a", "financial", "https://api.tushare.pro", label="财务报表",
+                     method="POST", verified=True, verified_at=_TODAY,
+                     body={"api_name": "income", "params": {"ts_code": "{ts_code}"},
+                           "fields": "ts_code,end_date,revenue,n_income,total_profit"}),
+            Endpoint("a", "valuation", "https://api.tushare.pro", label="估值指标",
+                     method="POST", verified=True, verified_at=_TODAY,
+                     body={"api_name": "daily_basic", "params": {"ts_code": "{ts_code}"},
+                           "fields": "ts_code,trade_date,pe,pe_ttm,pb,ps,total_mv,circ_mv"}),
+            Endpoint("a", "capital", "https://api.tushare.pro", label="资金流向",
+                     method="POST", verified=True, verified_at=_TODAY, default_on=False,
+                     body={"api_name": "moneyflow", "params": {"ts_code": "{ts_code}"},
+                           "fields": "ts_code,trade_date,buy_lg_amount,sell_lg_amount,"
+                                     "buy_elg_amount,sell_elg_amount,buy_md_amount,"
+                                     "sell_md_amount,buy_sm_amount,sell_sm_amount"}),
         ],
     ),
     SourceTemplate(
@@ -299,13 +323,21 @@ TEMPLATES: list[SourceTemplate] = [
         "polygon", True,
         key_in="query", key_name="apiKey",
         apply_url="https://polygon.io/dashboard/signup",
-        note="Polygon.io · 免费档 5 次/分",
+        note="Polygon.io(控制台已改名 Massive)· 免费档 5 次/分 · "
+             "⚠️ **免费档没有实时行情** —— 实测 last/trade 与 snapshot 都返回 "
+             "403 NOT_AUTHORIZED,只有历史聚合和前一交易日收盘可用",
         endpoints=[
             Endpoint("us", "quote",
-                     "https://api.polygon.io/v2/aggs/ticker/{symbol}/prev", label="美股行情", reachable=True, reachable_at=_TODAY),
+                     "https://api.polygon.io/v2/aggs/ticker/{symbol}/prev",
+                     # ⚠️ 标签写「前收盘」不写「行情」—— 它给的是**前一交易日
+                     # 收盘价**。标成"行情"用户会当成当前价用,而那个数在盘中
+                     # 可能差好几个点,且看不出任何异常
+                     label="美股前收盘(免费档无实时)",
+                     verified=True, verified_at=_TODAY,
+                     note="免费档只能拿到前一交易日收盘 · 想要实时要付费档"),
             Endpoint("us", "kline",
                      "https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/day/2024-01-01/2026-12-31",
-                     label="美股K线", reachable=True, reachable_at=_TODAY),
+                     label="美股K线", verified=True, verified_at=_TODAY),
         ],
     ),
     SourceTemplate(

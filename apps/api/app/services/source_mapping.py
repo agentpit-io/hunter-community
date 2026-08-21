@@ -134,10 +134,38 @@ _SHOU = 100.0
 BUILTIN: dict[str, dict[str, dict]] = {
     # Tushare Pro · POST 返回 {code, msg, data:{fields:[...], items:[[...]]}}
     # 它是**列式**的(fields + items),不是对象数组 —— 单独一个 shape 标记
+    # Tushare · 单地址 RPC · 返回 {code, msg, data:{fields:[...], items:[[...]]}}
+    # **列式**(fields + items),不是对象数组。
+    #
+    # ⚠️ 它默认返回**全历史**(实测日线 5987 行、资金流 4757 行)。
+    # 原样交给模型会把上下文挤爆,而且它只会看最近几行 —— `_limit` 截断。
     "tushare": {
         "kline": {"_shape": "columnar",
                   "_fields": "$.data.fields", "_items": "$.data.items",
+                  "_limit": 250,
                   "_required": _KLINE_REQ},
+        # income:营收/净利/利润总额 · 按报告期
+        "financial": {"_shape": "columnar_rows",
+                      "_fields": "$.data.fields", "_items": "$.data.items",
+                      "_ts": "end_date", "_limit": 20,
+                      "_required": ["rows"]},
+        # daily_basic:PE/PB/PS/市值 · 按交易日
+        "valuation": {"_shape": "columnar_rows",
+                      "_fields": "$.data.fields", "_items": "$.data.items",
+                      "_ts": "trade_date", "_limit": 60,
+                      "_required": ["rows"]},
+        # moneyflow:大单/超大单/中单/小单的买卖额(**单位是万元**)
+        "capital": {"_shape": "columnar_rows",
+                    "_fields": "$.data.fields", "_items": "$.data.items",
+                    "_ts": "trade_date", "_limit": 60,
+                    "_required": ["rows"]},
+    },
+    # Polygon.io · 免费档**只有历史与前收盘,没有实时**(实测 last/trade 与
+    # snapshot 都 403 NOT_AUTHORIZED)。
+    # 聚合返回 {results:[{t:毫秒时间戳, o,h,l,c,v,vw}]}
+    "polygon": {
+        "quote": {"_shape": "polygon_prev", "_required": _QUOTE_REQ},
+        "kline": {"_shape": "polygon_aggs", "_required": _KLINE_REQ},
     },
     # AKShare HTTP 代理 · 我们自己那台返回 {ok, data:[...]}(见 finance-data
     # 的 139.199.221.232:8765 /call)。用户自建的代理多半照抄这个形状
@@ -334,6 +362,12 @@ def apply(upstream: str, kind: str, payload: Any, custom: dict | None = None,
         out = _yahoo_chart(payload)
     elif shape == "columnar":
         out = _columnar(payload, spec)
+    elif shape == "columnar_rows":
+        out = _columnar_rows(payload, spec)
+    elif shape == "polygon_prev":
+        out = _polygon_prev(payload)
+    elif shape == "polygon_aggs":
+        out = _polygon_aggs(payload, spec)
     elif shape == "list":
         out = _list(payload, spec)
     elif shape == "delimited":
@@ -435,7 +469,118 @@ def _columnar(payload: Any, spec: dict) -> dict:
         })
     # Tushare 返回是**倒序**的(最新在前)· 我们全链路用正序
     rows.reverse()
+    lim = spec.get("_limit")
+    if lim and len(rows) > lim:
+        # 留最近的 —— 前面的是更早的历史
+        rows = rows[-lim:]
     return {"rows": rows}
+
+
+def _columnar_rows(payload: Any, spec: dict) -> dict:
+    """列式 → 通用 rows(**不强行套 OHLC**)。
+
+    `_columnar` 是给 K 线用的,它把列映射成 open/high/low/close。
+    但财报、估值、资金流没有这套字段 —— 硬套的结果是一堆 None,
+    然后被 `_required` 判成"结构不对"。
+
+    这里原样保留上游的列名,只做三件事:数值化、加统一的 `ts`、截断。
+    列名保持原样是有意的:用户对着 Tushare 文档能一一对上,
+    我们改名反而让他对不上。
+    """
+    fields = _walk(payload, spec["_fields"])
+    items = _walk(payload, spec["_items"])
+    if not isinstance(fields, list) or not isinstance(items, list):
+        return {"rows": []}
+    ts_col = spec.get("_ts") or ""
+    rows = []
+    for it in items:
+        if not isinstance(it, list):
+            continue
+        row: dict = {}
+        for i, name in enumerate(fields):
+            v = it[i] if i < len(it) else None
+            # ⚠️ **日期列不能过 _num()。**Tushare 的日期是 "20260630" 这种
+            # 纯数字字符串,转成数字会变 `20260630.0` —— 模型看到的是一个
+            # 两千多万的浮点数,不是一个日期。而它不报错,只是从此以后
+            # 这一列的排序、比较、显示全是错的。
+            if name.endswith("_date") or name in ("ts", "trade_date", "end_date",
+                                                  "ann_date", "f_ann_date"):
+                row[name] = _date(v)
+            elif isinstance(v, str) and not _looks_num(v):
+                row[name] = v
+            else:
+                row[name] = _num(v)
+        if ts_col and ts_col in fields:
+            row["ts"] = _date(it[fields.index(ts_col)])
+        rows.append(row)
+    # Tushare 是**倒序**(最新在前)· 全链路用正序
+    rows.reverse()
+    lim = spec.get("_limit")
+    if lim and len(rows) > lim:
+        rows = rows[-lim:]
+    return {"rows": rows}
+
+
+def _looks_num(v: str) -> bool:
+    try:
+        float(v)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+def _polygon_prev(payload: Any) -> dict:
+    """Polygon 前一交易日聚合 → quote 形状。
+
+    ⚠️ **这是昨收不是现价。**免费档没有实时(last/trade 与 snapshot 都
+    403),所以 `price` 填的是前一交易日的收盘价。UI 与模板里都要写明,
+    否则用户会拿它当当前价看。
+    """
+    r = _walk(payload, "$.results[0]")
+    if not isinstance(r, dict):
+        return {}
+    c = _num(r.get("c"))
+    o = _num(r.get("o"))
+    return {"price": c, "open": o, "high": _num(r.get("h")),
+            "low": _num(r.get("l")), "prev_close": o,
+            "volume": _int_or_none(r.get("v")),
+            "change_amt": (round(c - o, 4) if c is not None and o is not None else None),
+            "change_pct": (round((c - o) / o * 100, 4)
+                           if c is not None and o else None),
+            "as_of": _ms_date(r.get("t")),
+            "note": "免费档为前一交易日收盘,非实时"}
+
+
+def _polygon_aggs(payload: Any, spec: dict) -> dict:
+    """Polygon 日线聚合。`t` 是**毫秒时间戳**。"""
+    arr = _walk(payload, "$.results")
+    if not isinstance(arr, list):
+        return {"rows": []}
+    rows = []
+    for x in arr:
+        if not isinstance(x, dict):
+            continue
+        c = _num(x.get("c"))
+        ts = _ms_date(x.get("t"))
+        if c is None or not ts:
+            continue
+        rows.append({"ts": ts, "open": _num(x.get("o")), "high": _num(x.get("h")),
+                     "low": _num(x.get("l")), "close": c,
+                     "volume": _int_or_none(x.get("v"))})
+    rows.sort(key=lambda r: r["ts"])
+    return {"rows": rows}
+
+
+def _ms_date(v) -> str:
+    """毫秒时间戳 → YYYY-MM-DD。**按 UTC** —— 美股数据源给的是 UTC。"""
+    n = _num(v)
+    if n is None:
+        return ""
+    import datetime as _dt
+    try:
+        return _dt.datetime.utcfromtimestamp(n / 1000).strftime("%Y-%m-%d")
+    except (OverflowError, OSError, ValueError):
+        return ""
 
 
 def _list(payload: Any, spec: dict) -> dict:

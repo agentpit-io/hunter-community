@@ -36,6 +36,8 @@ interface Endpoint {
   method: string
   note: string
   headers: Record<string, string>
+  /** 单地址 RPC 的 POST body 模板(Tushare 四个接口共用一个地址) */
+  body: Record<string, unknown>
   verified: boolean
   verified_at: string
   /** 地址验过了但没 key 跑不完整 —— 见 source_templates.Endpoint.reachable */
@@ -198,6 +200,9 @@ export default function SourceAddPanel({ presetGroup, onClose, onDone }: Props) 
         endpoints: chosen.map((e) => ({
           market: e.market, kind: e.kind, label: e.label,
           endpoint: urlOf(e).trim(), headers: e.headers || {},
+          // 动词与 body 模板必须一起带过去 —— 少了 body,Tushare 那四条
+          // 发出去的请求一模一样,上游回「请指定正确的接口名」
+          method: e.method || 'GET', body: e.body || {},
         })),
       })
       // **三段都要说。**只报成功的那批,用户会以为勾的都生效了,

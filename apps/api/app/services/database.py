@@ -489,6 +489,9 @@ async def init_db():
         # 只有 ALTER 才能补上。ADD COLUMN IF NOT EXISTS 是幂等的。
         cur.execute("ALTER TABLE user_data_sources ADD COLUMN IF NOT EXISTS "
                     "http_method VARCHAR(8) NOT NULL DEFAULT 'GET'")
+        # 单地址 RPC 的 body 模板(同 sql/20260821b_user_source_body.sql)
+        cur.execute("ALTER TABLE user_data_sources ADD COLUMN IF NOT EXISTS "
+                    "body_tpl JSONB NOT NULL DEFAULT '{}'::jsonb")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_uds_user_lookup "
                     "ON user_data_sources(user_id, market, kind) WHERE enabled")
         # 同一 (market, kind, upstream) 只允许一条 —— 允许两条的话

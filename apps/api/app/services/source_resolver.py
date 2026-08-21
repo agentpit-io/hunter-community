@@ -35,7 +35,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -71,6 +71,9 @@ class UserSource:
     # HTTP 动词。多数源是 GET;巨潮公告只吃 POST(实测 GET→500)。
     # 同 market —— 放最后并给默认值,`UserSource(*r)` 是按位置构造的
     http_method: str = "GET"
+    # 单地址 RPC 的 body 模板 —— Tushare 四个接口共用一个地址,
+    # 靠 body 里的 api_name 区分。值里的占位符走 expand() 同一套
+    body_tpl: dict = field(default_factory=dict)
 
 
 def _candidates(uid: str, market: str, kind: str) -> list[UserSource]:
@@ -89,7 +92,7 @@ def _candidates(uid: str, market: str, kind: str) -> list[UserSource]:
         cur = conn.cursor()
         cur.execute(
             "SELECT id, name, upstream, endpoint, requires_key, key_in, key_name, "
-            "       key_prefix, api_key_enc, headers, field_map, timeout_ms, market, http_method "
+            "       key_prefix, api_key_enc, headers, field_map, timeout_ms, market, http_method, body_tpl "
             "FROM user_data_sources "
             "WHERE user_id=%s AND market=%s AND kind=%s AND enabled "
             "  AND (cooldown_until IS NULL OR cooldown_until < NOW()) "
@@ -303,6 +306,17 @@ def _cninfo_stock(code: str) -> str:
     return f"{bare},{org}" if org else bare
 
 
+def _expand_deep(obj, code: str):
+    """递归展开 body 模板里的占位符(只碰字符串,结构原样保留)。"""
+    if isinstance(obj, str):
+        return expand(obj, code)
+    if isinstance(obj, dict):
+        return {k: _expand_deep(v, code) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_expand_deep(v, code) for v in obj]
+    return obj
+
+
 def _fetch_one(src: UserSource, symbol: str) -> dict:
     """打一次用户的源并映射。任何一步失败都抛异常,由上层降级。"""
     # 地址里要 CIK 而用户给的是 ticker(字母)→ 先查对照表换成数字。
@@ -322,6 +336,10 @@ def _fetch_one(src: UserSource, symbol: str) -> dict:
     params: dict = {}
     body: dict | None = None
 
+    # body 模板先展开占位符 —— Tushare 的 params.ts_code 要 600519.SH
+    if src.body_tpl:
+        body = _expand_deep(src.body_tpl, sym)
+
     if src.requires_key and src.key_enc:
         raw = decrypt(src.key_enc)
         val = f"{src.key_prefix}{raw}" if src.key_prefix else raw
@@ -330,7 +348,10 @@ def _fetch_one(src: UserSource, symbol: str) -> dict:
         elif src.key_in == "query":
             params[src.key_name] = val
         else:
-            body = {src.key_name: val}
+            # **合并进模板而不是覆盖它**。第一版写的是 `body = {key: val}`,
+            # 那会把 api_name 整个冲掉 —— 上游返回"请指定正确的接口名",
+            # 而错误看起来像是我们没配对接口
+            body = {**(body or {}), src.key_name: val}
 
     timeout = min(max(src.timeout_ms, 1000), 30000) / 1000
     # ⚠️ **params 为空时必须传 None,不能传 {}**。
