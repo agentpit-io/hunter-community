@@ -492,6 +492,9 @@ async def init_db():
         # 单地址 RPC 的 body 模板(同 sql/20260821b_user_source_body.sql)
         cur.execute("ALTER TABLE user_data_sources ADD COLUMN IF NOT EXISTS "
                     "body_tpl JSONB NOT NULL DEFAULT '{}'::jsonb")
+        # 备用地址(同 sql/20260821c_user_source_alt_urls.sql)
+        cur.execute("ALTER TABLE user_data_sources ADD COLUMN IF NOT EXISTS "
+                    "alt_urls JSONB NOT NULL DEFAULT '[]'::jsonb")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_uds_user_lookup "
                     "ON user_data_sources(user_id, market, kind) WHERE enabled")
         # 同一 (market, kind, upstream) 只允许一条 —— 允许两条的话

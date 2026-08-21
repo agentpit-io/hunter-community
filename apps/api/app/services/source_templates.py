@@ -69,6 +69,15 @@ class Endpoint:
     #
     # 值里的 `{ts_code}` 等占位符走 source_resolver.expand() 同一套。
     body: dict = field(default_factory=dict)
+    # 同一份数据的**备用地址**,主地址连不上时依次试。
+    #
+    # 为东财加的:它的 push2his 分片**会轮换** —— 同一分钟 82. 是 5/5、
+    # 十分钟后 0/4,而同时 7. 变 4/4;更糟的时候**所有分片一起不通**,
+    # 只剩 push2delay。写死任何一个都会时灵时不灵,而用户会归咎于我们
+    #(地址是我们预填的)。
+    #
+    # 顺序 = 优先级。前面的数据更全,后面的更稳。
+    alt_urls: list[str] = field(default_factory=list)
     # 实测过吗 · 见文件头。False 会在 UI 上标「未实测」
     verified: bool = False
     verified_at: str = ""              # "2026-08-19"
@@ -178,10 +187,28 @@ TEMPLATES: list[SourceTemplate] = [
             ),
             Endpoint(
                 "a", "capital",
+                # 主地址给 60 天历史;备用地址见 alt_urls。
                 "https://82.push2his.eastmoney.com/api/qt/stock/fflow/kline/get"
                 "?secid={secid}&lmt=60&klt=101&fields1=f1,f2,f3"
                 "&fields2=f51,f52,f53,f54,f55,f56",
+                alt_urls=[
+                    # 其余分片 —— 能通的那个每隔一阵会换
+                    "https://7.push2his.eastmoney.com/api/qt/stock/fflow/kline/get"
+                    "?secid={secid}&lmt=60&klt=101&fields1=f1,f2,f3"
+                    "&fields2=f51,f52,f53,f54,f55,f56",
+                    "https://push2his.eastmoney.com/api/qt/stock/fflow/kline/get"
+                    "?secid={secid}&lmt=60&klt=101&fields1=f1,f2,f3"
+                    "&fields2=f51,f52,f53,f54,f55,f56",
+                    # ⭐ 最后这条**只给今天一行,但 100% 可达**(实测所有
+                    # push2his 分片全挂时它仍然 4/4)。而 get_money_flow()
+                    # 要的恰好就是今天 —— 宁可少几天历史,也别整条失败。
+                    "https://push2delay.eastmoney.com/api/qt/stock/fflow/kline/get"
+                    "?secid={secid}&lmt=1&klt=101&fields1=f1,f2,f3"
+                    "&fields2=f51,f52,f53,f54,f55,f56",
+                ],
                 label="资金流向", verified=True, verified_at=_TODAY, headers=_UA,
+                note="东财分片会轮换,主地址连不上时自动依次试备用地址;"
+                     "最后一档只给当日但最稳",
             ),
             Endpoint(
                 "a", "news",

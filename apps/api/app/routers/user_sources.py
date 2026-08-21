@@ -398,6 +398,8 @@ async def bulk_create(body: BulkCreateIn, request: Request):
             verb = (item.method or "").upper() or (
                 (tpl_ep.method if tpl_ep else "GET") or "GET")
             body_tpl = item.body or (dict(tpl_ep.body) if tpl_ep else {})
+            # 备用地址也从模板补 —— 同 method/body,是接口的固有属性
+            alt = list(tpl_ep.alt_urls) if tpl_ep else []
 
             try:
                 # 每条一个 savepoint —— 不然一条撞唯一索引会把整个事务
@@ -408,14 +410,14 @@ async def bulk_create(body: BulkCreateIn, request: Request):
                     INSERT INTO user_data_sources
                       (user_id, name, upstream, market, kind, endpoint, requires_key,
                        key_in, key_name, key_prefix, api_key_enc, api_key_hint,
-                       headers, field_map, timeout_ms, http_method, body_tpl)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s::jsonb)
+                       headers, field_map, timeout_ms, http_method, body_tpl, alt_urls)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s,%s::jsonb,%s::jsonb)
                     RETURNING {_COLS}
                 """, (uid, name[:60], body.upstream, item.market, item.kind, ep,
                       body.requires_key, body.key_in, body.key_name.strip(),
                       body.key_prefix, enc, hint,
                       _json(hdrs), _json(item.field_map), body.timeout_ms,
-                      verb, _json(body_tpl)))
+                      verb, _json(body_tpl), json.dumps(alt, ensure_ascii=False)))
                 created.append(_row(cur.fetchone()))
                 cur.execute("RELEASE SAVEPOINT sp")
             except Exception as e:                            # noqa: BLE001
@@ -679,7 +681,7 @@ async def test_saved_source(sid: int, request: Request, symbol: str = "600519"):
     try:
         cur.execute(
             "SELECT id, name, upstream, endpoint, requires_key, key_in, key_name, "
-            "       key_prefix, api_key_enc, headers, field_map, timeout_ms, kind, market, http_method, body_tpl "
+            "       key_prefix, api_key_enc, headers, field_map, timeout_ms, kind, market, http_method, body_tpl, alt_urls "
             "FROM user_data_sources WHERE id=%s AND user_id=%s", (sid, uid))
         row = cur.fetchone()
     finally:
@@ -691,7 +693,8 @@ async def test_saved_source(sid: int, request: Request, symbol: str = "600519"):
     # row[:12] 对齐 UserSource 的前 12 个位置字段;market 是第 14 列,
     # 单独传 —— 它在 dataclass 里排在 kind 后面,不能跟着切片走
     src = source_resolver.UserSource(*row[:12], market=row[13],
-                                     http_method=row[14], body_tpl=row[15] or {})
+                                     http_method=row[14], body_tpl=row[15] or {},
+                                     alt_urls=row[16] or [])
     kind = row[12]
 
     t0 = time.time()

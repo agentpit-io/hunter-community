@@ -74,6 +74,9 @@ class UserSource:
     # 单地址 RPC 的 body 模板 —— Tushare 四个接口共用一个地址,
     # 靠 body 里的 api_name 区分。值里的占位符走 expand() 同一套
     body_tpl: dict = field(default_factory=dict)
+    # 备用地址 —— 主地址连不上时依次试。东财分片会轮换,见
+    # source_templates.Endpoint.alt_urls
+    alt_urls: list = field(default_factory=list)
 
 
 def _candidates(uid: str, market: str, kind: str) -> list[UserSource]:
@@ -92,7 +95,7 @@ def _candidates(uid: str, market: str, kind: str) -> list[UserSource]:
         cur = conn.cursor()
         cur.execute(
             "SELECT id, name, upstream, endpoint, requires_key, key_in, key_name, "
-            "       key_prefix, api_key_enc, headers, field_map, timeout_ms, market, http_method, body_tpl "
+            "       key_prefix, api_key_enc, headers, field_map, timeout_ms, market, http_method, body_tpl, alt_urls "
             "FROM user_data_sources "
             "WHERE user_id=%s AND market=%s AND kind=%s AND enabled "
             "  AND (cooldown_until IS NULL OR cooldown_until < NOW()) "
@@ -318,20 +321,80 @@ def _expand_deep(obj, code: str):
 
 
 def _fetch_one(src: UserSource, symbol: str) -> dict:
-    """打一次用户的源并映射。任何一步失败都抛异常,由上层降级。"""
+    """打一次用户的源。**主地址不行就依次试备用地址。**
+
+    为什么需要备用地址:东财的 push2his 分片**会轮换** —— 实测同一分钟
+    82. 是 5/5、十分钟后 0/4,而同时 7. 变 4/4;更糟的时候所有分片一起
+    不通,只剩 push2delay(只给当日一行,但 100% 可达)。
+
+    换地址的条件有两个,**缺一不可**:
+      · 抛异常(连不上)
+      · **或者返回了但一行数据都没有** —— 这是关键。东财挂掉时经常是
+        `rc:0 + 空数组`,HTTP 200、结构完整,只有数据是空的。
+        只按异常判断的话,这种"成功地返回了空"会被当成正常结果。
+
+    全部试完仍不行就抛最后一个错误 —— 不返回空 dict 冒充成功。
+    """
+    urls = [src.endpoint] + [u for u in (src.alt_urls or []) if u]
+    last_err: Exception | None = None
+    for i, u in enumerate(urls):
+        try:
+            got = _fetch_at(src, symbol, u)
+        except Exception as e:                                 # noqa: BLE001
+            last_err = e
+            if i + 1 < len(urls):
+                logger.info("[resolver] {} 第 {} 个地址失败({}),换备用地址",
+                            src.name, i + 1, type(e).__name__)
+            continue
+        if not _looks_empty(got):
+            if i:
+                logger.info("[resolver] {} 用了第 {} 个备用地址", src.name, i)
+            return got
+        last_err = RuntimeError("上游返回了但没有数据(HTTP 200 + 空)")
+        if i + 1 < len(urls):
+            logger.info("[resolver] {} 第 {} 个地址返回空,换备用地址",
+                        src.name, i + 1)
+    raise last_err or RuntimeError("取数失败")
+
+
+def _looks_empty(payload: dict) -> bool:
+    """返回了但没有实际数据吗。
+
+    **只认几个已知形状,认不出就当成有数据** —— 宁可漏判(不换地址),
+    也不要误判成空而把好数据丢掉换个更差的源。
+    """
+    if not isinstance(payload, dict):
+        return not payload
+    d = payload.get("data")
+    if isinstance(d, dict):
+        k = d.get("klines")
+        if isinstance(k, list):
+            return len(k) == 0
+    if isinstance(d, list):
+        return len(d) == 0
+    return False
+
+
+def _fetch_at(src: UserSource, symbol: str, url: str = "") -> dict:
+    """打一次指定地址并返回原始负载。任何一步失败都抛异常。"""
     # 地址里要 CIK 而用户给的是 ticker(字母)→ 先查对照表换成数字。
     # **只在真的需要时才查**(地址里有 {cik10} 且代码不是纯数字),
     # 这样非 SEC 的源不会因此多一次网络请求
     sym = symbol
-    if "{cninfo}" in src.endpoint:
-        src = UserSource(**{**src.__dict__,
-                            "endpoint": src.endpoint.replace(
-                                "{cninfo}", _cninfo_stock(symbol))})
-    if "{cik10}" in src.endpoint and not str(symbol).strip().isdigit():
+    # ⚠️ **占位符要作用在真正要打的那个地址上。**
+    #
+    # 加备用地址之后这个函数收的是 `url`(可能是备用地址),而不再总是
+    # `src.endpoint`。第一版把 {cninfo} 替换写在 `src` 上、下面却用 `url` ——
+    # 结果主地址里的 `{cninfo}` 原封不动发了出去,巨潮返回空、映射报
+    # 「必需字段 items 没取到」。**改一处忘另一处,又是同一个形状。**
+    raw_url = url or src.endpoint
+    if "{cninfo}" in raw_url:
+        raw_url = raw_url.replace("{cninfo}", _cninfo_stock(symbol))
+    if "{cik10}" in raw_url and not str(symbol).strip().isdigit():
         hit = _cik_of(str(symbol).strip())
         if hit:
             sym = hit
-    ep = expand(src.endpoint, sym)
+    ep = expand(raw_url, sym)
     headers = {k: str(v) for k, v in (src.headers or {}).items()}
     params: dict = {}
     body: dict | None = None
