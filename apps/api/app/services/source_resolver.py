@@ -267,12 +267,52 @@ def _cik_of(ticker: str) -> str | None:
     return _CIK_MAP.get(ticker.upper()) or None
 
 
+# ── 巨潮的 code → orgId 对照 ────────────────────────────────
+#
+# 巨潮的公告查询要 `stock=600519,gssh0600519`(代码 + orgId 复合)。
+# 只给代码返回 totalRecordNum:0(不报错),**一个参数都不给则返回
+# 随机 30 家公司的公告** —— 而那 30 条会被当成用户问的那只票的公告
+# 报给他。实测:问茅台的公告,答的是太兴集团的中期股息。
+#
+# 这是最糟的一类错:答案完整、格式正确、看不出任何异常,只是公司不对。
+#
+# 巨潮自己发布了对照表(szse_stock.json,6239 条,免费无 key)。
+_CNINFO_ORG: dict[str, str] | None = None
+
+
+def _cninfo_stock(code: str) -> str:
+    """600519 → "600519,gssh0600519"。查不到就返回裸代码 ——
+    那会让上游返回 0 条,是个**空结果而不是错结果**。"""
+    global _CNINFO_ORG
+    bare = str(code).strip().split(".")[0]
+    if _CNINFO_ORG is None:
+        _CNINFO_ORG = {}
+        try:
+            with httpx.Client(timeout=30, follow_redirects=True) as c:
+                d = c.get("http://www.cninfo.com.cn/new/data/szse_stock.json",
+                          headers={"User-Agent": "Mozilla/5.0"}).json()
+            arr = d.get("stockList") or d.get("data") or []
+            for x in arr:
+                cd, org = str(x.get("code") or ""), str(x.get("orgId") or "")
+                if cd and org:
+                    _CNINFO_ORG[cd] = org
+            logger.info("[cninfo] 载入 code→orgId 对照 {} 条", len(_CNINFO_ORG))
+        except Exception as e:                                 # noqa: BLE001
+            logger.warning("[cninfo] 拉 orgId 对照失败: {}", e)
+    org = _CNINFO_ORG.get(bare)
+    return f"{bare},{org}" if org else bare
+
+
 def _fetch_one(src: UserSource, symbol: str) -> dict:
     """打一次用户的源并映射。任何一步失败都抛异常,由上层降级。"""
     # 地址里要 CIK 而用户给的是 ticker(字母)→ 先查对照表换成数字。
     # **只在真的需要时才查**(地址里有 {cik10} 且代码不是纯数字),
     # 这样非 SEC 的源不会因此多一次网络请求
     sym = symbol
+    if "{cninfo}" in src.endpoint:
+        src = UserSource(**{**src.__dict__,
+                            "endpoint": src.endpoint.replace(
+                                "{cninfo}", _cninfo_stock(symbol))})
     if "{cik10}" in src.endpoint and not str(symbol).strip().isdigit():
         hit = _cik_of(str(symbol).strip())
         if hit:

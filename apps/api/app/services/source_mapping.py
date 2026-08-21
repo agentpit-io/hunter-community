@@ -209,6 +209,9 @@ BUILTIN: dict[str, dict[str, dict]] = {
         "announce": {"_shape": "list", "_list": "$.announcements",
                      "title": "announcementTitle", "url": "adjunctUrl",
                      "published_at": "announcementTime", "source": "secName",
+                     # secCode 带出来给 cninfo_keep_only() 做"这条到底是不是
+                     # 这只票的"判断 —— 没有它那道保险是空转的
+                     "sec_code": "secCode",
                      # announcementTime 是**毫秒时间戳**(1786723200000),
                      # adjunctUrl 是**相对路径**(finalpage/2026-08-15/xxx.PDF)——
                      # 两个都要后处理,见 `_post_cninfo`
@@ -448,6 +451,25 @@ def _list(payload: Any, spec: dict) -> dict:
     if post == "cninfo":
         items = [_post_cninfo(x) for x in items]
     return {"items": items}
+
+
+def cninfo_keep_only(items: list[dict], code: str) -> list[dict]:
+    """只留下**确实属于这只票**的公告。
+
+    上游参数错一点就会返回别家公司的公告(见 source_templates 里的警告)。
+    这道过滤是**兜底**:即使参数拼错了,也只会返回空,不会返回错的公司。
+
+    「空的比假的好」—— 用户看到"没查到公告"会自己再问一次,
+    看到别家公司的公告则会当成真的读下去。
+    """
+    bare = str(code).strip().split(".")[0].lstrip("0")
+    out = []
+    for x in items:
+        sc = str(x.get("sec_code") or "").strip().lstrip("0")
+        # 没有 sec_code 字段就不做判断(别的来源复用这个函数时不该被误杀)
+        if not sc or sc == bare:
+            out.append(x)
+    return out
 
 
 def _post_cninfo(row: dict) -> dict:

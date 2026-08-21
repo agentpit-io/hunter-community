@@ -589,17 +589,80 @@ def get_money_flow(code: str) -> dict | None:
 
 
 def get_news(code: str, limit: int = 20) -> list[dict]:
-    """个股新闻。"""
+    """个股新闻 —— **同时带上用户自己配的新闻源与公告源**。
+
+    ## 为什么公告也从这里出
+
+    模型问「600519 最近有什么公告」时,调的是 `stock_news`(它手上没有
+    单独的公告工具)。实测:用户明明配了巨潮公告源,模型却答了一堆新闻,
+    并且说"暂未查询到公告"—— 因为公告那条源在对话里根本碰不到。
+
+    公告本来就是资讯的一种,而且是**权威度最高的那一种**(法定披露)。
+    把它并进来并用 `kind` 标出来,模型就能分清哪条是公告哪条是新闻;
+    再单独造一个公告工具反而要让模型多学一件事。
+
+    ## 顺序:公告在前
+
+    同一天的公司公告和媒体报道摆在一起时,公告是原始事实、报道是转述。
+    列表被截断时该先丢报道。
+    """
     sym = to_symbol(code)
     if not sym:
         return []
+
+    # ── 用户自己的源优先(同 get_quote,加一层在前面不动原路径)──
+    user_items: list[dict] = []
+    try:
+        from app.services import source_resolver
+        mk = _market_of(code)
+        # 公告在前、新闻在后 —— 见 docstring
+        for kind, tag in (("announce", "公告"), ("news", "新闻")):
+            hit = source_resolver.try_user(mk, kind, code)
+            raw_items = (hit or {}).get("items") or []
+            # ⚠️ 公告要按代码过滤 —— 巨潮的参数错一点就会返回别家公司的公告,
+            # 而那些看起来和真的一模一样(见 source_mapping.cninfo_keep_only)
+            if kind == "announce" and raw_items:
+                from app.services import source_mapping as _sm
+                before = len(raw_items)
+                raw_items = _sm.cninfo_keep_only(raw_items, code)
+                if len(raw_items) < before:
+                    logger.warning(
+                        "[news] 公告源返回了 {} 条不属于 {} 的记录,已丢弃",
+                        before - len(raw_items), code)
+            for i, it in enumerate(raw_items):
+                title = (it.get("title") or "").strip()
+                if not title:
+                    continue
+                user_items.append({
+                    "id": f"u{kind}{i}", "code": code, "title": title,
+                    # source 显示成"巨潮资讯 · 公告",让用户在结果里
+                    # 看得出这条是从他自己接的源来的
+                    "source": (it.get("source") or "").strip() or tag,
+                    "kind": tag,
+                    "url": it.get("url") or "",
+                    "published_at": it.get("published_at") or "",
+                })
+    except Exception as e:                                     # noqa: BLE001
+        logger.warning("[news] 用户源取数失败(回落官方): {}", e)
+
+    if len(user_items) >= limit:
+        return user_items[:limit]
+
     data = _get("/api/v1/news", {"symbols": sym, "limit": limit})
     if not isinstance(data, list):
-        return []
-    return [{"id": i, "code": code, "title": r.get("title", ""),
-             "source": r.get("source", ""), "url": r.get("url", ""),
-             "published_at": r.get("published_at", "")}
-            for i, r in enumerate(data)]
+        # 官方那条没数据不代表整体失败 —— 用户源已经拿到的照样返回
+        return user_items
+    official = [{"id": i, "code": code, "title": r.get("title", ""),
+                 "source": r.get("source", ""), "kind": "新闻",
+                 "url": r.get("url", ""),
+                 "published_at": r.get("published_at", "")}
+                for i, r in enumerate(data)]
+    # 标题去重 —— 用户源和官方源很可能报道同一件事,
+    # 同一条出现两遍会让模型以为"两家都在说,这事更重要"
+    seen = {(x["title"] or "").strip() for x in user_items}
+    merged = user_items + [x for x in official
+                           if (x["title"] or "").strip() not in seen]
+    return merged[:limit]
 
 
 def get_all_news_bulk(limit: int = 100) -> list[dict]:

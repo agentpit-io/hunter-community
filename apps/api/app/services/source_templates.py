@@ -229,11 +229,18 @@ TEMPLATES: list[SourceTemplate] = [
         "cninfo", False,
         note="巨潮资讯 · A股法定信息披露渠道 · 免 key",
         endpoints=[
-            Endpoint("a", "announce", "http://www.cninfo.com.cn/new/hisAnnouncement/query",
+            Endpoint("a", "announce",
+                     # ⚠️ **参数一个都不能少。**不带参数时它返回**随机 30 家公司**
+                     # 的公告(实测:太兴集团/中通快递/伟工控股),而那些会被
+                     # 当成用户问的那只票的公告报给他 —— 答案完整、格式正确、
+                     # 看不出任何异常,只是公司不对。
+                     "http://www.cninfo.com.cn/new/hisAnnouncement/query"
+                     "?stock={cninfo}&pageNum=1&pageSize=30"
+                     "&column=szse&tabName=fulltext&isHLtitle=true",
                      label="公司公告", method="POST", verified=True, verified_at=_TODAY,
                      headers=_UA,
-                     note="⚠️ 参数 stock 要**复合格式** `600519,gssh0600519`(代码+orgId)· "
-                          "只填 600519 会返回 totalRecordNum:0 而**不报错**"),
+                     note="⚠️ `{cninfo}` 会展开成 `600519,gssh0600519`(代码+orgId)· "
+                          "只填代码返回 0 条且**不报错**,不填参数则返回别家公司的公告"),
         ],
     ),
     # 港交所 —— `_24` P0.5 老板已定**不做**,整条从预置里删掉。
