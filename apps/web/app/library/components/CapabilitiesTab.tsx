@@ -34,6 +34,16 @@ export default function CapabilitiesTab({
   // 得有地方回答。默认全部
   const [kind, setKind] = useState<KindFilter>('')
 
+  // 「你装的」里按来源仓库再折一层的展开状态。默认全收起 ——
+  // 打开这页是想看"我装了哪几个包",不是一上来看十几个能力的清单
+  const [openSub, setOpenSub] = useState<Set<string>>(new Set())
+  const toggleSub = (k: string) =>
+    setOpenSub((prev) => {
+      const n = new Set(prev)
+      n.has(k) ? n.delete(k) : n.add(k)
+      return n
+    })
+
   const filtered = useMemo(() => {
     let gs = activeGroup ? groups.filter((g) => g.category === activeGroup) : groups
     const q = (search || '').toLowerCase()
@@ -83,16 +93,80 @@ export default function CapabilitiesTab({
             <span>{g.category}</span>
             <span style={{ color: HUNTER.INK_F, fontSize: 12 }}>{g.ready}/{g.total}</span>
           </div>
-          {g.items.map((i) => (
-            <Card key={i.key} item={i}
-                  selected={selected?.key === i.key}
-                  onSelect={() => onSelect(i)}
-                  onUse={() => onUse(i)} />
-          ))}
+          {/* 「你装的」按**来源仓库**再折一层(用户反馈 2026-08-21,同数据源那次)。
+              装一个 GitHub 仓库进来就多出十几张卡,而用户心里是"我装了一个 xxx",
+              不是"我装了十四个东西"。其他类目条目少,不折。 */}
+          {byOrigin(g.items).map((sub) => {
+            const subOpen = openSub.has(sub.key)
+            // 只有一个来源、且这一组本来就不多时不折 —— 折了反而多一次点击
+            const flat = sub.items.length <= 2
+            return (
+              <div key={sub.key} style={{ marginBottom: flat ? 0 : 6 }}>
+                {!flat && (
+                  <button style={subHeadStyle(subOpen)}
+                          onClick={() => toggleSub(sub.key)}
+                          title={subOpen ? '收起' : `展开 ${sub.items.length} 个能力`}>
+                    <span style={{ width: 12, color: HUNTER.INK_F, fontSize: 10 }}>
+                      {subOpen ? '▾' : '▸'}
+                    </span>
+                    <span style={{ fontWeight: 600 }}>{sub.label}</span>
+                    {/* 收起时把里面有什么摆出来 —— 只有一个仓库名太干,
+                        这行字才是判断要不要点开的依据 */}
+                    <span style={{ fontSize: 11, color: HUNTER.INK_F, marginLeft: 8,
+                                   overflow: 'hidden', textOverflow: 'ellipsis',
+                                   whiteSpace: 'nowrap' }}>
+                      {sub.items.map((x) => x.name).join(' · ')}
+                    </span>
+                    <span style={{ flex: 1 }} />
+                    <span style={{ fontSize: 11.5, color: HUNTER.INK_F, whiteSpace: 'nowrap' }}>
+                      {sub.items.length} 个能力
+                    </span>
+                  </button>
+                )}
+                {(flat || subOpen) && (
+                  <div style={{ paddingLeft: flat ? 0 : 14, marginTop: flat ? 0 : 4 }}>
+                    {sub.items.map((i) => (
+                      <Card key={i.key} item={i}
+                            selected={selected?.key === i.key}
+                            onSelect={() => onSelect(i)}
+                            onUse={() => onUse(i)} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       ))}
     </div>
   )
+}
+
+/** 按来源仓库分组,保持原顺序。
+ *
+ *  `origin` 形如 `github:prof-little-bear/cc-equity-research@main` ——
+ *  取中间那段当标签。
+ *
+ *  ⚠️ **没有 origin 的单独成组,不猜。**`_23` 的暂存路径以前不记来源,
+ *  已经装进去的那批就是空的。按仓库名猜一个填上去,等于把一条
+ *  没有依据的信息写进界面 —— 用户会当成事实。写"来源未记录"更诚实。
+ *  (写入侧已经补上,以后装的都会有。) */
+function byOrigin(items: CapabilityItem[]) {
+  const order: string[] = []
+  const bucket: Record<string, CapabilityItem[]> = {}
+  for (const it of items) {
+    const raw = it.origin || ''
+    const key = raw.startsWith('github:')
+      ? raw.slice(7).split('@')[0]
+      : (raw || '__none__')
+    if (!bucket[key]) { bucket[key] = []; order.push(key) }
+    bucket[key].push(it)
+  }
+  return order.map((k) => ({
+    key: k,
+    label: k === '__none__' ? '来源未记录' : k,
+    items: bucket[k],
+  }))
 }
 
 function Card({ item, selected, onSelect, onUse }: {
@@ -182,3 +256,20 @@ const useBtn: React.CSSProperties = {
 const emptyStyle: React.CSSProperties = {
   padding: '40px 20px', textAlign: 'center', color: HUNTER.INK_F, fontSize: 13,
 }
+
+const subHeadStyle = (open: boolean): React.CSSProperties => ({
+  display: 'flex',
+  alignItems: 'center',
+  gap: 4,
+  width: '100%',
+  padding: '9px 12px',
+  marginBottom: 4,
+  borderRadius: 9,
+  border: `1px solid ${HUNTER.LINE}`,
+  background: open ? HUNTER.PAPER : 'transparent',
+  color: HUNTER.INK,
+  fontSize: 13,
+  fontFamily: 'inherit',
+  cursor: 'pointer',
+  textAlign: 'left',
+})

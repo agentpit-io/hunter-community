@@ -184,6 +184,8 @@ export interface CapabilityItem {
   prompt_tpl: string
   brand: string
   builtin: boolean
+  /** 从哪个仓库装来的 · `github:owner/repo@ref` · 内置项与手动新建的为空 */
+  origin: string
   slow: boolean
   blocked_by: string[]
   status: 'ready' | 'blocked' | 'broken'

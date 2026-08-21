@@ -324,6 +324,13 @@ def save_raw(name: str, content: str) -> Path:
                 head = re.sub(r"^name:\s*.+$", f"name: {clean}", head, count=1, flags=re.M)
             else:
                 head = head.rstrip("\n") + f"\nname: {clean}"
+            # 记来源 —— `install()` 早就在写 `origin:`,而 `_23` 的暂存路径
+            # 没写。结果是同样"从 GitHub 装的",一半有来源一半没有,
+            # 能力页按来源分组时那一半只能落进"来源未记录"。
+            #
+            # **只在缺的时候补**:作者自己写了 origin 就别覆盖他的。
+            if origin and not re.search(r"^origin:" + chr(92) + "s*.+$", head, re.M):
+                head = head.rstrip(chr(10)) + chr(10) + "origin: " + origin
             text = head + sep + rest
 
     USER_SKILLS_DIR.mkdir(parents=True, exist_ok=True)

@@ -192,6 +192,9 @@ async def list_skills():
             "source_url": s.get("source_url", ""),
             "prompt_tpl": s["prompt_tpl"],
             "builtin": s.get("builtin", True),
+            # 从哪个仓库装来的(github:owner/repo@ref)· 能力页按它分组。
+            # 内置项与手动新建的为空 —— 前端会归到「来源未记录」,不猜。
+            "origin": s.get("origin", ""),
             "needs_tools": tools,
             # 三种"不能用"分开报,因为用户的下一步动作完全不同
             "missing_tools": missing,      # 声明的工具压根不存在 → 是我们的 bug
@@ -254,6 +257,9 @@ async def list_capabilities(request: Request):
             "category": s["category"], "hint": s["hint"],
             "prompt_tpl": s["prompt_tpl"], "brand": s.get("brand", ""),
             "builtin": s.get("builtin", True),
+            # 从哪个仓库装来的(github:owner/repo@ref)· 能力页按它分组。
+            # 内置项与手动新建的为空 —— 前端会归到「来源未记录」,不猜。
+            "origin": s.get("origin", ""),
             "slow": False,
             "blocked_by": missing + not_ready,
             "status": "broken" if missing else ("blocked" if not_ready else "ready"),
