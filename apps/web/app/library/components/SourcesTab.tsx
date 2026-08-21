@@ -49,6 +49,17 @@ export default function SourcesTab({
 
   const totalCount = filteredGroups.reduce((a, g) => a + g.sources.length, 0)
 
+  // 「你自己的」里按来源再折一层的展开状态。
+  // 默认全收起 —— 用户打开这页是想看"我接了哪几个源",
+  // 不是一上来就看 6 个接口的清单
+  const [openSub, setOpenSub] = useState<Set<string>>(new Set())
+  const toggleSub = (up: string) =>
+    setOpenSub((prev) => {
+      const n = new Set(prev)
+      n.has(up) ? n.delete(up) : n.add(up)
+      return n
+    })
+
   // ── 折叠 ──────────────────────────────────────────────────
   // 11 个来源 33 条源全铺开有五六屏,滚到底也数不清哪组是哪组。
   // 默认收起,点组头展开。
@@ -172,26 +183,87 @@ export default function SourcesTab({
                 </button>
               </div>
             ) : (
-              g.sources.map((s) => (
-                <EntityCard
-                  key={s.key}
-                  title={s.name}
-                  // 副标题里放**数据类型 + 市场**。来源已经是组标题了,
-                  // 再重复一遍是噪音;市场在这里反而有用,因为按来源分组后
-                  // 同一组里会混着 A股和港股(比如 AKShare)
-                  subtitle={[s.kind_label, s.market_label].filter(Boolean).join(' · ')}
-                  status={s.status}
-                  meta={s.volume_hint || (s.available ? undefined : '通道未开')}
-                  selected={selected?.key === s.key}
-                  onClick={() => onSelect(s)}
-                />
-              ))
+              /* 按**来源**再分一层(用户反馈 2026-08-21)。
+                 
+                 改之前一个接口一张卡:加一次东财就多出行情/K线/资金流/新闻
+                 四张,加两个来源列表就有七八行 —— 而用户心里"我接了两个源",
+                 不是"我接了七个东西"。列表长度应该跟他的心智对齐。
+                 
+                 现在一个来源一行,点开才看具体接口。 */
+              byUpstream(g.sources).map((sub) => {
+                const subOpen = openSub.has(sub.upstream)
+                return (
+                  <div key={sub.upstream} style={{ marginBottom: 6 }}>
+                    <button style={subHeadStyle(subOpen)}
+                            onClick={() => toggleSub(sub.upstream)}
+                            title={subOpen ? '收起' : `展开 ${sub.items.length} 个接口`}>
+                      <span style={{ width: 12, color: HUNTER.INK_F, fontSize: 10 }}>
+                        {subOpen ? '▾' : '▸'}
+                      </span>
+                      <span style={{ fontWeight: 600 }}>{sub.label}</span>
+                      {/* 收起时把**接口种类**摆出来 —— 折叠后只有一个名字太干,
+                          "实时行情·资金流向·新闻"才是他判断要不要点开的依据 */}
+                      <span style={{ fontSize: 11, color: HUNTER.INK_F, marginLeft: 8,
+                                     overflow: 'hidden', textOverflow: 'ellipsis',
+                                     whiteSpace: 'nowrap' }}>
+                        {sub.items.map((x) => x.kind_label).filter(Boolean).join(' · ')}
+                      </span>
+                      <span style={{ flex: 1 }} />
+                      <span style={{ fontSize: 11.5, color: HUNTER.INK_F, whiteSpace: 'nowrap' }}>
+                        {sub.items.length} 个接口
+                        {sub.bad > 0 && <b style={{ color: HUNTER.TAG_WARN_FG }}> · {sub.bad} 个有问题</b>}
+                      </span>
+                    </button>
+                    {subOpen && (
+                      <div style={{ paddingLeft: 14, marginTop: 4 }}>
+                        {sub.items.map((s) => (
+                          <EntityCard
+                            key={s.key}
+                            title={s.kind_label || s.name}
+                            // 展开后来源已经在上一行了,这里只放市场
+                            subtitle={s.market_label}
+                            status={s.status}
+                            meta={s.volume_hint || (s.available ? undefined : '通道未开')}
+                            selected={selected?.key === s.key}
+                            onClick={() => onSelect(s)}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })
             ))}
           </div>
         )
       })}
     </div>
   )
+}
+
+/** 把一组源按 upstream 再分一层,保持它们在原数组里的先后顺序。
+ *
+ *  不用 Object.groupBy —— 那是 ES2024,Next 的 target 不一定吃得下,
+ *  而且它返回的键顺序对我们这里"保持原顺序"没有保证。 */
+function byUpstream(items: DataSourceItem[]) {
+  const order: string[] = []
+  const bucket: Record<string, DataSourceItem[]> = {}
+  for (const it of items) {
+    const up = it.upstream || 'custom'
+    if (!bucket[up]) { bucket[up] = []; order.push(up) }
+    bucket[up].push(it)
+  }
+  return order.map((up) => ({
+    upstream: up,
+    // upstream_label 是后端给的中文名;取不到就退回条目名里 " · " 前那截
+    label: bucket[up][0].upstream_label || bucket[up][0].name.split(' · ')[0] || up,
+    items: bucket[up],
+    // 收起时也要能看见"这个源有几条不正常" —— 否则坏了的接口
+    // 会被折叠藏起来,用户永远不会去点开那一行
+    bad: bucket[up].filter((x) => x.status === 'unavailable'
+                              || x.status === 'need_key'
+                              || x.status === 'down').length,
+  }))
 }
 
 function Chip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
@@ -311,3 +383,19 @@ const emptyStyle: React.CSSProperties = {
   color: HUNTER.INK_F,
   fontSize: 13,
 }
+
+const subHeadStyle = (open: boolean): React.CSSProperties => ({
+  display: 'flex',
+  alignItems: 'center',
+  gap: 4,
+  width: '100%',
+  padding: '9px 12px',
+  borderRadius: 9,
+  border: `1px solid ${HUNTER.LINE}`,
+  background: open ? HUNTER.PAPER : 'transparent',
+  color: HUNTER.INK,
+  fontSize: 13,
+  fontFamily: 'inherit',
+  cursor: 'pointer',
+  textAlign: 'left',
+})
