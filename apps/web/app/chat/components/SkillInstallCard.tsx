@@ -145,9 +145,12 @@ export default function SkillInstallCard({ onClose, onInstalled, bare }: Props) 
                       {c.risks.length > 0 && (
                         <span style={riskTag}>⚠ {c.risks.length} 处需注意</span>
                       )}
+                      {c.is_index && <span style={riskTag}>目录页 · 不建议装</span>}
                     </div>
                     <div style={{ fontSize: 11.5, color: HUNTER.INK_F, marginTop: 2, lineHeight: 1.5 }}>
-                      {c.description || '(没写 description —— 模型会不知道什么时候该用它)'}
+                      {c.is_index
+                        ? '这是仓库的目录页,正文只是指向同仓库的其他 skill。装完之后那些相对路径不存在,模型读到这里就断了 —— 直接勾下面那几个子 skill。'
+                        : (c.description || '(没写 description —— 模型会不知道什么时候该用它)')}
                     </div>
 
                     {c.risks.map((r, i) => (

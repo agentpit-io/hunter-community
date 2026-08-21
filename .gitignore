@@ -47,3 +47,8 @@ tsconfig.tsbuildinfo
 *.bak
 *.bak.*
 .env.bak.*
+
+# 用户在界面上装的第三方 SKILL 落在这里(bind mount 进容器)——
+# 是运行时数据,不是代码。误提交过一次,044462d 撤回的就是这个。
+# 已跟踪的那几个不受影响:gitignore 只挡未跟踪的。
+user-skills/*/

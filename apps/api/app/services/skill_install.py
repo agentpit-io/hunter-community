@@ -122,6 +122,32 @@ class SkillCandidate:
     body_preview: str = ""
     lines: int = 0
     risks: list[dict] = field(default_factory=list)
+    is_index: bool = False          # 见 _looks_like_index()
+
+
+def _looks_like_index(path: str, body: str, skill_paths: list[str]) -> bool:
+    """这份 SKILL.md 是不是「仓库目录页」而不是真技能。
+
+    UZI-Skill 的根 SKILL.md 就是典型:正文通篇是
+
+        - Full stock research...:  read `skills/deep-analysis/SKILL.md`.
+        - Investor jury...:        read `skills/investor-panel/SKILL.md`.
+
+    它自己不干活,只把模型指向同仓库的子 skill。而我们是**把每个子 skill
+    摊平装成顶层技能**的,那些 `skills/xxx/SKILL.md` 相对路径在装完之后
+    根本不存在 —— 于是这一条即使加载了也是死路,模型读完找不到下一站。
+
+    实测:装整仓 UZI-Skill 后,4 个子技能(deep-analysis / investor-panel /
+    lhb-analyzer / trap-detector)全部可用,唯独根上这个 `uzi` 怎么试都
+    走不通。不是加载链路有洞,是这东西本来就不该被装成技能。
+    """
+    if "/" in path:                                   # 只有根上的才可能是目录页
+        return False
+    others = [q for q in skill_paths if q != path]
+    if not others:                                    # 没有子 skill,那它就是本体
+        return False
+    # 正文指向了别的 SKILL.md —— 指路牌的特征
+    return body.count("SKILL.md") >= 2
 
 
 def _raw(owner: str, repo: str, ref: str, path: str) -> str:
@@ -176,6 +202,7 @@ def inspect(text: str) -> dict:
             body_preview="\n".join(body.splitlines()[:40]),
             lines=len(txt.splitlines()),
             risks=scan_risks(txt),
+            is_index=_looks_like_index(p, body, skill_paths),
         ))
 
     stripped = []

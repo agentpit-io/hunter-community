@@ -144,6 +144,8 @@ export interface RepoCandidate {
   body_preview: string      // 正文前 40 行 —— **这才是真正的安全边界**
   lines: number
   risks: RepoRisk[]
+  /** 仓库根上的目录页,自己不干活只指向子 skill —— 装了也走不通 */
+  is_index?: boolean
 }
 
 export interface RepoInspect {

@@ -34,6 +34,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -71,15 +72,50 @@ _REFUSAL = [
 ]
 
 
+def _refresh_token() -> str:
+    """重新签一把 token。
+
+    ⚠️ **跑满 23 条要二十多分钟,而 JWT 的 TTL 是 1 小时** —— 实测跑到
+    第 16 条就开始 401,后面 8 条全废,而错误信息是 INVALID_TOKEN /
+    claim_failed,看起来像会话服务坏了,跟被测的 SKILL 毫无关系。
+
+    长跑的脚本必须自己会续签,不然测出来的失败一半是环境噪音。
+    """
+    import subprocess
+    out = subprocess.run(
+        ["docker", "compose", "exec", "-T", "api", "python", "-c",
+         "import sys; sys.path.insert(0,'/app');"
+         "from app.routers.auth import _sign_access;"
+         "print(_sign_access('" + os.getenv("HUNTER_UID", "") + "','user','local@hunter.local'))"],
+        capture_output=True, text=True, timeout=90)
+    tok = (out.stdout or "").strip().splitlines()[-1].strip() if out.stdout else ""
+    return tok
+
+
 def req(method: str, url: str, body=None, timeout=240):
+    global TOKEN
     data = json.dumps(body).encode() if body is not None else None
     r = urllib.request.Request(url, data=data, method=method)
     r.add_header("Content-Type", "application/json")
     if TOKEN:
         r.add_header("Authorization", f"Bearer {TOKEN}")
     op = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    with op.open(r, timeout=timeout) as resp:
-        raw = resp.read().decode("utf-8", "replace")
+    try:
+        with op.open(r, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        # 401 = token 过期。续签一次再重试 —— 见 _refresh_token 的说明
+        if e.code != 401 or not os.getenv("HUNTER_UID"):
+            raise
+        fresh = _refresh_token()
+        if not fresh:
+            raise
+        TOKEN = fresh
+        r2 = urllib.request.Request(url, data=data, method=method)
+        r2.add_header("Content-Type", "application/json")
+        r2.add_header("Authorization", f"Bearer {TOKEN}")
+        with op.open(r2, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", "replace")
     return json.loads(raw) if raw.strip() else {}
 
 
@@ -106,6 +142,45 @@ def ask_text(tpl: str, name: str) -> str:
     return q
 
 
+# opencode 报"加载了哪个 SKILL"有**两种写法**,都要认:
+#   · 老的:state.input.filePath = ".../skills/lhb_analyzer/SKILL.md"
+#   · 新的:state.title          = "Loaded skill: lhb_analyzer"
+#
+# ⚠️ 我第一版只认路径那种 —— 而 opencode 重启后换成了 title 那种,
+# 结果 23 条**全部**报"没加载这个 SKILL"。整整齐齐的全失败本身就是
+# 信号:不是 23 个都坏了,是判据错了。
+_SKILL_PATH = re.compile(r"/skills/([A-Za-z0-9_\-]+)/SKILL\.md")
+_SKILL_LOADED = re.compile(r"Loaded skill:\s*([A-Za-z0-9_\-]+)", re.I)
+
+
+def _skills_touched(part: dict) -> set:
+    """这次工具调用**读到了哪几个 SKILL**。
+
+    opencode 的 skill 工具把 SKILL.md 的绝对路径放进 `state.input.filePath`,
+    输出里也会带 `<path>…</path>` —— 两处都扫,有的调用只在输出里有。
+
+    这是"真的调了它"的**硬证据**。上一轮只看"有没有调工具",
+    结果 23/23 全过 —— 但模型完全可能调了别的工具,或干脆凭训练数据
+    答一段像模像样的话。
+    """
+    st = part.get("state") or {}
+    blob = " ".join(str(x) for x in (
+        (st.get("input") or {}).get("filePath", ""),
+        st.get("title", ""),
+        str(st.get("output", ""))[:400],
+    ))
+    return set(_SKILL_PATH.findall(blob)) | set(_SKILL_LOADED.findall(blob))
+
+
+def _dir_name(item: dict) -> str:
+    """卡片对应的 SKILL **目录名**。
+
+    `key` 就是目录名;display_name 带连字符、目录名带下划线,
+    所以不能拿显示名去比。
+    """
+    return str(item.get("key") or "").strip()
+
+
 def run_one(item: dict, keep: bool) -> dict:
     sid = None
     name = item.get("name") or item.get("key")
@@ -126,6 +201,7 @@ def run_one(item: dict, keep: bool) -> dict:
         if isinstance(msgs, dict):
             msgs = msgs.get("data") or []
         text, tools = [], []
+        loaded = set()          # 这一轮真正读到的 SKILL 目录名
         for m in msgs:
             mm = ({**(m.get("info") or {}), "parts": m.get("parts") or []}
                   if "info" in m else m)
@@ -136,6 +212,7 @@ def run_one(item: dict, keep: bool) -> dict:
                     text.append(p["text"])
                 elif p.get("type") == "tool":
                     tools.append(str(p.get("tool") or "?"))
+                    loaded |= _skills_touched(p)
         answer = "\n".join(text).strip()
 
         if not answer:
@@ -148,8 +225,28 @@ def run_one(item: dict, keep: bool) -> dict:
         if len(answer) < 60:
             return {"ok": False, "why": f"回复过短({len(answer)} 字)",
                     "answer": answer, "tools": tools, "cost": cost, "sid": sid}
+        # ⚠️ **必须确认它真的读了这一个 SKILL**,而不只是"调了某个工具"。
+        want = _dir_name(item)
+        if want and want not in loaded:
+            return {"ok": False,
+                    "why": "没加载这个 SKILL(读到的是:"
+                           + (", ".join(sorted(loaded)) or "无") + ")",
+                    "answer": answer, "tools": tools,
+                    "loaded": sorted(loaded), "cost": cost, "sid": sid}
+
+        # 加载了但只是在**介绍自己** —— 上一轮 deep-analysis 就是这样:
+        # 「I will explain the core workflow of my ... skill」。
+        # 那不算能用,用户要的是它干活。
+        low = answer[:180].lower()
+        if any(w in low for w in ("explain the core workflow", "工作流如下",
+                                  "该技能用于", "这个 skill 的作用",
+                                  "我已经加载了")):
+            return {"ok": False, "why": "只是在介绍这个 SKILL,没有执行",
+                    "answer": answer, "tools": tools,
+                    "loaded": sorted(loaded), "cost": cost, "sid": sid}
+
         return {"ok": True, "answer": answer, "tools": tools,
-                "cost": cost, "sid": sid}
+                "loaded": sorted(loaded), "cost": cost, "sid": sid}
     except urllib.error.HTTPError as e:
         return {"ok": False,
                 "why": f"HTTP {e.code}: {e.read()[:120].decode('utf-8','replace')}"}
@@ -194,7 +291,7 @@ def main() -> int:
             ok += 1
             print(f"    OK  {r.get('cost', 0):.0f}s · "
                   f"{len(r.get('answer') or '')} 字 · "
-                  f"工具 {', '.join(r.get('tools') or []) or '(未调)'}")
+                  f"加载了 {', '.join(r.get('loaded') or []) or '(无)'}")
         else:
             fails.append((s.get("name"), origin, r.get("why")))
             print(f"    X   {r.get('why')}")
