@@ -353,6 +353,21 @@ def _compute_candle_5d(codes, trade_date):
     return out
 
 
+# 只靠本地 klines 就能算的因子 —— **不碰网络,不需要任何 key**。
+#
+# 这个名单决定了开源实例"不填 key 能用到什么程度":这 8 个因子
+# 从本地 K 线算,所以哪怕用户什么都不配,量化也能选股、能回测。
+# 其余因子要么走 AKShare(基本面),要么要外部服务(已下架)。
+#
+# **不要往这里加基本面因子** —— 那些跑起来是分钟级的限流等待,
+# 混进来会让每日任务从几秒变成几十分钟,而且失败原因完全不同
+# (网络/限流 vs K线历史不足),混在一起很难看清是哪里出了问题。
+LOCAL_ONLY = [
+    "momentum_1m", "momentum_6m", "momentum_12m_1m",
+    "ma_align", "macd", "rsi", "vol_20d_inv", "candle_5d",
+]
+
+
 COMPUTERS = {
     # Phase A · 3 因子
     "pe_inv": _compute_pe_inv,

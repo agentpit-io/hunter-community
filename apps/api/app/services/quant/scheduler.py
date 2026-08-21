@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import date
+from datetime import date, timedelta
 
 from app.services.database import get_conn
 from app.services.quant import factor_engine
+from app.services.quant import universe as _uv
 
 log = logging.getLogger(__name__)
 
@@ -39,6 +40,111 @@ def daily_recompute():
     total = sum(result.values())
     log.info("[quant.scheduler] 完成 · 各因子行数 %s · 合计 %d", result, total)
     return result
+
+
+def daily_local_pipeline() -> dict:
+    """**不需要任何 key 的每日流水线** —— 开源实例靠它自给自足。
+
+    背景:开源版 `.env` 默认 `HUNTER_MINIMAL_BOOT=1`,启动时跳过**全部**
+    后台定时任务。它的本意是"跳过需要外部凭据的任务",但量化的因子重算
+    被一起关掉了 —— 于是因子数据停在最后一次手动回填,永远不会更新,
+    而界面上没有任何地方提示这一点(实测:停在 2026-07-15,过期一个多月)。
+
+    可是这几步**根本不需要凭据**:
+
+        ① 成分股      AKShare 直连
+        ② 个股日线    腾讯直连(或用户自己配的源)
+        ③ 指数日线    腾讯直连
+        ④ 技术因子    只读本地 klines
+
+    所以把它们单独拎出来,放在 MINIMAL_BOOT 那道门之外。
+
+    每一步失败都不阻断后面 —— 拿不到指数日线不该导致因子不算。
+    但**每一步的结果都要 log**,静默跳过的结果是第二天看起来一切正常
+    而表里什么都没有。
+    """
+    from datetime import date as _date
+    out: dict = {}
+    today = _date.today()
+
+    # ① 股票池
+    try:
+        codes = _uv.query_current("000300")
+        if len(codes) < 100:
+            codes = _uv.query_current("000300") if _uv.seed_current("000300") else []
+        out["universe"] = len(codes)
+    except Exception as e:                                    # noqa: BLE001
+        log.error("[quant.local] 股票池失败: %s", e)
+        codes = []
+        out["universe"] = 0
+    if not codes:
+        log.error("[quant.local] 没有股票池 · 后面全部跳过")
+        return out
+
+    # ② 个股日线 · 只补最近一段,不是全量重拉
+    try:
+        from app.services.quant import local_kline
+        from app.services.database import get_conn
+        lo = today - timedelta(days=45)
+        ok = 0
+        conn = get_conn(); cur = conn.cursor()
+        try:
+            for code in codes:
+                rows = local_kline.fetch_daily(code, lo, today)
+                if not rows:
+                    continue
+                for r in rows:
+                    cur.execute(
+                        """INSERT INTO klines (code, period, ts, open, high, low, close, volume)
+                           VALUES (%s,'daily',%s,%s,%s,%s,%s,%s)
+                           ON CONFLICT (code, period, ts) DO UPDATE
+                             SET open=EXCLUDED.open, high=EXCLUDED.high,
+                                 low=EXCLUDED.low, close=EXCLUDED.close,
+                                 volume=EXCLUDED.volume""",
+                        (code, r["ts"], r["open"], r["high"], r["low"],
+                         r["close"], int(r["volume"] or 0)))
+                conn.commit()
+                ok += 1
+        finally:
+            cur.close(); conn.close()
+        out["klines"] = ok
+        log.info("[quant.local] 日线更新 %d/%d 只", ok, len(codes))
+    except Exception as e:                                    # noqa: BLE001
+        log.error("[quant.local] 日线更新失败: %s", e)
+        out["klines"] = 0
+
+    # ③ 指数日线(基准)
+    try:
+        from app.services.quant import index_kline
+        n = 0
+        for ic in ("000300", "000905", "399006"):
+            r = index_kline.backfill(ic, today - timedelta(days=45), today)
+            n += r.get("written", 0)
+        out["index_klines"] = n
+    except Exception as e:                                    # noqa: BLE001
+        log.error("[quant.local] 指数日线失败: %s", e)
+        out["index_klines"] = 0
+
+    # ④ 技术因子
+    try:
+        res = {k: factor_engine.compute_and_store(k, codes, today)
+               for k in factor_engine.LOCAL_ONLY}
+        out["factors"] = res
+        log.info("[quant.local] 技术因子 @ %s · %s", today, res)
+    except Exception as e:                                    # noqa: BLE001
+        log.error("[quant.local] 因子计算失败: %s", e)
+        out["factors"] = {}
+    return out
+
+
+def register_local(scheduler):
+    """只注册不需要凭据的任务 —— 见 daily_local_pipeline 的说明。"""
+    from apscheduler.triggers.cron import CronTrigger
+    scheduler.add_job(
+        daily_local_pipeline,
+        CronTrigger(hour=17, minute=10),
+        id="quant_local_daily", replace_existing=True,
+    )
 
 
 def daily_ic_recompute():

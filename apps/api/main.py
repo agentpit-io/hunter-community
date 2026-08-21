@@ -33,6 +33,26 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("[boot] init_db failed (service will run but table-backed features may 500): {}", e)
 
+    # ─── 不需要任何凭据的任务 · 在 MINIMAL_BOOT 之前就挂上 ───
+    #
+    # MINIMAL_BOOT 的本意是"跳过需要外部凭据的后台任务",但它是个一刀切的开关,
+    # 把量化的每日因子重算也一起关掉了。后果:开源实例的因子数据停在最后一次
+    # 手动回填,**永远不会更新**,而界面上没有任何地方提示(实测停在
+    # 2026-07-15,过期一个多月)。
+    #
+    # 而这条流水线的四步 —— 成分股 / 个股日线 / 指数日线 / 技术因子 ——
+    # 全部走 AKShare 直连或腾讯直连,不需要任何 key。它不该被这个开关关掉。
+    _local_sched = None
+    try:
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler as _AS
+        from app.services.quant.scheduler import register_local as _reg_local
+        _local_sched = _AS(timezone="Asia/Shanghai")
+        _reg_local(_local_sched)
+        _local_sched.start()
+        logger.info("[quant.local] 每日 17:10 CST 本地流水线已挂载(不需要任何 key)")
+    except Exception as e:
+        logger.warning("[quant.local] 本地流水线挂载失败(非致命): {}", e)
+
     if HUNTER_MINIMAL_BOOT:
         logger.warning("[hunter-community] HUNTER_MINIMAL_BOOT=1 · skipping background schedulers only (tables OK)")
         yield

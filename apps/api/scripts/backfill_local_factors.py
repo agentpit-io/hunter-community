@@ -24,13 +24,10 @@ from app.services.quant import backtest_engine as bt          # noqa: E402
 from app.services.quant import factor_engine as fe            # noqa: E402
 from app.services.quant import universe as uv                 # noqa: E402
 
-# 只读 klines 的因子。**不要往这里加基本面因子** —— 那些走 akshare_client,
-# 跑起来是分钟级的限流等待,而且失败原因完全不同(网络/限流 vs 数据不足),
-# 混在一起会让"哪里失败了"变得很难看清。
-LOCAL_FACTORS = [
-    "momentum_1m", "momentum_6m", "momentum_12m_1m",
-    "ma_align", "macd", "rsi", "vol_20d_inv", "candle_5d",
-]
+# 名单在 factor_engine 里 —— 每日定时任务用的是同一份。
+# 抄成两份的话,加了新因子只改一处,而"回填补了、每日没算"这种
+# 不一致要等用户回测选不出票才会发现。
+LOCAL_FACTORS = fe.LOCAL_ONLY
 
 
 def main() -> int:

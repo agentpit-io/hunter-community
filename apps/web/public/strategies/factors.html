@@ -54,8 +54,19 @@ const container = document.getElementById('page-content')
         card.title = f.offline_reason
         card.style.opacity = '.5'
       } else if (f.has_data) {
-        flag.style.background = '#EEF5F1'; flag.style.color = '#2C6B55'
-        flag.textContent = `✅ 有数据 · ${f.latest || ''}`
+        // 「有数据」还不够 —— 数据可能是三个月前的。实测过基本面因子
+        // 停在 2026-07-15 而界面显示得和当天更新的一模一样,
+        // 用户据此以为自己在用最新数据选股。超过 10 天就标出来。
+        const days = f.latest
+          ? Math.floor((Date.now() - new Date(f.latest + 'T00:00:00').getTime()) / 86400000)
+          : null
+        const stale = days !== null && days > 10
+        flag.style.background = stale ? '#FDF3E7' : '#EEF5F1'
+        flag.style.color = stale ? '#8A5A1B' : '#2C6B55'
+        flag.textContent = stale
+          ? `⏳ ${f.latest} · ${days} 天前`
+          : `✅ 有数据 · ${f.latest || ''}`
+        if (stale) card.title = `这个因子最近一次计算是 ${f.latest},已经 ${days} 天没更新`
       } else {
         flag.style.background = '#FDF3E7'; flag.style.color = '#8A5A1B'
         flag.textContent = '⚠ 无数据'
