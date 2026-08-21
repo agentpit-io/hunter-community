@@ -21,6 +21,14 @@ class FactorDef:
     desc: str
     reverse: bool = False       # 反向因子(值越小越好 · 如 momentum_1m 反转)
     enabled: bool = True        # Phase B 默认全启用 · 未来接的因子放 False
+    # 下架原因 —— **不为空就等于 enabled=False,而且要说得出为什么**。
+    # 光把 enabled 改成 False,半年后没人知道当初为什么关,
+    # 于是要么被误开回来,要么一直挂着没人敢动。
+    offline_reason: str = ""
+
+    def __post_init__(self):
+        if self.offline_reason:
+            self.enabled = False
 
 
 ALL_FACTORS: list[FactorDef] = [
@@ -46,10 +54,23 @@ ALL_FACTORS: list[FactorDef] = [
     FactorDef("momentum_12m_1m", "动量", "12M-1M 动量", "📈", "剔除最近 1 月的 11 月涨幅 · 学术经典", enabled=True),
 
     # ── ML / 技术 / 资金 ──
-    FactorDef("kronos",    "ML",   "Kronos 技术",     "🧠", "清华 Kronos 时序大模型未来 5 日预测收益率"),
+    # 下架 · 两个独立的理由,任何一个都足够:
+    #
+    # 1. 它要调我们自己的 GPU 服务(hunter.agentpit.io/api/saas/kronos),
+    #    开源用户没有,也不可能自己搭一个。
+    # 2. 更要命的是 kronos_client.py 文件头自己写的:上游只支持"今天预测",
+    #    不支持"给定 T 日预测 T+5" —— **历史期 factor_value 恒为空**。
+    #    也就是说它在任何回测里都必然选不出票,用户选中它就是空仓。
+    FactorDef("kronos",    "ML",   "Kronos 技术",     "🧠", "清华 Kronos 时序大模型未来 5 日预测收益率",
+              offline_reason="需要 Kronos 预测服务,且历史期无数据、无法回测"),
     FactorDef("ma_align",  "技术", "均线趋势",        "📉", "MA5/10/20/60 多头排列打分"),
     FactorDef("macd",      "技术", "MACD 动量",       "📉", "MACD_bar / ATR14"),
-    FactorDef("main_flow", "资金", "主力净流入",      "💵", "近 5 日超大单+大单净流入 / 5 日总资金流"),
+    # 下架 · 但和 kronos 不同,**这个是能救回来的**:
+    # akshare_client.get_main_flow_ratio() 直接 _get() 打我们的网关,
+    # 绕过了已经支持用户源的 get_money_flow()。而东财的资金流是免费的。
+    # 等取数改走用户源之后可以恢复上架。
+    FactorDef("main_flow", "资金", "主力净流入",      "💵", "近 5 日超大单+大单净流入 / 5 日总资金流",
+              offline_reason="当前取数写死走 Hunter 网关,改走用户源后可恢复"),
     FactorDef("rsi",       "技术", "RSI 超买卖",      "📉", "RSI14 分段映射"),
 
     # ── 波动 / 其他 ──

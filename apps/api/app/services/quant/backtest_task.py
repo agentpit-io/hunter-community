@@ -58,6 +58,9 @@ def run_and_store(task_id: str, strategy: dict, start: date, end: date, user_id:
                 "status": "error",
                 "error": result["error"],
                 "message": result.get("message", ""),
+                # 逐因子的数据诊断 —— 前端要靠它告诉用户是**哪几个**因子没数据。
+                # 只传 message 的话,用户看到"没选出票"仍然不知道该改什么
+                "factors": result.get("factors") or [],
             }, TTL_SEC)
             return
         # 补 positions 里的 name(前端展示用)

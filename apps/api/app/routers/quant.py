@@ -33,17 +33,45 @@ router = APIRouter(prefix="/quant", tags=["quant"])
 
 @router.get("/factors")
 async def list_factors():
-    """20 因子清单 · 启用状态(Phase A 只 3 个 enabled=true)"""
+    """因子清单 · 带**这个因子到底有没有数据**。
+
+    只报 enabled 是不够的:20 个因子里 enabled 的有 18 个,而
+    `factor_value` 表里真正有数据的只有 3 个。用户在界面上看不出区别,
+    随手选 5 个全是空的,回测就选不出票 —— 这正是 B1 的上游成因。
+
+    `has_data` / `latest` 让前端能把没数据的标灰。
+    """
+    from app.services.database import get_conn
+    stats: dict[str, tuple] = {}
+    try:
+        conn = get_conn(); cur = conn.cursor()
+        cur.execute("""SELECT factor_key, count(*), max(trade_date),
+                              count(DISTINCT code)
+                         FROM factor_value GROUP BY factor_key""")
+        stats = {r[0]: r for r in cur.fetchall()}
+        cur.close(); conn.close()
+    except Exception as e:                                    # noqa: BLE001
+        # 查不到统计不该让整个因子列表 500 —— 那样界面直接白屏。
+        # 降级成"不知道有没有数据",而不是假装都有
+        log.warning("[quant] 因子数据统计查询失败: %s", e)
+        stats = {}
+
     return {
         "factors": [
             {
                 "key": f.key, "cat": f.cat, "name": f.name,
                 "icon": f.icon, "desc": f.desc,
                 "reverse": f.reverse, "enabled": f.enabled,
+                "offline_reason": f.offline_reason,
+                "has_data": f.key in stats,
+                "rows": stats[f.key][1] if f.key in stats else 0,
+                "codes": stats[f.key][3] if f.key in stats else 0,
+                "latest": stats[f.key][2].isoformat() if f.key in stats else None,
             } for f in factor_defs.ALL_FACTORS
         ],
         "cat_order": factor_defs.CAT_ORDER,
         "enabled_count": len(factor_defs.enabled_factors()),
+        "with_data_count": sum(1 for f in factor_defs.ALL_FACTORS if f.key in stats),
     }
 
 

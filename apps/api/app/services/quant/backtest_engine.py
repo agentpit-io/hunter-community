@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 
 from app.services.database import get_conn
+from app.services.quant.factor_defs import get_factor
 from app.services.quant.strategy_engine import score_and_select
 
 log = logging.getLogger(__name__)
@@ -228,6 +229,12 @@ def _calc_turnover(prev: list[str], curr: list[str]) -> float:
 
     低估换手 = 低估成本 = 回测收益偏高,而这个偏差在结果里看不出来。
     """
+    # **空仓不是交易。** 下面两个分支各自都对,但它们默认"至少有一边有持仓"。
+    # 两边同时为空时(因子没数据 → 每期都选不出票)会落进第一个分支,
+    # 于是每期都按满仓换手收一次费 —— 实测 33 期 × 10bps = -3.3%,
+    # 系统据此报出"年化 -5.07%",而这个账户从头到尾一股没买。
+    if not prev and not curr:
+        return 0.0
     if not prev:
         return 1.0          # 首期建仓 · 全额买入
     if not curr:
@@ -238,6 +245,53 @@ def _calc_turnover(prev: list[str], curr: list[str]) -> float:
     total = sum(abs((wc if c in curr else 0.0) - (wp if c in prev else 0.0))
                 for c in codes)
     return total / 2.0
+
+
+def factor_data_report(keys: list[str], start: date, end: date) -> list[dict]:
+    """每个因子在 [start, end] 里到底有没有数据。
+
+    回测选不出票时,用户只会看到"没有持仓",而真正需要知道的是
+    **哪几个因子没数据、最近一次有数据是什么时候**。没有这个,
+    他只能怀疑是自己的权重配错了。
+    """
+    if not keys:
+        return []
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """SELECT factor_key, count(*), min(trade_date), max(trade_date)
+                 FROM factor_value
+                WHERE factor_key = ANY(%s) AND trade_date BETWEEN %s AND %s
+                GROUP BY factor_key""",
+            (keys, start, end))
+        in_range = {r[0]: r for r in cur.fetchall()}
+        # 区间内没有的,再看它**全表**有没有 —— 「从来没算过」和
+        # 「算过但不覆盖这段时间」是两个完全不同的问题,给的建议也不同
+        cur.execute(
+            """SELECT factor_key, count(*), min(trade_date), max(trade_date)
+                 FROM factor_value WHERE factor_key = ANY(%s) GROUP BY factor_key""",
+            (keys,))
+        ever = {r[0]: r for r in cur.fetchall()}
+    finally:
+        cur.close(); conn.close()
+
+    out = []
+    for k in keys:
+        fdef = get_factor(k)
+        name = fdef.name if fdef else k
+        if k in in_range:
+            _, n, lo, hi = in_range[k]
+            out.append({"key": k, "name": name, "ok": True, "rows": n,
+                        "from": lo.isoformat(), "to": hi.isoformat()})
+        elif k in ever:
+            _, n, lo, hi = ever[k]
+            out.append({"key": k, "name": name, "ok": False, "rows": 0,
+                        "why": f"这段时间没有数据 · 已有的是 {lo} ~ {hi}"})
+        else:
+            out.append({"key": k, "name": name, "ok": False, "rows": 0,
+                        "why": "从来没有计算过"})
+    return out
 
 
 def run_backtest(strategy: dict, start: date, end: date, user_id: str | None = None) -> dict:
@@ -271,8 +325,31 @@ def run_backtest(strategy: dict, start: date, end: date, user_id: str | None = N
         turnover_hist.append(turnover)
         nav_series.append({"date": dt0.isoformat(), "nav": round(nav[-1], 4)})
 
+    # ── B1 · 一期都没买到票时,不要给成绩单 ──────────────────
+    #
+    # 用户选的因子如果一个都没有数据,每期 picks 都是空,而下面这些指标
+    # 照样算得出来:年化 -5.07%、最大回撤 -3.25%、Sortino -7.03。
+    # 它们看起来就是一份"策略跑完了,只是不赚钱"的报告,而真相是
+    # **这个策略从头到尾没有被测过**。
+    #
+    # CLAUDE.md:严禁 mock 兜底 · 空的比假的好。一份看不出是空的报告,
+    # 比直接报错危险得多 —— 用户会据此把策略判死刑。
+    held = sum(1 for c in positions_hist if c)
+    if held == 0:
+        keys = [f["key"] for f in strategy["factors"] if f.get("weight_pct", 0) > 0]
+        return {
+            "error": "no_holdings",
+            "message": "整个回测区间一只股票都没选出来 —— 所选因子在这段时间没有数据。",
+            "factors": factor_data_report(keys, start, end),
+            "start": start.isoformat(), "end": end.isoformat(),
+            "n_periods": len(schedule) - 1,
+        }
+
     metrics = _calc_metrics(nav, ppy)
     metrics["turnover"] = round(sum(turnover_hist) / len(turnover_hist), 3) if turnover_hist else 0
+    # 部分期空仓 —— 不拦,但必须说。半数以上是空的时候,
+    # 这条曲线描述的主要是"没持仓"而不是"这个策略"
+    metrics["periods_held"] = held
 
     # C4.2 · 最后一期持仓保留 factor_contrib · 便于前端"贡献表"
     last_picks = picks_hist[-1] if picks_hist else []
@@ -311,6 +388,31 @@ def run_backtest(strategy: dict, start: date, end: date, user_id: str | None = N
     from app.services.quant import universe as _universe
     quality = _universe.quality_at(strategy["config"].get("universe", "hs300"),
                                    schedule[0])
+    # 请求了 5 个因子,其中 2 个没数据 —— 引擎会**默默用剩下 3 个**出结果。
+    # 指标是真的,但它描述的不是用户配的那个策略。B1 拦的是"一个因子都没有",
+    # 而这里是"少了几个",同样不能不说 —— 尤其当缺的那几个占了大半权重时,
+    # 用户会拿一份三因子的成绩单去判断他的五因子策略。
+    req_keys = [f["key"] for f in strategy["factors"] if f.get("weight_pct", 0) > 0]
+    freport = factor_data_report(req_keys, start, end)
+    missing = [f for f in freport if not f["ok"]]
+    if missing:
+        wmap = {f["key"]: f.get("weight_pct", 0) for f in strategy["factors"]}
+        lost_w = sum(wmap.get(f["key"], 0) for f in missing)
+        total_w = sum(wmap.values()) or 100
+        quality = {**quality,
+                   "missing_factors": missing,
+                   "missing_weight_pct": round(lost_w / total_w * 100),
+                   "factor_note": (
+                       f"{len(req_keys)} 个因子里有 {len(missing)} 个没有数据"
+                       f"({'、'.join(f['name'] for f in missing)}),"
+                       f"占权重 {round(lost_w / total_w * 100)}%。"
+                       f"这次实际只用了另外 {len(req_keys) - len(missing)} 个因子选股。")}
+
+    n_periods = len(schedule) - 1
+    if held < n_periods:
+        quality = {**quality, "empty_periods": n_periods - held, "empty_note": (
+            f"{n_periods} 期里有 {n_periods - held} 期没选出票(因子在那些时点没数据)。"
+            f"这些期按空仓计,收益不代表策略表现。")}
     # 换仓频率:UI 上能选 W/M/Q/H,而 _rebalance_dates 强制月频。
     # 选了没生效**必须说出来** —— 否则用户以为自己在对比不同频率,
     # 两次跑的其实是同一个东西

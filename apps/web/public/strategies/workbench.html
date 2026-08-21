@@ -18,6 +18,23 @@ document.body.innerHTML = renderShell('workbench', '策略广场 / 策略工作�
 let draft = loadDraft()
 const container = document.getElementById('page-content')
 
+// 回测区间的**唯一真值来源**。按钮文案、下方标签、真正发出去的请求
+// 三处必须同源 —— 之前它们各写各的,于是按钮说 3 年、标签说 2023-08 起、
+// 请求发的是 8 个月,而用户没有任何办法看出来。
+const BACKTEST_MONTHS = 8
+function backtestRange() {
+  const end = new Date(); end.setDate(15)
+  const start = new Date(end); start.setMonth(end.getMonth() - BACKTEST_MONTHS)
+  const fmt = d => d.toISOString().slice(0, 10)
+  return { start, end, fmt }
+}
+function renderBacktestRange() {
+  const el = document.getElementById('bt-range')
+  if (!el) return
+  const { start, end, fmt } = backtestRange()
+  el.textContent = `回测区间 ${fmt(start)} → ${fmt(end)} · 结果页可改`
+}
+
 function renderLeftPanel() {
   const factorsHtml = draft.factors.length === 0 ? `
     <div class="empty" style="padding:30px 20px">
@@ -142,11 +159,15 @@ function renderMiddlePanel() {
 
       <!-- 跑回测 -->
       <div style="padding:16px 18px">
+        <!-- 文案原来写「跑 3 年回测」,下面标签写死「回测区间 2023-08 → 2026-07」,
+             而代码实际请求的是 end.setMonth(-8) —— 八个月。两处都是假的,
+             而写死的那行连"假"都看不出来,因为它根本不随参数变。
+             现在两处都由 backtestRange() 算出来,只有一个真值来源。 -->
         <button id="btn-backtest" class="btn primary" style="width:100%;height:44px;font-size:14px">
-          <span class="hi hi-play"></span>跑 3 年回测
+          <span class="hi hi-play"></span>跑 8 个月回测
         </button>
-        <div style="text-align:center;color:var(--muted);font-size:11px;margin-top:8px">
-          回测区间 2023-08 → 2026-07 · 结果页可改
+        <div style="text-align:center;color:var(--muted);font-size:11px;margin-top:8px" id="bt-range">
+          回测区间 计算中… · 结果页可改
         </div>
         <button class="btn ask-hunter" style="width:100%;margin-top:10px;height:38px" id="btn-ask-2">
           <span class="hi hi-seal"></span>让 Hunter 解读这个组合
@@ -284,6 +305,8 @@ document.getElementById('btn-ask-2').addEventListener('click', askHunterFromWork
 document.getElementById('btn-save').addEventListener('click', () => openSaveDialog())
 
 // D-4 · 跑回测 · 异步任务 · task_id 轮询 · 前端可看到"计算中"进度
+renderBacktestRange()
+
 document.getElementById('btn-backtest').addEventListener('click', async () => {
   if (draft.factors.length === 0) { toast('先选几个因子', 'warn'); return }
   const btn = document.getElementById('btn-backtest')
@@ -292,9 +315,7 @@ document.getElementById('btn-backtest').addEventListener('click', async () => {
   const factors = draft.factors.map(k => ({ key: k, weight_pct: draft.weights[k] || 0 }))
                                 .filter(f => f.weight_pct > 0)
   try {
-    const end = new Date(); end.setDate(15)
-    const start = new Date(end); start.setMonth(end.getMonth() - 8)
-    const fmt = d => d.toISOString().slice(0, 10)
+    const { start, end, fmt } = backtestRange()
     const submitR = await fetch('/api/quant/backtest/run', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({
@@ -323,7 +344,18 @@ document.getElementById('btn-backtest').addEventListener('click', async () => {
       const s = await fetch(`/api/quant/backtest/status/${taskId}`).then(r => r.json())
       if (s.status === 'running') btn.textContent = '⏳ 计算中...'
       else if (s.status === 'queued') btn.textContent = '⏳ 排队中...'
-      else if (s.status === 'error') throw new Error(s.message || s.error || '未知错误')
+      else if (s.status === 'error') {
+        // 「一只票都没选出来」是最常见的失败,而只说这一句用户不知道该改什么。
+        // 后端把逐因子的数据诊断也传上来了,这里必须展开 —— 否则用户
+        // 只能怀疑是自己的权重配错了,而真正的原因是因子压根没算过
+        const bad = (s.factors || []).filter(f => !f.ok)
+        if (bad.length) {
+          const NL = String.fromCharCode(10)
+          const lines = bad.map(f => `· ${f.name}:${f.why}`).join(NL)
+          throw new Error((s.message || '选不出股票') + NL + NL + lines)
+        }
+        throw new Error(s.message || s.error || '未知错误')
+      }
       else if (s.status === 'done') { d = s.result; break }
       else if (s.status === 'not_found') throw new Error('任务丢失 · 请重试')
     }
@@ -334,7 +366,7 @@ document.getElementById('btn-backtest').addEventListener('click', async () => {
     location.href = '/strategies/backtest.html'
   } catch (e) {
     toast('回测失败: ' + e.message, 'warn')
-    btn.classList.remove('loading'); btn.innerHTML = '<span class="hi hi-play"></span>跑 3 年回测'
+    btn.classList.remove('loading'); btn.innerHTML = '<span class="hi hi-play"></span>跑 8 个月回测'
   }
 })
 

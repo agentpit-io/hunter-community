@@ -82,11 +82,13 @@ container.innerHTML = `
   <!-- 成色提示(_17 §5)· 用户拿到一个漂亮回测,看不出里面有没有偏差。
        让他知道成色,比修好它更急 —— 修要等历史成分累积一两年,
        而误判"这策略能用"是现在就会发生的 -->
-  ${(quality && (!quality.survivorship_ok || quality.rebalance_note)) ? `
+  ${(quality && (!quality.survivorship_ok || quality.rebalance_note || quality.empty_note || quality.factor_note)) ? `
   <div class="quality-warn">
     <b>⚠ 这次回测的成色</b>
     ${quality.survivorship_ok ? '' : `<div>· ${quality.note}</div>`}
     ${quality.rebalance_note ? `<div>· ${quality.rebalance_note}</div>` : ''}
+    ${quality.empty_note ? `<div>· ${quality.empty_note}</div>` : ''}
+    ${quality.factor_note ? `<div>· ${quality.factor_note}</div>` : ''}
     ${metrics.n_periods && metrics.n_periods < 12
       ? `<div>· 只跑了 <b>${metrics.n_periods}</b> 期(不足一年)—— 样本太少,指标参考价值有限。</div>` : ''}
     ${bench ? '' : '<div>· 基准未接入,无法判断是否跑赢大盘。</div>'}
@@ -544,7 +546,7 @@ container.innerHTML = `
   btn.addEventListener('click', async () => {
     const positions = (isReal && Array.isArray(realResult.positions)) ? realResult.positions : []
     if (!positions.length) {
-      status.textContent = '⚠ 无持仓数据 · 需先跑回测'
+      status.textContent = isReal ? '⚠ 这次回测没有选出任何股票' : '⚠ 无持仓数据 · 需先跑回测'
       status.style.color = 'var(--danger)'
       return
     }
@@ -591,7 +593,19 @@ container.innerHTML = `
   if (!wrap) return
   const positions = (isReal && Array.isArray(realResult.positions)) ? realResult.positions : []
   if (!positions.length) {
-    wrap.innerHTML = '<div style="color:var(--muted);padding:40px 0;text-align:center">无持仓数据 · 需先跑回测</div>'
+    // 「需先跑回测」在两种情况下都会显示,而它只对其中一种成立:
+    //   · 真的还没跑 —— 提示正确
+    //   · 跑完了但一只票都没选出来 —— 用户刚跑完,这句话让他重跑一遍,
+    //     而重跑一百次结果还是一样。同一屏上方还挂着「年化 -5.07%」,
+    //     两条信息互相矛盾。
+    // 现在按 isReal 区分:跑过了就说真实原因。
+    const empty = quality?.empty_note
+    wrap.innerHTML = isReal
+      ? `<div style="color:var(--danger);padding:40px 20px;text-align:center;line-height:1.7">
+           这次回测没有选出任何股票<br>
+           <span style="color:var(--muted);font-size:12px">${empty || '所选因子在这段区间没有数据 —— 换几个有数据的因子再试'}</span>
+         </div>`
+      : '<div style="color:var(--muted);padding:40px 0;text-align:center">无持仓数据 · 需先跑回测</div>'
     return
   }
   // draft 里的因子作为列 · positions 里 factor_contrib 是 dict
