@@ -62,6 +62,19 @@ def daily_local_pipeline() -> dict:
     每一步失败都不阻断后面 —— 拿不到指数日线不该导致因子不算。
     但**每一步的结果都要 log**,静默跳过的结果是第二天看起来一切正常
     而表里什么都没有。
+
+    ## 用谁的数据源
+
+    **固定走免费公开源(腾讯 / AKShare),不读任何用户配置。**
+
+    `local_kline.fetch_daily()` 支持"用户源优先",但这里刻意不传 user_id:
+    这是个全局定时任务,不属于任何用户,拿某一个人的 key 去刷全量数据
+    既不合理也不安全(他的额度、他的授权)。
+
+    用户想用自己的源,现在的方式是手工跑
+    `scripts/backfill_klines_local.py <月数> <user_id>`。
+    以后要做成自动的,得先想清楚多用户下该用谁的 —— 那是产品决策,
+    不是在这里随手 `user_id=某个人` 能定的。
     """
     from datetime import date as _date
     out: dict = {}
@@ -137,13 +150,65 @@ def daily_local_pipeline() -> dict:
     return out
 
 
+def weekly_akshare_factors() -> dict:
+    """基本面因子 · 每周一次 —— **不需要 key,只是慢**。
+
+    这 10 个因子(PE/PB/ROE/毛利率/营收同比…)走 AKShare 直连,和技术因子
+    一样不需要任何凭据,但 AKShare 对财务接口有限流:300 只跑一个日期是
+    分钟级。放进每日任务会让本来几秒的流水线变成几十分钟,而且一旦卡住,
+    连技术因子也跟着不更新 —— 所以单独排。
+
+    为什么必须排上:因子是选股打分的输入。基本面这 10 个停更,策略就只能
+    靠技术面,而用户在界面上选了 PE、营收同比这些,拿到的是一份
+    "少了一半权重"的回测。
+
+    只算**当天**一个日期。历史回填用 scripts/backfill_akshare_factors.py。
+    """
+    from datetime import date as _date
+    today = _date.today()
+    try:
+        codes = _uv.query_current("000300")
+    except Exception as e:                                    # noqa: BLE001
+        log.error("[quant.akshare] 取股票池失败: %s", e)
+        return {}
+    if not codes:
+        log.error("[quant.akshare] 股票池为空 · 跳过")
+        return {}
+
+    out = {}
+    for k in factor_engine.AKSHARE_ONLY:
+        try:
+            out[k] = factor_engine.compute_and_store(k, codes, today)
+        except Exception as e:                                # noqa: BLE001
+            # 一个因子失败不带走其余 —— 但要打出来。AKShare 限流是常态,
+            # 静默跳过的结果是下周看起来"跑过了"而表里还是空的
+            log.error("[quant.akshare] %s 失败: %s %s", k, type(e).__name__, str(e)[:80])
+            out[k] = 0
+    log.info("[quant.akshare] 基本面因子 @ %s · %s", today, out)
+    return out
+
+
 def register_local(scheduler):
-    """只注册不需要凭据的任务 —— 见 daily_local_pipeline 的说明。"""
+    """只注册不需要凭据的任务。
+
+    两个任务都不碰我们自己的服务:
+
+      每日 17:10  daily_local_pipeline    成分股/日线/指数/技术因子 · 几秒
+      每周六 02:00 weekly_akshare_factors  基本面因子 · 分钟到小时级
+
+    周六凌晨:这个任务要跑很久,放在非交易日的低峰,跑挂了也有一整个
+    周末可以重试,不影响周一开盘前的数据。
+    """
     from apscheduler.triggers.cron import CronTrigger
     scheduler.add_job(
         daily_local_pipeline,
         CronTrigger(hour=17, minute=10),
         id="quant_local_daily", replace_existing=True,
+    )
+    scheduler.add_job(
+        weekly_akshare_factors,
+        CronTrigger(day_of_week="sat", hour=2, minute=0),
+        id="quant_akshare_weekly", replace_existing=True,
     )
 
 

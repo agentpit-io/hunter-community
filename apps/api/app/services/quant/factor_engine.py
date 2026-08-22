@@ -368,6 +368,21 @@ LOCAL_ONLY = [
 ]
 
 
+# 走 AKShare 直连的因子 —— **同样不需要任何 key,只是慢**。
+#
+# 慢到什么程度:AKShare 对财务接口有限流,300 只 × 一个日期实测是分钟级,
+# 补一整年是小时级(backfill_hs300_full.py 自己写着 60-120 分钟)。
+# 所以它不能和 LOCAL_ONLY 一起塞进每日任务 —— 那会让本来几秒的任务
+# 变成几十分钟,而且一旦卡住,连技术因子也跟着不更新。
+#
+# 单独排一个低频任务(每周),见 scheduler.weekly_akshare_factors()。
+AKSHARE_ONLY = [
+    "pe_inv", "pb_inv", "dividend_yield", "ev_ebitda_inv",
+    "roe", "roa", "gross_margin", "debt_ratio_inv",
+    "revenue_growth_yoy", "earnings_growth_yoy",
+]
+
+
 COMPUTERS = {
     # Phase A · 3 因子
     "pe_inv": _compute_pe_inv,
@@ -400,6 +415,27 @@ COMPUTERS = {
 # ═══════════════════════════════════════════════════════════════
 # 落库
 # ═══════════════════════════════════════════════════════════════
+
+
+def _check_coverage() -> list[str]:
+    """每个启用的因子都得有人负责算它。
+
+    这次整件事的根源就是"因子定义了但没人算":20 个因子里 17 个从来没跑过,
+    而界面上它们和有数据的长得一模一样,用户选中就回测出一份空仓成绩单。
+
+    以后新增因子时,如果忘了把它归进 LOCAL_ONLY 或 AKSHARE_ONLY,
+    **启动时就会有一条 ERROR**,而不是等到用户选了它才发现。
+    """
+    from app.services.quant.factor_defs import enabled_factors
+    covered = set(LOCAL_ONLY) | set(AKSHARE_ONLY)
+    orphans = [f.key for f in enabled_factors() if f.key not in covered]
+    if orphans:
+        log.error("[factor_engine] 这些因子启用了但没有任何定时任务算它:%s"
+                  " —— 用户选中会得到空仓回测", orphans)
+    return orphans
+
+
+_check_coverage()
 
 def _bulk_upsert(trade_date: date, factor_key: str,
                  raw: dict[str, float], z: dict[str, float], rank: dict[str, float]) -> int:
