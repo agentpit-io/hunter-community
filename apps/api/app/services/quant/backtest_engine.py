@@ -337,6 +337,19 @@ def run_backtest(strategy: dict, start: date, end: date, user_id: str | None = N
     held = sum(1 for c in positions_hist if c)
     if held == 0:
         keys = [f["key"] for f in strategy["factors"] if f.get("weight_pct", 0) > 0]
+        # **先分清是哪一种空**。「股票池是空的」和「因子没数据」看起来
+        # 都是"选不出票",但用户要做的事完全不同:前者是去加自选或换池子,
+        # 后者是换因子。给错提示会让他改半天权重而问题根本不在那
+        from app.services.quant import universe as _uv
+        ukey = strategy["config"].get("universe", "hs300")
+        pool = _uv.resolve(ukey, schedule[0], user_id)
+        if not pool:
+            return {
+                "error": "empty_universe",
+                "message": _uv.describe_universe(ukey, 0, user_id),
+                "universe": ukey,
+                "start": start.isoformat(), "end": end.isoformat(),
+            }
         return {
             "error": "no_holdings",
             "message": "整个回测区间一只股票都没选出来 —— 所选因子在这段时间没有数据。",

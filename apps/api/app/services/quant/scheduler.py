@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import date, timedelta
 
 from app.services.database import get_conn
@@ -77,14 +78,24 @@ def daily_local_pipeline() -> dict:
     不是在这里随手 `user_id=某个人` 能定的。
     """
     from datetime import date as _date
+    from app.services.quant import init_state as _st
     out: dict = {}
     today = _date.today()
 
     # ① 股票池
+    _st.step("同步成分股", 0)
     try:
-        codes = _uv.query_current("000300")
+        codes = _uv.covered_codes()
         if len(codes) < 100:
-            codes = _uv.query_current("000300") if _uv.seed_current("000300") else []
+            # 首次启动 · 成分股还没 seed。两个指数都要 seed ——
+            # 只 seed 沪深300 的话,"中证500"这个池子永远没有因子数据
+            for _ic in _uv.COVERED_INDEXES:
+                try:
+                    n = _uv.seed_current(_ic)
+                    log.info("[quant.local] seed %s · %d 只", _ic, n)
+                except Exception as e:                        # noqa: BLE001
+                    log.error("[quant.local] seed %s 失败: %s", _ic, e)
+            codes = _uv.covered_codes()
         out["universe"] = len(codes)
     except Exception as e:                                    # noqa: BLE001
         log.error("[quant.local] 股票池失败: %s", e)
@@ -95,6 +106,7 @@ def daily_local_pipeline() -> dict:
         return out
 
     # ② 个股日线 · 只补最近一段,不是全量重拉
+    _st.step("拉取 K 线", 1, f"0/{len(codes)}")
     try:
         from app.services.quant import local_kline
         from app.services.database import get_conn
@@ -118,15 +130,31 @@ def daily_local_pipeline() -> dict:
                          r["close"], int(r["volume"] or 0)))
                 conn.commit()
                 ok += 1
+                if ok % 20 == 0:
+                    _st.detail(f"{ok}/{len(codes)}")
+                # 对上游客气一点 —— 回填脚本有这个 sleep 所以 800/800 全成功,
+                # 这里原来没有,结果清一色 ReadTimeout
+                time.sleep(0.15)
         finally:
             cur.close(); conn.close()
         out["klines"] = ok
-        log.info("[quant.local] 日线更新 %d/%d 只", ok, len(codes))
+        if ok == 0:
+            # **一只都没拿到不是"跑完了"**。原来这里只 log 一句就继续往下走,
+            # 用户会看到进度条走完然后什么数据都没有
+            log.error("[quant.local] 日线一只都没拿到(%d 只全失败)—— "
+                      "上游可能在限流,稍后重试", len(codes))
+            out["klines_error"] = f"{len(codes)} 只全部失败"
+        elif ok < len(codes) * 0.5:
+            log.warning("[quant.local] 日线只拿到 %d/%d 只 · 覆盖不足一半", ok, len(codes))
+            out["klines_error"] = f"只拿到 {ok}/{len(codes)}"
+        else:
+            log.info("[quant.local] 日线更新 %d/%d 只", ok, len(codes))
     except Exception as e:                                    # noqa: BLE001
         log.error("[quant.local] 日线更新失败: %s", e)
         out["klines"] = 0
 
     # ③ 指数日线(基准)
+    _st.step("拉取指数(基准)", 2)
     try:
         from app.services.quant import index_kline
         n = 0
@@ -139,15 +167,67 @@ def daily_local_pipeline() -> dict:
         out["index_klines"] = 0
 
     # ④ 技术因子
+    _st.step("计算因子", 3, f"0/{len(factor_engine.LOCAL_ONLY)}")
     try:
-        res = {k: factor_engine.compute_and_store(k, codes, today)
-               for k in factor_engine.LOCAL_ONLY}
+        res = {}
+        for _i, k in enumerate(factor_engine.LOCAL_ONLY, 1):
+            _st.detail(f"{_i}/{len(factor_engine.LOCAL_ONLY)} · {k}")
+            res[k] = factor_engine.compute_and_store(k, codes, today)
         out["factors"] = res
         log.info("[quant.local] 技术因子 @ %s · %s", today, res)
     except Exception as e:                                    # noqa: BLE001
         log.error("[quant.local] 因子计算失败: %s", e)
         out["factors"] = {}
+    _st.step("完成", 4)
     return out
+
+
+def run_initial_setup() -> dict:
+    """首次初始化 —— 库是空的时候在启动后立刻跑一遍。
+
+    历史因子也一并补:只有当天一个截面的话,**回测仍然一期都选不出票**
+    (回测要的是每个调仓日的因子值)。用户初始化完立刻点回测得到
+    "选不出股票",和没初始化没区别。
+    """
+    from app.services.quant import init_state as _st
+    if not _st.begin():
+        return {"skipped": "已经在跑"}
+    try:
+        out = daily_local_pipeline()
+        # 补历史因子 —— 回测要用
+        _st.step("补历史因子(回测要用)", 3, "")
+        try:
+            from datetime import date as _date, timedelta as _td
+            from app.services.quant import backtest_engine as _bt
+            codes = _uv.covered_codes()
+            end = _date.today(); start = end - _td(days=370)
+            days = sorted(set(_bt._rebalance_dates(start, end, "W"))
+                          | set(_bt._rebalance_dates(start, end, "M")))
+            for i, d in enumerate(days, 1):
+                _st.detail(f"{i}/{len(days)} · {d}")
+                for k in factor_engine.LOCAL_ONLY:
+                    factor_engine.compute_and_store(k, codes, d)
+            out["history_dates"] = len(days)
+        except Exception as e:                                # noqa: BLE001
+            log.error("[quant.init] 补历史因子失败: %s", e)
+        # 补历史因子是第 4 步 —— daily_local_pipeline 结束时把 steps_done
+        # 设成了 4,这里又覆盖回 3,结果跑完了进度条停在 75%
+        _st.step("完成", 4)
+        # 跑完了不等于成功。K 线一只没拿到、因子一行没写 —— 这两种情况下
+        # 显示"初始化完成"会让用户去点回测,然后得到"选不出股票",
+        # 而他刚看着进度条走完
+        if out.get("klines_error"):
+            _st.finish(f"K 线没补上:{out['klines_error']} · 上游可能在限流,"
+                       f"稍后在设置里重新同步")
+            log.error("[quant.init] 初始化未达成 · %s", out)
+            return out
+        _st.finish()
+        log.info("[quant.init] 首次初始化完成 · %s", out)
+        return out
+    except Exception as e:                                    # noqa: BLE001
+        log.error("[quant.init] 首次初始化失败: %s", e)
+        _st.finish(str(e)[:200])
+        return {"error": str(e)[:200]}
 
 
 def weekly_akshare_factors() -> dict:
@@ -167,7 +247,7 @@ def weekly_akshare_factors() -> dict:
     from datetime import date as _date
     today = _date.today()
     try:
-        codes = _uv.query_current("000300")
+        codes = _uv.covered_codes()
     except Exception as e:                                    # noqa: BLE001
         log.error("[quant.akshare] 取股票池失败: %s", e)
         return {}

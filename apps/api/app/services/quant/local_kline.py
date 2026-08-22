@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import date
 
 import requests
@@ -50,15 +51,24 @@ def _from_tencent(code: str, start: date, end: date, adjust: str = "qfq") -> lis
     """
     q = _prefixed(code)
     days = max(200, min(1500, (end - start).days + 60))
-    try:
-        r = requests.get(_TENCENT, params={"param": f"{q},day,,,{days},{adjust}"},
-                         headers=_UA, timeout=30)
-        if r.status_code != 200:
-            return []
-        node = (r.json().get("data") or {}).get(q) or {}
-        raw = node.get(f"{adjust}day") or node.get("day") or []
-    except Exception as e:                                    # noqa: BLE001
-        log.warning("[local_kline] 腾讯拉 %s 失败: %s", code, type(e).__name__)
+    # 连着打会被限流 —— 实测批量跑 800 只时清一色 ReadTimeout,
+    # 而单独拉一只完全正常。失败了退避重试,不是直接放弃:
+    # 放弃的表现是"这只票没有数据",和真的没有数据分不开
+    raw = []
+    for attempt in range(3):
+        try:
+            r = requests.get(_TENCENT, params={"param": f"{q},day,,,{days},{adjust}"},
+                             headers=_UA, timeout=30)
+            if r.status_code == 200:
+                node = (r.json().get("data") or {}).get(q) or {}
+                raw = node.get(f"{adjust}day") or node.get("day") or []
+                break
+        except Exception as e:                                # noqa: BLE001
+            if attempt == 2:
+                log.warning("[local_kline] 腾讯拉 %s 失败(重试 3 次): %s",
+                            code, type(e).__name__)
+        time.sleep(0.6 * (attempt + 1))
+    if not raw:
         return []
 
     lo, hi = start.isoformat(), end.isoformat()

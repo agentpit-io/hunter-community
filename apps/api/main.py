@@ -50,6 +50,21 @@ async def lifespan(app: FastAPI):
         _reg_local(_local_sched)
         _local_sched.start()
         logger.info("[quant.local] 每日 17:10 CST 本地流水线已挂载(不需要任何 key)")
+
+        # 首次启动 · 库是空的就立刻跑一遍,别让用户等到下午五点。
+        #
+        # 定时任务只在 17:10 触发。一个用户上午拉下代码 docker compose up,
+        # 打开策略工作台看到的是空股票池 + "成分股还没有同步" —— 而他
+        # 完全不知道要等什么、等多久。
+        #
+        # 放线程里跑:这一趟要十几分钟(实测 K 线 800 只 24 分钟),
+        # 卡在 lifespan 里会让整个服务起不来。
+        from app.services.quant import init_state as _qinit
+        if _qinit.needs_init():
+            logger.warning("[quant.init] 量化数据是空的 · 启动后台初始化"
+                           "(约 10-30 分钟 · 进度见 /api/quant/init-status)")
+            from app.services.quant.scheduler import run_initial_setup as _run_init
+            asyncio.create_task(asyncio.to_thread(_run_init))
     except Exception as e:
         logger.warning("[quant.local] 本地流水线挂载失败(非致命): {}", e)
 

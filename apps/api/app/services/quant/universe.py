@@ -237,31 +237,100 @@ def reconcile_current(index_code: str) -> dict:
     return {"added": sorted(added), "removed": sorted(removed)}
 
 
+# 目前**真正有数据支撑**的股票池。
+#
+# 之前 UI 给了六个选项(沪深300/中证500/沪深800/全A股/港股通/我的自选),
+# 而后端只有前两个是真的 —— 其余四个都悄悄回落到 `stocks` 表的 301 只 A 股。
+# 实测:选「港股通」返回的是 A 股,选「全A股」返回 301 只(全 A 有 5000+),
+# 选「我的自选」也返回那 301 只,根本没读用户的自选。
+#
+# 而回落是**不吭声**的:用户以为自己在测全市场,实际测的是那 301 只。
+# 这和回测空仓时照样出成绩单是同一类问题 —— 宁可说"这个池子还没有数据",
+# 也不要给一份看不出是错的结果。
+SUPPORTED_UNIVERSES = {"hs300", "zz500", "my_watchlist"}
+
+# 定时任务和回填要覆盖的全集 —— **必须和 SUPPORTED_UNIVERSES 对得上**。
+#
+# 之前所有任务都写死 `query_current("000300")`,只给沪深300 算因子。
+# 于是"中证500"这个选项:成分股是真的 500 只,但一只因子数据都没有,
+# 用户选了得到 0 结果。池子是真的、因子是空的,比池子假的更难查。
+#
+# 「我的自选」不在这里:用户加的票可能是任意 A 股,不可能提前全算 ——
+# 那种情况下 UI 要能说"你的自选里有 N 只还没有因子数据"。
+COVERED_INDEXES = ["000300", "000905"]
+
+
+def covered_codes() -> list[str]:
+    """定时任务该算哪些票 —— 沪深300 ∪ 中证500,去重。"""
+    seen, out = set(), []
+    for ic in COVERED_INDEXES:
+        for c in query_current(ic):
+            if c not in seen:
+                seen.add(c); out.append(c)
+    return out
+
+
 def resolve(universe_key: str, on_date: date | None = None, user_id: str | None = None) -> list[str]:
-    """统一入口 · strategy_engine._resolve_universe 调用
-    · hs300/zz500/zz1000 · 从 index_component 拉
-    · my_watch · 从 stocks WHERE user_id 拉
-    · a_all / a_ex_st · 从 stocks 拉
-    · 未 seed 时 fallback stocks 表
+    """统一入口 · **不支持的池子返回空,不静默回落**。
+
+    · hs300 / zz500  从 index_component 拉
+    · my_watchlist   从 stocks WHERE user_id 拉(用户在「自选」页加的)
+    · 其余           返回 [],由调用方告诉用户"这个池子还没有数据"
     """
+    # 前端历史上传过 my_watchlist,而这里判断的是 my_watch —— 永远匹配不上,
+    # 于是"我的自选"一路走到兜底,返回全部 A 股。两个都认。
+    if universe_key in ("my_watchlist", "my_watch"):
+        if not user_id:
+            log.warning("[universe] 我的自选需要登录用户")
+            return []
+        conn = get_conn(); cur = conn.cursor()
+        try:
+            cur.execute(
+                "SELECT code FROM stocks WHERE user_id=%s AND enabled AND market='A'",
+                (str(user_id),))
+            return [r[0] for r in cur.fetchall()]
+        finally:
+            cur.close(); conn.close()
+
     if universe_key in INDEX_MAP:
         index_code, _ = INDEX_MAP[universe_key]
         codes = query_active_at(index_code, on_date) if on_date else query_current(index_code)
         if codes:
             return codes
-        # fallback · 未 seed 时
-    return _fallback_stocks(universe_key, user_id)
+        log.warning("[universe] %s 的成分股还没 seed", universe_key)
+        return []
+
+    log.warning("[universe] 不支持的股票池 %s(支持:%s)",
+                universe_key, sorted(SUPPORTED_UNIVERSES))
+    return []
 
 
-def _fallback_stocks(universe_key: str, user_id: str | None) -> list[str]:
-    conn = get_conn(); cur = conn.cursor()
-    if universe_key == "my_watch" and user_id:
-        cur.execute("SELECT code FROM stocks WHERE user_id=%s AND enabled AND market='A'", (user_id,))
-    else:
-        cur.execute("SELECT DISTINCT code FROM stocks WHERE enabled AND market='A'")
-    codes = [r[0] for r in cur.fetchall()]
-    cur.close(); conn.close()
-    return codes
+def watchlist_gaps(codes: list[str]) -> list[str]:
+    """自选里哪些票**还没有因子数据**。
+
+    加自选时会按需补(on_demand.ensure_stock),但补失败的、
+    这个功能上线之前就加进去的、以及新股历史不够算不出因子的,
+    都会留在这里。不列出来的话用户只看到"10 只选出 3 只"。
+    """
+    if not codes:
+        return []
+    from app.services.quant.on_demand import has_factor_data
+    have = has_factor_data(codes)
+    return [c for c in codes if c not in have]
+
+
+def describe_universe(universe_key: str, n: int, user_id: str | None = None) -> str:
+    """池子为空时,**说清楚是为什么** —— 用户看到"选不出股票"时
+    要能分辨是自选还没加、是池子不支持,还是成分股没 seed。"""
+    if n:
+        return ""
+    if universe_key in ("my_watchlist", "my_watch"):
+        return ("「我的自选」是空的 —— 先到「自选」页加几只股票,"
+                "或者换成沪深 300 / 中证 500。") if user_id else "「我的自选」需要先登录。"
+    if universe_key in SUPPORTED_UNIVERSES:
+        return f"{universe_key} 的成分股还没有同步 —— 稍后再试。"
+    return (f"暂不支持「{universe_key}」这个股票池。"
+            f"目前支持:沪深 300、中证 500、我的自选。")
 
 
 def quality_at(universe_key: str, on_date: date) -> dict:

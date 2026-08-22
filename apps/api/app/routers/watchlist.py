@@ -64,7 +64,26 @@ async def add_to_watchlist(stock: StockIn, request: Request):
                           stock.exchange, stock.asset_type)
     fd_result = fd_subscribe(stock.code, stock.name, stock.market,
                              stock.exchange, stock.asset_type)
-    return {"ok": True, "added": added, "finance_data": fd_result}
+
+    # A 股按需补量化数据 —— 加进自选却选不出来,用户会以为是权重配错了。
+    #
+    # 因子只算「核心池」(沪深300 ∪ 中证500 = 800 只)。核心池外的票在
+    # factor_value 里一条都没有,于是"自选 10 只只选出 3 只"而界面不说为什么。
+    # 全 A 股预先算掉不现实(K 线 1.81 秒/只 × 5400 = 2.7 小时),所以
+    # **加一只补一只**。
+    #
+    # 失败不影响加自选本身:补数据是附加价值,不该因为拿不到 K 线
+    # 就让用户加不进去。
+    quant = None
+    if stock.market == "A":
+        try:
+            from app.services.quant import on_demand
+            quant = on_demand.ensure_stock(stock.code, user_id=user_id)
+        except Exception as e:                                # noqa: BLE001
+            quant = {"code": stock.code, "ok": False,
+                     "why": f"{type(e).__name__}: {str(e)[:80]}"}
+    return {"ok": True, "added": added, "finance_data": fd_result,
+            "quant": quant}
 
 
 @router.delete("/watchlist/{code}")

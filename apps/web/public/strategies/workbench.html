@@ -83,11 +83,12 @@ function renderMiddlePanel() {
           <div class="field" style="margin:0">
             <div class="lbl">股票池</div>
             <select data-cfg="universe">
+              <!-- 只留后端真正有数据支撑的三个。原来还有沪深800/全A股/港股通,
+                   但它们在后端都悄悄回落到 stocks 表的 301 只 A 股 ——
+                   选「港股通」返回的是 A 股,选「全A股」返回 301 只(全 A 有 5000+)。
+                   用户以为在测全市场,实际测的是那 301 只。 -->
               <option value="hs300"        ${cfg.universe==='hs300'?'selected':''}>沪深 300（推荐）</option>
               <option value="zz500"        ${cfg.universe==='zz500'?'selected':''}>中证 500</option>
-              <option value="hs800"        ${cfg.universe==='hs800'?'selected':''}>沪深 800</option>
-              <option value="a_all"        ${cfg.universe==='a_all'?'selected':''}>A 股全市场 · 剔 ST/次新</option>
-              <option value="hk_all"       ${cfg.universe==='hk_all'?'selected':''}>港股通</option>
               <option value="my_watchlist" ${cfg.universe==='my_watchlist'?'selected':''}>我的自选</option>
             </select>
           </div>
@@ -219,14 +220,21 @@ async function refreshPicks() {
     document.getElementById('topn-date').textContent = d.trade_date
     document.getElementById('topn-cnt').textContent = picks.length
     if (picks.length === 0) {
-      body.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted)">无匹配 · 可能因子还没算完 · 检查后端 factor_value 表</div>'
+      // 原来一律显示"无匹配 · 检查后端 factor_value 表" —— 那是给开发看的,
+      // 而且三种完全不同的原因(池子不支持 / 自选是空的 / 因子没数据)
+      // 显示同一句话,用户没法知道自己该做什么。后端现在会给出 reason。
+      const why = d.reason || '无匹配 · 可能因子还没算完'
+      body.innerHTML = `<div style="padding:20px 16px;text-align:center;color:var(--muted);line-height:1.7">${why}</div>`
       return
     }
-    body.innerHTML = `<table class="holdings-table">
+    const gapHtml = d.gap_note
+      ? `<div style="padding:8px 12px;margin-bottom:6px;background:#FDF3E7;color:#8A5A1B;border-radius:6px;font-size:11.5px;line-height:1.6">${d.gap_note}</div>`
+      : ''
+    body.innerHTML = gapHtml + `<table class="holdings-table">
       <thead><tr><th class="rk">#</th><th>股票</th><th class="num">综合分</th></tr></thead>
       <tbody>${picks.map((p, i) => `
         <tr><td class="rk">${i+1}</td>
-            <td><b>${p.name || p.code}</b><div class="cd">${p.code}${p.name && p.name !== p.code ? ' · A 股' : ' · A 股'}</div></td>
+            <td><b>${p.name || p.code}</b><div class="cd">${p.code} · A 股</div></td>
             <td class="num score">${p.score.toFixed(3)}</td>
         </tr>`).join('')}</tbody>
     </table>`
@@ -306,6 +314,51 @@ document.getElementById('btn-save').addEventListener('click', () => openSaveDial
 
 // D-4 · 跑回测 · 异步任务 · task_id 轮询 · 前端可看到"计算中"进度
 renderBacktestRange()
+
+// 首次初始化进度。
+//
+// 新装的实例库是空的,后端启动时会自动跑一遍(拉成分股/K线/算因子),
+// 实测十几到几十分钟。期间用户打开这个页面看到的是空股票池 +
+// "选不出股票" —— 而他完全不知道在等什么、要等多久。
+;(async function pollInit() {
+  const bar = document.createElement('div')
+  bar.style.cssText = 'display:none;margin:10px 20px;padding:10px 14px;background:#FDF3E7;'
+    + 'color:#8A5A1B;border-radius:8px;font-size:12.5px;line-height:1.7'
+  container.parentNode.insertBefore(bar, container)
+  const STEPS = 4
+  for (;;) {
+    let d
+    try {
+      d = await fetch('/api/quant/init-status', { cache: 'no-store' }).then(r => r.json())
+    } catch (e) { await new Promise(r => setTimeout(r, 5000)); continue }
+
+    if (d.running) {
+      const pct = Math.round((d.steps_done / STEPS) * 100)
+      bar.style.display = 'block'
+      bar.innerHTML = `<b>首次初始化中…</b> ${d.step || ''} `
+        + `(${d.steps_done}/${STEPS})${d.detail ? ' · ' + d.detail : ''}`
+        + `<div style="margin-top:6px;height:5px;background:#EFE3D2;border-radius:3px;overflow:hidden">`
+        + `<div style="height:100%;width:${pct}%;background:#C97A2B;transition:width .4s"></div></div>`
+        + `<div style="margin-top:5px;opacity:.8">已用 ${d.elapsed_sec || 0} 秒 · `
+        + `完成前选股和回测都会是空的</div>`
+      await new Promise(r => setTimeout(r, 3000))
+      continue
+    }
+    if (d.error) {
+      bar.style.display = 'block'
+      bar.innerHTML = `<b>初始化失败:</b>${d.error}`
+      return
+    }
+    // 跑完了才提示刷新 —— 没跑过(needs_init=false 且没 started)不打扰
+    if (d.done) {
+      bar.style.display = 'block'
+      bar.innerHTML = '<b>初始化完成</b> · 刷新页面即可开始选股和回测'
+    } else {
+      bar.style.display = 'none'
+    }
+    return
+  }
+})()
 
 document.getElementById('btn-backtest').addEventListener('click', async () => {
   if (draft.factors.length === 0) { toast('先选几个因子', 'warn'); return }

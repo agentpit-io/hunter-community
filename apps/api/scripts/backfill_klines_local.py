@@ -31,7 +31,7 @@ def main() -> int:
     end = date.today()
     start = end - timedelta(days=months * 31)
 
-    codes = uv.query_current("000300")
+    codes = uv.covered_codes()
     if len(codes) < 100:
         print(f"[!] 股票池只有 {len(codes)} 只 · 先 seed 成分股")
         return 1

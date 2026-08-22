@@ -330,6 +330,40 @@ async def factor_quantile(
     return result
 
 
+@router.post("/init")
+async def trigger_init():
+    """手工触发一次数据同步。
+
+    启动时库空会自动跑,但这些情况需要手工:成分股换了一批、
+    某次同步跑到一半失败了、或者用户就是想立刻刷新一遍。
+
+    **必须在 API 进程内跑** —— 进度存在进程内存里,
+    用 `docker exec` 另起一个 python 跑的话,这边的
+    /init-status 永远是空的(实测踩过)。
+    """
+    import asyncio as _aio
+    from app.services.quant import init_state
+    if init_state.snapshot()["running"]:
+        return {"ok": False, "message": "已经在跑了", **init_state.snapshot()}
+    from app.services.quant.scheduler import run_initial_setup
+    _aio.create_task(_aio.to_thread(run_initial_setup))
+    return {"ok": True, "message": "已开始 · 轮询 /api/quant/init-status 看进度"}
+
+
+@router.get("/init-status")
+async def init_status():
+    """首次初始化进度 · 前端轮询这个。
+
+    `needs_init` 是**查库**得出的,不是看"跑没跑过" —— 跑了一半被杀掉的
+    情况实测发生过(重建容器把回填进程 SIGKILL 了),那时状态是"跑过"
+    而数据依然是空的。
+    """
+    from app.services.quant import init_state
+    s = init_state.snapshot()
+    s["needs_init"] = init_state.needs_init()
+    return s
+
+
 # ═══════════════════════════════════════════════════════════════
 # POST /scan · 按策略打分 · Top N
 # ═══════════════════════════════════════════════════════════════
@@ -354,7 +388,38 @@ async def scan(body: ScanIn, request: Request):
         name_map = strategy_engine.fetch_stock_names([p["code"] for p in picks])
         for p in picks:
             p["name"] = name_map.get(p["code"], p["code"])
-    return {"trade_date": trade_date.isoformat(), "picks": picks}
+        out = {"trade_date": trade_date.isoformat(), "picks": picks}
+        # 自选池:选出来的可能只是一部分。**把没参与打分的票说出来** ——
+        # 否则用户看到"自选 10 只只出了 3 只"会以为是权重配错了
+        cfg = body.config or {}
+        if cfg.get("universe") in ("my_watchlist", "my_watch") and uid:
+            from app.services.quant import universe as _uv
+            pool = _uv.resolve(cfg["universe"], trade_date, str(uid))
+            gaps = _uv.watchlist_gaps(pool)
+            if gaps:
+                out["gaps"] = gaps
+                out["gap_note"] = (f"自选 {len(pool)} 只里有 {len(gaps)} 只还没有因子数据"
+                                   f",没参与打分:{'、'.join(gaps[:8])}"
+                                   + ("…" if len(gaps) > 8 else ""))
+        return out
+
+    # 一只都没选出来时,**说清楚是哪一种空**。「股票池是空的」和
+    # 「因子没数据」用户要做的事完全不同:前者去加自选或换池子,
+    # 后者换因子。原来两种都只显示"无匹配",他只能瞎猜
+    from app.services.quant import universe as _uv
+    cfg = body.config or {}
+    ukey = cfg.get("universe", "hs300")
+    pool = _uv.resolve(ukey, trade_date, str(uid) if uid else None)
+    if not pool:
+        return {"trade_date": trade_date.isoformat(), "picks": [],
+                "reason": _uv.describe_universe(ukey, 0, str(uid) if uid else None)}
+    keys = [f["key"] for f in body.factors if f.get("weight_pct", 0) > 0]
+    rep = backtest_engine.factor_data_report(keys, trade_date - timedelta(days=45), trade_date)
+    miss = [f["name"] for f in rep if not f["ok"]]
+    return {"trade_date": trade_date.isoformat(), "picks": [],
+            "reason": (f"股票池有 {len(pool)} 只,但这些因子没有数据:"
+                       + "、".join(miss)) if miss else
+                      f"股票池有 {len(pool)} 只,但没有一只满足因子覆盖要求"}
 
 
 # ═══════════════════════════════════════════════════════════════
