@@ -400,7 +400,8 @@ def run(job_id: int) -> dict:
     factors = {}
     if done > 0 or fin_done > 0:
         try:
-            factors = _compute_factors(codes, start, end)
+            factors = _compute_factors(codes, start, end,
+                                       bool(job.get("with_financial")))
         except Exception as e:                                # noqa: BLE001
             log.error("[data_job %s] 算因子失败: %s", job_id, e)
     else:
@@ -415,23 +416,42 @@ def run(job_id: int) -> dict:
     return {"done": done, "skipped": skipped, "failed": failed, "factors": factors}
 
 
-def _compute_factors(codes: list[str], start: date, end: date) -> dict:
-    """把技术因子算到每个调仓日上。
+def _compute_factors(codes: list[str], start: date, end: date,
+                     with_financial: bool = False) -> dict:
+    """把因子算到每个调仓日上。
 
     **不能只算当天一个截面** —— 回测要的是每个调仓日的因子值,
     只有当天的话回测一期都选不出票,用户下完立刻点回测得到"选不出股票",
     和没下没区别。
+
+    `with_financial=True` 时连基本面因子一起算。这一条是补的 ——
+    原来只算 LOCAL_ONLY,结果:任务显示"财报 292 只成功",
+    `financial_metric` 里也确实有 313 只的数据,而 `factor_value` 里
+    基本面因子只有 10 只(那还是之前手工测试留下的)。
+    用户看到"财报 300 只"却在回测时被告知"这些因子没有数据" ——
+    **下载成功和因子可用之间断了一环**。
     """
     from app.services.quant import backtest_engine as bt, factor_engine as fe
     days = sorted(set(bt._rebalance_dates(start, end, "W"))
                   | set(bt._rebalance_dates(start, end, "M")))
     if not days:
         return {}
+    keys = list(fe.LOCAL_ONLY)
+    if with_financial:
+        # 只算真正落了库的那几个(_make_db_factor)。其余仍走 akshare_client
+        # 的因子不放进来 —— 那些每只要 8.6 秒,几百只 × 几十个调仓日
+        # 会让任务从几分钟变成几十小时
+        keys += [k for k in fe.AKSHARE_ONLY if k in _DB_BACKED]
     out: dict[str, int] = {}
     for d in days:
-        for k in fe.LOCAL_ONLY:
+        for k in keys:
             try:
                 out[k] = out.get(k, 0) + fe.compute_and_store(k, codes, d)
             except Exception as e:                            # noqa: BLE001
                 log.warning("[data_job] 因子 %s @ %s 失败: %s", k, d, e)
     return out
+
+
+# 已经改成从 financial_metric 读的因子(见 factor_engine._make_db_factor)。
+# 这些算起来是纯本地查询,毫秒级,可以放心放进每次任务。
+_DB_BACKED = {"roa", "gross_margin", "revenue_growth_yoy", "earnings_growth_yoy"}
