@@ -15,8 +15,8 @@
 
 *别人的策略 · 你自己的 SKILL · 一个平台 · 一亿套系统*
 
-**Your private financial AI team · One API key · Self-hosted in 5 minutes**
-*开源自部署 · 一 key 通用 · 5 分钟跑起来*
+**Chat / positions / investment thesis on your disk · Pick your data supply — free sources, bring-your-own tools, or Hunter data pipeline · 5 minutes to running**
+*对话 · 持仓 · 记忆体在你磁盘 · 数据供给三选一 · 5 分钟跑起来*
 
 [![License](https://img.shields.io/badge/license-Apache_2.0-blue)](./LICENSE)
 [![CI](https://github.com/agentpit-io/hunter-community/actions/workflows/ci.yml/badge.svg)](https://github.com/agentpit-io/hunter-community/actions/workflows/ci.yml)
@@ -33,6 +33,10 @@ https://github.com/user-attachments/assets/37f4a065-663b-4eee-8d3f-c9c0573270e3
 
 *Full SaaS demo · 3m 34s · deep analysis + trend forecast + SKILL usage · click play in the video player*
 
+<br>
+
+**⚠️ Disclaimer**: This project is a research analytics tool · all outputs are AI-generated content · for research reference only · does not constitute investment advice of any kind · invest at your own risk
+
 </div>
 
 ---
@@ -43,7 +47,8 @@ https://github.com/user-attachments/assets/37f4a065-663b-4eee-8d3f-c9c0573270e3
 - [Why Hunter](#-why-hunter)
 - [Core Capabilities](#-core-capabilities)
 - [5-Minute Quick Start](#-5-minute-quick-start)
-- [The Two Keys (the only concept you need)](#-the-two-keys-the-only-concept-you-need)
+- [Data Supply: Pick One of Three (the only concept you need)](#-data-supply-pick-one-of-three-the-only-concept-you-need)
+- [Killer Feature: Investment Thesis](#-killer-feature-investment-thesis)
 - [LLM Compatibility](#-llm-compatibility)
 - [23 Built-in SKILLs](#-23-built-in-skills)
 - [Tech Stack](#-tech-stack)
@@ -62,7 +67,7 @@ https://github.com/user-attachments/assets/37f4a065-663b-4eee-8d3f-c9c0573270e3
 
 **Hunter is a financial AI Agent platform for individual investors**. Give it 1 API key + 1 LLM, and you get an AI team that queries quotes, pulls news, runs deep analysis, forecasts trends, tracks your watchlist, and follows SKILL-based methodologies — **all running on your own machine**.
 
-- 🎯 **One-key access** · A single `hunt_tools_xxx` key unlocks **32/33 data sources** + **23 polished SKILLs** + Kronos trend forecast + TrueSource intel
+- 🎯 **Pick your data supply (3 ways)** · Free sources (akshare/yfinance) out of the box · or Hunter data pipeline (`hunt_tools_xxx`, free signup) unlocks **32/33 data sources** + **23 polished SKILLs** + Kronos trend forecast + TrueSource alt-data intel · or bring your own MCP
 - 🧠 **Pluggable LLMs** · **DeepSeek v4 pro is the P0 default** (verified · <$0.001/case · 12-70s) · env templates ready for Qwen / Doubao / Claude / GPT
 - 💾 **Self-hosted** · `docker compose` one command · data lives on your disk · we don't phone home
 - 🔌 **Easy to extend** · Write SKILLs in Markdown · install SKILLs from GitHub in one click · plug in your own MCP server — all supported
@@ -176,26 +181,45 @@ open http://localhost:3100
 
 ---
 
-## 🔑 The Two Keys (the only concept you need)
+## 🔑 Data Supply: Pick One of Three (the only concept you need)
 
-This is the **only concept you need to understand** to use this project. Everything else is copy-paste.
+Besides an LLM key (required · yours, drives conversation itself) · you have **three ways** to supply data — **we no longer require our platform key**:
 
-| | Whose key | What it does | What happens if empty |
-|---|---|---|---|
-| **① LLM key** | Yours (DeepSeek / OpenAI / OpenRouter / OneAPI) | Drives the conversation | Chat unavailable |
-| **② Hunter platform key** `hunt_tools_xxx` | We issue it · [free 30-sec signup](https://hunter.agentpit.io/dev/api-keys) | Unlocks **tools/SKILLs** (quotes / K-line / earnings / UZI / Kronos) + **deep-analysis data foundation** | Chat still works · tools say "go apply" · deep analysis Sentinel typically **fetches 14 items / keeps 0** · reports become LLM speculation |
+| Option | Whose key | Data source | Best for | Cold-start experience |
+|---|---|---|---|---|
+| **① Free open sources** | No key from us | akshare (A-shares) · yfinance (US/HK) · built-in offline sample | Want to run in 5 min · try it first | Works out of the box · explicit downgrade prompt when coverage gaps show |
+| **② Bring your own tools / MCP** | Your own data-source keys / MCP server | Your own broker · data vendor · self-built MCP · any Cline/Cursor-ecosystem MCP | You already have data subscriptions · want to pipe into Hunter | Sidebar Toolbox「＋」button to connect your own MCP |
+| **③ Hunter data pipeline** `hunt_tools_xxx` | We issue it · [free 30-sec signup](https://hunter.agentpit.io/dev/api-keys) | 32 data sources · alt-data (procurement/hiring/customs/patents) · Kronos GPU trend forecast · TrueSource intel | Free sources not enough · want exclusive alt-data signals & deep-analysis foundation | One key covers 4 gateways (tools/data/kronos/truesource) |
 
-**One key covers 4 gateways** (unified since 2026-08-14):
-```
-One hunt_tools_xxx  →  /api/saas/tools/*       (23 SKILLs + toolbox)
-                    →  /api/saas/data/*        (finance-data · 32 sources)
-                    →  /api/saas/kronos/*      (Kronos trend forecast)
-                    →  /api/saas/truesource/*  (TrueSource intel)
-```
+**Suggested journey**: Day 1 use ① free sources to run the full loop → dig deeper and find gaps / disconnects / missing alt-data signals → upgrade to ③ Hunter pipeline (most turnkey) or plug in ② your own data source.
 
-**Why tools need our key**: These capabilities are backed by data pipelines and model services we continuously maintain · executed on Hunter servers · not on your machine · outputs are free to you · usage is metered per key.
+**LLM key (required)**: DeepSeek offers 5M free tokens · [30-sec signup](https://platform.deepseek.com/api_keys) · also supports OpenAI / OpenRouter / OneAPI / AIHubMix and any OpenAI-compatible endpoint.
 
-**Open Source Edition isn't crippled**: All left-side tools remain visible. Clicking one tells you how to unlock it — not hidden away.
+### Why it's worth forking and self-hosting
+
+- ✅ **Chat, positions, investment thesis all on your disk** — deep-analysis inference also runs in your container · no more dependency on our servers · **"local-first" is now a fact, not a slogan**
+- ✅ **Apache 2.0** — fork freely (only requirement: rename brand) · commercial closed-source OK · redistribution OK
+- ✅ **All left-side tools stay visible** — not crippled, not hidden · clicking tells you exactly how to unlock · never silent failure
+- ✅ **Pipeline usage metered per key** — we don't look at your data or conversations · we only count requests
+
+---
+
+## 🧠 Killer Feature: Investment Thesis
+
+**The Investment Thesis is what sets Hunter apart from every other financial AI tool** — it records "why did I buy in the first place": the core thesis at entry, the 5 key assumptions, the cost basis. Then the system uses the latest data to continuously test whether those assumptions still hold:
+
+- 📉 **Earnings-invalidation monitor** — automatically compares latest earnings against entry-time revenue/profit assumptions · deviation from baseline is quantified
+- 🔄 **Order-flow monitor** — real-time news sentiment check on key customers / suppliers / channels
+- 🏛 **Pillar-erosion alert** — the moment any of the 5 pillars breaks, you get notified immediately · not six months later when you finally check the account
+- 📊 **Assumption-drift tracking** — quantifies how far and how fast key metrics diverge from baseline
+
+**One analysis · ongoing companion** — transforms one-off deep reports into ongoing portfolio-management companions. This is the watershed between "read a report once and forget it" and "long-term tracking of a research framework."
+
+**How it's implemented**: via the `uzi_thesis` SKILL (see "Investment Strategy" category below) · thesis data stored in local Postgres · fully on your disk · never leaves your machine · we can't see it, and don't need to.
+
+**Roadmap**: v1.0 will introduce optional paid "Thesis Cloud Sync" for cross-device sync and cloud backup; **the local single-node version stays free forever**.
+
+> ⚠️ All assumption checks, pillar scores, and drift alerts produced by the thesis engine are AI-generated research reference · do not constitute investment advice · position adjustments are your own decision.
 
 ---
 
@@ -227,7 +251,7 @@ A SKILL is **analytical logic** — a piece of methodology explaining "how to ap
 |---|---|
 | `stock_deep_analysis` | 22-dim fusion · 8 data sources · ~7s LITE report |
 | `debate` | 6 analysts · 2 rounds of debate · 60-90s deep report |
-| `uzi_quick_scan` | 30-second buy/sell/hold call · with 66-expert jury vote distribution |
+| `uzi_quick_scan` | 30-second composite score with key highlights · 66-expert opinion distribution (for research reference only · not investment advice) |
 
 ### Valuation Modeling (5 · UZI series)
 
@@ -392,13 +416,15 @@ User-connected MCP servers are automatically added to the toolbox view · descri
 | Capability | Community (self-hosted) | Cloud ([hunter.agentpit.io](https://hunter.agentpit.io)) |
 |---|---|---|
 | Chat (with your own LLM key) | ✅ | ✅ |
-| Left-side tools and 23 SKILLs | ✅ requires platform key (free) | ✅ |
-| UZI deep analysis (22-dim) | ✅ requires platform key | ✅ |
-| Kronos trend forecast | ✅ requires platform key (or your own GPU) | ✅ |
-| TrueSource intel gathering | ✅ requires platform key | ✅ |
-| Watchlist · portfolio · signals | ✅ | ✅ |
-| Connect your own MCP | ✅ no platform key needed | ✅ |
+| Free data sources (akshare/yfinance) | ✅ out of the box · no platform key needed | ✅ |
+| Bring your own MCP / data source | ✅ no platform key needed | ✅ |
+| 23 built-in SKILLs (methodology) | ✅ shipped with the code · no key needed | ✅ |
+| UZI deep analysis (22-dim) | ✅ data supply: pick 1 of 3 (free / BYO / pipeline) | ✅ |
+| Kronos trend forecast | ✅ Hunter pipeline (free) · or your own GPU | ✅ |
+| TrueSource alt-data intel | ✅ Hunter pipeline (free) · or self-collect | ✅ |
+| Investment thesis (local storage) | ✅ free forever · local Postgres | ✅ |
 | Install SKILL from GitHub | ✅ (v0.2.3) | ✅ |
+| Thesis cloud sync (v1.0 planned) | ⏳ planned (local stays free forever) | 🔜 optional paid tier planned |
 | WeChat push | ❌ | ✅ |
 | Lark notifications | ❌ | ✅ |
 | Multi-tenant billing | ❌ | ✅ |

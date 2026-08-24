@@ -15,8 +15,8 @@
 
 *Your investment brain, on your terms*
 
-**开源自部署 · 一 key 通用 · 5 分钟跑起来**
-*Your private financial AI team · one API key · self-hosted in 5 minutes*
+**对话 · 持仓 · 投资记忆体都在你磁盘 · 数据供给三选一(免费源 / 自接工具 / 平台管道)· 5 分钟跑起来**
+*Chat / positions / thesis on your disk · pick your data supply — free sources, bring-your-own tools, or Hunter data pipeline*
 
 [![License](https://img.shields.io/badge/license-Apache_2.0-blue)](./LICENSE)
 [![CI](https://github.com/agentpit-io/hunter-community/actions/workflows/ci.yml/badge.svg)](https://github.com/agentpit-io/hunter-community/actions/workflows/ci.yml)
@@ -33,6 +33,10 @@ https://github.com/user-attachments/assets/37f4a065-663b-4eee-8d3f-c9c0573270e3
 
 *SaaS 完整演示 · 3 分 34 秒 · 深度分析 + 走势预测 + SKILL 使用 · 点视频左下角播放*
 
+<br>
+
+**⚠️ 免责声明**:本项目是投研分析工具 · 所有输出为 AI 生成内容 · 仅供研究参考 · 不构成任何投资建议 · 投资有风险 · 决策需谨慎
+
 </div>
 
 ---
@@ -43,7 +47,8 @@ https://github.com/user-attachments/assets/37f4a065-663b-4eee-8d3f-c9c0573270e3
 - [为什么选 Hunter](#-为什么选-hunter)
 - [核心能力](#-核心能力)
 - [5 分钟跑起来](#-5-分钟跑起来)
-- [两把 key(唯一需要理解的概念)](#-两把-key唯一需要理解的概念)
+- [数据供给三选一(唯一需要理解的概念)](#-数据供给三选一唯一需要理解的概念)
+- [杀手级功能:投资记忆体](#-杀手级功能投资记忆体investment-thesis)
 - [大模型兼容性](#-大模型兼容性)
 - [23 个内置 SKILL](#-23-个内置-skill)
 - [技术栈](#-技术栈)
@@ -62,7 +67,7 @@ https://github.com/user-attachments/assets/37f4a065-663b-4eee-8d3f-c9c0573270e3
 
 **Hunter 是给个人投资者用的金融 AI Agent 平台**。给它 1 把 key + 1 个大模型 · 你就有一个能查行情、拉新闻、跑深度分析、预测走势、盯自选、按 SKILL 方法论工作的 AI 团队 —— **全部在你自己的机器上运行**。
 
-- 🎯 **一 key 通用** · `hunt_tools_xxx` 一把 key 解锁 **32/33 数据源** + **23 个精修 SKILL** + Kronos 走势预测 + TrueSource 情报
+- 🎯 **数据供给三选一** · 免费源(akshare/yfinance)开箱即用 · 或平台管道(`hunt_tools_xxx` 免费申请)解锁 **32/33 数据源** + **23 个精修 SKILL** + Kronos 走势预测 + TrueSource 另类情报 · 或接你自己的 MCP
 - 🧠 **多模型可插拔** · **DeepSeek v4 pro 实测 P0 默认**(<$0.001/次 · 12-70 秒)· 通义/豆包/Claude/GPT env 模板齐全
 - 💾 **自部署** · docker compose 一键起 · 数据在你磁盘 · 不上云 · 不联系我们除非你想
 - 🔌 **易扩展** · Markdown 写 SKILL 方法论 · GitHub 一键装 SKILL · 接自己的 MCP · 三种扩展全支持
@@ -176,26 +181,45 @@ open http://localhost:3100
 
 ---
 
-## 🔑 两把 key(唯一需要理解的概念)
+## 🔑 数据供给三选一(唯一需要理解的概念)
 
-这是使用本项目**唯一需要理解的概念** · 其余都是照抄命令。
+除了一把大模型 key(必需 · 你自己申请驱动对话本身)· 数据供给你有 **三种玩法** —— **不再强制我们的平台 key**:
 
-| | 谁的 key | 干什么 | 不填会怎样 |
-|---|---|---|---|
-| **① 大模型 key** | 你自己的(DeepSeek / OpenAI / OpenRouter / OneAPI) | 驱动对话本身 | 聊天不可用 |
-| **② Hunter 平台 key** `hunt_tools_xxx` | 我们签发 · [免费申请 30 秒](https://hunter.agentpit.io/dev/api-keys) | 解锁**工具/SKILL**(行情/K线/财报/UZI/Kronos)+ **深度分析数据基座** | 聊天照常 · 工具提示"去申请" · 深度分析报告 Sentinel 常态**抓 14 条 / 保留 0 条** · 基本是 LLM 空谈 |
+| 玩法 | 谁的 key | 数据来源 | 适合谁 | 冷启动体验 |
+|---|---|---|---|---|
+| **① 免费开源源** | 不需要任何我们的 key | akshare(A股)· yfinance(美/港股)· 内置离线样例 | 想 5 分钟跑通 · 先看看效果 | 开箱即用 · 覆盖不全时会明确降级提示 |
+| **② 自接工具 / MCP** | 你自己的数据源 key / MCP server | 你自己的 broker · 数据商 · 自建 MCP · Cline/Cursor 生态任意 MCP | 已有数据订阅 · 想接进 Hunter 用 | 侧栏「工具箱 ＋」按钮接自己的 MCP |
+| **③ 平台数据管道** `hunt_tools_xxx` | 我们签发 · [免费申请 30 秒](https://hunter.agentpit.io/dev/api-keys) | 32 数据源 · 另类数据(招投标/招聘/海关/专利)· Kronos GPU 走势预测 · TrueSource 情报 | 免费源不够用 · 想要独家另类信号与深度分析基座 | 一 key 通 4 网关(tools/data/kronos/truesource) |
 
-**一 key 通吃 4 网关**(2026-08-14 起统一):
-```
-一把 hunt_tools_xxx  →  /api/saas/tools/*       (23 SKILL + 工具箱)
-                    →  /api/saas/data/*        (finance-data · 32 源)
-                    →  /api/saas/kronos/*      (Kronos 走势预测)
-                    →  /api/saas/truesource/*  (TrueSource 情报)
-```
+**推荐使用路径**:第一天用 ① 免费源跑通全流程 → 用得深了发现覆盖不够、经常断流、缺另类信号 → 升级到 ③ 平台管道(最省心)或接 ② 自己的数据源。
 
-**为什么工具需要我们的 key**:这些能力背后是我们持续维护的数据管道和模型服务 · 在 Hunter 服务器上执行 · 不在你的机器上 · 产物免费给你用 · 用量按 key 记账。
+**大模型 key(必需)**:DeepSeek 免费送 500 万 tokens · [30 秒申请](https://platform.deepseek.com/api_keys)· 也支持 OpenAI / OpenRouter / OneAPI / AIHubMix 等任何 OpenAI-compatible 端点。
 
-**开源版不打折**:左侧工具全部照常显示 · 点下去会告诉你怎么解锁 · 而不是把功能藏起来。
+### 为什么值得 fork 自部署
+
+- ✅ **对话 · 持仓 · 投资记忆体全部在你磁盘** —— 深度分析推理也在你的容器里跑 · 不再依赖我方服务器 · **本地优先从口号变成事实**
+- ✅ **Apache 2.0** —— fork 随便用(仅须换品牌名)· 商业闭源可以 · 二次分发可以
+- ✅ **左侧工具全部照常显示** —— 不打折不隐藏 · 点下去会明确告诉你怎么解锁 · 而不是静默失败
+- ✅ **平台管道用量按 key 记账** —— 我们不看你的数据、不看你的对话 · 只看请求计数
+
+---
+
+## 🧠 杀手级功能:投资记忆体(Investment Thesis)
+
+**投资记忆体是 Hunter 区别于其他财经 AI 工具的核心能力** —— 它记录你「当初为什么买」:买入时的核心论点、5 大关键假设、持仓成本。之后系统用最新数据持续检验这些假设是否仍然成立:
+
+- 📉 **业绩证伪监控** —— 财报出来后自动比对当初的营收/利润假设 · 偏离基线立即量化标记
+- 🔄 **订单流转监控** —— 关键客户/供应商/渠道的实时舆情检验
+- 🏛 **逻辑支柱松动预警** —— 5 大支柱任意一支塌了立即提醒你 · 而不是等你半年后翻账户才发现
+- 📊 **假设漂移追踪** —— 定量记录关键指标偏离基线的幅度与速度
+
+**一次分析 · 持续陪伴** —— 把一次性的深度报告变成持续的持仓管理助手 · 这是"看一次报告然后忘掉"和"研究框架长期跟踪"的分水岭。
+
+**实现方式**:通过 `uzi_thesis` SKILL(详见下方「投资策略」分类) · 记忆数据以本地 Postgres 存储 · 完全在你磁盘上 · 不出你的机器 · 我们看不到、也不需要看到。
+
+**未来路线**:v1.0 将推出「记忆体云同步」(可选付费) · 跨设备同步与云端备份;**本地单机版永久免费**。
+
+> ⚠️ 记忆体产出的所有假设检验、支柱评分、漂移提示都是 AI 生成的研究参考 · 不构成投资建议 · 是否调整持仓由你自己决策。
 
 ---
 
@@ -247,7 +271,7 @@ SKILL 是**分析逻辑** —— 一段讲清"这类问题该怎么分析"的方
 |---|---|
 | `stock_deep_analysis` | 22 维度融合 · 8 数据源 · 约 7s 出 LITE 报告 |
 | `debate` | 6 位分析师 · 2 轮辩论 · 60-90s 出深度报告 |
-| `uzi_quick_scan` | 30 秒给出买/卖/持结论 · 附 66 位专家评委投票分布 |
+| `uzi_quick_scan` | 30 秒给出综合评分与要点摘要 · 附 66 位专家评委观点分布(仅供研究参考 · 不构成投资建议)|
 
 ### 估值建模(5 · UZI 系列)
 
@@ -412,13 +436,15 @@ description: 一句话说明什么时候该用它 —— 模型据此判断要�
 | 能力 | Community(自部署) | Cloud([hunter.agentpit.io](https://hunter.agentpit.io)) |
 |---|---|---|
 | 对话(自带大模型 key) | ✅ | ✅ |
-| 左侧工具与 23 SKILL | ✅ 需平台 key(免费) | ✅ |
-| UZI 深度分析(22 维) | ✅ 需平台 key | ✅ |
-| Kronos 走势预测 | ✅ 需平台 key(或自建 GPU) | ✅ |
-| TrueSource 情报采集 | ✅ 需平台 key | ✅ |
-| 自选 · 持仓 · 信号 | ✅ | ✅ |
-| 接入你自己的 MCP | ✅ 不需要平台 key | ✅ |
+| 免费数据源(akshare/yfinance) | ✅ 开箱即用 · 无需任何我方 key | ✅ |
+| 接入你自己的 MCP / 数据源 | ✅ 无需任何我方 key | ✅ |
+| 内置 23 SKILL(方法论) | ✅ 全部随代码分发 · 无需任何 key | ✅ |
+| UZI 深度分析(22 维) | ✅ 数据源三选一(免费源/自接/平台管道)| ✅ |
+| Kronos 走势预测 | ✅ 平台管道(免费) · 或自建 GPU | ✅ |
+| TrueSource 另类情报 | ✅ 平台管道(免费) · 或自采 | ✅ |
+| 投资记忆体(本地存储) | ✅ 永久免费 · 本地 Postgres | ✅ |
 | GitHub 一键装 SKILL | ✅ (v0.2.3) | ✅ |
+| 记忆体云同步(v1.0 规划)| ⏳ 规划中(本地版永久免费) | 🔜 计划推出(可选付费) |
 | 微信推送 | ❌ | ✅ |
 | 飞书通知 | ❌ | ✅ |
 | 多租户计费 | ❌ | ✅ |
