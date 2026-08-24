@@ -36,6 +36,19 @@ async def get_overview():
     return data_center.overview()
 
 
+@router.post("/industries/sync")
+async def sync_industries():
+    """同步行业分类(新浪源 · 49 板块 · 约 1 分钟)。
+
+    手工触发而不是自动跑 —— 和数据下载同一个原则:不替用户占资源。
+    前端在「按行业选」但行业表是空的时候给一个「同步行业分类」按钮。
+    """
+    import asyncio as _aio
+    from app.services.quant import industry_seed
+    _aio.create_task(_aio.to_thread(industry_seed.seed))
+    return {"ok": True, "message": "已开始同步 · 约 1 分钟 · 完成后刷新 /scopes"}
+
+
 @router.get("/scopes")
 async def get_scopes(request: Request):
     """可选范围 + 每个的股票数。前端拿它渲染①那一排和行业两级。"""
