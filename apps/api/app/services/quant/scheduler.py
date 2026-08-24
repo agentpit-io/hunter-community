@@ -82,27 +82,24 @@ def daily_local_pipeline() -> dict:
     out: dict = {}
     today = _date.today()
 
-    # ① 股票池
-    _st.step("同步成分股", 0)
+    # ① 要更新哪些票 —— **用户下过什么就更新什么**
+    #
+    # 原来这里发现池子空就自己去 seed 沪深300 + 中证500,然后开始下 800 只。
+    # 那是"替用户决定要什么"的另一种形式 —— 和开机自动跑一个毛病。
+    # 现在:用户一只都没下过,就什么都不做,而且这不是错误,是正常状态。
+    _st.step("检查已有数据", 0)
     try:
         codes = _uv.covered_codes()
-        if len(codes) < 100:
-            # 首次启动 · 成分股还没 seed。两个指数都要 seed ——
-            # 只 seed 沪深300 的话,"中证500"这个池子永远没有因子数据
-            for _ic in _uv.COVERED_INDEXES:
-                try:
-                    n = _uv.seed_current(_ic)
-                    log.info("[quant.local] seed %s · %d 只", _ic, n)
-                except Exception as e:                        # noqa: BLE001
-                    log.error("[quant.local] seed %s 失败: %s", _ic, e)
-            codes = _uv.covered_codes()
         out["universe"] = len(codes)
     except Exception as e:                                    # noqa: BLE001
-        log.error("[quant.local] 股票池失败: %s", e)
+        log.error("[quant.local] 读已有数据失败: %s", e)
         codes = []
         out["universe"] = 0
     if not codes:
-        log.error("[quant.local] 没有股票池 · 后面全部跳过")
+        log.info("[quant.local] 用户还没下载任何数据 · 本次不做任何事"
+                 "(到「数据」页选范围下载后,这里会自动跟着更新)")
+        out["skipped"] = "no_data_yet"
+        _st.step("完成", 4)
         return out
 
     # ② 个股日线 · 只补最近一段,不是全量重拉
@@ -183,11 +180,21 @@ def daily_local_pipeline() -> dict:
 
 
 def run_initial_setup() -> dict:
-    """首次初始化 —— 库是空的时候在启动后立刻跑一遍。
+    """⚠ **已被「数据」页的下载任务取代 · 保留只为兼容老的 POST /quant/init**
 
-    历史因子也一并补:只有当天一个截面的话,**回测仍然一期都选不出票**
-    (回测要的是每个调仓日的因子值)。用户初始化完立刻点回测得到
-    "选不出股票",和没初始化没区别。
+    它原来的作用是"库是空的就自己去 seed 沪深300 + 中证500 并下 800 只"。
+    老板砍掉了这个行为:「刚下载启动容器自动跑不太好,用户都不知道你就
+    占用他的资源很不好」。
+
+    而且现在 `covered_codes()` 读的是 `data_coverage`(用户下过什么),
+    所以在一个没下过数据的实例上,**这个函数什么都不会做** ——
+    这是有意的,不是 bug。
+
+    要下数据请走「数据」页:用户自己选范围、时长、要不要财报。
+    等第 3 步的下载任务系统上线后,这个函数和 /quant/init 一起删掉。
+
+    历史因子那段逻辑仍然有价值(只算当天一个截面的话回测一期都选不出票),
+    下载任务实现时要把它搬过去。
     """
     from app.services.quant import init_state as _st
     if not _st.begin():
@@ -246,14 +253,17 @@ def weekly_akshare_factors() -> dict:
     """
     from datetime import date as _date
     today = _date.today()
+    # **只算有财报覆盖的票**。用 kline 覆盖的话,会给那些用户只下了日线、
+    # 明确没要财报的股票去拉财报 —— 那是替他做决定,而且很慢(8.6 秒/只)
     try:
-        codes = _uv.covered_codes()
+        codes = _uv.covered_codes_financial()
     except Exception as e:                                    # noqa: BLE001
-        log.error("[quant.akshare] 取股票池失败: %s", e)
+        log.error("[quant.akshare] 读财报覆盖失败: %s", e)
         return {}
     if not codes:
-        log.error("[quant.akshare] 股票池为空 · 跳过")
-        return {}
+        log.info("[quant.akshare] 还没有下载过财报数据 · 本次跳过"
+                 "(到「数据」页选「日线 + 财报」下载后,这里会自动跟着更新)")
+        return {"skipped": "no_financial_data"}
 
     out = {}
     for k in factor_engine.AKSHARE_ONLY:

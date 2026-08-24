@@ -261,13 +261,38 @@ COVERED_INDEXES = ["000300", "000905"]
 
 
 def covered_codes() -> list[str]:
-    """定时任务该算哪些票 —— 沪深300 ∪ 中证500,去重。"""
-    seen, out = set(), []
-    for ic in COVERED_INDEXES:
-        for c in query_current(ic):
-            if c not in seen:
-                seen.add(c); out.append(c)
-    return out
+    """定时任务该更新哪些票 —— **以用户下过什么为准**。
+
+    原来这里返回沪深300 ∪ 中证500(写死的 800 只),也就是说不管用户
+    下没下、想不想要,定时任务每天都去更新这 800 只。老板的意见是
+    「用户都不知道你就占用他的资源」—— 写死范围和开机自动跑是同一个毛病。
+
+    现在读 `data_coverage`:用户在「数据」页下过哪些,就更新哪些。
+    一只都没下过的实例,这里返回空列表,定时任务什么都不做 ——
+    **这才是正确的默认行为**。
+    """
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("SELECT DISTINCT code FROM data_coverage WHERE data_type='kline'")
+        return [r[0] for r in cur.fetchall()]
+    except Exception as e:                                    # noqa: BLE001
+        log.warning("[universe] 读 data_coverage 失败: %s", e)
+        return []
+    finally:
+        cur.close(); conn.close()
+
+
+def covered_codes_financial() -> list[str]:
+    """有财报覆盖的票 —— 每周任务只重算这些的基本面因子。"""
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("SELECT DISTINCT code FROM data_coverage WHERE data_type='financial'")
+        return [r[0] for r in cur.fetchall()]
+    except Exception as e:                                    # noqa: BLE001
+        log.warning("[universe] 读 data_coverage(financial) 失败: %s", e)
+        return []
+    finally:
+        cur.close(); conn.close()
 
 
 def resolve(universe_key: str, on_date: date | None = None, user_id: str | None = None) -> list[str]:

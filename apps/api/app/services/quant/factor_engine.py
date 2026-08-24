@@ -117,8 +117,42 @@ def _compute_roe(codes: list[str], trade_date: date) -> dict[str, float]:
 # B2 · 6 财务因子(akshare_client 已有 helper · 一次批发)
 # ═══════════════════════════════════════════════════════════════
 
+def _make_db_factor(metric_key: str, scale: float = 1.0,
+                    lo: float | None = None, hi: float | None = None):
+    """工厂 · 从 `financial_metric` 表读 —— **不联网**。
+
+    数据由「数据」页的下载任务落库(financial_store)。这样:
+
+      · 算因子变成纯本地操作,几秒而不是几十分钟
+      · 不再依赖 akshare_client 那个**永不失效的进程内缓存**
+        (方案 §G0:容器长跑时新季报进不来,而界面显示的日期是最新的)
+
+    scale:上游给的是百分数(如 ROE 18.5),转成小数要 /100。
+    lo/hi:合理区间,超出的当异常剔除 —— 不是截断到边界,
+    截断会把异常值变成"刚好在边界上"的正常值参与排名。
+    """
+    def _compute(codes, trade_date):
+        from app.services.quant import financial_store as fs
+        raw = fs.read_metric(codes, metric_key, trade_date)
+        out = {}
+        for code, v in raw.items():
+            x = v * scale
+            if lo is not None and x <= lo:
+                continue
+            if hi is not None and x >= hi:
+                continue
+            out[code] = x
+        return out
+    return _compute
+
+
 def _make_akshare_factor(getter_name: str):
-    """工厂 · 用 akshare_client 的 getter 生成 compute · 3σ + z-score 由外层做"""
+    """工厂 · 用 akshare_client 的 getter 生成 compute · 3σ + z-score 由外层做
+
+    ⚠ 只剩没有落库对应指标的因子还在用它。新因子请走 `_make_db_factor` ——
+    这个函数每只票都要打一次 AKShare(8.6 秒),而且靠进程内缓存去重,
+    容器一重启就重新付一遍。
+    """
     def _compute(codes, trade_date):
         from app.services.quant import akshare_client as akc
         getter = getattr(akc, getter_name)
@@ -390,11 +424,13 @@ COMPUTERS = {
     "momentum_12m_1m": _compute_momentum_12m_1m,
     # B2.1 · 财务 6 因子
     "pb_inv": _compute_pb_inv,
-    "roa": _make_akshare_factor("get_roa"),
-    "gross_margin": _make_akshare_factor("get_gross_margin"),
+    # 这四个已落库(financial_metric),走本地读 —— 不联网、几秒算完。
+    # 上游给的是百分数,scale=0.01 转小数
+    "roa": _make_db_factor("roa", 0.01, lo=-1, hi=1),
+    "gross_margin": _make_db_factor("gross_margin", 0.01, lo=-2, hi=2),
     "debt_ratio_inv": _compute_debt_ratio_inv,
-    "revenue_growth_yoy": _make_akshare_factor("get_revenue_growth"),
-    "earnings_growth_yoy": _make_akshare_factor("get_earnings_growth"),
+    "revenue_growth_yoy": _make_db_factor("revenue_growth_yoy", 0.01, lo=-10, hi=50),
+    "earnings_growth_yoy": _make_db_factor("earnings_growth_yoy", 0.01, lo=-10, hi=50),
     # B2.2 · K 线 7 因子
     "momentum_1m": _compute_momentum_1m,
     "momentum_6m": _compute_momentum_6m,

@@ -33,6 +33,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("[boot] init_db failed (service will run but table-backed features may 500): {}", e)
 
+    # 上次崩掉留下的下载任务 —— worker 是进程内的线程,容器一重启它就没了,
+    # 而库里状态还是 running。不处理的话页面上永远显示"进行中"然后不动。
+    # 标成 paused,用户点一下续跑就接着下(已下载的不会重来)。
+    try:
+        from app.services.quant.data_job import reclaim_orphans as _reclaim
+        _n = _reclaim()
+        if _n:
+            logger.warning("[data_job] {} 个任务因服务重启中断 · 已标为可续跑", _n)
+    except Exception as e:
+        logger.warning("[data_job] 回收中断任务失败(非致命): {}", e)
+
     # ─── 不需要任何凭据的任务 · 在 MINIMAL_BOOT 之前就挂上 ───
     #
     # MINIMAL_BOOT 的本意是"跳过需要外部凭据的后台任务",但它是个一刀切的开关,
@@ -51,20 +62,21 @@ async def lifespan(app: FastAPI):
         _local_sched.start()
         logger.info("[quant.local] 每日 17:10 CST 本地流水线已挂载(不需要任何 key)")
 
-        # 首次启动 · 库是空的就立刻跑一遍,别让用户等到下午五点。
+        # ⚠ **不要在这里自动下载数据。**
         #
-        # 定时任务只在 17:10 触发。一个用户上午拉下代码 docker compose up,
-        # 打开策略工作台看到的是空股票池 + "成分股还没有同步" —— 而他
-        # 完全不知道要等什么、等多久。
+        # 曾经这里有一段"库是空的就立刻跑一遍"。老板的意见是:
+        #   「刚下载启动容器自动跑不太好,用户都不知道你就占用他的资源
+        #     很不好」
         #
-        # 放线程里跑:这一趟要十几分钟(实测 K 线 800 只 24 分钟),
-        # 卡在 lifespan 里会让整个服务起不来。
-        from app.services.quant import init_state as _qinit
-        if _qinit.needs_init():
-            logger.warning("[quant.init] 量化数据是空的 · 启动后台初始化"
-                           "(约 10-30 分钟 · 进度见 /api/quant/init-status)")
-            from app.services.quant.scheduler import run_initial_setup as _run_init
-            asyncio.create_task(asyncio.to_thread(_run_init))
+        # 一个用户 docker compose up 只是想看看这东西长什么样,而我们
+        # 直接开始下 800 只股票、跑 25 分钟、吃他的带宽和 CPU —— 他既不
+        # 知道在跑什么,也没法叫停。
+        #
+        # 现在改成:什么都不做。用户到「数据」页自己选范围和时长再下。
+        # 库是空的时候前端会提示他去下载(见 GET /api/quant/data/overview)。
+        #
+        # 定时任务仍然挂着,但它只更新**用户已经下过的**股票
+        # (以 data_coverage 为准)—— 一只都没下过的实例,它什么都不做。
     except Exception as e:
         logger.warning("[quant.local] 本地流水线挂载失败(非致命): {}", e)
 
@@ -258,6 +270,10 @@ app.include_router(backtest_router.router, prefix="/api")
 # ── 量化策略(因子/选股/回测) · Phase A · doc/11量化策略/quant-strategy-tech-plan.md ──
 from app.routers import quant as quant_router
 app.include_router(quant_router.router, prefix="/api")
+
+# 数据中心 · /api/quant/data/* · 单独一个 router(quant.py 已 600+ 行)
+from app.routers import quant_data as quant_data_router
+app.include_router(quant_data_router.router, prefix="/api")
 
 # ── /chat 会话归属(用户隔离的权威数据源, 供 web BFF 调用) ──
 from app.routers import chat_session as chat_session_router

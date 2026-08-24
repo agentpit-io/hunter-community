@@ -596,6 +596,114 @@ async def init_db():
                     "ON hunter_artifacts.published_artifact (owner_user_id, source_message_id) "
                     "WHERE source_message_id IS NOT NULL")
 
+        # 数据中心 · 5 表 · DDL 同 sql/20260824_data_center.sql
+        #
+        # 原来量化数据是开机自动跑、范围写死沪深300 ∪ 中证500。改成用户在
+        # 「数据」页自己选范围和时长,后台跑、实时进度、增量更新。
+        # 方案见 doc/.../11量化策略/22_20260822_数据中心_技术方案.md
+
+        # 增量更新的唯一依据。**只存一个连续区间,不存区间列表** ——
+        # 中间有洞说明上次下到一半失败了,重下整段比拼接更可靠。拼接写错的
+        # 表现是"数据看起来连续、中间少三个月",这种错在回测结果里看不出来
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS data_coverage (
+              code         VARCHAR(10)  NOT NULL,
+              data_type    VARCHAR(16)  NOT NULL,
+              covered_from DATE         NOT NULL,
+              covered_to   DATE         NOT NULL,
+              updated_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
+              PRIMARY KEY (code, data_type)
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_dc_type "
+                    "ON data_coverage (data_type, covered_to DESC)")
+
+        # 任务状态**必须落库**。放模块内存的后果实测过两次:docker exec
+        # 另起进程跑状态读不到;容器重建进度全丢而用户还在页面上等
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS data_job (
+              id             BIGSERIAL     PRIMARY KEY,
+              user_id        VARCHAR(64),
+              scope          JSONB         NOT NULL,
+              span_months    INT           NOT NULL,
+              with_financial BOOLEAN       NOT NULL DEFAULT FALSE,
+              keep_raw       BOOLEAN       NOT NULL DEFAULT FALSE,
+              status         VARCHAR(16)   NOT NULL,
+              total          INT           NOT NULL DEFAULT 0,
+              done_count     INT           NOT NULL DEFAULT 0,
+              skipped_count  INT           NOT NULL DEFAULT 0,
+              failed_count   INT           NOT NULL DEFAULT 0,
+              current_code   VARCHAR(10),
+              phase          VARCHAR(32),
+              message        TEXT,
+              created_at     TIMESTAMPTZ   NOT NULL DEFAULT now(),
+              started_at     TIMESTAMPTZ,
+              finished_at    TIMESTAMPTZ,
+              updated_at     TIMESTAMPTZ   NOT NULL DEFAULT now()
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_dj_status "
+                    "ON data_job (status, id DESC)")
+
+        # 行业二级分类 · 一级由我们归并成 7 个,不直接用东财 80+ 板块名
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS stock_industry (
+              code       VARCHAR(10)  NOT NULL,
+              l1         VARCHAR(32)  NOT NULL,
+              l2         VARCHAR(32)  NOT NULL,
+              updated_at TIMESTAMPTZ  NOT NULL DEFAULT now(),
+              PRIMARY KEY (code)
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_si_l1 ON stock_industry (l1, l2)")
+
+        # 财报提炼指标(窄表)· 因子直接读这张。
+        # 用长表不用宽表:加指标只是多插几行,不动表结构 —— 生产迁移规则是
+        # 只 ADD 不 DROP。而且行业口径不同(银行没"营业成本"),宽表全是 NULL。
+        # 实测资产负债表 319 列,而 10 个基本面因子只用到约 15 个字段
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS financial_metric (
+              code        VARCHAR(10)      NOT NULL,
+              report_date DATE             NOT NULL,
+              metric_key  VARCHAR(32)      NOT NULL,
+              value       DOUBLE PRECISION,
+              updated_at  TIMESTAMPTZ      NOT NULL DEFAULT now(),
+              PRIMARY KEY (code, report_date, metric_key)
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_fm_key_date "
+                    "ON financial_metric (metric_key, report_date DESC)")
+
+        # 财报原始归档 · 默认不写,用户勾「保留原始报表」才落。
+        # 留它的理由:下载 8.6 秒/只、解析毫秒级 —— 以后加新因子有归档就是
+        # 重新解析几秒,没有就要重下 1.9 小时
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS financial_raw (
+              code        VARCHAR(10)  NOT NULL,
+              report_date DATE         NOT NULL,
+              report_type VARCHAR(16)  NOT NULL,
+              payload     JSONB        NOT NULL,
+              fetched_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
+              PRIMARY KEY (code, report_date, report_type)
+            )
+        """)
+
+        # 一次性回填:老实例的 klines 补 coverage 记录。
+        #
+        # data_coverage 是新表,而已有安装的 klines 里可能已经有几百只股票
+        # (我们自己这台实测 805 只)。不回填的话 overview 报 empty=true、
+        # 定时任务读到空池 —— 升级之后数据看起来凭空消失了,而它明明在库里。
+        #
+        # 幂等:ON CONFLICT DO NOTHING,已有记录的不动(下载任务写的比这里
+        # 推断的准)。
+        cur.execute("""
+            INSERT INTO data_coverage (code, data_type, covered_from, covered_to)
+            SELECT code, 'kline', min(ts), max(ts)
+              FROM klines WHERE period='daily'
+             GROUP BY code
+            ON CONFLICT (code, data_type) DO NOTHING
+        """)
+
         conn.commit()
         conn.close()
         logger.info("Database initialized")
