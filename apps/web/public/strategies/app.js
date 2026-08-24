@@ -366,6 +366,7 @@ function renderShell(activeTab, title, subTitle, actions) {
       <a href="/strategies/factors.html"   class="tab-h ${activeTab==='factors'?'active':''}">因子广场</a>
       <a href="/strategies/workbench.html" class="tab-h ${activeTab==='workbench'?'active':''}">策略工作台</a>
       <a href="/strategies/backtest.html"  class="tab-h ${activeTab==='backtest'?'active':''}">回测结果</a>
+      <a href="/strategies/data.html"      class="tab-h ${activeTab==='data'?'active':''}">数据</a>
     </div>
     <div id="page-content"></div>
   </div>

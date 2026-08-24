@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>数据 · 猎鹿人 Hunter</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    .dc-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+    .dc-stat{background:var(--bg,#FAF7F3);border-radius:8px;padding:11px 13px}
+    .dc-stat .k{color:var(--muted);font-size:11.5px}
+    .dc-stat .v{font-size:19px;font-weight:600;margin-top:2px}
+    .dc-stat .v small{font-size:12px;font-weight:400;color:var(--muted)}
+    .dc-seg{display:flex;flex-wrap:wrap;gap:7px}
+    .dc-seg button{border:1px solid var(--line,#E8E0D6);background:#fff;border-radius:7px;
+      padding:7px 13px;cursor:pointer;font-size:13px;font-family:inherit;color:var(--text)}
+    .dc-seg button.on{border-color:var(--brand);background:#FDF3E7;color:#A85F17;font-weight:600}
+    .dc-l1{border:1px solid var(--line,#E8E0D6);border-radius:8px;padding:8px 10px;margin-bottom:7px;background:#fff}
+    .dc-l1-hd{display:flex;align-items:center;margin-bottom:7px;font-size:13px}
+    .dc-l1-hd label{display:flex;align-items:center;gap:6px;cursor:pointer}
+    .dc-l1-hd .n{margin-left:auto;color:var(--muted);font-size:11.5px}
+    .dc-ind{display:grid;grid-template-columns:repeat(auto-fill,minmax(126px,1fr));gap:7px}
+    .dc-ind label{display:flex;align-items:center;gap:6px;border:1px solid var(--line,#E8E0D6);
+      border-radius:7px;padding:7px 9px;font-size:12.5px;cursor:pointer;background:#fff}
+    .dc-ind label.on{border-color:var(--brand);background:#FDF3E7}
+    .dc-ind .n{color:var(--muted);font-size:11px;margin-left:auto}
+    #dc-ind-block.off{opacity:.4;pointer-events:none}
+    .dc-cost{background:#FDF3E7;color:#8A5A1B;border-radius:8px;padding:11px 14px;
+      font-size:12.5px;line-height:1.7;margin-top:6px}
+    .dc-bar{height:7px;background:#EFE7DC;border-radius:4px;overflow:hidden;margin:8px 0 5px}
+    .dc-bar i{display:block;height:100%;background:var(--brand);border-radius:4px;transition:width .4s}
+    .dc-split{display:grid;grid-template-columns:1.35fr 1fr;gap:14px}
+    @media(max-width:900px){.dc-split{grid-template-columns:1fr}}
+    .dc-lbl{font-size:12.5px;color:var(--muted);margin:14px 0 6px}
+  </style>
+</head>
+<body>
+<script src="app.js"></script>
+<script>
+document.body.innerHTML = renderShell('data', '策略广场 / 数据',
+  '自己选范围下载 · 后台跑 · 关掉页面也不影响', '')
+
+const container = document.getElementById('page-content')
+
+// 速率写死在前端只是为了**拖选项时不打后端** —— 点「开始下载」前会调
+// /estimate 拿准确的可跳过数。两个数都是实测值(见后端 data_center.py)
+const RATE_KLINE = 1.81, RATE_FIN = 8.6
+
+let SCOPES = null
+let sel = { kind: 'hs300', industries: [], span: 36, fin: false, raw: false }
+let estTimer = null
+
+const fmtSec = s => s < 90 ? Math.round(s) + ' 秒'
+  : s < 5400 ? Math.round(s / 60) + ' 分钟' : (s / 3600).toFixed(1) + ' 小时'
+
+container.innerHTML = `
+  <div class="panel" style="margin:0 20px 14px"><div class="p-hd">当前数据</div>
+    <div class="cnt" style="margin-bottom:10px">下载过的数据都存在本地,以后只补新增的部分,不会重复下载</div>
+    <div class="dc-grid" id="dc-overview"><div class="cnt">加载中…</div></div>
+    <div class="cnt" id="dc-factor-note" style="margin-top:8px;line-height:1.7"></div>
+  </div>
+  <div class="dc-split" style="margin:0 20px">
+    <div class="panel"><div class="p-hd">下载数据</div>
+      <div class="cnt">选好范围点开始 · 后台跑 · 关掉页面也不影响</div>
+      <div class="dc-lbl">① 选哪些股票</div>
+      <div class="dc-seg" id="dc-scope"></div>
+      <div id="dc-ind-block" class="off">
+        <div class="dc-lbl">行业(选了「按行业选」时生效 · 点一级可全选下面的二级)</div>
+        <div id="dc-inds"></div>
+      </div>
+      <div class="dc-lbl">② 下多长时间</div>
+      <div class="dc-seg" id="dc-span"></div>
+      <div class="cnt" style="margin-top:6px">
+        「只补最新」= 已经下过的股票把缺的那几天补上。它是<b>时间范围的一种</b>,
+        不是另一个按钮。注意耗时按<b>只数</b>算不按数据量算 —— 每只仍要打一次上游。
+      </div>
+      <div class="dc-lbl">③ 下哪类数据</div>
+      <div class="dc-seg" id="dc-kind"></div>
+      <div class="cnt" style="margin-top:6px;line-height:1.7">
+        日线支撑 <b>8 个技术因子</b>,实测约 1.8 秒/只 —— 因子本身是本地算的,几乎不花时间。<br>
+        财报支撑另外 <b>10 个基本面因子</b>(PE / ROE / 营收同比…),实测约 8.6 秒/只,<b>贵 5 倍</b>。
+      </div>
+      <label style="display:flex;align-items:center;gap:7px;margin-top:10px;font-size:12.5px;cursor:pointer" id="dc-raw-wrap">
+        <input type="checkbox" id="dc-raw"> 保留财报原始报表(多占约 0.045 MB/只 ·
+        以后加新因子不用重新下载)
+      </label>
+      <div class="dc-cost" id="dc-cost">预计…</div>
+      <div style="margin-top:12px">
+        <button class="btn primary" id="dc-start">开始下载</button>
+        <span class="cnt" id="dc-start-note" style="margin-left:8px"></span>
+      </div>
+    </div>
+
+    <div class="panel"><div class="p-hd">正在下载</div>
+      <div class="cnt">关掉页面也会继续 · 回来还能看到进度</div>
+      <div id="dc-active" style="margin-top:8px"></div>
+      <div class="p-hd" style="margin-top:16px">最近任务</div>
+      <div id="dc-jobs"><div class="cnt">加载中…</div></div>
+    </div>
+  </div>
+`
+
+// ── 渲染 ───────────────────────────────────────────────
+function seg(id, items, cur, onPick) {
+  const el = document.getElementById(id)
+  el.innerHTML = items.map(it =>
+    `<button data-v="${it.v}" class="${it.v === cur ? 'on' : ''}">${it.label}</button>`).join('')
+  el.onclick = e => {
+    const b = e.target.closest('button'); if (!b) return
+    onPick(b.dataset.v)
+    ;[...el.children].forEach(x => x.classList.toggle('on', x === b))
+  }
+}
+
+async function loadScopes() {
+  SCOPES = await fetch('/api/quant/data/scopes').then(r => r.json())
+  const idx = SCOPES.indexes.map(x => ({ v: x.kind, label: `${x.label}${x.count ? ' ' + x.count : ''}` }))
+  seg('dc-scope', [
+    ...idx,
+    { v: 'all_a', label: `全 A 股 ${SCOPES.all_a.count}` },
+    { v: 'industry', label: '按行业选' },
+    { v: 'watchlist', label: `我的自选 ${SCOPES.watchlist.count}` },
+  ], sel.kind, v => { sel.kind = v; toggleInd(); estimate() })
+
+  const wrap = document.getElementById('dc-inds')
+  if (!SCOPES.industry_seeded) {
+    wrap.innerHTML = `<div class="cnt" style="padding:10px 0">
+      行业分类还没同步 —— <a href="#" id="dc-sync-ind">点这里同步</a>(新浪源 · 约 1 分钟)</div>`
+    document.getElementById('dc-sync-ind').onclick = async e => {
+      e.preventDefault()
+      await fetch('/api/quant/data/industries/sync', { method: 'POST' })
+      wrap.innerHTML = '<div class="cnt" style="padding:10px 0">同步中… 约 1 分钟后刷新页面</div>'
+    }
+    return
+  }
+  wrap.innerHTML = SCOPES.industries.filter(g => g.children.length).map(g => `
+    <div class="dc-l1">
+      <div class="dc-l1-hd">
+        <label><input type="checkbox" class="dc-l1-all" data-l1="${g.l1}"> <b>${g.l1}</b></label>
+        <span class="n">${g.children.reduce((s, c) => s + c.count, 0)}</span>
+      </div>
+      <div class="dc-ind">${g.children.map(c =>
+        `<label><input type="checkbox" value="${c.l2}"> ${c.l2} <span class="n">${c.count}</span></label>`).join('')}</div>
+    </div>`).join('')
+
+  wrap.onchange = e => {
+    const box = e.target
+    if (box.classList.contains('dc-l1-all')) {
+      // 一级只是批量开关,**不参与计数** —— 勾了一级又勾二级会算两遍
+      box.closest('.dc-l1').querySelectorAll('.dc-ind input').forEach(k => {
+        k.checked = box.checked
+        k.closest('label').classList.toggle('on', box.checked)
+      })
+    } else {
+      box.closest('label').classList.toggle('on', box.checked)
+      const g = box.closest('.dc-l1')
+      g.querySelector('.dc-l1-all').checked =
+        g.querySelectorAll('.dc-ind input').length === g.querySelectorAll('.dc-ind input:checked').length
+    }
+    sel.industries = [...wrap.querySelectorAll('.dc-ind input:checked')].map(i => i.value)
+    estimate()
+  }
+}
+
+// 行业区只在选了「按行业选」时可点 —— 否则用户勾了半天才发现没生效
+function toggleInd() {
+  document.getElementById('dc-ind-block').classList.toggle('off', sel.kind !== 'industry')
+}
+
+seg('dc-span', [
+  { v: 0, label: '只补最新' }, { v: 12, label: '1 年' },
+  { v: 36, label: '3 年' }, { v: 60, label: '5 年' }, { v: 120, label: '全部历史' },
+], sel.span, v => { sel.span = +v; estimate() })
+
+seg('dc-kind', [
+  { v: 'k', label: '只要日线(快)' }, { v: 'kf', label: '日线 + 财报(慢很多)' },
+], 'k', v => { sel.fin = v === 'kf'; document.getElementById('dc-raw-wrap').style.display = sel.fin ? 'flex' : 'none'; estimate() })
+document.getElementById('dc-raw-wrap').style.display = 'none'
+document.getElementById('dc-raw').onchange = e => { sel.raw = e.target.checked; estimate() }
+
+// ── 预估 ───────────────────────────────────────────────
+function scopeBody() {
+  return { kind: sel.kind, industries: sel.industries }
+}
+
+function estimate() {
+  // 本地先算一个粗的,让拖选项时立刻有反馈;再异步拿后端的准确值
+  clearTimeout(estTimer)
+  estTimer = setTimeout(async () => {
+    const d = await fetch('/api/quant/data/estimate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope: scopeBody(), span_months: sel.span,
+                             with_financial: sel.fin, keep_raw: sel.raw }),
+    }).then(r => r.json())
+    const el = document.getElementById('dc-cost')
+    if (!d.stocks) { el.innerHTML = d.note || '这个范围没有股票'; return }
+    el.innerHTML =
+      `预计:<b>${d.todo} 只 · 约 ${fmtSec(d.seconds)}</b> · 新增磁盘约 ${d.disk_mb} MB<br>` +
+      (d.skip ? `共 ${d.stocks} 只,其中 <b>${d.skip} 只</b>已有数据可跳过`
+              : `共 ${d.stocks} 只,全部需要下载`) +
+      (d.warn ? `<br>⚠ ${d.warn}` : '')
+  }, 250)
+}
+
+// ── 概览 ───────────────────────────────────────────────
+async function loadOverview() {
+  const o = await fetch('/api/quant/data/overview').then(r => r.json())
+  document.getElementById('dc-overview').innerHTML = `
+    <div class="dc-stat"><div class="k">已下载股票</div><div class="v">${o.stocks} <small>只</small></div></div>
+    <div class="dc-stat"><div class="k">日线区间</div><div class="v" style="font-size:13px">${o.kline_from || '—'}<br><small>→ ${o.kline_to || '—'}</small></div></div>
+    <div class="dc-stat"><div class="k">可用因子</div><div class="v">${o.factors_with_data} <small>/ ${o.factors_total}</small></div></div>
+    <div class="dc-stat"><div class="k">财报数据</div><div class="v">${o.financial_stocks} <small>只</small></div></div>
+    <div class="dc-stat"><div class="k">占用磁盘</div><div class="v">${o.disk_mb} <small>MB</small></div></div>`
+  document.getElementById('dc-factor-note').innerHTML = o.empty
+    ? '还没有任何数据 —— 在下面选一批股票下载,大约 10 分钟就能开始回测'
+    : `· <b>技术因子</b>只靠日线算,下过日线就有<br>· <b>基本面因子</b>要财报 —— 没下financial 的话,选了它们回测会提示"这些因子没有数据"`
+}
+
+// ── 任务 ───────────────────────────────────────────────
+const STATUS_CN = { queued: '排队中', running: '进行中', paused: '已暂停',
+                    done: '完成', failed: '失败', canceled: '已取消' }
+
+async function loadJobs() {
+  const d = await fetch('/api/quant/data/jobs?limit=8').then(r => r.json())
+  const a = d.active
+  const box = document.getElementById('dc-active')
+  if (a) {
+    const j = await fetch(`/api/quant/data/jobs/${a.id}`).then(r => r.json())
+    const doneN = (j.done_count || 0) + (j.skipped_count || 0)
+    const pct = j.total ? Math.round(doneN / j.total * 100) : 0
+    box.innerHTML = `
+      <div style="font-size:13px"><b>#${j.id}</b> ${STATUS_CN[j.status] || j.status}
+        <span class="cnt">· ${j.phase || ''}</span></div>
+      <div class="dc-bar"><i style="width:${pct}%"></i></div>
+      <div class="cnt">${j.done_count} 下 / ${j.skipped_count} 跳 / ${j.failed_count} 败 · 共 ${j.total}
+        ${j.current_code ? '· 当前 ' + j.current_code : ''}
+        ${j.eta_sec != null ? '<br>已用 ' + fmtSec(j.elapsed_sec || 0) + ' · 预计还要 ' + fmtSec(j.eta_sec) : ''}</div>
+      <div style="margin-top:8px">
+        <button class="btn small" data-act="pause" data-id="${j.id}">暂停</button>
+        <button class="btn small" data-act="cancel" data-id="${j.id}">取消</button>
+      </div>`
+    document.getElementById('dc-start').disabled = true
+    document.getElementById('dc-start-note').textContent = '已经有一个任务在跑 · 同时只允许一个'
+  } else {
+    box.innerHTML = '<div class="cnt">没有正在跑的任务</div>'
+    document.getElementById('dc-start').disabled = false
+    document.getElementById('dc-start-note').textContent = ''
+  }
+
+  document.getElementById('dc-jobs').innerHTML = (d.jobs || []).map(j => `
+    <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line,#eee);font-size:12.5px">
+      <span style="color:var(--muted)">#${j.id}</span>
+      <span>${j.scope?.kind || '?'} · ${j.span_months ? j.span_months + ' 个月' : '只补最新'}${j.with_financial ? ' + 财报' : ''}</span>
+      <span style="margin-left:auto;color:var(--muted)">${j.done_count}下/${j.skipped_count}跳</span>
+      <span>${STATUS_CN[j.status] || j.status}</span>
+      ${j.status === 'paused' ? `<button class="btn small" data-act="resume" data-id="${j.id}">续跑</button>` : ''}
+    </div>`).join('') || '<div class="cnt">还没有任务</div>'
+}
+
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-act]'); if (!b) return
+  await fetch(`/api/quant/data/jobs/${b.dataset.id}/${b.dataset.act}`, { method: 'POST' })
+  setTimeout(loadJobs, 600)
+})
+
+document.getElementById('dc-start').onclick = async () => {
+  const btn = document.getElementById('dc-start')
+  btn.disabled = true
+  const d = await fetch('/api/quant/data/jobs', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ scope: scopeBody(), span_months: sel.span,
+                           with_financial: sel.fin, keep_raw: sel.raw }),
+  }).then(r => r.json())
+  if (d.error) {
+    // 后端把"为什么不能开始"说清楚了(范围空 / 已有任务在跑),
+    // 直接透传 —— 自己编一句笼统的会把真原因盖掉
+    document.getElementById('dc-start-note').textContent = d.message || d.error
+    btn.disabled = false
+    return
+  }
+  loadJobs()
+}
+
+// 有任务在跑时 3 秒刷一次,空闲时 15 秒 —— 空闲还高频轮询纯属浪费
+let tick = 0
+setInterval(() => {
+  tick++
+  const active = document.getElementById('dc-start').disabled
+  if (active || tick % 5 === 0) { loadJobs(); loadOverview() }
+}, 3000)
+
+loadOverview(); loadScopes().then(estimate); loadJobs()
+</script>
+</body>
+</html>
