@@ -41,9 +41,21 @@ import re
 import warnings
 from datetime import date
 
-from app.services.database import get_conn
-
 log = logging.getLogger(__name__)
+
+
+def get_conn():
+    """延迟导入 —— **取数和解析这两个函数不该拖进数据库依赖**。
+
+    服务器采集(scripts/harvest_to_csv.py)只用 fetch_indicator + parse,
+    直接写 CSV、不入库。而顶层 `from app.services.database import get_conn`
+    会连带拖进 loguru、psycopg2 一整串,在只装了 requests+akshare 的
+    采集机上直接 ModuleNotFoundError。
+
+    放到函数里之后,不落库的调用方完全不碰这些依赖。
+    """
+    from app.services.database import get_conn as _c
+    return _c()
 
 # 上游列名 → 我们的 metric_key。
 #
