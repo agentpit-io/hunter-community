@@ -59,6 +59,15 @@ container.innerHTML = `
     <div class="dc-grid" id="dc-overview"><div class="cnt">加载中…</div></div>
     <div class="cnt" id="dc-factor-note" style="margin-top:8px;line-height:1.7"></div>
   </div>
+  <div class="panel" style="margin:0 20px 14px"><div class="p-hd">从数据包导入
+      <button class="btn small" id="dc-pkg-refresh" style="float:right;margin-top:-2px">刷新</button></div>
+    <div class="cnt" style="margin-bottom:10px" id="dc-pkg-hint">
+      本地下不动的话,可以用我们打好的数据包 ——
+      下载后把 <b>.tar</b> 放进 <code id="dc-pkg-dir">data-packages/</code> 目录,这里会自动出现
+    </div>
+    <div id="dc-pkgs"><div class="cnt">加载中…</div></div>
+  </div>
+
   <div class="dc-split" style="margin:0 20px">
     <div class="panel"><div class="p-hd">下载数据</div>
       <div class="cnt">选好范围点开始 · 后台跑 · 关掉页面也不影响</div>
@@ -250,7 +259,10 @@ async function loadJobs() {
   document.getElementById('dc-jobs').innerHTML = (d.jobs || []).map(j => `
     <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line,#eee);font-size:12.5px">
       <span style="color:var(--muted)">#${j.id}</span>
-      <span>${j.scope?.kind || '?'} · ${j.span_months ? j.span_months + ' 个月' : '只补最新'}${j.with_financial ? ' + 财报' : ''}</span>
+      <span>${j.scope?.kind === 'package'
+        ? '导入 ' + (j.scope.file || '').replace(/^hunter-data-/, '')
+        : (j.scope?.kind || '?') + ' · ' + (j.span_months ? j.span_months + ' 个月' : '只补最新')
+          + (j.with_financial ? ' + 财报' : '')}</span>
       <span style="margin-left:auto;color:var(--muted)">${j.done_count}下/${j.skipped_count}跳</span>
       <span>${STATUS_CN[j.status] || j.status}</span>
       ${j.status === 'paused' ? `<button class="btn small" data-act="resume" data-id="${j.id}">续跑</button>` : ''}
@@ -281,15 +293,96 @@ document.getElementById('dc-start').onclick = async () => {
   loadJobs()
 }
 
+// ── 数据包 ─────────────────────────────────────────────
+const fmtMB = b => (b / 1048576).toFixed(1) + ' MB'
+
+async function loadPackages() {
+  let d
+  try {
+    d = await fetch('/api/quant/data/packages').then(r => r.json())
+  } catch (e) { return }
+  const dirEl = document.getElementById('dc-pkg-dir')
+  if (dirEl && d.dir) dirEl.textContent = d.dir.replace('/opt/hunter-packages', 'data-packages/')
+
+  const box = document.getElementById('dc-pkgs')
+  const pkgs = d.packages || []
+  if (!pkgs.length) {
+    box.innerHTML = `<div class="cnt" style="padding:14px 0">
+      目录里还没有数据包。把下载好的 .tar 放进去,点上面的「刷新」。</div>`
+    return
+  }
+  box.innerHTML = pkgs.map(p => {
+    // 识别不了的也列出来 —— 用户把包放进去却看不到它,
+    // 比看到一条"这个文件不是数据包"更让人困惑
+    if (!p.ok) {
+      return `<div style="border:1px solid var(--line,#E8E0D6);border-radius:8px;padding:11px 13px;margin-bottom:8px">
+        <div style="font-size:13px"><b>${p.file}</b> <span class="cnt">· ${fmtMB(p.bytes)}</span></div>
+        <div class="cnt" style="color:#8A5A1B;margin-top:4px">${p.why}</div></div>`
+    }
+    const stale = p.schema_ok === false
+    return `<div style="border:1px solid ${stale ? '#E5C08B' : 'var(--brand)'};border-radius:8px;padding:11px 13px;margin-bottom:8px">
+      <div style="font-size:13px"><b>${p.file}</b></div>
+      <div class="cnt" style="margin-top:3px;line-height:1.7">
+        ${p.scope} · ${p.stocks} 只 · ${p.years ? p.years[0] + '–' + p.years[1] : ''} ·
+        ${p.volumes} 卷 · ${(p.rows || 0).toLocaleString()} 行 · ${fmtMB(p.bytes)}<br>
+        打包于 ${(p.built_at || '').slice(0, 10)} · ${p.built_by || ''}
+      </div>
+      ${stale ? `<div class="cnt" style="color:#8A5A1B;margin-top:5px">
+        ⚠ 这个包需要 ${p.schema_version} 或更新的版本 —— 请先 git pull 并重新 build</div>` : ''}
+      <div style="margin-top:9px">
+        <button class="btn small primary" data-pkg="${p.file}" ${stale ? 'disabled' : ''}>导入</button>
+        <span class="cnt" id="pkg-note-${p.file.replace(/\W/g, '')}" style="margin-left:8px"></span>
+      </div></div>`
+  }).join('')
+}
+
+document.getElementById('dc-pkg-refresh').onclick = loadPackages
+
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-pkg]'); if (!b) return
+  const file = b.dataset.pkg
+  const note = document.getElementById('pkg-note-' + file.replace(/\W/g, ''))
+  b.disabled = true
+  // 先预检:让用户看到"要导什么、会不会覆盖",再真的开始
+  const info = await fetch('/api/quant/data/packages/' + encodeURIComponent(file))
+    .then(r => r.json())
+  if (info.error) {
+    // 后端把原因说清楚了(版本太新 / 不是数据包 / 文件没了),直接透传
+    if (note) note.textContent = info.message || info.error
+    b.disabled = false
+    return
+  }
+  const ok = confirm(
+    `导入 ${info.scope} · ${info.stocks} 只 · ${info.total_rows.toLocaleString()} 行\n` +
+    `你已有 ${info.you_have} 只 —— ${info.note}\n\n` +
+    (info.unknown_volumes && info.unknown_volumes.length
+      ? `⚠ 有 ${info.unknown_volumes.length} 卷不认识,会跳过\n\n` : '') +
+    `导入后会自动重算因子,过程中不要关容器。确定开始?`)
+  if (!ok) { b.disabled = false; return }
+
+  const r = await fetch('/api/quant/data/packages/import', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ file }),
+  }).then(r => r.json())
+  if (r.error) {
+    if (note) note.textContent = r.message || r.error
+    b.disabled = false
+    return
+  }
+  if (note) note.textContent = '已开始 · 右侧看进度'
+  loadJobs()
+})
+
 // 有任务在跑时 3 秒刷一次,空闲时 15 秒 —— 空闲还高频轮询纯属浪费
 let tick = 0
 setInterval(() => {
   tick++
   const active = document.getElementById('dc-start').disabled
   if (active || tick % 5 === 0) { loadJobs(); loadOverview() }
+  if (tick % 10 === 0) loadPackages()
 }, 3000)
 
-loadOverview(); loadScopes().then(estimate); loadJobs()
+loadOverview(); loadScopes().then(estimate); loadJobs(); loadPackages()
 </script>
 </body>
 </html>

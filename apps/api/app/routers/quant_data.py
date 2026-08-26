@@ -152,6 +152,54 @@ async def resume_job(job_id: int):
     return {"ok": True, "job_id": job_id}
 
 
+# ═══════════════════════════════════════════════════════════
+# 数据包导入
+# ═══════════════════════════════════════════════════════════
+
+@router.get("/packages")
+async def list_packages():
+    """列出 data-packages/ 里的数据包。
+
+    识别不了的也列出来并说明为什么 —— 用户把包放进去却看不到它,
+    比看到一条"这个文件不是数据包"更让人困惑。
+    """
+    from app.services.quant import package_import as pi
+    return {"dir": str(pi.PACKAGE_DIR), "packages": pi.list_packages()}
+
+
+@router.get("/packages/{file}")
+async def inspect_package(file: str):
+    """导入前的预检 —— 页面上那张确认卡靠它。"""
+    from app.services.quant import package_import as pi
+    return pi.inspect(file)
+
+
+class ImportIn(BaseModel):
+    file: str
+
+
+@router.post("/packages/import")
+async def import_package(body: ImportIn, request: Request):
+    """导入数据包。复用 data_job 的进度/暂停/取消。"""
+    import asyncio as _aio
+    from app.services.quant import data_job, package_import as pi
+
+    running = data_job.active_job()
+    if running:
+        return {"error": "job_running",
+                "message": f"已经有一个任务在跑(#{running['id']})· 同时只允许一个"}
+
+    info = pi.inspect(body.file)
+    if info.get("error"):
+        return info
+
+    jid = data_job.create({"kind": "package", "file": body.file},
+                          0, False, False, len(info.get("volumes") or []),
+                          _uid(request))
+    _aio.create_task(_aio.to_thread(pi.run, jid, body.file))
+    return {"ok": True, "job_id": jid, "info": info}
+
+
 @router.post("/jobs/{job_id}/cancel")
 async def cancel_job(job_id: int):
     from app.services.quant import data_job

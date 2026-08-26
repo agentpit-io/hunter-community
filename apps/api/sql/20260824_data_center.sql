@@ -130,3 +130,18 @@ SELECT code, 'kline', min(ts), max(ts)
   FROM klines WHERE period='daily'
  GROUP BY code
 ON CONFLICT (code, data_type) DO NOTHING;
+
+
+-- ═══════════════════════════════════════════════════════════════
+-- 补丁 · phase 放宽到 TEXT(2026-08-26)
+-- ═══════════════════════════════════════════════════════════════
+-- 原本 VARCHAR(32) 是按"成分股/日线/财报/算因子"这种短词设计的。
+-- 数据包导入要显示卷名(「导入 1/6 · meta-stocks.csv.gz」),超了 32 字符
+-- 直接 StringDataRightTruncation。
+--
+-- 而这个异常发生在后台线程里,表现是**任务永远停在 queued、页面一动不动** ——
+-- 换个字段装(比如塞回 current_code)不解决问题,那个只有 10 字符更窄。
+-- 放宽类型才是对的:进度文案本来就该能写清楚。
+--
+-- VARCHAR(n) → TEXT 是放宽,不丢数据,PG 里是 O(1) 的元数据变更。
+ALTER TABLE data_job ALTER COLUMN phase TYPE TEXT;

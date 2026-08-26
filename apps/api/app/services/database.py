@@ -644,6 +644,11 @@ async def init_db():
         """)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_dj_status "
                     "ON data_job (status, id DESC)")
+        # phase 放宽到 TEXT · DDL 同 sql/20260824_data_center.sql 末尾。
+        # 原来 VARCHAR(32) 装不下带卷名的进度文案(「导入 1/6 ·
+        # meta-stocks.csv.gz」),超长会 StringDataRightTruncation,
+        # 而异常在后台线程里被吞掉 —— 表现是任务永远停在 queued
+        cur.execute("ALTER TABLE data_job ALTER COLUMN phase TYPE TEXT")
 
         # 行业二级分类 · 一级由我们归并成 7 个,不直接用东财 80+ 板块名
         cur.execute("""

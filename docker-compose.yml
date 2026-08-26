@@ -137,6 +137,14 @@ services:
       # 挂载而不是打进镜像:换推荐不用重建,而且用户 fork 之后
       # 改成他们团队的推荐位是改一个 JSON 就生效
       - ./data:/opt/hunter-data:ro
+      # 数据包 · 可读写。
+      #
+      # 用户把从云盘下载的 .tar 拖进 ./data-packages/ 就能在「数据」页
+      # 看到并导入;我们这边打包也写到这里。
+      #
+      # 为什么不放 ./data 下面:那个是 :ro(内置数据不该被改),而打包
+      # 要写。而且混在一起以后分不清哪个是随代码分发的、哪个是用户放的。
+      - ./data-packages:/opt/hunter-packages
     ports:
       - "${API_HOST_PORT:-8100}:8000"
 
