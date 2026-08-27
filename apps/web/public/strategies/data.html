@@ -255,7 +255,7 @@ function failHint (j) {
       <div style="font-size:13px"><b>#${j.id}</b> ${STATUS_CN[j.status] || j.status}
         <span class="cnt">· ${j.phase || ''}</span></div>
       <div class="dc-bar"><i style="width:${pct}%"></i></div>
-      <div class="cnt">${j.done_count} 下 / ${j.skipped_count} 跳 / ${j.failed_count} 败 · 共 ${j.total}
+      <div class="cnt">成功 ${j.done_count} · 跳过 ${j.skipped_count} · 失败 ${j.failed_count} · 共 ${j.total}
         ${j.current_code ? '· 当前 ' + j.current_code : ''}
         ${j.eta_sec != null ? '<br>已用 ' + fmtSec(j.elapsed_sec || 0) + ' · 预计还要 ' + fmtSec(j.eta_sec) : ''}</div>
       ${failHint(j)}
@@ -278,7 +278,7 @@ function failHint (j) {
         ? '导入 ' + (j.scope.file || '').replace(/^hunter-data-/, '')
         : (j.scope?.kind || '?') + ' · ' + (j.span_months ? j.span_months + ' 个月' : '只补最新')
           + (j.with_financial ? ' + 财报' : '')}</span>
-      <span style="margin-left:auto;color:var(--muted)">${j.done_count}下/${j.skipped_count}跳</span>
+      <span style="margin-left:auto;color:var(--muted)">成功 ${j.done_count} · 跳过 ${j.skipped_count}</span>
       <span>${STATUS_CN[j.status] || j.status}</span>
       ${j.status === 'paused' ? `<button class="btn small" data-act="resume" data-id="${j.id}">续跑</button>` : ''}
     </div>`).join('') || '<div class="cnt">还没有任务</div>'
