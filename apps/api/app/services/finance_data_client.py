@@ -131,6 +131,25 @@ def to_symbol(code: str) -> str | None:
     suffix = code.split(".")[1] if "." in code else None
     s = STOCK_MAP.get(bare) or _dynamic_map.get(bare)
 
+    # ── 港股/美股先判,**必须排在 A 股前缀 override 之前** ──────────
+    #
+    # 实测 to_symbol('00700') 返回的是 '00700.SZ' —— 00700 以 "00" 开头,
+    # 被下面那条 A 股规则判成深圳,于是系统认认真真去深交所要一只
+    # 叫 00700 的股票。港股不是"没做",是**做了但会拿错**。
+    #
+    # 那条 override 的本意是"覆盖 watchlist 脏数据"(002138 被登记成 SH),
+    # 但它把真港股也一起覆盖了。代码形态比 watchlist 字段可靠:
+    # 5 位纯数字只可能是港股,含字母只可能是美股。
+    try:
+        from app.services.market_source import market_of as _mkt
+        _m = _mkt(code)
+        if _m == "hk":
+            return f"{bare.zfill(5)}.HK"
+        if _m == "us":
+            return f"{bare.upper()}.US"
+    except Exception:                                          # noqa: BLE001
+        pass
+
     # A 股/ETF/可转债/北交所 · 前缀 override（防 watchlist 脏数据 e.g. 002138 被登记成 SH）
     prefix_exch = _a_prefix_exchange(bare)
     if prefix_exch:
@@ -280,6 +299,30 @@ def _user_valuation(code: str) -> dict:
         return {}
 
 
+def _free_quote(code: str) -> dict | None:
+    """港美股免费报价兜底 · 腾讯 qt.gtimg.cn。A 股返回 None(不抢原路径)。
+
+    形状必须和官方分支**完全一致**,包括五档盘口那 20 个键 ——
+    少几个键的后果实测过:界面不报错,只是名字显示成代码、
+    涨跌额恒为 +0.00,全部静默回落成默认值。
+    """
+    try:
+        from app.services import market_source
+        q = market_source.quote(code)
+    except Exception as e:                                     # noqa: BLE001
+        logger.warning("[finance_data_client] 免费报价通道失败 {}: {}", code, e)
+        return None
+    if not q:
+        return None
+    return {
+        **q,
+        **{f"bid{i}": None for i in range(1, 6)},
+        **{f"bid{i}v": 0 for i in range(1, 6)},
+        **{f"ask{i}": None for i in range(1, 6)},
+        **{f"ask{i}v": 0 for i in range(1, 6)},
+    }
+
+
 def get_quote(code: str) -> dict | None:
     """实时报价快照（含五档盘口）· SaaS or provider fallback."""
     # ── 用户自己的数据源优先(`_21` §6)──────────────────────────
@@ -326,6 +369,23 @@ def get_quote(code: str) -> dict | None:
         from loguru import logger as _lg
         _lg.warning("[finance_data_client] 用户源解析异常(已忽略): {}", e)
 
+    # ── 港美股优先走免费通道 ─────────────────────────────────
+    #
+    # 不是"兜底",是**优先**。两个理由:
+    #
+    # 1. **我们的 SaaS 给的是昨天的数据。** 实测
+    #        /api/v1/quote/00700.HK -> updated_at 2026-08-26 · price 445.4
+    #    而同一时刻腾讯免费源给的是 448.2(当天盘中)。用户要的是实时,
+    #    拿昨收当实时,界面上和真实时长得一模一样 —— 看不出来。
+    #
+    # 2. 开源版的立足点就是**不依赖我们的服务器**。港美股免费源国内直连
+    #    可用(实测 100/100 次 · 中位 70ms),没有理由绕我们一圈。
+    #
+    # A 股不走这里 —— market_source.quote() 对 A 股返回 None,原路径不变。
+    _q = _free_quote(code)
+    if _q:
+        return _q
+
     # No SaaS URL configured → go straight to providers.data_source
     if not _use_saas():
         base = _provider_get_quote_sync(code)
@@ -333,7 +393,7 @@ def get_quote(code: str) -> dict | None:
         # from SG etc). Return None so caller shows "数据未就绪" rather than
         # misleading 0.0 quotes.
         if not base or base.get("price") is None:
-            return None
+            return _free_quote(code)
         stock = STOCK_MAP.get(code) or _dynamic_map.get(code) or {"name": base.get("name") or code, "market": base.get("market") or "A"}
         # Shape-adapt: providers return simple dict · fill bid/ask with zeros
         return {
@@ -359,10 +419,10 @@ def get_quote(code: str) -> dict | None:
 
     sym = to_symbol(code)
     if not sym:
-        return None
+        return _free_quote(code)
     data = _get(f"/api/v1/quote/{sym}")
     if not data:
-        return None
+        return _free_quote(code)
     stock = STOCK_MAP.get(code) or _dynamic_map.get(code) or {"name": code, "market": "A"}
     # 统一成 hermes collector 写 Redis 的格式
     return {
@@ -469,6 +529,17 @@ def get_research_reports(code: str, limit: int = 10) -> list[dict]:
 def get_reliable_close(code: str, today: str) -> dict | None:
     """当 quote ts 不是今天时，从 kline 取当日收盘价。
     V2：finance-data kline 无今日数据时，用 akshare 兜底（防上游对个别股票停更）。"""
+    # 港美股先走免费通道。
+    #
+    # 不加这段的后果实测过:这个函数的 akshare 兜底分支里写着
+    #     stock = ... or {"name": code, "market": "A"}
+    # 港股走到那里就被打上 market=A、name=代码,然后 **写回 Redis** ——
+    # 于是 /api/quote 的缓存被重新污染,前面修好的又变回去。
+    # 缓存自愈只能删一次,写的人不改,下一轮又脏了。
+    _q = _free_quote(code)
+    if _q:
+        return _q
+
     sym = to_symbol(code)
     if not sym:
         return None
@@ -553,6 +624,21 @@ def get_reliable_close(code: str, today: str) -> dict | None:
     }
 
 
+def _free_daily(code: str, limit: int = 120) -> list[dict]:
+    """港美股免费通道兜底 —— 腾讯(港)/ 新浪(美),国内直连。
+
+    只在官方链路(用户源 → SaaS)拿不到时才走。**A 股一律返回空**,
+    不抢原路径 —— 那条链路是通的、验过 88 分钟零失败的,
+    改坏现成能用的东西比多写一个分支贵得多。
+    """
+    try:
+        from app.services import market_source
+        return market_source.daily(code, limit=limit or 800)
+    except Exception as e:                                     # noqa: BLE001
+        logger.warning("[finance_data_client] 免费日线通道失败 {}: {}", code, e)
+        return []
+
+
 def get_kline(code: str, period: str = "daily", limit: int = 120) -> list[dict]:
     """K线数据。period: daily/weekly/monthly → tf=1d。"""
     # 用户自己的 K线源优先 · 同 get_quote,加一层在前面不动原路径
@@ -566,6 +652,11 @@ def get_kline(code: str, period: str = "daily", limit: int = 120) -> list[dict]:
         from loguru import logger as _lg
         _lg.warning("[finance_data_client] 用户 K线源解析异常(已忽略): {}", e)
 
+    # 港美股同理:优先免费通道。A 股返回空,继续走原路径
+    _rows = _free_daily(code, limit)
+    if _rows:
+        return _rows
+
     sym = to_symbol(code)
     if not sym:
         return []
@@ -577,8 +668,9 @@ def get_kline(code: str, period: str = "daily", limit: int = 120) -> list[dict]:
     tf    = tf_map.get(period, "1d")
     range_ = range_map.get(period, "1y")
     data = _get(f"/api/v1/kline/{sym}", {"tf": tf, "range": range_, "fq": "front"})
-    if not isinstance(data, list):
-        return []
+    if not isinstance(data, list) or not data:
+        # 官方链路拿不到 —— 港美股走免费通道兜底(A 股返回空,不抢原路径)
+        return _free_daily(code, limit)
     rows = data[-limit:] if limit else data
     return [{"ts": r.get("ts", "")[:10], "open": _f(r.get("open")),
              "high": _f(r.get("high")), "low": _f(r.get("low")),

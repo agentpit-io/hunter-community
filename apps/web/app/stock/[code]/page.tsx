@@ -170,6 +170,9 @@ export default function StockPage() {
   const [tab, setTab] = useState(0)
   const [quote, setQuote] = useState<Quote | null>(null)
   const [klines, setKlines] = useState<Kline[]>([])
+  // 拿不到的原因。空字符串 = 还在加载 —— 这两种状态必须分开,
+  // 混在一起就是测试人员报的"K线永远转圈"
+  const [klineErr, setKlineErr] = useState('')
   const [timeshare, setTimeshare] = useState<Kline[]>([])
   const [fundflow, setFundflow] = useState<FundFlow | null>(null)
   const [news, setNews] = useState<NewsItem[]>([])
@@ -219,16 +222,28 @@ export default function StockPage() {
 
   useEffect(() => {
     if (tab === 1) {
+      setKlineErr('')
       fetch(API + '/api/kline/' + code + '?period=day&limit=120')
-        .then(r => r.json()).then(setKlines).catch(() => {})
+        .then(r => r.json())
+        .then(d => {
+          // 接口拿不到数据时返回的是 {error, message},不是数组。
+          // 直接 setKlines(d) 会让下面的 klines.map 报
+          // "klines.map is not a function" —— 白屏,比"加载中"更糟。
+          if (Array.isArray(d)) { setKlines(d); return }
+          setKlines([])
+          setKlineErr(d?.message || '暂无数据')
+        })
+        .catch(() => { setKlines([]); setKlineErr('行情接口没响应') })
     }
     if (tab === 2) {
       const fetchTS = () => {
         setTimeshareLoading(true)
         fetch(API + '/api/timeshare/' + code)
           .then(r => r.json())
-          .then(d => { setTimeshare(d); setTimeshareLoading(false) })
-          .catch(() => setTimeshareLoading(false))
+          // 同 K线:拿不到时返回的是 {error, message} 而不是数组,
+          // 直接塞进 state 会让 timeshare.map 崩掉
+          .then(d => { setTimeshare(Array.isArray(d) ? d : []); setTimeshareLoading(false) })
+          .catch(() => { setTimeshare([]); setTimeshareLoading(false) })
       }
       fetchTS()
       timeshareTimerRef.current = setInterval(fetchTS, 60000)
@@ -439,6 +454,11 @@ export default function StockPage() {
                 <div className="text-xs text-slate-500 mb-3 font-medium">{isFund ? '净值走势' : '日K线'}</div>
                 {klines.length > 0 ? (
                   <ReactECharts option={isFund ? fundNavOption : klineOption} style={{ height: isFund ? 400 : 500 }} />
+                ) : klineErr ? (
+                  <div className="h-60 flex flex-col items-center justify-center text-slate-500 gap-2">
+                    <div className="text-sm">暂无 K 线数据</div>
+                    <div className="text-xs text-slate-400">{klineErr}</div>
+                  </div>
                 ) : (
                   <div className="h-60 flex items-center justify-center text-slate-600">加载中...</div>
                 )}
