@@ -62,10 +62,29 @@ container.innerHTML = `
   <div class="panel" style="margin:0 20px 14px"><div class="p-hd">从数据包导入
       <button class="btn small" id="dc-pkg-refresh" style="float:right;margin-top:-2px">刷新</button></div>
     <div class="cnt" style="margin-bottom:10px" id="dc-pkg-hint">
-      本地下不动的话,可以用我们打好的数据包 ——
-      下载后把 <b>.tar</b> 放进 <code id="dc-pkg-dir">data-packages/</code> 目录,这里会自动出现
+      本地下不动的话,可以用我们打好的数据包 —— 下载后从这里选文件就行
     </div>
-    <div id="dc-pkgs"><div class="cnt">加载中…</div></div>
+
+    <div id="dc-drop" style="border:1.5px dashed var(--line,#D9CFC2);border-radius:10px;
+         padding:20px 16px;text-align:center;transition:.15s;cursor:pointer">
+      <input type="file" id="dc-file" accept=".tar" style="display:none">
+      <button class="btn small primary" id="dc-browse">浏览… 选择数据包</button>
+      <div class="cnt" style="margin-top:8px">或者把 <b>.tar</b> 文件拖到这里</div>
+    </div>
+
+    <div id="dc-up" style="display:none;margin-top:10px">
+      <div class="cnt" id="dc-up-name"></div>
+      <div class="dc-bar" style="margin-top:6px"><i id="dc-up-bar" style="width:0%"></i></div>
+      <div class="cnt" id="dc-up-pct" style="margin-top:4px"></div>
+    </div>
+    <div class="cnt" id="dc-up-msg" style="margin-top:8px"></div>
+
+    <div id="dc-pkgs" style="margin-top:12px"><div class="cnt">加载中…</div></div>
+    <div class="cnt" style="margin-top:10px;opacity:.75">
+      包很大(以后加分钟线会到 GB 级),或者你是在服务器上跑 ——
+      也可以直接把 .tar 放进 <code id="dc-pkg-dir">data-packages/</code> 目录,
+      点「刷新」就会出现
+    </div>
   </div>
 
   <div class="dc-split" style="margin:0 20px">
@@ -322,8 +341,8 @@ async function loadPackages() {
   const box = document.getElementById('dc-pkgs')
   const pkgs = d.packages || []
   if (!pkgs.length) {
-    box.innerHTML = `<div class="cnt" style="padding:14px 0">
-      目录里还没有数据包。把下载好的 .tar 放进去,点上面的「刷新」。</div>`
+    box.innerHTML = `<div class="cnt" style="padding:10px 0">
+      还没有数据包 —— 用上面的「浏览」选一个下载好的 .tar</div>`
     return
   }
   box.innerHTML = pkgs.map(p => {
@@ -349,6 +368,99 @@ async function loadPackages() {
         <span class="cnt" id="pkg-note-${p.file.replace(/\W/g, '')}" style="margin-left:8px"></span>
       </div></div>`
   }).join('')
+}
+
+// ── 浏览上传 ───────────────────────────────────────────
+//
+// 为什么是"上传"而不是"填个本地路径":浏览器**不允许网页读本地路径**。
+// 用户点浏览选了文件,网页拿到的是文件对象,拿不到 D:/下载/xxx.tar 这个
+// 字符串;就算手打路径进来,网页也没权限去读。而且容器只挂了
+// data-packages,宿主机别的目录对它根本不存在。
+//
+// 用户感知不到区别 —— 看到的还是"点浏览、选文件、导进去了"。
+
+const upBox = document.getElementById('dc-up')
+const upMsg = document.getElementById('dc-up-msg')
+const drop  = document.getElementById('dc-drop')
+const fileEl = document.getElementById('dc-file')
+
+document.getElementById('dc-browse').onclick = () => fileEl.click()
+drop.onclick = e => { if (e.target === drop || e.target.tagName === 'DIV') fileEl.click() }
+fileEl.onchange = () => { if (fileEl.files[0]) upload(fileEl.files[0]) }
+
+;['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => {
+  e.preventDefault(); drop.style.borderColor = 'var(--brand)'
+  drop.style.background = 'rgba(180,120,40,.05)'
+}))
+;['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => {
+  e.preventDefault(); drop.style.borderColor = 'var(--line,#D9CFC2)'
+  drop.style.background = ''
+}))
+drop.addEventListener('drop', e => {
+  const f = e.dataTransfer.files[0]
+  if (f) upload(f)
+})
+
+function upload (f) {
+  upMsg.textContent = ''
+  upMsg.style.color = ''
+  // **后缀不对当场拦住,不传。** 传完 100 MB 才告诉用户"这不是数据包",
+  // 是在浪费他的时间
+  if (!f.name.toLowerCase().endsWith('.tar')) {
+    upMsg.style.color = '#B4472A'
+    upMsg.textContent = `只支持 .tar 数据包 —— 你选的是「${f.name}」`
+    fileEl.value = ''
+    return
+  }
+
+  const fd = new FormData()
+  fd.append('file', f)
+  upBox.style.display = 'block'
+  document.getElementById('dc-up-name').textContent = f.name + ' · ' + fmtMB(f.size)
+
+  // 用 XHR 不用 fetch —— fetch 至今没有上传进度事件,
+  // 而 100 MB 没有进度条的话用户不知道是在传还是卡死了
+  const xhr = new XMLHttpRequest()
+  xhr.open('POST', '/api/quant/data/packages/upload')
+  xhr.upload.onprogress = e => {
+    if (!e.lengthComputable) return
+    const pct = Math.round(e.loaded / e.total * 100)
+    document.getElementById('dc-up-bar').style.width = pct + '%'
+    document.getElementById('dc-up-pct').textContent =
+      pct < 100 ? `上传中 ${pct}%` : '上传完成 · 正在校验…'
+  }
+  xhr.onload = () => {
+    fileEl.value = ''
+    let d
+    try { d = JSON.parse(xhr.responseText) } catch (e) {
+      upBox.style.display = 'none'
+      upMsg.style.color = '#B4472A'
+      upMsg.textContent = '上传失败 · 服务端没有正常返回'
+      return
+    }
+    upBox.style.display = 'none'
+    if (d.error && !d.ok) {
+      upMsg.style.color = '#B4472A'
+      upMsg.textContent = d.message || d.error
+      return
+    }
+    if (d.valid === false) {
+      upMsg.style.color = '#8A5A1B'
+      upMsg.textContent = `无法识别:${d.message || '这不是一个数据包'}`
+      loadPackages()
+      return
+    }
+    upMsg.style.color = '#2F7A3E'
+    upMsg.textContent = '已上传并识别 —— 下面点「导入」开始'
+    loadPackages()
+  }
+  xhr.onerror = () => {
+    upBox.style.display = 'none'
+    upMsg.style.color = '#B4472A'
+    upMsg.textContent = '上传中断 —— 请重试'
+    fileEl.value = ''
+  }
+  xhr.send(fd)
 }
 
 document.getElementById('dc-pkg-refresh').onclick = loadPackages

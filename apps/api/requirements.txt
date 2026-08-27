@@ -41,3 +41,7 @@ email-validator==2.2.0
 pytesseract==0.3.13
 Pillow==11.0.0
 
+
+# 文件上传(数据包「浏览…」按钮)· FastAPI 的 UploadFile 依赖它,
+# 不装的话带 File(...) 的路由在**启动时**就报错,整个 API 起不来
+python-multipart==0.0.9

@@ -332,8 +332,16 @@ def _run(job_id: int, file: str) -> dict:
     except Exception as e:                                    # noqa: BLE001
         log.error("[pkg] 算因子失败: %s", e)
 
-    msg = (f"导入 {done} 卷 · {rows_total} 行 · 耗时 {int(time.time()-t0)}s"
-           + (f" · {failed} 卷失败" if failed else ""))
+    # 用户看得懂的话。原来写的是"导入 6 卷 · 191489 行" ——
+    # **"卷"是我们的内部概念**,用户不知道一卷是什么;而 191489
+    # 和 191,489 在一眼扫过去时是两个量级
+    _stocks = man.get("stocks") or 0
+    _years = man.get("years") or []
+    msg = (f"导入成功 · 已加载 {rows_total:,} 行数据"
+           + (f" · {_stocks} 只股票" if _stocks else "")
+           + (f" · {_years[0]}–{_years[1]}" if len(_years) == 2 else "")
+           + f" · 耗时 {int(time.time()-t0)}s"
+           + (f" · ⚠ {failed} 个分卷失败" if failed else ""))
     dj.set_status(job_id, "done", msg)
     log.info("[pkg] %s · 因子 %s", msg, factors)
     return {"done": done, "failed": failed, "rows": rows_total,

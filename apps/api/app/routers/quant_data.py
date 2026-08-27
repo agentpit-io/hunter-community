@@ -9,8 +9,9 @@ quant.py 已经 600 多行了。
 from __future__ import annotations
 
 import logging
+import os
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, File, Request, UploadFile
 from pydantic import BaseModel
 
 from app.services.quant import data_center
@@ -172,6 +173,73 @@ async def inspect_package(file: str):
     """导入前的预检 —— 页面上那张确认卡靠它。"""
     from app.services.quant import package_import as pi
     return pi.inspect(file)
+
+
+@router.post("/packages/upload")
+async def upload_package(file: UploadFile = File(...)):
+    """从浏览器上传数据包 —— 「浏览…」按钮走这条。
+
+    ## 为什么是上传,而不是"让用户填个本地路径"
+
+    浏览器**不允许网页读取本地路径**。用户点浏览选了文件,网页拿到的是
+    文件对象,拿不到 `D:/下载/hunter-data.tar` 这样的路径;就算用户手打
+    路径进来,网页也没权限去读。这是浏览器的安全边界,不是我们能改的。
+
+    而且就算浏览器允许也没用:容器只挂了 `./data-packages`,
+    宿主机的 `D:/下载/` **对容器根本不存在**。
+
+    用户感知不到区别 —— 他看到的还是"点浏览、选文件、导进去了"。
+    """
+    import re, shutil, tempfile
+    from app.services.quant import package_import as pi
+
+    name = (file.filename or "").strip()
+    # 用户可控的文件名直接拼进路径 = 目录穿越。只留最后一段并挡掉可疑字符
+    name = re.sub(r"[^\w.\-]", "_", name.replace("\\", "/").split("/")[-1])
+    if not name.endswith(".tar"):
+        return {"error": "bad_type",
+                "message": f"只支持 .tar 数据包 —— 你选的是「{file.filename}」"}
+
+    pi.PACKAGE_DIR.mkdir(parents=True, exist_ok=True)
+    dest = pi.PACKAGE_DIR / name
+
+    # **先写临时文件再改名。** 直接写目标名的话,上传中途断了会在目录里
+    # 留下一个半截包,而列表会把它当成"损坏的数据包"列出来 —— 用户看到
+    # 一条自己没放过的坏数据,完全不知道哪来的
+    tmp = None
+    size = 0
+    try:
+        with tempfile.NamedTemporaryFile(dir=pi.PACKAGE_DIR, prefix=".upload-",
+                                         suffix=".part", delete=False) as f:
+            tmp = f.name
+            # **流式落盘,不能 await file.read() 一次读进内存** ——
+            # 100 MB 的包会把内存打满,而且不报错,只是容器 OOM 被杀
+            while True:
+                chunk = await file.read(1 << 20)
+                if not chunk:
+                    break
+                f.write(chunk)
+                size += len(chunk)
+        if size == 0:
+            return {"error": "empty", "message": "文件是空的 —— 可能没下载完"}
+        shutil.move(tmp, dest)
+        tmp = None
+    except Exception as e:                                     # noqa: BLE001
+        return {"error": type(e).__name__, "message": f"上传失败:{str(e)[:120]}"}
+    finally:
+        if tmp:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
+    # 落盘之后立刻校验 —— 让用户当场知道这个包能不能用,
+    # 而不是点了导入才发现不认识
+    info = pi.inspect(name)
+    if info.get("error"):
+        return {"ok": True, "file": name, "bytes": size, "valid": False,
+                "error": info["error"], "message": info.get("message")}
+    return {"ok": True, "file": name, "bytes": size, "valid": True, "info": info}
 
 
 class ImportIn(BaseModel):
