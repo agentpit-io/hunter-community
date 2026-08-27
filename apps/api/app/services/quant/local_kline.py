@@ -33,10 +33,54 @@ _TENCENT = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
 _UA = {"User-Agent": "Mozilla/5.0"}
 
 
+# 北交所 —— **免费源都给不了历史日线,只能排除**。
+#
+# 实测(2026-08-27,以 920000 安徽凤凰为例):
+#   腾讯 bj920000   只返回当天 1 条,而且是 day 不是 qfqday(连复权都没有);
+#                   换 n=60/300/1500、带不带 qfq 都一样
+#   腾讯 sh/sz920000  0 条(前缀本来就不对)
+#   东财 secid=0.920000  第一次拿到 643 条,之后三次重试全 RemoteDisconnected
+#                   —— 和指数日线、行业板块是同一个毛病,不可靠
+#   新浪 klc_kl.js  是自定义二进制编码,不是 JSON,要逆向
+#
+# 而 stocks_catalog_baseline.json 里有 331 只 920xxx,且 exchange 字段
+# **错标成 SZ**。不排除的话:每次全 A 下载必然失败 331 次,而且失败的票
+# 不写 coverage → 下次续跑又重试一遍,永远失败永远重试。
+#
+# 测试人员实测 511 次失败里,331 次就是这个。
+_BJ_PREFIXES = ("4", "8", "92")
+
+
+def is_unsupported(code: str) -> bool:
+    """这只票我们拿不到历史日线 —— 调用方应当跳过并**说明原因**,
+    而不是当成普通失败混在失败计数里。"""
+    c = str(code).zfill(6)
+    return c.startswith(_BJ_PREFIXES)
+
+
 def _prefixed(code: str) -> str:
-    """A 股代码加交易所前缀。6/9 开头是沪市,其余(0/2/3)是深市。"""
+    """A 股代码加交易所前缀。6/9 开头是沪市,其余(0/2/3)是深市。
+
+    ⚠ 这个规则**不适用于北交所**(4/8/92 开头)—— 它们要 bj 前缀,
+    而且即使用对前缀腾讯也只给当天一条。用 is_unsupported() 先挡掉。
+    """
     c = str(code).zfill(6)
     return ("sh" if c[0] in "69" else "sz") + c
+
+
+# 被限流时把重试关掉 —— 见 fetch_daily 的说明
+_RETRY_ON = True
+
+
+def set_retry(on: bool) -> None:
+    """worker 检测到限流时调 set_retry(False)。
+
+    3 次重试对付**偶发失败**是对的,但遇到限流是灾难:
+    每只失败都重试 3 次 = 请求量放大 3 倍 = 持续刺激上游。
+    实测服务器那次在"全败"状态下硬跑了两千多只,每只打 3 次。
+    """
+    global _RETRY_ON
+    _RETRY_ON = on
 
 
 def _from_tencent(code: str, start: date, end: date, adjust: str = "qfq") -> list[dict]:
@@ -50,12 +94,23 @@ def _from_tencent(code: str, start: date, end: date, adjust: str = "qfq") -> lis
     上游哪天改了顺序,这里直接判空,而不是安静地存错。
     """
     q = _prefixed(code)
-    days = max(200, min(1500, (end - start).days + 60))
+    # ⚠ **上限 800,不是 1500。**
+    #
+    # 实测同一只票要不同天数(600519):
+    #     请求  300 → 得 301   2025-06 起
+    #     请求  800 → 得 801   2023-05 起   ← 最优
+    #     请求 1200 → 得 641   2024-01 起   ← 反而变少
+    #     请求 1500 → 得 641
+    #     请求 3000 → 得   0   直接空
+    #
+    # 要多了反而给少。之前按 1500 请求,每只只拿到 641 条(2.5 年),
+    # 服务器那次的 2016-2019 四个分卷因此全是空的。
+    days = max(200, min(800, (end - start).days + 60))
     # 连着打会被限流 —— 实测批量跑 800 只时清一色 ReadTimeout,
     # 而单独拉一只完全正常。失败了退避重试,不是直接放弃:
     # 放弃的表现是"这只票没有数据",和真的没有数据分不开
     raw = []
-    for attempt in range(3):
+    for attempt in range(3 if _RETRY_ON else 1):
         try:
             r = requests.get(_TENCENT, params={"param": f"{q},day,,,{days},{adjust}"},
                              headers=_UA, timeout=30)

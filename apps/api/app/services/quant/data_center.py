@@ -160,22 +160,43 @@ def resolve_scope(scope: dict, user_id: str | None = None) -> tuple[list[str], s
 
 def overview() -> dict:
     """当前数据概览 —— 数据页顶部那一排。"""
+    # 每段单独 try —— 少一张表不该让整页 500。
+    # 测试人员全新装一台就栽在这:factor_value 不存在,概览接口直接
+    # `relation "factor_value" does not exist`,数据页整个打不开。
+    # 表现是"量化功能全坏了",而实际只是少一张表、下载和回测都好好的。
+    #
+    # **缺表返回 0,并把原因带出去** —— 不是静默吞掉。missing 里有什么,
+    # 前端就照实说"因子表还没建",而不是让用户看着 0 个因子猜。
     conn = get_conn(); cur = conn.cursor()
+    missing: list[str] = []
+
+    def _one(sql: str, params=None, default=None, table: str = ""):
+        try:
+            cur.execute(sql, params) if params else cur.execute(sql)
+            return cur.fetchone() or default
+        except Exception:                                     # noqa: BLE001
+            conn.rollback()          # 失败的事务不回滚,后面每一条都跟着废
+            if table:
+                missing.append(table)
+            return default
+
     try:
-        cur.execute("""SELECT count(DISTINCT code), min(covered_from), max(covered_to)
-                         FROM data_coverage WHERE data_type='kline'""")
-        k_n, k_from, k_to = cur.fetchone() or (0, None, None)
-        cur.execute("SELECT count(DISTINCT code) FROM data_coverage WHERE data_type='financial'")
-        f_n = (cur.fetchone() or [0])[0]
-        cur.execute("SELECT count(DISTINCT factor_key) FROM factor_value")
-        fk = (cur.fetchone() or [0])[0]
+        k_n, k_from, k_to = _one(
+            """SELECT count(DISTINCT code), min(covered_from), max(covered_to)
+                 FROM data_coverage WHERE data_type='kline'""",
+            default=(0, None, None), table="data_coverage")
+        f_n = (_one("SELECT count(DISTINCT code) FROM data_coverage "
+                    "WHERE data_type='financial'", default=[0]))[0]
+        fk = (_one("SELECT count(DISTINCT factor_key) FROM factor_value",
+                   default=[0], table="factor_value"))[0]
         # 磁盘:量化相关的几张表加起来
-        cur.execute("""SELECT coalesce(sum(pg_total_relation_size(c.oid)), 0)
-                         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-                        WHERE n.nspname='public' AND c.relname = ANY(%s)""",
-                    (["klines", "factor_value", "financial_metric",
-                      "financial_raw", "index_component"],))
-        disk_mb = round(((cur.fetchone() or [0])[0] or 0) / 1024 / 1024, 1)
+        disk_mb = round(((_one(
+            """SELECT coalesce(sum(pg_total_relation_size(c.oid)), 0)
+                 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname='public' AND c.relname = ANY(%s)""",
+            (["klines", "factor_value", "financial_metric",
+              "financial_raw", "index_component"],),
+            default=[0]))[0] or 0) / 1024 / 1024, 1)
     finally:
         cur.close(); conn.close()
 
@@ -192,6 +213,8 @@ def overview() -> dict:
         "disk_mb": disk_mb,
         # 库是空的 → 前端提示"到「数据」页下载",而不是让用户对着空界面发懵
         "empty": (k_n or 0) == 0,
+        # 缺哪张表照实说 —— 空着表示一切正常
+        "missing_tables": missing,
     }
 
 

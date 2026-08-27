@@ -233,6 +233,20 @@ async function loadJobs() {
   const d = await fetch('/api/quant/data/jobs?limit=8').then(r => r.json())
   const a = d.active
   const box = document.getElementById('dc-active')
+// 失败数一涨用户就以为系统坏了。**照实说是暂时还是永久** ——
+// 「等 5 分钟继续」和「这只票根本拿不到」是两回事,混在一起报数字
+// 只会让人白等或者白重试。
+function failHint (j) {
+  const f = j.failed_count || 0
+  if ((j.phase || '').includes('限流')) {
+    return `<div class="cnt" style="color:#c60">上游在限流 —— 已自动放慢并等待,
+      恢复后会继续,失败的票末尾还会重跑一遍。<b>不用管它</b>。</div>`
+  }
+  if (f === 0) return ''
+  return `<div class="cnt" style="color:#c60">${f} 只暂时没拿到 ——
+    多半是免费源限流。整轮跑完会自动重跑一遍,通常能救回大部分。</div>`
+}
+
   if (a) {
     const j = await fetch(`/api/quant/data/jobs/${a.id}`).then(r => r.json())
     const doneN = (j.done_count || 0) + (j.skipped_count || 0)
@@ -244,6 +258,7 @@ async function loadJobs() {
       <div class="cnt">${j.done_count} 下 / ${j.skipped_count} 跳 / ${j.failed_count} 败 · 共 ${j.total}
         ${j.current_code ? '· 当前 ' + j.current_code : ''}
         ${j.eta_sec != null ? '<br>已用 ' + fmtSec(j.elapsed_sec || 0) + ' · 预计还要 ' + fmtSec(j.eta_sec) : ''}</div>
+      ${failHint(j)}
       <div style="margin-top:8px">
         <button class="btn small" data-act="pause" data-id="${j.id}">暂停</button>
         <button class="btn small" data-act="cancel" data-id="${j.id}">取消</button>
