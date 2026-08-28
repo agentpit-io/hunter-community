@@ -292,9 +292,20 @@ def upsert_cons(cur, rows: list[dict]):
 
 def wipe_demo(conn):
     cur = conn.cursor()
-    for tbl in ("pred_snapshot", "pred_backtest", "pred_consistency"):
+    # pred_snapshot / pred_backtest 直接按 model_ver 删
+    for tbl in ("pred_snapshot", "pred_backtest"):
         cur.execute(f"DELETE FROM {tbl} WHERE model_ver=%s", (MODEL_VER,))
         log.info("wiped %s where model_ver=%s → %d rows", tbl, MODEL_VER, cur.rowcount)
+    # pred_consistency 表没有 model_ver 列 · 关联 pred_backtest 找 demo 行删
+    cur.execute("""
+        DELETE FROM pred_consistency c
+        WHERE EXISTS (
+            SELECT 1 FROM pred_backtest b
+            WHERE b.symbol = c.symbol AND b.pred_date = c.pred_date
+              AND b.model_ver = %s
+        )
+    """, (MODEL_VER,))
+    log.info("wiped pred_consistency via join → %d rows", cur.rowcount)
     conn.commit()
 
 
