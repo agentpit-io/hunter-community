@@ -44,14 +44,37 @@ def get_conn():
 
 
 def fetch_real_kline(symbol: str, days: int) -> list[dict]:
-    """通过 finance-data client 拉真实日 K · 走已有 hunter gateway 网关(与生产一致)."""
-    from app.services.finance_data_client import get_kline
+    """akshare 直连拉真实日 K · 不依赖 hunter gateway(seed 环境常无 HUNTER_API_KEY)."""
+    import akshare as ak
+    from datetime import datetime, timedelta
     bare = symbol.split(".")[0]
-    limit = days + 30  # 拿多一点做 lag
-    bars = get_kline(bare, period="daily", limit=limit)
-    if not bars:
+    end = datetime.now()
+    start = end - timedelta(days=days + 60)  # 拿多一点覆盖周末/节假日
+    try:
+        df = ak.stock_zh_a_hist(
+            symbol=bare, period="daily",
+            start_date=start.strftime("%Y%m%d"),
+            end_date=end.strftime("%Y%m%d"),
+            adjust="qfq",
+        )
+    except Exception as e:
+        log.warning("akshare 拉 %s 失败: %s", symbol, e)
         return []
-    return bars
+    if df is None or df.empty:
+        return []
+    bars = []
+    for _, row in df.iterrows():
+        d = row.get("日期")
+        ts = d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)[:10]
+        bars.append({
+            "ts": ts,
+            "open": float(row.get("开盘") or 0),
+            "high": float(row.get("最高") or 0),
+            "low": float(row.get("最低") or 0),
+            "close": float(row.get("收盘") or 0),
+            "volume": int(row.get("成交量") or 0),
+        })
+    return bars[-(days + 30):]  # 只留够 lag 的量
 
 
 def synthesize_predictions(bars: list[dict], symbol: str) -> tuple[list[dict], list[dict], list[dict]]:
