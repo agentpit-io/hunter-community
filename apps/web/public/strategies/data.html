@@ -59,6 +59,34 @@ container.innerHTML = `
     <div class="dc-grid" id="dc-overview"><div class="cnt">加载中…</div></div>
     <div class="cnt" id="dc-factor-note" style="margin-top:8px;line-height:1.7"></div>
   </div>
+  <div class="panel" style="margin:0 20px 14px"><div class="p-hd">从数据包导入
+      <button class="btn small" id="dc-pkg-refresh" style="float:right;margin-top:-2px">刷新</button></div>
+    <div class="cnt" style="margin-bottom:10px" id="dc-pkg-hint">
+      本地下不动的话,可以用我们打好的数据包 —— 下载后从这里选文件就行
+    </div>
+
+    <div id="dc-drop" style="border:1.5px dashed var(--line,#D9CFC2);border-radius:10px;
+         padding:20px 16px;text-align:center;transition:.15s;cursor:pointer">
+      <input type="file" id="dc-file" accept=".tar" style="display:none">
+      <button class="btn small primary" id="dc-browse">浏览… 选择数据包</button>
+      <div class="cnt" style="margin-top:8px">或者把 <b>.tar</b> 文件拖到这里</div>
+    </div>
+
+    <div id="dc-up" style="display:none;margin-top:10px">
+      <div class="cnt" id="dc-up-name"></div>
+      <div class="dc-bar" style="margin-top:6px"><i id="dc-up-bar" style="width:0%"></i></div>
+      <div class="cnt" id="dc-up-pct" style="margin-top:4px"></div>
+    </div>
+    <div class="cnt" id="dc-up-msg" style="margin-top:8px"></div>
+
+    <div id="dc-pkgs" style="margin-top:12px"><div class="cnt">加载中…</div></div>
+    <div class="cnt" style="margin-top:10px;opacity:.75">
+      包很大(以后加分钟线会到 GB 级),或者你是在服务器上跑 ——
+      也可以直接把 .tar 放进 <code id="dc-pkg-dir">data-packages/</code> 目录,
+      点「刷新」就会出现
+    </div>
+  </div>
+
   <div class="dc-split" style="margin:0 20px">
     <div class="panel"><div class="p-hd">下载数据</div>
       <div class="cnt">选好范围点开始 · 后台跑 · 关掉页面也不影响</div>
@@ -79,6 +107,21 @@ container.innerHTML = `
       <div class="cnt" style="margin-top:6px;line-height:1.7">
         日线支撑 <b>8 个技术因子</b>,实测约 1.8 秒/只 —— 因子本身是本地算的,几乎不花时间。<br>
         财报支撑另外 <b>10 个基本面因子</b>(PE / ROE / 营收同比…),实测约 8.6 秒/只,<b>贵 5 倍</b>。
+      </div>
+      <div class="dc-lbl">④ 从哪里下</div>
+      <div class="dc-seg" id="dc-src"></div>
+      <div class="cnt" id="dc-src-note" style="margin-top:6px;line-height:1.7"></div>
+      <div id="dc-custom" style="display:none;margin-top:8px;padding:10px 12px;
+           border:1px solid var(--line,#E8E0D6);border-radius:8px">
+        <div class="cnt" style="margin-bottom:6px">用你自己的数据源 —— 额度算你的,不占我们的</div>
+        <input id="dc-cust-url" placeholder="API 地址,例如 http://api.xtick.top"
+               style="width:100%;padding:6px 8px;margin-bottom:6px;border:1px solid var(--line,#E8E0D6);border-radius:6px;font-size:12.5px">
+        <input id="dc-cust-key" type="password" placeholder="Key"
+               style="width:100%;padding:6px 8px;border:1px solid var(--line,#E8E0D6);border-radius:6px;font-size:12.5px">
+        <div style="margin-top:8px">
+          <button class="btn small" id="dc-cust-test">测试连接</button>
+          <span class="cnt" id="dc-cust-msg" style="margin-left:8px"></span>
+        </div>
       </div>
       <label style="display:flex;align-items:center;gap:7px;margin-top:10px;font-size:12.5px;cursor:pointer" id="dc-raw-wrap">
         <input type="checkbox" id="dc-raw"> 保留财报原始报表(多占约 0.045 MB/只 ·
@@ -178,6 +221,56 @@ seg('dc-kind', [
 document.getElementById('dc-raw-wrap').style.display = 'none'
 document.getElementById('dc-raw').onchange = e => { sel.raw = e.target.checked; estimate() }
 
+// ── ④ 下载通道 ─────────────────────────────────────────
+//
+// **三条通道的历史深度不一样,而且付费的反而更短** —— 这一点必须写在
+// 界面上,不能藏。实测:
+//     腾讯免费源  一次 801 根 ≈ 3.25 年
+//     XTick 付费  平均每只 518 行 ≈ 2.12 年
+// 用户付了费拿到更少的数据、回头来问,那时候再解释就成狡辩了。
+const SRC_NOTE = {
+  free: '腾讯 / 新浪 · <b>免费</b> · 单次最长 <b>3.25 年</b>(801 根)· 实测 30/30 零失败。' +
+        '慢在每只都要打一次上游,不是慢在数据量。',
+  agentpit: '<b>更快</b> —— 走我们服务器上已经存好的数据,不用一只只去外部源拉,' +
+        '也不用退避重试。<br>覆盖全 A 股(库里 5,665 只)· ' +
+        '历史长度因股而异,热门股通常比免费源更长(茅台实测 843 根 vs 742 根)。' +
+        '单次最多 2000 只。',
+  custom: '填你自己的 API 和 Key —— <b>额度算你的,不占我们的</b>,' +
+        '数据源的授权也由你和供应商约定。',
+}
+seg('dc-src', [
+  { v: 'free', label: '本地免费源' },
+  { v: 'agentpit', label: 'AgentPit 高速通道' },
+  { v: 'custom', label: '我自己的数据源' },
+], 'free', v => {
+  sel.src = v
+  document.getElementById('dc-src-note').innerHTML = SRC_NOTE[v] || ''
+  document.getElementById('dc-custom').style.display = v === 'custom' ? 'block' : 'none'
+  estimate()
+})
+document.getElementById('dc-src-note').innerHTML = SRC_NOTE.free
+
+document.getElementById('dc-cust-test').onclick = async () => {
+  const btn = document.getElementById('dc-cust-test')
+  const msg = document.getElementById('dc-cust-msg')
+  const url = document.getElementById('dc-cust-url').value.trim()
+  const key = document.getElementById('dc-cust-key').value.trim()
+  if (!url || !key) { msg.style.color = '#B4472A'; msg.textContent = 'API 地址和 Key 都要填'; return }
+  btn.disabled = true; msg.style.color = ''; msg.textContent = '测试中…'
+  try {
+    // **先测再下。** 不测的话,Key 填错要跑十分钟才发现
+    const r = await fetch('/api/quant/data/source/test', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, key }),
+    }).then(r => r.json())
+    if (r.ok) { msg.style.color = '#2F7A3E'; msg.textContent = r.message || '连接正常' }
+    else { msg.style.color = '#B4472A'; msg.textContent = r.message || '连不上' }
+  } catch (e) {
+    msg.style.color = '#B4472A'; msg.textContent = '测试失败 · ' + e.message
+  }
+  btn.disabled = false
+}
+
 // ── 预估 ───────────────────────────────────────────────
 function scopeBody() {
   return { kind: sel.kind, industries: sel.industries }
@@ -224,6 +317,20 @@ async function loadJobs() {
   const d = await fetch('/api/quant/data/jobs?limit=8').then(r => r.json())
   const a = d.active
   const box = document.getElementById('dc-active')
+// 失败数一涨用户就以为系统坏了。**照实说是暂时还是永久** ——
+// 「等 5 分钟继续」和「这只票根本拿不到」是两回事,混在一起报数字
+// 只会让人白等或者白重试。
+function failHint (j) {
+  const f = j.failed_count || 0
+  if ((j.phase || '').includes('限流')) {
+    return `<div class="cnt" style="color:#c60">上游在限流 —— 已自动放慢并等待,
+      恢复后会继续,失败的票末尾还会重跑一遍。<b>不用管它</b>。</div>`
+  }
+  if (f === 0) return ''
+  return `<div class="cnt" style="color:#c60">${f} 只暂时没拿到 ——
+    多半是免费源限流。整轮跑完会自动重跑一遍,通常能救回大部分。</div>`
+}
+
   if (a) {
     const j = await fetch(`/api/quant/data/jobs/${a.id}`).then(r => r.json())
     const doneN = (j.done_count || 0) + (j.skipped_count || 0)
@@ -232,9 +339,10 @@ async function loadJobs() {
       <div style="font-size:13px"><b>#${j.id}</b> ${STATUS_CN[j.status] || j.status}
         <span class="cnt">· ${j.phase || ''}</span></div>
       <div class="dc-bar"><i style="width:${pct}%"></i></div>
-      <div class="cnt">${j.done_count} 下 / ${j.skipped_count} 跳 / ${j.failed_count} 败 · 共 ${j.total}
+      <div class="cnt">成功 ${j.done_count} · 跳过 ${j.skipped_count} · 失败 ${j.failed_count} · 共 ${j.total}
         ${j.current_code ? '· 当前 ' + j.current_code : ''}
         ${j.eta_sec != null ? '<br>已用 ' + fmtSec(j.elapsed_sec || 0) + ' · 预计还要 ' + fmtSec(j.eta_sec) : ''}</div>
+      ${failHint(j)}
       <div style="margin-top:8px">
         <button class="btn small" data-act="pause" data-id="${j.id}">暂停</button>
         <button class="btn small" data-act="cancel" data-id="${j.id}">取消</button>
@@ -250,8 +358,11 @@ async function loadJobs() {
   document.getElementById('dc-jobs').innerHTML = (d.jobs || []).map(j => `
     <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line,#eee);font-size:12.5px">
       <span style="color:var(--muted)">#${j.id}</span>
-      <span>${j.scope?.kind || '?'} · ${j.span_months ? j.span_months + ' 个月' : '只补最新'}${j.with_financial ? ' + 财报' : ''}</span>
-      <span style="margin-left:auto;color:var(--muted)">${j.done_count}下/${j.skipped_count}跳</span>
+      <span>${j.scope?.kind === 'package'
+        ? '导入 ' + (j.scope.file || '').replace(/^hunter-data-/, '')
+        : (j.scope?.kind || '?') + ' · ' + (j.span_months ? j.span_months + ' 个月' : '只补最新')
+          + (j.with_financial ? ' + 财报' : '')}</span>
+      <span style="margin-left:auto;color:var(--muted)">成功 ${j.done_count} · 跳过 ${j.skipped_count}</span>
       <span>${STATUS_CN[j.status] || j.status}</span>
       ${j.status === 'paused' ? `<button class="btn small" data-act="resume" data-id="${j.id}">续跑</button>` : ''}
     </div>`).join('') || '<div class="cnt">还没有任务</div>'
@@ -269,7 +380,12 @@ document.getElementById('dc-start').onclick = async () => {
   const d = await fetch('/api/quant/data/jobs', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ scope: scopeBody(), span_months: sel.span,
-                           with_financial: sel.fin, keep_raw: sel.raw }),
+                           with_financial: sel.fin, keep_raw: sel.raw,
+                           source: sel.src || 'free',
+                           custom: sel.src === 'custom' ? {
+                             url: document.getElementById('dc-cust-url').value.trim(),
+                             key: document.getElementById('dc-cust-key').value.trim(),
+                           } : null }),
   }).then(r => r.json())
   if (d.error) {
     // 后端把"为什么不能开始"说清楚了(范围空 / 已有任务在跑),
@@ -281,15 +397,189 @@ document.getElementById('dc-start').onclick = async () => {
   loadJobs()
 }
 
+// ── 数据包 ─────────────────────────────────────────────
+const fmtMB = b => (b / 1048576).toFixed(1) + ' MB'
+
+async function loadPackages() {
+  let d
+  try {
+    d = await fetch('/api/quant/data/packages').then(r => r.json())
+  } catch (e) { return }
+  const dirEl = document.getElementById('dc-pkg-dir')
+  if (dirEl && d.dir) dirEl.textContent = d.dir.replace('/opt/hunter-packages', 'data-packages/')
+
+  const box = document.getElementById('dc-pkgs')
+  const pkgs = d.packages || []
+  if (!pkgs.length) {
+    box.innerHTML = `<div class="cnt" style="padding:10px 0">
+      还没有数据包 —— 用上面的「浏览」选一个下载好的 .tar</div>`
+    return
+  }
+  box.innerHTML = pkgs.map(p => {
+    // 识别不了的也列出来 —— 用户把包放进去却看不到它,
+    // 比看到一条"这个文件不是数据包"更让人困惑
+    if (!p.ok) {
+      return `<div style="border:1px solid var(--line,#E8E0D6);border-radius:8px;padding:11px 13px;margin-bottom:8px">
+        <div style="font-size:13px"><b>${p.file}</b> <span class="cnt">· ${fmtMB(p.bytes)}</span></div>
+        <div class="cnt" style="color:#8A5A1B;margin-top:4px">${p.why}</div></div>`
+    }
+    const stale = p.schema_ok === false
+    return `<div style="border:1px solid ${stale ? '#E5C08B' : 'var(--brand)'};border-radius:8px;padding:11px 13px;margin-bottom:8px">
+      <div style="font-size:13px"><b>${p.file}</b></div>
+      <div class="cnt" style="margin-top:3px;line-height:1.7">
+        ${p.scope} · ${p.stocks} 只 · ${p.years ? p.years[0] + '–' + p.years[1] : ''} ·
+        ${p.volumes} 卷 · ${(p.rows || 0).toLocaleString()} 行 · ${fmtMB(p.bytes)}<br>
+        打包于 ${(p.built_at || '').slice(0, 10)} · ${p.built_by || ''}
+      </div>
+      ${stale ? `<div class="cnt" style="color:#8A5A1B;margin-top:5px">
+        ⚠ 这个包需要 ${p.schema_version} 或更新的版本 —— 请先 git pull 并重新 build</div>` : ''}
+      <div style="margin-top:9px">
+        <button class="btn small primary" data-pkg="${p.file}" ${stale ? 'disabled' : ''}>导入</button>
+        <span class="cnt" id="pkg-note-${p.file.replace(/\W/g, '')}" style="margin-left:8px"></span>
+      </div></div>`
+  }).join('')
+}
+
+// ── 浏览上传 ───────────────────────────────────────────
+//
+// 为什么是"上传"而不是"填个本地路径":浏览器**不允许网页读本地路径**。
+// 用户点浏览选了文件,网页拿到的是文件对象,拿不到 D:/下载/xxx.tar 这个
+// 字符串;就算手打路径进来,网页也没权限去读。而且容器只挂了
+// data-packages,宿主机别的目录对它根本不存在。
+//
+// 用户感知不到区别 —— 看到的还是"点浏览、选文件、导进去了"。
+
+const upBox = document.getElementById('dc-up')
+const upMsg = document.getElementById('dc-up-msg')
+const drop  = document.getElementById('dc-drop')
+const fileEl = document.getElementById('dc-file')
+
+document.getElementById('dc-browse').onclick = () => fileEl.click()
+drop.onclick = e => { if (e.target === drop || e.target.tagName === 'DIV') fileEl.click() }
+fileEl.onchange = () => { if (fileEl.files[0]) upload(fileEl.files[0]) }
+
+;['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => {
+  e.preventDefault(); drop.style.borderColor = 'var(--brand)'
+  drop.style.background = 'rgba(180,120,40,.05)'
+}))
+;['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => {
+  e.preventDefault(); drop.style.borderColor = 'var(--line,#D9CFC2)'
+  drop.style.background = ''
+}))
+drop.addEventListener('drop', e => {
+  const f = e.dataTransfer.files[0]
+  if (f) upload(f)
+})
+
+function upload (f) {
+  upMsg.textContent = ''
+  upMsg.style.color = ''
+  // **后缀不对当场拦住,不传。** 传完 100 MB 才告诉用户"这不是数据包",
+  // 是在浪费他的时间
+  if (!f.name.toLowerCase().endsWith('.tar')) {
+    upMsg.style.color = '#B4472A'
+    upMsg.textContent = `只支持 .tar 数据包 —— 你选的是「${f.name}」`
+    fileEl.value = ''
+    return
+  }
+
+  const fd = new FormData()
+  fd.append('file', f)
+  upBox.style.display = 'block'
+  document.getElementById('dc-up-name').textContent = f.name + ' · ' + fmtMB(f.size)
+
+  // 用 XHR 不用 fetch —— fetch 至今没有上传进度事件,
+  // 而 100 MB 没有进度条的话用户不知道是在传还是卡死了
+  const xhr = new XMLHttpRequest()
+  xhr.open('POST', '/api/quant/data/packages/upload')
+  xhr.upload.onprogress = e => {
+    if (!e.lengthComputable) return
+    const pct = Math.round(e.loaded / e.total * 100)
+    document.getElementById('dc-up-bar').style.width = pct + '%'
+    document.getElementById('dc-up-pct').textContent =
+      pct < 100 ? `上传中 ${pct}%` : '上传完成 · 正在校验…'
+  }
+  xhr.onload = () => {
+    fileEl.value = ''
+    let d
+    try { d = JSON.parse(xhr.responseText) } catch (e) {
+      upBox.style.display = 'none'
+      upMsg.style.color = '#B4472A'
+      upMsg.textContent = '上传失败 · 服务端没有正常返回'
+      return
+    }
+    upBox.style.display = 'none'
+    if (d.error && !d.ok) {
+      upMsg.style.color = '#B4472A'
+      upMsg.textContent = d.message || d.error
+      return
+    }
+    if (d.valid === false) {
+      upMsg.style.color = '#8A5A1B'
+      upMsg.textContent = `无法识别:${d.message || '这不是一个数据包'}`
+      loadPackages()
+      return
+    }
+    upMsg.style.color = '#2F7A3E'
+    upMsg.textContent = '已上传并识别 —— 下面点「导入」开始'
+    loadPackages()
+  }
+  xhr.onerror = () => {
+    upBox.style.display = 'none'
+    upMsg.style.color = '#B4472A'
+    upMsg.textContent = '上传中断 —— 请重试'
+    fileEl.value = ''
+  }
+  xhr.send(fd)
+}
+
+document.getElementById('dc-pkg-refresh').onclick = loadPackages
+
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-pkg]'); if (!b) return
+  const file = b.dataset.pkg
+  const note = document.getElementById('pkg-note-' + file.replace(/\W/g, ''))
+  b.disabled = true
+  // 先预检:让用户看到"要导什么、会不会覆盖",再真的开始
+  const info = await fetch('/api/quant/data/packages/' + encodeURIComponent(file))
+    .then(r => r.json())
+  if (info.error) {
+    // 后端把原因说清楚了(版本太新 / 不是数据包 / 文件没了),直接透传
+    if (note) note.textContent = info.message || info.error
+    b.disabled = false
+    return
+  }
+  const ok = confirm(
+    `导入 ${info.scope} · ${info.stocks} 只 · ${info.total_rows.toLocaleString()} 行\n` +
+    `你已有 ${info.you_have} 只 —— ${info.note}\n\n` +
+    (info.unknown_volumes && info.unknown_volumes.length
+      ? `⚠ 有 ${info.unknown_volumes.length} 卷不认识,会跳过\n\n` : '') +
+    `导入后会自动重算因子,过程中不要关容器。确定开始?`)
+  if (!ok) { b.disabled = false; return }
+
+  const r = await fetch('/api/quant/data/packages/import', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ file }),
+  }).then(r => r.json())
+  if (r.error) {
+    if (note) note.textContent = r.message || r.error
+    b.disabled = false
+    return
+  }
+  if (note) note.textContent = '已开始 · 右侧看进度'
+  loadJobs()
+})
+
 // 有任务在跑时 3 秒刷一次,空闲时 15 秒 —— 空闲还高频轮询纯属浪费
 let tick = 0
 setInterval(() => {
   tick++
   const active = document.getElementById('dc-start').disabled
   if (active || tick % 5 === 0) { loadJobs(); loadOverview() }
+  if (tick % 10 === 0) loadPackages()
 }, 3000)
 
-loadOverview(); loadScopes().then(estimate); loadJobs()
+loadOverview(); loadScopes().then(estimate); loadJobs(); loadPackages()
 </script>
 </body>
 </html>

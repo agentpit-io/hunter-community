@@ -644,6 +644,11 @@ async def init_db():
         """)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_dj_status "
                     "ON data_job (status, id DESC)")
+        # phase 放宽到 TEXT · DDL 同 sql/20260824_data_center.sql 末尾。
+        # 原来 VARCHAR(32) 装不下带卷名的进度文案(「导入 1/6 ·
+        # meta-stocks.csv.gz」),超长会 StringDataRightTruncation,
+        # 而异常在后台线程里被吞掉 —— 表现是任务永远停在 queued
+        cur.execute("ALTER TABLE data_job ALTER COLUMN phase TYPE TEXT")
 
         # 行业二级分类 · 一级由我们归并成 7 个,不直接用东财 80+ 板块名
         cur.execute("""
@@ -687,6 +692,119 @@ async def init_db():
               PRIMARY KEY (code, report_date, report_type)
             )
         """)
+
+        # 下载失败记录 · 幂等版(对齐 sql/20260827_data_failure.sql)
+        #
+        # 只记「孤立失败」—— 限流时是成片失败,不是某只票的问题。
+        # 全记的话一次限流就把几千只票打成永久拿不到,下次全跳过,
+        # 表现是"数据越下越少"而且查不出原因。
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS data_failure (
+              code       VARCHAR(10) NOT NULL,
+              data_type  VARCHAR(16) NOT NULL,
+              fail_count INT         NOT NULL DEFAULT 1,
+              last_tried TIMESTAMPTZ NOT NULL DEFAULT now(),
+              PRIMARY KEY (code, data_type)
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_df_lookup "
+                    "ON data_failure (data_type, fail_count DESC, last_tried DESC)")
+
+        # 量化策略 4 表 + 指数成分表 · 幂等版
+        # (对齐 sql/20260817_quant_strategy.sql、sql/20260818_index_component.sql)
+        #
+        # **为什么要在这里再写一遍**:那两个 .sql 从来没有人自动执行,
+        # 只有我们自己的实例是当初手工 psql 跑过才有表。测试人员全新装一台,
+        # 打开量化页直接 500:`relation "factor_value" does not exist`。
+        # 我们这台看不出来 —— 表早就在了。
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS factor_value (
+              trade_date  DATE             NOT NULL,
+              factor_key  VARCHAR(32)      NOT NULL,
+              code        VARCHAR(10)      NOT NULL,
+              market      VARCHAR(4)       NOT NULL DEFAULT 'A',
+              raw_value   DOUBLE PRECISION,
+              z_score     DOUBLE PRECISION,
+              pct_rank    REAL,
+              updated_at  TIMESTAMPTZ      NOT NULL DEFAULT now(),
+              PRIMARY KEY (trade_date, factor_key, code)
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_fv_factor_date "
+                    "ON factor_value (factor_key, trade_date DESC)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_fv_code_date "
+                    "ON factor_value (code, trade_date DESC)")
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS factor_ic (
+              factor_key   VARCHAR(32) NOT NULL,
+              trade_date   DATE        NOT NULL,
+              universe     VARCHAR(16) NOT NULL DEFAULT 'hs300',
+              horizon_days INT         NOT NULL DEFAULT 5,
+              ic           DOUBLE PRECISION,
+              ic_ir        DOUBLE PRECISION,
+              updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+              PRIMARY KEY (factor_key, trade_date, universe, horizon_days)
+            )
+        """)
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS strategy (
+              id          BIGSERIAL   PRIMARY KEY,
+              user_id     TEXT,
+              name        VARCHAR(64) NOT NULL,
+              description TEXT,
+              factors     JSONB       NOT NULL,
+              config      JSONB       NOT NULL,
+              is_official BOOLEAN     NOT NULL DEFAULT FALSE,
+              is_public   BOOLEAN     NOT NULL DEFAULT FALSE,
+              fork_from   BIGINT      REFERENCES strategy(id) ON DELETE SET NULL,
+              created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+              updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_strategy_user "
+                    "ON strategy (user_id) WHERE user_id IS NOT NULL")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_strategy_public "
+                    "ON strategy (is_public) WHERE is_public = TRUE")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_strategy_official "
+                    "ON strategy (is_official) WHERE is_official = TRUE")
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS backtest_result (
+              id           BIGSERIAL   PRIMARY KEY,
+              strategy_id  BIGINT      REFERENCES strategy(id) ON DELETE SET NULL,
+              spec_hash    VARCHAR(64) NOT NULL,
+              start_date   DATE        NOT NULL,
+              end_date     DATE        NOT NULL,
+              metrics      JSONB       NOT NULL,
+              nav_series   JSONB       NOT NULL,
+              quantile_ret JSONB,
+              positions    JSONB,
+              cost_used    DOUBLE PRECISION,
+              duration_ms  INT,
+              created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+              CONSTRAINT uniq_spec_hash UNIQUE (spec_hash)
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_bt_strategy "
+                    "ON backtest_result (strategy_id, created_at DESC)")
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS index_component (
+              index_code     VARCHAR(10) NOT NULL,
+              stock_code     VARCHAR(10) NOT NULL,
+              effective_from DATE        NOT NULL,
+              effective_to   DATE,
+              weight         DOUBLE PRECISION,
+              updated_at     TIMESTAMPTZ DEFAULT now(),
+              PRIMARY KEY (index_code, stock_code, effective_from)
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_ic_current "
+                    "ON index_component (index_code) WHERE effective_to IS NULL")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_ic_stock "
+                    "ON index_component (stock_code)")
 
         # 一次性回填:老实例的 klines 补 coverage 记录。
         #

@@ -36,6 +36,22 @@ def _get_user_stocks(request: Request) -> list:
     return get_stocks()
 
 
+def _cache_poisoned(code: str, raw) -> bool:
+    """缓存里的 market 和代码形态对不上 → 这条缓存是错的。
+
+    只做这一个判断,不做"全面校验" —— 判据越多越容易把好缓存误删,
+    而误删的代价是多打一次上游,判漏的代价是用户一直看到错数据。
+    """
+    try:
+        from app.services.market_source import market_of
+        q = json.loads(raw)
+    except Exception:                                          # noqa: BLE001
+        return True          # 解析不了的缓存本来就该扔
+    want = market_of(code).upper()
+    got = (q.get("market") or "").upper()
+    return bool(got) and got != want
+
+
 def _kline_refresh(code: str, today: str) -> dict | None:
     """用 kline 刷新过期 quote 并写回 Redis。"""
     kq = get_reliable_close(code, today)
@@ -56,6 +72,15 @@ async def list_stocks(request: Request):
 async def get_quote(code: str):
     today = _today()
     cached = _redis.get(f"quote:{code}")
+    if cached and _cache_poisoned(code, cached):
+        # 修复前写进去的脏缓存:港股 00700 曾被判成 A 股(以 "00" 开头),
+        # 于是缓存里 market=A、name="00700"。ts 是今天,所以下面那段
+        # 刷新逻辑**不会触发** —— 脏数据会一直返回下去。
+        #
+        # 已经装了的用户升级后不该还要手动清 Redis,所以这里自愈:
+        # 缓存里的 market 和代码本身对不上就当没缓存。
+        _redis.delete(f"quote:{code}")
+        cached = None
     if cached:
         q = json.loads(cached)
         if q.get("ts", "")[:10] != today:

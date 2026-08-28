@@ -42,6 +42,19 @@ _SLEEP_SEC = 0.15
 _FLUSH_EVERY = 10
 _FLUSH_SEC = 2.0
 
+# ── 限流退避(见 doc/.../24_20260827_全量下载限流问题与退避方案.md)──
+# 连续失败这么多只就判定为被限流
+_MISS_TRIGGER = 5
+# 退避梯度:1 分钟 → 5 分钟 → 15 分钟。掐是暂时的,等就能恢复
+_BACKOFF = (60, 300, 900)
+# 每这么多只主动歇一会 —— 预防比补救便宜
+_REST_EVERY = 500
+_REST_SEC = 120
+# 整轮跑完之后,等这么久再重跑失败的那批
+_RETRY_WAIT = 600
+# 孤立失败累计这么多次 = 判定这只票拿不到(退市/停牌/源里没有)
+_FAIL_PERMANENT = 3
+
 ACTIVE = ("queued", "running")
 
 
@@ -203,6 +216,23 @@ def reclaim_orphans() -> int:
 # worker
 # ═══════════════════════════════════════════════════════════
 
+def _sleep_interruptible(job_id: int, seconds: float, step: float = 5.0) -> bool:
+    """睡觉时也要能被暂停打断。
+
+    直接 time.sleep(900) 的话,用户点暂停要等 15 分钟才生效 ——
+    界面上看就是"点了没反应"。
+    返回 False 表示用户暂停/取消了。
+    """
+    waited = 0.0
+    while waited < seconds:
+        st = _read_status(job_id)
+        if st in ("paused", "canceled", "failed"):
+            return False
+        time.sleep(min(step, seconds - waited))
+        waited += step
+    return True
+
+
 def _upsert_coverage(code: str, data_type: str, lo: date, hi: date) -> None:
     """记下这只票下到哪儿了。**区间取并集** —— 用户先下 1 年再下 3 年,
     覆盖应该变成 3 年那个更大的区间,而不是被后一次覆写成一样大。"""
@@ -216,6 +246,59 @@ def _upsert_coverage(code: str, data_type: str, lo: date, hi: date) -> None:
                              updated_at   = now()""",
                     (code, data_type, lo, hi))
         conn.commit()
+    finally:
+        cur.close(); conn.close()
+
+
+def _note_failure(code: str, data_type: str, isolated: bool) -> None:
+    """记一次失败。
+
+    **只有"孤立失败"才计数。** 限流的时候是成片失败,那不是这只票的问题;
+    照单全记的话一次限流就把几千只票打成"永久拿不到",下次全跳过 ——
+    表现是"数据越下越少",而且找不出原因。
+
+    isolated=True 的判据在调用方:此刻 miss_streak == 0,
+    也就是**前一只是成功的**,说明通道是通的,失败是这只票自己的事。
+    """
+    if not isolated:
+        return
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("""INSERT INTO data_failure (code, data_type, fail_count, last_tried)
+                       VALUES (%s,%s,1,now())
+                       ON CONFLICT (code, data_type) DO UPDATE
+                         SET fail_count = data_failure.fail_count + 1,
+                             last_tried = now()""", (code, data_type))
+        conn.commit()
+    finally:
+        cur.close(); conn.close()
+
+
+def _clear_failure(code: str, data_type: str) -> None:
+    """拿到了就把黑名单记录删掉 —— 新股上市后就有数据了,不能一直挂着"""
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("DELETE FROM data_failure WHERE code=%s AND data_type=%s",
+                    (code, data_type))
+        conn.commit()
+    finally:
+        cur.close(); conn.close()
+
+
+def _blacklist(data_type: str = "kline") -> set[str]:
+    """连续孤立失败 >= _FAIL_PERMANENT 次、且最近 30 天内试过的,这轮跳过。
+
+    留 30 天的口子:退市/停牌会复牌,新股会上市,不能一次判死。
+    """
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("""SELECT code FROM data_failure
+                        WHERE data_type=%s AND fail_count >= %s
+                          AND last_tried > now() - interval '30 days'""",
+                    (data_type, _FAIL_PERMANENT))
+        return {r[0] for r in cur.fetchall()}
+    except Exception:                                         # noqa: BLE001
+        return set()          # 表还没建 —— 不该因此下不了数据
     finally:
         cur.close(); conn.close()
 
@@ -273,13 +356,50 @@ def run(job_id: int) -> dict:
 
     already = data_center._covered(codes, "kline", start, end)
 
-    _progress(job_id, phase="下载日线", done=0, skipped=len(already), failed=0)
-    # **续跑要接着上次的计数**。原来这里一律从 0 开始,于是暂停时显示
-    # "已下 15 只",一点续跑变成 4 —— 用户会以为前面下的白费了(实际没白费,
-    # 只是计数被覆写)。实测踩到过。
-    done = job.get("done_count") or 0
-    failed = job.get("failed_count") or 0
+    # ── 三个计数器必须共用一个基准:**本轮**。─────────────────
+    #
+    # 曾经为了"续跑别把计数清零"而把上一轮的 done/failed 接着往上加,
+    # 结果同一只票被记两遍:上一轮下成功的票现在带着 coverage,
+    # 这一轮又被算进 already(跳过)。测试人员实测
+    #     成功 3487 + 跳过 3321 + 失败 2212 = 9020 > 总数 5534
+    # 连带三个症状,全是这一个原因:进度条满格却还在跑、
+    # "预计还要 0 秒"、三个数加起来超过总数。
+    #
+    # 现在改成:
+    #     跳过 = 本轮开始时就已经有的(**含上一轮下好的**)
+    #     成功 = 本轮新下下来的
+    #     失败 = 本轮试了没拿到的
+    # 三者互斥,合计必 <= 总数。
+    #
+    # 续跑后"成功"确实会从 15 变回 0 —— 但那 15 只不是消失了,是挪进了
+    # "跳过"。**进度条不会倒退**,这才是用户真正在看的东西。
+    # 而失败数也不再跨轮累加:上一轮失败的票这一轮重试成功了就该消失,
+    # 累加的话这个数只涨不跌,用户看到"失败一直在增加",
+    # 实际上很多早就补回来了。它要回答的是"现在还有多少没拿到"。
+    done = 0
+    failed = 0
     skipped = len(already)
+    _progress(job_id, phase="下载日线", done=0, skipped=skipped, failed=0)
+    unsupported = 0
+    miss_streak = 0          # 连续失败计数 · 触发退避
+    backoff_i = 0            # 退避档位
+    dead = 0                 # 黑名单跳过数
+    blacklist = _blacklist("kline")
+
+    # ── 下载通道 ────────────────────────────────────────────
+    # 用户在页面上选的"从哪里下",存在 scope 里(data_job 表不加列 ——
+    # 生产库改列有成本,而 scope 本来就是 jsonb)。
+    # **不传就是 free,老任务行为一字不变。**
+    from app.services.quant import download_source as _ds
+    _src = _ds.normalize((job.get("scope") or {}).get("source"))
+    _custom = (job.get("scope") or {}).get("custom")
+    if _src != _ds.FREE:
+        log.info("[data_job %s] 下载通道 = %s", job_id, _src)
+
+    def _fetch(c):
+        return _ds.fetch_daily(c, start, end, source=_src, custom=_custom)
+    retry_queue: list[str] = []
+    local_kline.set_retry(True)
     t0 = last_flush = time.time()
 
     for i, code in enumerate(codes, 1):
@@ -298,8 +418,25 @@ def run(job_id: int) -> dict:
         if code in already:
             continue
 
+        # 北交所等拿不到历史日线的,**算跳过不算失败**。
+        #
+        # 算失败的话:全 A 股每次都报 331 次失败,用户会以为系统坏了;
+        # 而且失败的票不写 coverage → 下次续跑又重试一遍,永远重试。
+        # 记进 coverage 之后就真的跳过了。
+        if local_kline.is_unsupported(code):
+            unsupported += 1
+            skipped += 1
+            continue
+
+        # 反复孤立失败的(退市/停牌/源里就是没有),这轮跳过。
+        # 每轮都试一遍的话,白白消耗配额、还把限流提前触发
+        if code in blacklist:
+            dead += 1
+            skipped += 1
+            continue
+
         try:
-            rows = local_kline.fetch_daily(code, start, end)
+            rows = _fetch(code)
         except Exception as e:                                # noqa: BLE001
             log.warning("[data_job %s] %s 取数异常: %s", job_id, code, type(e).__name__)
             rows = []
@@ -308,6 +445,40 @@ def run(job_id: int) -> dict:
             # **拿不到就是拿不到**,不写空行不补零。回测靠"这只票没有价格"
             # 跳过它,补一行假价格会让收益凭空出现
             failed += 1
+            retry_queue.append(code)
+            # miss_streak 还没自增 —— 此刻为 0 就意味着前一只是成功的,
+            # 通道是通的,这次失败是这只票自己的问题
+            _note_failure(code, "kline", isolated=(miss_streak == 0))
+            miss_streak += 1
+
+            # ── 限流退避 ──────────────────────────────────────
+            #
+            # 实测腾讯的限流是**开关式**的:要么全成要么全败,中间没有过渡,
+            # 而且掐一段时间会自动恢复。服务器那次每 50 只采样:
+            #
+            #    100 只  50/50 全成
+            #    700 只   0/50 全败   ← 被掐
+            #   1900 只  50/50 全成   ← 自己恢复了
+            #   3700 只   0/50 全败   ← 又被掐
+            #
+            # 所以「统一调慢」是错的解法:被掐时慢也没用(全败),
+            # 没被掐时慢纯属浪费。正确做法是**检测到就重退避**。
+            #
+            # 硬打的代价实测过:那次在全败状态下跑了两千多只,
+            # 每只还重试 3 次 —— 请求量放大 3 倍,持续刺激上游。
+            if miss_streak >= _MISS_TRIGGER:
+                local_kline.set_retry(False)     # 被限时重试只会更糟
+                wait = _BACKOFF[min(backoff_i, len(_BACKOFF) - 1)]
+                backoff_i += 1
+                _progress(job_id, done=done, skipped=skipped, failed=failed,
+                          phase=f"上游限流 · 等 {wait//60} 分钟后继续")
+                log.warning("[data_job %s] 连续失败 %d 只 · 退避 %d 秒",
+                            job_id, miss_streak, wait)
+                if not _sleep_interruptible(job_id, wait):
+                    _progress(job_id, done=done, skipped=skipped, failed=failed,
+                              phase="已暂停")
+                    return {"paused": True, "done": done}
+                miss_streak = 0
         else:
             try:
                 _save_klines(code, rows)
@@ -323,15 +494,79 @@ def run(job_id: int) -> dict:
                 _upsert_coverage(code, "kline", start,
                                  date.fromisoformat(rows[-1]["ts"]))
                 done += 1
+                _clear_failure(code, "kline")
+                # 成功就立刻恢复全速 —— 掐是暂时的,恢复了不该继续慢
+                if miss_streak or backoff_i:
+                    miss_streak = 0
+                    backoff_i = 0
+                    local_kline.set_retry(True)
             except Exception as e:                            # noqa: BLE001
                 log.warning("[data_job %s] %s 入库失败: %s", job_id, code, e)
                 failed += 1
+
+        # 每 _REST_EVERY 只主动歇一会,不等被掐了才停
+        if i % _REST_EVERY == 0 and i < len(codes):
+            _progress(job_id, done=done, skipped=skipped, failed=failed,
+                      phase=f"已下 {i} 只 · 歇 {_REST_SEC//60} 分钟(避免被限流)")
+            log.info("[data_job %s] 第 %d 只 · 主动休息 %d 秒", job_id, i, _REST_SEC)
+            if not _sleep_interruptible(job_id, _REST_SEC):
+                _progress(job_id, done=done, skipped=skipped, failed=failed,
+                          phase="已暂停")
+                return {"paused": True, "done": done}
 
         if ((done + failed) % _FLUSH_EVERY == 0
                 or time.time() - last_flush >= _FLUSH_SEC):
             _progress(job_id, done=done, skipped=skipped, failed=failed, code=code)
             last_flush = time.time()
         time.sleep(_SLEEP_SEC)
+
+    # ── 失败的票攒到最后重跑一遍 ────────────────────────────
+    #
+    # **不当场重试** —— 当场重试是在被限的时候重试,必然还是失败,
+    # 而且把请求量放大。等整轮跑完、歇一会儿,按实测大概率已经恢复了
+    # (服务器那次全败之后自己恢复过两次)。
+    # 走 agentpit / custom 通道时不做"限流退避重跑"。
+    #
+    # 那套退避是为免费源写的:免费源返回空通常是被限流,等一会再试有用。
+    # 但网关返回空是"库里没这只票",**重试一百次还是空** ——
+    # 实测 301154 就是这样,任务白等 10 分钟。
+    if retry_queue and _src != _ds.FREE:
+        log.info("[data_job %s] %s 通道:%d 只网关没有,不重跑(重试对'没有'无效)",
+                 job_id, _src, len(retry_queue))
+        retry_queue = []
+
+    if retry_queue and _read_status(job_id) == "running":
+        n = len(retry_queue)
+        _progress(job_id, done=done, skipped=skipped, failed=failed,
+                  phase=f"{n} 只失败 · 歇 {_RETRY_WAIT//60} 分钟后重跑")
+        log.info("[data_job %s] 第一轮失败 %d 只 · 等 %d 秒重跑",
+                 job_id, n, _RETRY_WAIT)
+        if _sleep_interruptible(job_id, _RETRY_WAIT):
+            local_kline.set_retry(True)
+            recovered = 0
+            for j, code in enumerate(retry_queue, 1):
+                if j % 5 == 1 and _read_status(job_id) != "running":
+                    break
+                try:
+                    rows = _fetch(code)
+                except Exception:                             # noqa: BLE001
+                    rows = []
+                if rows:
+                    try:
+                        _save_klines(code, rows)
+                        _upsert_coverage(code, "kline", start,
+                                         date.fromisoformat(rows[-1]["ts"]))
+                        recovered += 1
+                        done += 1
+                        failed -= 1
+                        _clear_failure(code, "kline")
+                    except Exception:                         # noqa: BLE001
+                        pass
+                if j % 20 == 0:
+                    _progress(job_id, done=done, skipped=skipped, failed=failed,
+                              phase=f"重跑失败项 {j}/{n} · 已救回 {recovered}")
+                time.sleep(_SLEEP_SEC)
+            log.info("[data_job %s] 重跑救回 %d/%d 只", job_id, recovered, n)
 
     # ── 财报 · 用户勾了才下 ──────────────────────────────────
     #
@@ -407,7 +642,14 @@ def run(job_id: int) -> dict:
     else:
         log.info("[data_job %s] 没有新数据 · 跳过因子计算", job_id)
 
-    msg = (f"日线 {done} 只 · 跳过 {skipped} 只 · 失败 {failed} 只"
+    _parts = []
+    if unsupported:
+        _parts.append(f"{unsupported} 只北交所 · 免费源没有历史数据")
+    if dead:
+        _parts.append(f"{dead} 只反复拿不到 · 多半已退市或长期停牌")
+    msg = (f"日线 {done} 只 · 跳过 {skipped} 只"
+           + (f"(含 {' · '.join(_parts)})" if _parts else "")
+           + f" · 失败 {failed} 只"
            + (f" · 财报 {fin_done} 只(失败 {fin_failed})" if job.get("with_financial") else "")
            + f" · 耗时 {int(time.time() - t0)}s"
            + ("" if (done or fin_done) else " · 数据已是最新,无需重算因子"))
