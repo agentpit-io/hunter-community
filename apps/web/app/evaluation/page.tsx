@@ -277,7 +277,7 @@ export default function EvaluationPage() {
 
         {/* 单股演变 */}
         <Panel title="单股预测演变"
-               subtitle="同一只股票 · 多次预测同一目标日的轨迹 · 看模型如何"改主意"">
+               subtitle="同一只股票 · 多次预测同一目标日的轨迹 · 看模型如何改主意">
           <div className="flex items-center gap-2 mb-3">
             <input value={evoCode} onChange={e => setEvoCode(e.target.value)}
                    placeholder="股票代码 · 如 600519.SH"
