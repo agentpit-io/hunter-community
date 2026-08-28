@@ -85,6 +85,10 @@ class JobIn(BaseModel):
     span_months: int = 36
     with_financial: bool = False
     keep_raw: bool = False
+    # 从哪里下:free(默认 · 腾讯/新浪)/ agentpit(平台付费源)/ custom(用户自己的)
+    # **不传就是 free,老调用方行为一字不变**
+    source: str | None = None
+    custom: dict | None = None
 
 
 @router.post("/jobs")
@@ -108,7 +112,23 @@ async def create_job(body: JobIn, request: Request):
     if not est["stocks"]:
         return {"error": "empty_scope", "message": est.get("note") or "这个范围没有股票"}
 
-    jid = data_job.create(body.scope, body.span_months, body.with_financial,
+    # 通道校验放在建任务**之前** —— 让它跑起来再失败的话,
+    # 用户已经等了几分钟,而且库里留下半截数据
+    from app.services.quant import download_source as ds
+    src = ds.normalize(getattr(body, "source", None))
+    custom = getattr(body, "custom", None)
+    bad = ds.validate(src, custom)
+    if bad:
+        return bad
+
+    # 通道信息塞进 scope 一起存 —— data_job 表不用加列(生产库改列有成本),
+    # 而 scope 本来就是 jsonb
+    scope = dict(body.scope or {})
+    scope["source"] = src
+    if src == ds.CUSTOM and custom:
+        scope["custom"] = {"url": custom.get("url", ""), "key": custom.get("key", "")}
+
+    jid = data_job.create(scope, body.span_months, body.with_financial,
                           body.keep_raw, est["stocks"], _uid(request))
     # 放线程里跑:一趟可能几小时,卡在事件循环里整个 API 就没响应了
     _aio.create_task(_aio.to_thread(data_job.run, jid))
@@ -240,6 +260,22 @@ async def upload_package(file: UploadFile = File(...)):
         return {"ok": True, "file": name, "bytes": size, "valid": False,
                 "error": info["error"], "message": info.get("message")}
     return {"ok": True, "file": name, "bytes": size, "valid": True, "info": info}
+
+
+class SourceTestIn(BaseModel):
+    url: str
+    key: str
+
+
+@router.post("/source/test")
+async def test_source(body: SourceTestIn):
+    """测试用户自己填的数据源通不通。
+
+    **这个按钮是必须的** —— 不测的话 Key 填错要跑十分钟才发现,
+    而那十分钟里用户不知道是在下载还是卡住了。
+    """
+    from app.services.quant import download_source as ds
+    return ds.test_connection(body.url, body.key)
 
 
 class ImportIn(BaseModel):

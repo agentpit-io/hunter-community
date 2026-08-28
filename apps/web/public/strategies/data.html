@@ -108,6 +108,21 @@ container.innerHTML = `
         日线支撑 <b>8 个技术因子</b>,实测约 1.8 秒/只 —— 因子本身是本地算的,几乎不花时间。<br>
         财报支撑另外 <b>10 个基本面因子</b>(PE / ROE / 营收同比…),实测约 8.6 秒/只,<b>贵 5 倍</b>。
       </div>
+      <div class="dc-lbl">④ 从哪里下</div>
+      <div class="dc-seg" id="dc-src"></div>
+      <div class="cnt" id="dc-src-note" style="margin-top:6px;line-height:1.7"></div>
+      <div id="dc-custom" style="display:none;margin-top:8px;padding:10px 12px;
+           border:1px solid var(--line,#E8E0D6);border-radius:8px">
+        <div class="cnt" style="margin-bottom:6px">用你自己的数据源 —— 额度算你的,不占我们的</div>
+        <input id="dc-cust-url" placeholder="API 地址,例如 http://api.xtick.top"
+               style="width:100%;padding:6px 8px;margin-bottom:6px;border:1px solid var(--line,#E8E0D6);border-radius:6px;font-size:12.5px">
+        <input id="dc-cust-key" type="password" placeholder="Key"
+               style="width:100%;padding:6px 8px;border:1px solid var(--line,#E8E0D6);border-radius:6px;font-size:12.5px">
+        <div style="margin-top:8px">
+          <button class="btn small" id="dc-cust-test">测试连接</button>
+          <span class="cnt" id="dc-cust-msg" style="margin-left:8px"></span>
+        </div>
+      </div>
       <label style="display:flex;align-items:center;gap:7px;margin-top:10px;font-size:12.5px;cursor:pointer" id="dc-raw-wrap">
         <input type="checkbox" id="dc-raw"> 保留财报原始报表(多占约 0.045 MB/只 ·
         以后加新因子不用重新下载)
@@ -205,6 +220,55 @@ seg('dc-kind', [
 ], 'k', v => { sel.fin = v === 'kf'; document.getElementById('dc-raw-wrap').style.display = sel.fin ? 'flex' : 'none'; estimate() })
 document.getElementById('dc-raw-wrap').style.display = 'none'
 document.getElementById('dc-raw').onchange = e => { sel.raw = e.target.checked; estimate() }
+
+// ── ④ 下载通道 ─────────────────────────────────────────
+//
+// **三条通道的历史深度不一样,而且付费的反而更短** —— 这一点必须写在
+// 界面上,不能藏。实测:
+//     腾讯免费源  一次 801 根 ≈ 3.25 年
+//     XTick 付费  平均每只 518 行 ≈ 2.12 年
+// 用户付了费拿到更少的数据、回头来问,那时候再解释就成狡辩了。
+const SRC_NOTE = {
+  free: '腾讯 / 新浪 · <b>免费</b> · 单次最长 <b>3.25 年</b>(801 根)· 实测 30/30 零失败。' +
+        '慢在每只都要打一次上游,不是慢在数据量。',
+  agentpit: '走 AgentPit 的付费数据源 · 需要平台 Key · <b>单次最长 2 年</b> —— ' +
+        '<b style="color:#8A5A1B">比免费通道短一年</b>,换来的是更快、不用退避。' +
+        '按次消耗配额,开始前会告诉你这次用多少。',
+  custom: '填你自己的 API 和 Key —— <b>额度算你的,不占我们的</b>,' +
+        '数据源的授权也由你和供应商约定。',
+}
+seg('dc-src', [
+  { v: 'free', label: '本地免费源' },
+  { v: 'agentpit', label: 'AgentPit 高速通道' },
+  { v: 'custom', label: '我自己的数据源' },
+], 'free', v => {
+  sel.src = v
+  document.getElementById('dc-src-note').innerHTML = SRC_NOTE[v] || ''
+  document.getElementById('dc-custom').style.display = v === 'custom' ? 'block' : 'none'
+  estimate()
+})
+document.getElementById('dc-src-note').innerHTML = SRC_NOTE.free
+
+document.getElementById('dc-cust-test').onclick = async () => {
+  const btn = document.getElementById('dc-cust-test')
+  const msg = document.getElementById('dc-cust-msg')
+  const url = document.getElementById('dc-cust-url').value.trim()
+  const key = document.getElementById('dc-cust-key').value.trim()
+  if (!url || !key) { msg.style.color = '#B4472A'; msg.textContent = 'API 地址和 Key 都要填'; return }
+  btn.disabled = true; msg.style.color = ''; msg.textContent = '测试中…'
+  try {
+    // **先测再下。** 不测的话,Key 填错要跑十分钟才发现
+    const r = await fetch('/api/quant/data/source/test', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, key }),
+    }).then(r => r.json())
+    if (r.ok) { msg.style.color = '#2F7A3E'; msg.textContent = r.message || '连接正常' }
+    else { msg.style.color = '#B4472A'; msg.textContent = r.message || '连不上' }
+  } catch (e) {
+    msg.style.color = '#B4472A'; msg.textContent = '测试失败 · ' + e.message
+  }
+  btn.disabled = false
+}
 
 // ── 预估 ───────────────────────────────────────────────
 function scopeBody() {
@@ -315,7 +379,12 @@ document.getElementById('dc-start').onclick = async () => {
   const d = await fetch('/api/quant/data/jobs', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ scope: scopeBody(), span_months: sel.span,
-                           with_financial: sel.fin, keep_raw: sel.raw }),
+                           with_financial: sel.fin, keep_raw: sel.raw,
+                           source: sel.src || 'free',
+                           custom: sel.src === 'custom' ? {
+                             url: document.getElementById('dc-cust-url').value.trim(),
+                             key: document.getElementById('dc-cust-key').value.trim(),
+                           } : null }),
   }).then(r => r.json())
   if (d.error) {
     // 后端把"为什么不能开始"说清楚了(范围空 / 已有任务在跑),

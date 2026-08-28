@@ -385,6 +385,19 @@ def run(job_id: int) -> dict:
     backoff_i = 0            # 退避档位
     dead = 0                 # 黑名单跳过数
     blacklist = _blacklist("kline")
+
+    # ── 下载通道 ────────────────────────────────────────────
+    # 用户在页面上选的"从哪里下",存在 scope 里(data_job 表不加列 ——
+    # 生产库改列有成本,而 scope 本来就是 jsonb)。
+    # **不传就是 free,老任务行为一字不变。**
+    from app.services.quant import download_source as _ds
+    _src = _ds.normalize((job.get("scope") or {}).get("source"))
+    _custom = (job.get("scope") or {}).get("custom")
+    if _src != _ds.FREE:
+        log.info("[data_job %s] 下载通道 = %s", job_id, _src)
+
+    def _fetch(c):
+        return _ds.fetch_daily(c, start, end, source=_src, custom=_custom)
     retry_queue: list[str] = []
     local_kline.set_retry(True)
     t0 = last_flush = time.time()
@@ -423,7 +436,7 @@ def run(job_id: int) -> dict:
             continue
 
         try:
-            rows = local_kline.fetch_daily(code, start, end)
+            rows = _fetch(code)
         except Exception as e:                                # noqa: BLE001
             log.warning("[data_job %s] %s 取数异常: %s", job_id, code, type(e).__name__)
             rows = []
@@ -525,7 +538,7 @@ def run(job_id: int) -> dict:
                 if j % 5 == 1 and _read_status(job_id) != "running":
                     break
                 try:
-                    rows = local_kline.fetch_daily(code, start, end)
+                    rows = _fetch(code)
                 except Exception:                             # noqa: BLE001
                     rows = []
                 if rows:
