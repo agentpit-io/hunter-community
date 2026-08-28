@@ -118,6 +118,10 @@ def synthesize_predictions(bars: list[dict], symbol: str) -> tuple[list[dict], l
     rng = random.Random(f"{SEED}:{symbol}")
     snap_rows, bt_rows, cons_rows = [], [], []
 
+    # 跨 base_date 的记忆:某 pred_date 上一次是谁预测的、预测了多少
+    # (跨 run_date 保存 · 做 consistency 比较)
+    last_pred_by_target: dict[tuple[str, int], tuple[date, float]] = {}
+
     # bars 按时间升序 · 每个日期 D 生成 5 个 horizon 预测(1..5),对应 D+1..D+5
     for i in range(len(bars) - 6):
         run_bar = bars[i]
@@ -131,8 +135,6 @@ def synthesize_predictions(bars: list[dict], symbol: str) -> tuple[list[dict], l
         last_close = float(run_bar.get("close") or 0)
         if last_close <= 0:
             continue
-
-        prev_scores: dict[int, float] = {}  # horizon → 上一次预测的 change_pct(做 consistency)
 
         for h in range(1, 6):
             if i + h >= len(bars):
@@ -148,9 +150,10 @@ def synthesize_predictions(bars: list[dict], symbol: str) -> tuple[list[dict], l
 
             real_change = (real_close - last_close) / last_close * 100.0
 
-            # 合成预测:真值 * skill(0.55-0.75) + 噪声
-            skill = 0.55 + rng.random() * 0.20
-            noise = rng.gauss(0, max(0.6, abs(real_change) * 0.4))
+            # 合成预测:真值 * skill(小) + 大噪声 · 目标 ~58% 方向命中率
+            # 真实模型极少能到 70%+ · 演示数据必须落在"看着可信"的区间
+            skill = 0.10 + rng.random() * 0.15    # 0.10-0.25
+            noise = rng.gauss(0, max(1.5, abs(real_change) * 1.2))
             pred_change = real_change * skill + noise
             pred_close = last_close * (1 + pred_change / 100)
 
@@ -170,8 +173,8 @@ def synthesize_predictions(bars: list[dict], symbol: str) -> tuple[list[dict], l
             else:
                 direction, signal = "flat", "中性"
 
-            confidence = round(50 + skill * 30 + rng.gauss(0, 5), 2)
-            confidence = max(15.0, min(92.0, confidence))
+            confidence = round(45 + skill * 80 + rng.gauss(0, 8), 2)
+            confidence = max(15.0, min(88.0, confidence))
 
             snap_rows.append({
                 "symbol": symbol, "run_date": run_date, "pred_date": future_date,
@@ -197,11 +200,13 @@ def synthesize_predictions(bars: list[dict], symbol: str) -> tuple[list[dict], l
                 "signal": signal, "factors": factors, "model_ver": MODEL_VER,
             })
 
-            # consistency:与上一天对同一目标日的预测比
-            if h in prev_scores:
-                prev_change = prev_scores[h]
+            # consistency:与上一次预测同一 pred_date 的比较(跨 run_date)
+            key = (symbol, i + h)  # 用 bars 索引唯一标识目标日
+            prev = last_pred_by_target.get(key)
+            if prev is not None:
+                prev_run, prev_change = prev
                 delta = round(pred_change - prev_change, 4)
-                if (prev_change > 0) != (pred_change > 0):
+                if (prev_change > 0) != (pred_change > 0) and abs(delta) > 0.3:
                     verdict = "reversal"
                 elif abs(delta) < 0.3:
                     verdict = "consistent"
@@ -209,19 +214,18 @@ def synthesize_predictions(bars: list[dict], symbol: str) -> tuple[list[dict], l
                     verdict = "strengthen"
                 else:
                     verdict = "weaken"
-                # 挑变化最大的因子作为 top_driver
                 top_f = max(factors.items(), key=lambda kv: abs(kv[1]))
-                driver_share = round(abs(top_f[1]) / max(sum(abs(v) for v in factors.values()), 0.001) * 100, 2)
                 factor_delta = {k: round(v, 3) for k, v in factors.items()}
+                driver_share = round(abs(top_f[1]) / max(sum(abs(v) for v in factors.values()), 0.001) * 100, 2)
                 cons_rows.append({
                     "symbol": symbol, "pred_date": future_date,
-                    "prev_run": run_date - timedelta(days=1), "curr_run": run_date,
-                    "prev_base": run_date - timedelta(days=1), "curr_base": run_date,
+                    "prev_run": prev_run, "curr_run": run_date,
+                    "prev_base": prev_run, "curr_base": run_date,
                     "prev_change": round(prev_change, 4), "curr_change": round(pred_change, 4),
                     "delta": delta, "verdict": verdict, "factor_delta": factor_delta,
                     "top_driver": top_f[0], "driver_share": driver_share,
                 })
-            prev_scores[h] = pred_change
+            last_pred_by_target[key] = (run_date, pred_change)
 
     return snap_rows, bt_rows, cons_rows
 
