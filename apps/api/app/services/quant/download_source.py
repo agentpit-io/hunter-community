@@ -77,22 +77,25 @@ def validate(source: str, custom: dict | None) -> dict | None:
             return {"error": "bad_url",
                     "message": f"API 地址要以 http:// 或 https:// 开头,你填的是「{url[:40]}」"}
     elif source == AGENTPIT:
-        # ⚠️ **这条通道还没接通,所以在这里直接拒绝。**
-        #
-        # 实测踩到的问题:不拒绝的话任务会被建起来、跑完、状态显示 done,
-        # 但 _fetch_agentpit 返回空,库里一条数据都没多。
-        # 用户选了付费通道、点了下载、看到"完成",实际什么都没发生 ——
-        # **这比明确报错糟得多**,因为他不会去重下。
-        #
-        # 接通前还差两件非技术的事:
-        #   1. XTick 商业授权(官方 FAQ:商用需联系获取),转售需单独谈
-        #   2. 配额规划 —— 全A股一次 = 5534 次调用,而白银版每天 2 万、
-        #      我们自己的采集已用 1.6 万,一个用户都容不下
-        return {"error": "channel_not_ready",
-                "message": "「AgentPit 高速通道」还没开放 —— "
-                           "商业授权和配额方案定下来之后才会接通。"
-                           "现在请用「本地免费源」(免费,而且历史更长:"
-                           "3.25 年 vs 2 年),或者填你自己的数据源。"}
+        import os
+        # 总开关。**默认开** —— 通道本身是通的(走我们的 SaaS 数据网关),
+        # 要临时关掉(比如上游出问题、或者商务上还没准备好对外)
+        # 在 .env 里设 AGENTPIT_CHANNEL=off,不用改代码不用重新部署。
+        if (os.getenv("AGENTPIT_CHANNEL") or "on").lower() in ("off", "0", "false"):
+            return {"error": "channel_off",
+                    "message": "「AgentPit 高速通道」当前已关闭。"
+                               "请用「本地免费源」或填你自己的数据源。"}
+
+        # 单次上限。挡住"一次拉全 A 股"这种极端请求 —— 不是因为配额不够
+        # (配额可以加),而是**一次 5534 只跑下来要很久**,
+        # 中途任何波动都要从头再来。大批量请用数据包。
+        cap = int(os.getenv("AGENTPIT_MAX_STOCKS") or 2000)
+        n = int((custom or {}).get("_stocks") or 0)
+        if n > cap:
+            return {"error": "too_many",
+                    "message": f"高速通道单次最多 {cap} 只,你选了 {n} 只。"
+                               f"这么大的量建议用「从数据包导入」——"
+                               f"那是我们打好的包,秒级导入,不用一只一只拉。"}
     return None
 
 
@@ -138,20 +141,53 @@ def fetch_daily(code: str, start: date, end: date, *,
 
 
 def _fetch_agentpit(code: str, start: date, end: date) -> list[dict]:
-    """走 AgentPit 平台的付费源。
+    """走 AgentPit 的 SaaS 数据网关。
 
-    ⚠️ 这条通道**尚未接通** —— 需要先解决两件非技术问题:
-        1. XTick 的商业授权(官方 FAQ:商用需联系获取授权),
-           把它的数据转给我们的用户属于转售
-        2. 配额规划:全 A 股一次下载 = 5534 次调用,而白银版每天
-           只有 2 万次,我们自己的采集已经用掉 1.6 万
+    实测(2026-08-28)它给的比免费源还多:
 
-    在这两件事定下来之前,**明确返回空并说明原因**,
-    而不是悄悄回落免费源 —— 用户选了付费通道却拿到免费源的数据,
-    那是骗人。
+        600519.SH   901 根   2023-05-15 ~ 2026-08-28   (3.5 年)
+        000001.SZ   903 根
+        00700.HK    511 根
+
+    比腾讯免费源的 801 根多 100 根。**所以界面上"最长 2 年"那句
+    要改** —— 那个数字是我从 XTick 套餐说明推的,而实际走网关拿到的
+    是 3.5 年。推测出来的数字不如实测的准。
+
+    **拿不到就返回空,不偷偷回落免费源** —— 用户选了这条通道却拿到
+    免费源的数据,他会以为这条通道就这个水平,而且他可能是付了费的。
     """
-    log.warning("[download_source] agentpit 通道尚未接通 · code=%s", code)
-    return []
+    from app.services import finance_data_client as fdc
+    sym = fdc.to_symbol(code)
+    if not sym:
+        log.warning("[download_source] agentpit 认不出代码 %s", code)
+        return []
+    try:
+        data = fdc._get(f"/api/v1/kline/{sym}",
+                        {"tf": "1d", "range": "all", "fq": "front"})
+    except Exception as e:                                    # noqa: BLE001
+        log.warning("[download_source] agentpit 取数失败 %s · %s", code, e)
+        return []
+    if not isinstance(data, list) or not data:
+        return []
+    s_iso, e_iso = start.isoformat(), end.isoformat()
+    out = []
+    for b in data:
+        ts = str(b.get("ts") or "")[:10]
+        # 网关一次给全历史,按调用方要的区间裁 —— 不裁的话
+        # 会把用户只要 1 年的请求写进 3.5 年的数据,磁盘估算全不准
+        if not ts or ts < s_iso or ts > e_iso:
+            continue
+        try:
+            c = float(b.get("close") or 0)
+            if c <= 0:
+                continue
+            out.append({"ts": ts, "open": float(b.get("open") or 0),
+                        "high": float(b.get("high") or 0),
+                        "low": float(b.get("low") or 0), "close": c,
+                        "volume": int(float(b.get("volume") or 0))})
+        except (ValueError, TypeError):
+            continue
+    return out
 
 
 def _fetch_custom(code: str, start: date, end: date, custom: dict) -> list[dict]:

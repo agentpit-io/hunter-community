@@ -117,7 +117,8 @@ async def create_job(body: JobIn, request: Request):
     from app.services.quant import download_source as ds
     src = ds.normalize(getattr(body, "source", None))
     custom = getattr(body, "custom", None)
-    bad = ds.validate(src, custom)
+    # 把只数塞进去,让 validate 能判断"是不是一次要太多"
+    bad = ds.validate(src, {**(custom or {}), "_stocks": est.get("todo") or est.get("stocks") or 0})
     if bad:
         return bad
 

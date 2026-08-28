@@ -525,6 +525,16 @@ def run(job_id: int) -> dict:
     # **不当场重试** —— 当场重试是在被限的时候重试,必然还是失败,
     # 而且把请求量放大。等整轮跑完、歇一会儿,按实测大概率已经恢复了
     # (服务器那次全败之后自己恢复过两次)。
+    # 走 agentpit / custom 通道时不做"限流退避重跑"。
+    #
+    # 那套退避是为免费源写的:免费源返回空通常是被限流,等一会再试有用。
+    # 但网关返回空是"库里没这只票",**重试一百次还是空** ——
+    # 实测 301154 就是这样,任务白等 10 分钟。
+    if retry_queue and _src != _ds.FREE:
+        log.info("[data_job %s] %s 通道:%d 只网关没有,不重跑(重试对'没有'无效)",
+                 job_id, _src, len(retry_queue))
+        retry_queue = []
+
     if retry_queue and _read_status(job_id) == "running":
         n = len(retry_queue)
         _progress(job_id, done=done, skipped=skipped, failed=failed,
