@@ -77,11 +77,22 @@ def validate(source: str, custom: dict | None) -> dict | None:
             return {"error": "bad_url",
                     "message": f"API 地址要以 http:// 或 https:// 开头,你填的是「{url[:40]}」"}
     elif source == AGENTPIT:
-        # 平台 Key 从环境变量读,不让用户填 —— 用户填的话等于把 Key 散出去
-        import os
-        if not os.getenv("HUNTER_API_KEY") and not os.getenv("AGENTPIT_API_KEY"):
-            return {"error": "no_platform_key",
-                    "message": "还没配置平台 Key —— 在 .env 里设 HUNTER_API_KEY 后重启"}
+        # ⚠️ **这条通道还没接通,所以在这里直接拒绝。**
+        #
+        # 实测踩到的问题:不拒绝的话任务会被建起来、跑完、状态显示 done,
+        # 但 _fetch_agentpit 返回空,库里一条数据都没多。
+        # 用户选了付费通道、点了下载、看到"完成",实际什么都没发生 ——
+        # **这比明确报错糟得多**,因为他不会去重下。
+        #
+        # 接通前还差两件非技术的事:
+        #   1. XTick 商业授权(官方 FAQ:商用需联系获取),转售需单独谈
+        #   2. 配额规划 —— 全A股一次 = 5534 次调用,而白银版每天 2 万、
+        #      我们自己的采集已用 1.6 万,一个用户都容不下
+        return {"error": "channel_not_ready",
+                "message": "「AgentPit 高速通道」还没开放 —— "
+                           "商业授权和配额方案定下来之后才会接通。"
+                           "现在请用「本地免费源」(免费,而且历史更长:"
+                           "3.25 年 vs 2 年),或者填你自己的数据源。"}
     return None
 
 

@@ -121,6 +121,24 @@ async def create_job(body: JobIn, request: Request):
     if bad:
         return bad
 
+    # 全都已经有数据了,不用下。
+    #
+    # **排在通道检查之后** —— 通道不可用是更根本的前提,而且"换个通道"
+    # 比"换个时间范围"更可能是用户真正想做的事。
+    #
+    # 不挡的话会建一个空任务、瞬间跑完、在"最近任务"里留一条 done ——
+    # 用户看到"完成"但什么都没发生,列表还被这种空任务塞满。
+    # 实测:hs300 全部已下过时,连点几次就多出几条无意义记录。
+    if not est.get("todo"):
+        # **提示要看用户已经选了什么**。原来一律说"选「只补最新」",
+        # 而用户明明已经选了它 —— 提示打转,看着像系统坏了。
+        tip = ("已经是最新的了,没有要补的。"
+               if (body.span_months or 0) <= 0 else
+               "想补最近几天的话,把「下多长时间」选成「只补最新」。")
+        return {"error": "nothing_to_do",
+                "message": f"这 {est['stocks']} 只的数据都已经有了,不用重复下。{tip}"}
+
+
     # 通道信息塞进 scope 一起存 —— data_job 表不用加列(生产库改列有成本),
     # 而 scope 本来就是 jsonb
     scope = dict(body.scope or {})
