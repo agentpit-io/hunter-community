@@ -1,7 +1,8 @@
 'use client'
 import { useState, useRef, useEffect } from 'react'
+import Link from 'next/link'
 import ReactECharts from 'echarts-for-react'
-import { TrendingUp, Search, Loader2, AlertCircle, Info, X } from 'lucide-react'
+import { TrendingUp, Search, Loader2, AlertCircle, Info, X, Activity, ExternalLink } from 'lucide-react'
 
 type Bar = { date: string; open: number; high: number; low: number; close: number; volume: number }
 type PredResult = {
@@ -595,6 +596,10 @@ export default function KPredPage() {
             {/* Pro 因子面板（仅 Pro 模式） */}
             {proResult && <ProPanel pro={proResult.pro} lastClose={result.last_close} days={days} />}
 
+            {/* 该股·该模型·近 90d 表现(复赛 §3.A.2.2) */}
+            <HistoricalPerformanceCard symbol={result.symbol} />
+
+
             {/* 预测数据表 */}
             <div className="border-t px-5 py-4" style={{ borderColor: 'var(--border)' }}>
               <p className="text-xs font-semibold mb-3" style={{ color: 'var(--text-muted)' }}>逐日预测明细</p>
@@ -634,5 +639,98 @@ export default function KPredPage() {
         )}
       </div>
     </main>
+  )
+}
+
+
+// ─── 该股·该模型·近 90d 表现卡(§3.A.2.2 复赛验证) ──────────────
+// 目的:每张预测报告底部显示"该模型对这只股票近 90 天的历史命中率"
+// 数据源:/api/backtest/accuracy?days=90&symbol=XXX
+// 合规:样本量 < 30 显示"数据不足" · 严禁 mock 兜底
+
+type AccuracySummary = {
+  sample: number
+  hit_rate: number | null
+  amt_hit_rate: number | null
+  mae: number | null
+  window_days: number
+}
+
+function HistoricalPerformanceCard({ symbol }: { symbol: string }) {
+  const [data, setData] = useState<AccuracySummary | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true); setError(false); setData(null)
+    fetch(`/api/backtest/accuracy?days=90&symbol=${encodeURIComponent(symbol)}`, { headers: authHeaders() })
+      .then(r => r.ok ? r.json() : Promise.reject(r.status))
+      .then(d => { if (!cancelled) { if (d?.detail) setError(true); else setData(d) } })
+      .catch(() => { if (!cancelled) setError(true) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [symbol])
+
+  return (
+    <div className="border-t px-5 py-4" style={{ borderColor: 'var(--border)' }}>
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <Activity className="w-3.5 h-3.5" style={{ color: 'var(--text-muted)' }} />
+          <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
+            该股 · 该模型 · 近 90 日表现
+          </p>
+        </div>
+        <Link href={`/evaluation?symbol=${encodeURIComponent(symbol)}`}
+              className="text-xs flex items-center gap-1 hover:opacity-70 transition-opacity"
+              style={{ color: '#f59e0b' }}>
+          查看完整评估看板 <ExternalLink className="w-3 h-3" />
+        </Link>
+      </div>
+
+      {loading ? (
+        <div className="grid grid-cols-4 gap-2">
+          {[0, 1, 2, 3].map(i => (
+            <div key={i} className="h-14 rounded animate-pulse"
+                 style={{ background: 'var(--bg)' }} />
+          ))}
+        </div>
+      ) : error ? (
+        <p className="text-xs py-2" style={{ color: 'var(--text-muted)' }}>
+          历史表现数据暂不可用 · 需完成每日预测流水线积累样本
+        </p>
+      ) : data && data.sample >= 30 ? (
+        <div className="grid grid-cols-4 gap-2">
+          <PerfCell label="样本量" value={data.sample.toLocaleString()} />
+          <PerfCell label="方向命中率"
+                    value={data.hit_rate !== null ? `${data.hit_rate.toFixed(1)}%` : '—'}
+                    highlight={data.hit_rate !== null && data.hit_rate >= 55}
+                    color={data.hit_rate !== null && data.hit_rate >= 55 ? '#22c55e' : '#f59e0b'} />
+          <PerfCell label="幅度命中率"
+                    value={data.amt_hit_rate !== null ? `${data.amt_hit_rate.toFixed(1)}%` : '—'}
+                    hint="误差 < 1%" />
+          <PerfCell label="平均绝对误差"
+                    value={data.mae !== null ? `${data.mae.toFixed(2)}%` : '—'}
+                    hint="MAE" />
+        </div>
+      ) : (
+        <p className="text-xs py-2" style={{ color: 'var(--text-muted)' }}>
+          样本量不足(仅 {data?.sample ?? 0} 条 · 需 ≥ 30)· 无法给出稳定的历史评估
+        </p>
+      )}
+    </div>
+  )
+}
+
+function PerfCell({ label, value, hint, highlight, color }:
+  { label: string; value: string; hint?: string; highlight?: boolean; color?: string }) {
+  return (
+    <div className="rounded-lg px-3 py-2"
+         style={{ background: 'var(--bg)', border: `1px solid ${highlight ? (color || 'var(--border)') : 'var(--border)'}` }}>
+      <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{label}</div>
+      <div className="font-mono font-bold text-sm mt-0.5"
+           style={{ color: color || 'var(--text)' }}>{value}</div>
+      {hint && <div className="text-[10px] opacity-60 mt-0.5" style={{ color: 'var(--text-muted)' }}>{hint}</div>}
+    </div>
   )
 }

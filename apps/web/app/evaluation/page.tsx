@@ -63,8 +63,15 @@ function fmtNum(v: number | null | undefined, digits = 2): string {
   return v.toFixed(digits)
 }
 
+// URL 拿 symbol · 客户端组件在 useEffect 里读 window · 不用 useSearchParams 免 Suspense
+function getInitialSymbol(): string {
+  if (typeof window === 'undefined') return ''
+  return new URLSearchParams(window.location.search).get('symbol') || ''
+}
+
 export default function EvaluationPage() {
   const [days, setDays] = useState(90)
+  const [symbol, setSymbol] = useState<string>('')  // '' = 全部
   const [acc, setAcc] = useState<Accuracy | null>(null)
   const [cons, setCons] = useState<Consistency | null>(null)
   const [revs, setRevs] = useState<Reversal[]>([])
@@ -73,18 +80,29 @@ export default function EvaluationPage() {
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
 
-  const load = useCallback(async (d: number) => {
+  // URL ?symbol=xxx 首次挂载读一次
+  useEffect(() => {
+    const s = getInitialSymbol()
+    if (s) { setSymbol(s); setEvoCode(s) }
+  }, [])
+
+  const load = useCallback(async (d: number, sym: string) => {
     setLoading(true); setErr('')
     try {
+      const accUrl = sym
+        ? `/api/backtest/accuracy?days=${d}&symbol=${encodeURIComponent(sym)}`
+        : `/api/backtest/accuracy?days=${d}`
       const [a, c, v] = await Promise.all([
-        fetch(`/api/backtest/accuracy?days=${d}`, { headers: authH() }).then(r => r.json()),
+        fetch(accUrl, { headers: authH() }).then(r => r.json()),
         fetch(`/api/backtest/consistency?days=${d}`, { headers: authH() }).then(r => r.json()),
-        fetch(`/api/backtest/reversals?limit=20`, { headers: authH() }).then(r => r.json()),
+        fetch(`/api/backtest/reversals?limit=50`, { headers: authH() }).then(r => r.json()),
       ])
       if (a?.detail) setErr(a.detail)
       setAcc(a?.detail ? null : a)
       setCons(c?.detail ? null : c)
-      setRevs(v?.items || [])
+      // reversals 客户端按 symbol 过滤(API 不带 symbol 参数)· 全部时留 20 条
+      const items = v?.items || []
+      setRevs(sym ? items.filter((r: Reversal) => r.symbol === sym) : items.slice(0, 20))
     } catch (e) {
       setErr(String(e))
     } finally { setLoading(false) }
@@ -100,7 +118,7 @@ export default function EvaluationPage() {
     } catch { setEvo([]) }
   }, [])
 
-  useEffect(() => { load(days) }, [load, days])
+  useEffect(() => { load(days, symbol) }, [load, days, symbol])
   useEffect(() => { loadEvo(evoCode) }, [loadEvo, evoCode])
 
   const reversalRate = cons && cons.sample > 0
@@ -129,13 +147,29 @@ export default function EvaluationPage() {
                              : 'border-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
                 }`}>{d}天</button>
             ))}
-            <button onClick={() => load(days)} disabled={loading}
+            <button onClick={() => load(days, symbol)} disabled={loading}
               className="px-3 py-1 rounded text-sm border border-gray-300 hover:bg-gray-50
                          dark:hover:bg-gray-800 disabled:opacity-50 flex items-center gap-1">
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />刷新
             </button>
           </div>
         </div>
+
+        {/* 单股筛选态提示条 · 从 kpred 底部跳过来会带 ?symbol= */}
+        {symbol && (
+          <div className="p-3 rounded border border-blue-300 bg-blue-50 dark:bg-blue-950
+                          dark:border-blue-700 text-sm flex items-center justify-between">
+            <span>
+              当前只看 <b className="font-mono">{symbol}</b> 的历史评估 ·
+              命中率/反转清单/单股演变均按此过滤
+            </span>
+            <button onClick={() => { setSymbol('') }}
+              className="text-xs px-2 py-0.5 rounded border border-blue-400 hover:bg-blue-100
+                        dark:hover:bg-blue-900">
+              清除筛选 ×
+            </button>
+          </div>
+        )}
 
         {/* 演示数据横幅 · 复赛期间明示 */}
         <div className="p-3 rounded border border-amber-300 bg-amber-50 dark:bg-amber-950
