@@ -305,9 +305,22 @@ def run_backtest(strategy: dict, start: date, end: date, user_id: str | None = N
     if len(schedule) < 2:
         return {"error": "no_dates", "message": f"起止时间内无 rebalance 日 · start={start} end={end}"}
 
-    cost_bps = strategy["config"].get("cost_bps", 15)
-    nav = [1.0]
+    # 复赛 §3.B · 交易成本模型 · broker preset 优先于 cost_bps
+    # broker_preset(cn_default/hk_default/us_default/zero)折算成"单向平均 bps"
+    # 塞给引擎;显式给了 cost_bps 就沿用旧口径(向后兼容 · 用户可覆盖)
+    from app.services.quant.broker import defaults as _broker_defaults
+    preset_key = strategy["config"].get("broker_preset")
+    preset = _broker_defaults.resolve(preset_key)
+    _explicit_bps = strategy["config"].get("cost_bps")
+    if _explicit_bps is None or preset_key:
+        cost_bps = preset.total_bps_per_side
+    else:
+        cost_bps = _explicit_bps
+
+    nav = [1.0]              # 净值(扣成本)
+    nav_gross = [1.0]        # 毛净值(不扣成本 · 复赛演示对比用)
     nav_series = []
+    nav_gross_series = []
     positions_hist = []          # 每期 code list
     picks_hist = []              # 每期完整 picks(含 factor_contrib) · 用于最后一期展示
     turnover_hist = []
@@ -320,10 +333,12 @@ def run_backtest(strategy: dict, start: date, end: date, user_id: str | None = N
         cost = turnover * cost_bps / 10000
         period_ret = _period_return(codes, dt0, dt1)
         nav.append(nav[-1] * (1 - cost) * (1 + period_ret))
+        nav_gross.append(nav_gross[-1] * (1 + period_ret))
         positions_hist.append(codes)
         picks_hist.append(picks)
         turnover_hist.append(turnover)
         nav_series.append({"date": dt0.isoformat(), "nav": round(nav[-1], 4)})
+        nav_gross_series.append({"date": dt0.isoformat(), "nav": round(nav_gross[-1], 4)})
 
     # ── B1 · 一期都没买到票时,不要给成绩单 ──────────────────
     #
@@ -436,13 +451,50 @@ def run_backtest(strategy: dict, start: date, end: date, user_id: str | None = N
             f"不认识的换仓频率「{want_freq}」—— 这次按月度跑。"
             f"可选:W 周 / M 月 / Q 季 / H 半年。")}
 
+    # 复赛 §3.B · 毛/净对比 + 成本分解
+    gross_metrics = _calc_metrics(nav_gross, ppy)
+    total_bps_used = cost_bps * sum(turnover_hist)   # 累积总 bps 消耗
+    total_cost_pct = total_bps_used / 10000          # 折算成小数(小于 1)
+    # 每项分解:按 preset breakdown 的比例把总 bps 拆开
+    _bd = preset.breakdown_avg()
+    _bd_total = sum(_bd.values()) or 1e-9
+    cost_breakdown = {
+        k: {
+            "bps": round(v, 4),
+            "share_pct": round(v / _bd_total * 100, 2),
+            "cost_used": round(v * sum(turnover_hist) / 10000, 6),
+        } for k, v in _bd.items()
+    }
+    # 净收益 / 毛收益 / 成本占毛收益的比
+    net_ret = nav[-1] - 1.0
+    gross_ret = nav_gross[-1] - 1.0
+    cost_ratio_pct = (
+        round((gross_ret - net_ret) / abs(gross_ret) * 100, 2)
+        if abs(gross_ret) > 1e-9 else None
+    )
+
     return {
         "start": start.isoformat(),
         "end": end.isoformat(),
-        "metrics": metrics,
-        "nav_series": nav_series,
+        "metrics": metrics,                         # net(向后兼容 · 主指标)
+        "gross_metrics": gross_metrics,             # 复赛 §3.B · 不扣成本对照
+        "nav_series": nav_series,                   # net
+        "nav_gross_series": nav_gross_series,       # 复赛 §3.B
         "positions": positions,
-        "cost_used": cost_bps * sum(turnover_hist),
+        # cost_used 保留旧口径(bps 累积值)· 兼容旧前端消费
+        "cost_used": total_bps_used,
+        # 复赛 §3.B · 结构化的交易成本报告
+        "trading_cost": {
+            "broker": preset.to_dict(),             # preset 完整 dump · 前端展示"什么样的成本参数"
+            "cost_bps_used": round(cost_bps, 4),    # 引擎实际使用的单向 bps
+            "total_bps_consumed": round(total_bps_used, 4),
+            "total_cost_pct": round(total_cost_pct * 100, 4),
+            "gross_total_return_pct": round(gross_ret * 100, 4),
+            "net_total_return_pct": round(net_ret * 100, 4),
+            "cost_ratio_of_gross_pct": cost_ratio_pct,   # 成本吃了毛收益的百分之多少
+            "breakdown": cost_breakdown,            # 每项成本各占多少 bps + 各消耗多少
+            "turnover_total": round(sum(turnover_hist), 4),
+        },
         "duration_ms": int((time.time() - t0) * 1000),
         # 取不到指数数据时显式给 null(而不是省略,也不是补一条平线)——
         # 前端据此把基准线整块隐藏。补出来的基准会让超额收益看起来很漂亮。

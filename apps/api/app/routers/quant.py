@@ -122,6 +122,16 @@ async def broker_balance():
     return {"broker": b.name, "balance": b.query_balance()}
 
 
+@router.get("/broker/presets")
+async def broker_presets():
+    """复赛 §3.B · 三市场默认 broker 参数(A股/港股/美股/零成本对比)
+    · 供前端 backtest 页在跑之前让用户选一档
+    · 结果里再展示"如果换另一档,毛/净差多少"
+    """
+    from app.services.quant.broker import defaults as _bd
+    return {"presets": _bd.list_presets(), "default": _bd.DEFAULT_PRESET_KEY}
+
+
 # ═══════════════════════════════════════════════════════════════
 # E-1 · Prometheus metrics · 生产可观测
 # ═══════════════════════════════════════════════════════════════

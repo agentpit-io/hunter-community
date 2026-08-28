@@ -43,6 +43,8 @@ const container = document.getElementById('page-content')
 // 现在:后端给什么就显示什么,没给的显示 "—" 并注明原因。
 // 假数字比缺数字危险得多 —— 缺了用户知道自己不知道,假了他以为自己知道。
 const metrics = realResult?.metrics || draft._metrics || {}
+const grossMetrics = realResult?.gross_metrics || null   // 复赛 §3.B · 毛(不扣成本)
+const tradingCost  = realResult?.trading_cost  || null   // 复赛 §3.B · 成本分解
 const quality  = realResult?.quality || null
 const bench    = realResult?.benchmark || null
 
@@ -73,7 +75,9 @@ container.innerHTML = `
       realResult?.rebalance_used && realResult.rebalance_used !== cfg.rebalance
         ? '<span style="color:#B06A32"> (实际:月度)</span>' : ''}</span>
     <span class="sep">·</span>
-    <span><b>成本</b>${cfg.cost_bps} bps</span>
+    <span><b>成本</b>${tradingCost
+      ? `${tradingCost.broker.label} · ${tradingCost.cost_bps_used} bps 单向`
+      : `${cfg.cost_bps} bps`}</span>
     <span class="sep">·</span>
     <span><b>基准</b>${bench ? (BENCHMARK_NAME[cfg.benchmark] || cfg.benchmark)
       : '<span style="opacity:.6">未接入</span>'}</span>
@@ -92,6 +96,53 @@ container.innerHTML = `
     ${metrics.n_periods && metrics.n_periods < 12
       ? `<div>· 只跑了 <b>${metrics.n_periods}</b> 期(不足一年)—— 样本太少,指标参考价值有限。</div>` : ''}
     ${bench ? '' : '<div>· 基准未接入,无法判断是否跑赢大盘。</div>'}
+  </div>` : ''}
+
+  <!-- 复赛 §3.B · 交易成本影响 · 毛/净并列 + 明细折叠 -->
+  ${tradingCost ? `
+  <div class="cost-panel" style="margin:12px 0;padding:14px 16px;border:1px solid var(--border,#e5e7eb);border-radius:10px;background:var(--bg-card,#fafafa)">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
+      <div style="font-weight:600;font-size:14px">交易成本影响 · ${tradingCost.broker.label}</div>
+      <div style="font-size:12px;opacity:.65">
+        每笔往返约 ${tradingCost.broker.total_bps_round_trip} bps · 总换手 ${(tradingCost.turnover_total*100).toFixed(0)}%
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+      <div>
+        <div style="font-size:11px;opacity:.7">毛收益(不扣成本)</div>
+        <div style="font-size:22px;font-weight:700;color:${tradingCost.gross_total_return_pct>=0?'#B0532C':'#2C6B55'}">
+          ${tradingCost.gross_total_return_pct>=0?'+':''}${tradingCost.gross_total_return_pct}%
+        </div>
+        <div style="font-size:11px;opacity:.55">未考虑手续费/税/滑点</div>
+      </div>
+      <div>
+        <div style="font-size:11px;opacity:.7">净收益(扣成本)</div>
+        <div style="font-size:22px;font-weight:700;color:${tradingCost.net_total_return_pct>=0?'#B0532C':'#2C6B55'}">
+          ${tradingCost.net_total_return_pct>=0?'+':''}${tradingCost.net_total_return_pct}%
+        </div>
+        <div style="font-size:11px;opacity:.55">这是实盘能拿到的收益</div>
+      </div>
+      <div>
+        <div style="font-size:11px;opacity:.7">成本吃掉毛收益</div>
+        <div style="font-size:22px;font-weight:700;color:#B06A32">
+          ${tradingCost.cost_ratio_of_gross_pct===null?'—':tradingCost.cost_ratio_of_gross_pct+'%'}
+        </div>
+        <div style="font-size:11px;opacity:.55">累计成本 ${tradingCost.total_cost_pct}%</div>
+      </div>
+    </div>
+    <details style="margin-top:10px">
+      <summary style="cursor:pointer;font-size:12px;opacity:.7">成本明细 · 单向平均 bps 分解</summary>
+      <div style="margin-top:8px;font-size:12px;line-height:1.7">
+        ${Object.entries(tradingCost.breakdown).map(([k, v]) => {
+          const label = ({commission:'佣金',stamp_tax:'印花税',slippage:'滑点',other:'其它规费'})[k] || k
+          return `<div>· <b>${label}</b> ${v.bps} bps(占 ${v.share_pct}% · 累计消耗 ${(v.cost_used*100).toFixed(3)}%)</div>`
+        }).join('')}
+        <div style="margin-top:6px;opacity:.6">${tradingCost.broker.notes}</div>
+        <div style="margin-top:6px;opacity:.55;font-size:11px">
+          注:回测按静态 bps 扣成本(每笔换手 × 单向 bps × 2)· 实盘会因流动性/成交时机/大单冲击与此不同 · 不构成投资建议
+        </div>
+      </div>
+    </details>
   </div>` : ''}
 
   <!-- 6 指标卡 -->
