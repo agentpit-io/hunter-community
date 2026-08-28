@@ -43,25 +43,7 @@ def get_conn():
     return psycopg2.connect(url, connect_timeout=10)
 
 
-def fetch_real_kline(symbol: str, days: int) -> list[dict]:
-    """akshare 直连拉真实日 K · 不依赖 hunter gateway(seed 环境常无 HUNTER_API_KEY)."""
-    import akshare as ak
-    from datetime import datetime, timedelta
-    bare = symbol.split(".")[0]
-    end = datetime.now()
-    start = end - timedelta(days=days + 60)  # 拿多一点覆盖周末/节假日
-    try:
-        df = ak.stock_zh_a_hist(
-            symbol=bare, period="daily",
-            start_date=start.strftime("%Y%m%d"),
-            end_date=end.strftime("%Y%m%d"),
-            adjust="qfq",
-        )
-    except Exception as e:
-        log.warning("akshare 拉 %s 失败: %s", symbol, e)
-        return []
-    if df is None or df.empty:
-        return []
+def _bars_from_eastmoney_df(df) -> list[dict]:
     bars = []
     for _, row in df.iterrows():
         d = row.get("日期")
@@ -74,7 +56,61 @@ def fetch_real_kline(symbol: str, days: int) -> list[dict]:
             "close": float(row.get("收盘") or 0),
             "volume": int(row.get("成交量") or 0),
         })
-    return bars[-(days + 30):]  # 只留够 lag 的量
+    return bars
+
+
+def _bars_from_sina_df(df) -> list[dict]:
+    bars = []
+    for _, row in df.iterrows():
+        d = row.get("date")
+        ts = d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)[:10]
+        bars.append({
+            "ts": ts,
+            "open": float(row.get("open") or 0),
+            "high": float(row.get("high") or 0),
+            "low": float(row.get("low") or 0),
+            "close": float(row.get("close") or 0),
+            "volume": int(row.get("volume") or 0),
+        })
+    return bars
+
+
+def fetch_real_kline(symbol: str, days: int) -> list[dict]:
+    """真实日 K · 3 次重试 + 东财/新浪双源 · GCP→大陆网络不稳自动兜底."""
+    import time
+    import akshare as ak
+    from datetime import datetime, timedelta
+    bare = symbol.split(".")[0]
+    end = datetime.now()
+    start = end - timedelta(days=days + 60)
+
+    # 东财优先(前复权更准)· 3 次重试
+    for attempt in range(3):
+        try:
+            df = ak.stock_zh_a_hist(
+                symbol=bare, period="daily",
+                start_date=start.strftime("%Y%m%d"),
+                end_date=end.strftime("%Y%m%d"),
+                adjust="qfq",
+            )
+            if df is not None and not df.empty:
+                return _bars_from_eastmoney_df(df)[-(days + 30):]
+        except Exception as e:
+            log.info("akshare 东财 attempt=%d %s: %s", attempt + 1, symbol, str(e)[:80])
+            time.sleep(1.5 * (attempt + 1))
+
+    # 新浪兜底
+    sina_sym = ("sh" if symbol.endswith(".SH") else "sz") + bare
+    for attempt in range(2):
+        try:
+            df = ak.stock_zh_a_daily(symbol=sina_sym, adjust="qfq")
+            if df is not None and not df.empty:
+                return _bars_from_sina_df(df)[-(days + 30):]
+        except Exception as e:
+            log.info("akshare 新浪 attempt=%d %s: %s", attempt + 1, sina_sym, str(e)[:80])
+            time.sleep(1.5 * (attempt + 1))
+
+    return []
 
 
 def synthesize_predictions(bars: list[dict], symbol: str) -> tuple[list[dict], list[dict], list[dict]]:
