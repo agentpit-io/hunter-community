@@ -83,6 +83,11 @@ services:
       DATA_SOURCE_PROVIDER: ${DATA_SOURCE_PROVIDER:-}
       HUNTER_SAAS_DATA_URL: ${HUNTER_SAAS_DATA_URL:-}
       HUNTER_SAAS_DATA_KEY: ${HUNTER_SAAS_DATA_KEY:-}
+      # 预测回测三张表(pred_snapshot/pred_backtest/pred_consistency)默认走 finance-data
+      # 库。留空则 /api/backtest/* 一律返 503。独立部署时若想让 hunter-community
+      # 自足(见 db/migrations/0004_pred_backtest.sql 已建的本地表),把这里指向本地
+      # postgres:postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      FINDATA_DB_URL: ${FINDATA_DB_URL:-}
       LLM_PROVIDER: ${LLM_PROVIDER:-openai_compat}
       LLM_BASE_URL: ${LLM_BASE_URL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
