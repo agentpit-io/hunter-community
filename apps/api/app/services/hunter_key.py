@@ -31,8 +31,18 @@ from app.services.database import get_conn
 from app.utils.crypto import decrypt, encrypt
 
 # Where the tool gateway lives. Override only if you run your own Hunter.
-UPSTREAM = os.getenv("HUNTER_UPSTREAM_URL", "https://hunter.agentpit.io").rstrip("/")
-APPLY_URL = f"{UPSTREAM}/dev/api-keys"
+# `HUNTER_UPSTREAM_URL=""`(compose 兜底) → 独立运行模式 · 不指回官方 SaaS ·
+# 但 apply_url 仍需给出一个可用的链接 · 否则前端"去申请 key"按钮跳到相对路径
+# 400/404 · 见 2026-08-29 事故:评委演示时用户遇到 /dev/api-keys 404。
+# 双默认:
+#   · UPSTREAM 空(独立模式) · 数据请求走本地/自建 · APPLY_URL 仍指官方 SaaS
+#   · UPSTREAM 非空(指向官方或自建) · APPLY_URL 拼在其后
+_ENV_UPSTREAM = (os.getenv("HUNTER_UPSTREAM_URL") or "").rstrip("/")
+UPSTREAM = _ENV_UPSTREAM  # 数据请求 URL · 空表示"没有官方上游"
+APPLY_URL = (
+    f"{_ENV_UPSTREAM}/dev/api-keys" if _ENV_UPSTREAM
+    else "https://hunter.agentpit.io/dev/api-keys"   # 兜底:独立模式仍需能申请 key
+)
 
 _ENV_KEY = (os.getenv("HUNTER_API_KEY") or "").strip()
 

@@ -33,7 +33,10 @@ export default function UnlockModal({ triggeredBy, onClose, onUnlocked }: Props)
 
   useEffect(() => { void getUnlockStatus(true).then(setSt) }, [])
 
-  const applyUrl = st?.apply_url || APPLY_URL_FALLBACK
+  // apply_url 兜底:空/相对路径都不合法 · 强制走前端 fallback
+  // 见 2026-08-29 事故:HUNTER_UPSTREAM_URL 未配时后端返 /dev/api-keys · 前端跳相对路径 404
+  const _rawApplyUrl = st?.apply_url || ''
+  const applyUrl = /^https?:\/\//i.test(_rawApplyUrl) ? _rawApplyUrl : APPLY_URL_FALLBACK
 
   const submit = async () => {
     const k = key.trim()
