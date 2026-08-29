@@ -89,12 +89,22 @@ CATALOG: list[ToolEntry] = [
               needs_data=[], note="纯本地写库 · 不依赖任何数据源",
               prompt_tpl="把 {股票} 加入我的自选",
               category="组合级"),
-    # 2026-08-18 补登记。MCP 侧(watchlist_mcp.py:89)与 SKILL
-    # (skills/watchlist_rank/)都加了,但这份注册表漏了 —— 后果不是"少一行":
-    # SKILL 的 needs_tools 指向一个"未注册"的工具,于是它在能力库里被判成
-    # **broken**(灰的、点不了),而工具本身其实是好的。
-    # scripts/check_tools.py 抓到了这处漂移。
-    # 依赖读 watchlist_rank_agent.py:366/368 核实:get_quote + get_kline_with_fallback
+    # 2026-08-29 · 复赛演示能力矩阵 UI 补齐(依赖 Hunter key 的工具全登记)
+    # 之前 CATALOG 只登记了本地工具 · 依赖平台数据的都没标 · 导致
+    # 能力矩阵摘要 SKILL/工具 need_key=0 · 让 Hunter key 看着毫无价值
+    ToolEntry("watchlist_stock_quickview", "股票速查", "watchlist", ToolOrigin.IMAGE,
+              "一屏看清 {股票} 的行情 · K 线 · 关键财务",
+              needs_data=["a.quote", "a.kline"],
+              optional_data=["a.news"],
+              markets=["a"],
+              prompt_tpl="{股票} 最新行情",
+              category="行情与资讯"),
+    ToolEntry("watchlist_stock_news", "个股新闻", "watchlist", ToolOrigin.IMAGE,
+              "获取 {股票} 近期新闻列表",
+              needs_data=["a.news"],
+              markets=["a"],
+              prompt_tpl="{股票} 最近有什么新闻",
+              category="行情与资讯"),
 
     # ── 组合级 · portfolio server ─────────────────────────────
     ToolEntry("portfolio_update_risk_profile", "更新风险画像", "portfolio", ToolOrigin.IMAGE,
@@ -104,8 +114,36 @@ CATALOG: list[ToolEntry] = [
               category="组合级"),
 
     # ── 深度分析 · uzi server ─────────────────────────────────
+    # 2026-08-29 补登记 · UZI 5 SKILL 全靠这个工具
+    ToolEntry("uzi_stock_deep_analysis", "UZI 深度分析引擎", "uzi", ToolOrigin.IMAGE,
+              "22 维度个股深度分析 · 生成基本面/技术面/资金面/估值 综合报告",
+              needs_data=["a.quote", "a.kline", "a.news", "a.announce",
+                          "a.financial", "a.lhb", "a.fund_holders"],
+              optional_data=["a.money_flow", "a.governance", "a.research"],
+              markets=["a"], slow=True,
+              prompt_tpl="帮我深度分析 {股票}",
+              category="投研报告",
+              note="A 股 7 类数据齐全 · 港美股走各自的 deep 工具(未登记)"),
 
     # ── 平台自有能力 · hunter_cap server(我们在 Step 3 加的)──
+    # 2026-08-29 补登记 · Kronos 预测 + TrueSource 情报 · 是 Hunter 独家卖点
+    ToolEntry("hunter_cap_kpred", "K 线走势预测", "hunter_cap", ToolOrigin.PLATFORM,
+              "Kronos ML 模型 · 未来 5-20 交易日 OHLC 预测",
+              needs_data=["global.kronos"],
+              markets=["a", "hk", "us"], slow=True,
+              prompt_tpl="预测 {股票} 未来 5 天走势",
+              category="投研报告"),
+    ToolEntry("hunter_cap_truesource_brief", "情报简版", "hunter_cap", ToolOrigin.PLATFORM,
+              "TrueSource 全网情报 · 简版摘要",
+              needs_data=["global.truesource_brief"],
+              prompt_tpl="给我 {股票} 的最新情报简报",
+              category="事件与筛选"),
+    ToolEntry("hunter_cap_truesource_scout", "情报侦察", "hunter_cap", ToolOrigin.PLATFORM,
+              "TrueSource 情报深度侦察 · 长任务",
+              needs_data=["global.truesource_scout"],
+              slow=True,
+              prompt_tpl="深度侦察 {股票} 的负面/舆情",
+              category="事件与筛选"),
 
     # ── 从 GitHub 导入 SKILL(`_23`)· hunter_cap server ───────
     # 四个工具里**只有 repo_open 露给用户**:它是入口,用户说
