@@ -17,6 +17,7 @@ import {
   getUnlockStatus, saveKey, clearKey,
   type UnlockStatus, APPLY_URL_FALLBACK,
 } from '../lib/unlockClient'
+import CapabilityMatrixPanel from './CapabilityMatrixPanel'
 
 interface Props {
   /** 从某张 SKILL 卡点进来时传它的名字,文案里点名会更贴题 */
@@ -108,18 +109,8 @@ export default function UnlockModal({ triggeredBy, onClose, onUnlocked }: Props)
                 <Check size={14} />
                 <span>已接入 Hunter 服务 · {st?.masked}</span>
               </div>
-              {st!.tools.length > 0 && (
-                <div style={{ marginBottom: 14 }}>
-                  <div style={{ fontSize: 12, color: HUNTER.INK_F, marginBottom: 6 }}>当前可用</div>
-                  {st!.tools.map((t) => (
-                    <div key={t.name} style={{ display: 'flex', gap: 8, padding: '4px 0', fontSize: 13 }}>
-                      <Check size={13} style={{ color: HUNTER.SUCCESS, flexShrink: 0, marginTop: 3 }} />
-                      <span style={{ color: HUNTER.INK }}>{t.title}</span>
-                      <span style={{ color: HUNTER.INK_F }}>· {t.desc}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
+              {/* 能力矩阵 · 数据源/工具/SKILL 三层聚合 · 2026-08-29 UI 改造 */}
+              <CapabilityMatrixPanel unlocked={true} defaultOpen={false} />
               {st?.env_locked ? (
                 <div style={{ fontSize: 12, color: HUNTER.INK_F }}>
                   这把 key 来自 <code>.env</code> 的 <code>HUNTER_API_KEY</code>,
@@ -142,11 +133,13 @@ export default function UnlockModal({ triggeredBy, onClose, onUnlocked }: Props)
                   : <>左侧的工具与 SKILL 要用 Hunter 平台的数据与算力,</>}
                 需要一把我们签发的 key。<b>免费</b>,大约 30 秒。
               </p>
-              <p style={{ fontSize: 12, lineHeight: 1.7, color: HUNTER.INK_F, margin: '0 0 14px' }}>
+              <p style={{ fontSize: 12, lineHeight: 1.7, color: HUNTER.INK_F, margin: '0 0 10px' }}>
                 普通对话不受影响 —— 你填自己的大模型 key 就能一直聊。
-                这把 key 只用来解锁行情速查、K 线、财报、关键新闻、
-                UZI 深度分析、Kronos 走势预测等能力。
+                这把 key 解锁的具体能力如下(展开看):
               </p>
+
+              {/* 能力矩阵 · 三视角展示 · 替代原来"等能力"糊了过去的文案 */}
+              <CapabilityMatrixPanel unlocked={false} defaultOpen={false} />
 
               {st?.configured && !st.upstream_error && (
                 <div style={{
