@@ -596,6 +596,11 @@ export default function KPredPage() {
             {/* Pro 因子面板（仅 Pro 模式） */}
             {proResult && <ProPanel pro={proResult.pro} lastClose={result.last_close} days={days} />}
 
+            {/* 预测不确定性 · 区间条 + 三类概率环(复赛 §3.C · 仅 Pro 模式) */}
+            {proResult && (proResult.pro as any).distribution && (
+              <UncertaintyCard distribution={(proResult.pro as any).distribution} />
+            )}
+
             {/* 该股·该模型·近 90d 表现(复赛 §3.A.2.2) */}
             <HistoricalPerformanceCard symbol={result.symbol} />
 
@@ -639,6 +644,196 @@ export default function KPredPage() {
         )}
       </div>
     </main>
+  )
+}
+
+
+// ─── 预测不确定性卡(§3.C 复赛验证) ──────────────────────────────
+// 目的:在点估计之外 · 显示 80/95 预测区间 + 三类概率环
+// 数据源:pro.distribution(来自 compute_pro_prediction · 已包含 calibration 计算)
+// 合规:任何字段 None 都不给假数字 · 只显"样本不足"
+
+type Distribution = {
+  point_pct: number
+  interval_80: [number, number] | null
+  interval_95: [number, number] | null
+  residual_std: number | null
+  prob: { up: number; flat: number; down: number } | null
+  prob_bucket: string | null
+  prob_sample_in_bucket: number | null
+  sample: number
+  note: string | null
+}
+
+function UncertaintyCard({ distribution: d }: { distribution: Distribution }) {
+  const hasInterval = !!(d.interval_80 && d.interval_95)
+  const hasProb = !!d.prob
+  const point = d.point_pct
+
+  return (
+    <div className="border-t px-5 py-4" style={{ borderColor: 'var(--border)' }}>
+      <div className="flex items-center gap-2 mb-3">
+        <Activity className="w-3.5 h-3.5" style={{ color: '#f59e0b' }} />
+        <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
+          预测不确定性 · 区间与概率(§3.C · 复赛新增)
+        </p>
+      </div>
+
+      {!hasInterval && !hasProb ? (
+        <p className="text-xs py-2" style={{ color: 'var(--text-muted)' }}>
+          样本量不足({d.sample} 条 · 需 ≥ 30)· 无法给出稳定的区间和概率
+        </p>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* 区间条 */}
+          <div>
+            <div className="text-[10px] mb-2" style={{ color: 'var(--text-muted)' }}>
+              预测区间 · 基于近 90 日残差分位
+            </div>
+            {hasInterval ? (
+              <IntervalBar point={point} p80={d.interval_80!} p95={d.interval_95!}
+                           residualStd={d.residual_std ?? 0} />
+            ) : (
+              <div className="text-xs py-2" style={{ color: 'var(--text-muted)' }}>
+                区间数据不足
+              </div>
+            )}
+          </div>
+
+          {/* 概率环 */}
+          <div>
+            <div className="text-[10px] mb-2" style={{ color: 'var(--text-muted)' }}>
+              三类概率 · 基于近 180 日经验频率
+            </div>
+            {hasProb ? (
+              <ProbDonut prob={d.prob!} point={point} bucket={d.prob_bucket ?? ''}
+                         nInBucket={d.prob_sample_in_bucket ?? 0} />
+            ) : (
+              <div className="text-xs py-2" style={{ color: 'var(--text-muted)' }}>
+                概率数据不足
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="mt-3 text-[10px] opacity-60" style={{ color: 'var(--text-muted)' }}>
+        仅供研究 · 非投资建议 · 区间与概率均从历史统计推断 · 不保证覆盖未来实际收益
+      </div>
+    </div>
+  )
+}
+
+/** 区间条 · 深色 marker 是点估计 · 两层色带为 80/95 区间 */
+function IntervalBar({ point, p80, p95, residualStd }: {
+  point: number; p80: [number, number]; p95: [number, number]; residualStd: number
+}) {
+  const lo = p95[0] + point; const hi = p95[1] + point
+  const lo80 = p80[0] + point; const hi80 = p80[1] + point
+  // 归一化到 0-100% · 用 p95 range 撑满
+  const range = Math.max(hi - lo, 0.001)
+  const posPoint = ((point - lo) / range) * 100
+  const posLo80 = ((lo80 - lo) / range) * 100
+  const posHi80 = ((hi80 - lo) / range) * 100
+  const up = point >= 0
+
+  return (
+    <div>
+      <div className="relative h-8 rounded overflow-hidden"
+           style={{ background: 'rgba(148,163,184,0.15)' }}>
+        {/* 95 区间(浅色底 · 已经是背景) */}
+        {/* 80 区间(深一档) */}
+        <div className="absolute top-0 h-full"
+             style={{
+               left: `${posLo80}%`, width: `${posHi80 - posLo80}%`,
+               background: 'rgba(251,191,36,0.28)',
+             }} />
+        {/* 点估计 marker */}
+        <div className="absolute top-0 h-full w-[3px]"
+             style={{
+               left: `${posPoint}%`, transform: 'translateX(-50%)',
+               background: up ? '#ef4444' : '#22c55e',
+             }} />
+      </div>
+      <div className="flex justify-between mt-1.5 text-[10px] font-mono"
+           style={{ color: 'var(--text-muted)' }}>
+        <span>{lo.toFixed(2)}%</span>
+        <span style={{ color: up ? '#ef4444' : '#22c55e' }}>
+          {up ? '+' : ''}{point.toFixed(2)}%
+        </span>
+        <span>{hi.toFixed(2)}%</span>
+      </div>
+      <div className="mt-1 text-[10px]" style={{ color: 'var(--text-muted)' }}>
+        深色区 80% 区间 [{lo80.toFixed(2)}%, {hi80.toFixed(2)}%] · 全带 95% ·
+        残差 std {residualStd.toFixed(2)}%
+      </div>
+    </div>
+  )
+}
+
+/** 概率环 · SVG 三段圆环 · 中央显示点估计 */
+function ProbDonut({ prob, point, bucket, nInBucket }: {
+  prob: { up: number; flat: number; down: number }
+  point: number; bucket: string; nInBucket: number
+}) {
+  // 圆环参数
+  const size = 120, stroke = 14
+  const r = (size - stroke) / 2
+  const cx = size / 2, cy = size / 2
+  const circ = 2 * Math.PI * r
+  const upLen = prob.up * circ
+  const flatLen = prob.flat * circ
+  const downLen = prob.down * circ
+  const up = point >= 0
+
+  return (
+    <div className="flex items-center gap-3">
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="flex-shrink-0">
+        {/* down 段 · 红 · 从 12 点开始逆时针 */}
+        <circle cx={cx} cy={cy} r={r} fill="none" stroke="#ef4444" strokeWidth={stroke}
+                strokeDasharray={`${downLen} ${circ}`}
+                transform={`rotate(-90 ${cx} ${cy})`} />
+        {/* flat 段 · 灰 */}
+        <circle cx={cx} cy={cy} r={r} fill="none" stroke="#94a3b8" strokeWidth={stroke}
+                strokeDasharray={`${flatLen} ${circ}`}
+                strokeDashoffset={-downLen}
+                transform={`rotate(-90 ${cx} ${cy})`} />
+        {/* up 段 · 绿(A 股上涨用红 · 这里 up=看涨概率用绿避免视觉冲突 · 或反过来?
+             ← 复赛面向评委 · 用国际通用 up=绿 down=红 · 便于理解) */}
+        <circle cx={cx} cy={cy} r={r} fill="none" stroke="#22c55e" strokeWidth={stroke}
+                strokeDasharray={`${upLen} ${circ}`}
+                strokeDashoffset={-(downLen + flatLen)}
+                transform={`rotate(-90 ${cx} ${cy})`} />
+        {/* 中心文字 · 点估计 */}
+        <text x={cx} y={cy - 4} textAnchor="middle"
+              style={{ fontSize: 11, fill: 'var(--text-muted)' }}>点估计</text>
+        <text x={cx} y={cy + 12} textAnchor="middle"
+              style={{
+                fontSize: 16, fontWeight: 700, fontFamily: 'monospace',
+                fill: up ? '#ef4444' : '#22c55e',
+              }}>
+          {up ? '+' : ''}{point.toFixed(2)}%
+        </text>
+      </svg>
+      <div className="flex-1 min-w-0 text-xs space-y-1">
+        <ProbRow color="#22c55e" label="上涨" val={prob.up} />
+        <ProbRow color="#94a3b8" label="持平" val={prob.flat} />
+        <ProbRow color="#ef4444" label="下跌" val={prob.down} />
+        <div className="text-[10px] pt-1" style={{ color: 'var(--text-muted)' }}>
+          bucket {bucket} · 桶内 {nInBucket} 条
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ProbRow({ color, label, val }: { color: string; label: string; val: number }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: color }} />
+      <span className="opacity-80">{label}</span>
+      <span className="font-mono font-bold ml-auto">{(val * 100).toFixed(0)}%</span>
+    </div>
   )
 }
 

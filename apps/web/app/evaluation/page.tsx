@@ -41,6 +41,23 @@ type EvoRow = {
   real_change?: number | null
   dir_hit?: boolean | null
 }
+type ReliabilityBin = {
+  bin: [number, number]
+  avg_pred: number | null
+  freq: number | null
+  n: number
+}
+type Calibration = {
+  sample_size: number
+  brier: number | null
+  ece: number | null
+  reliability: ReliabilityBin[] | null
+  window_days: number
+  symbol: string | null
+  note: string | null
+  threshold_pct?: number
+  prob_model?: string
+}
 
 const authH = (): Record<string, string> => {
   const t = typeof window !== 'undefined' ? localStorage.getItem('hunter_token') || '' : ''
@@ -77,6 +94,7 @@ export default function EvaluationPage() {
   const [revs, setRevs] = useState<Reversal[]>([])
   const [evoCode, setEvoCode] = useState('600519.SH')
   const [evo, setEvo] = useState<EvoRow[]>([])
+  const [cali, setCali] = useState<Calibration | null>(null)   // §3.C 校准
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
 
@@ -92,14 +110,20 @@ export default function EvaluationPage() {
       const accUrl = sym
         ? `/api/backtest/accuracy?days=${d}&symbol=${encodeURIComponent(sym)}`
         : `/api/backtest/accuracy?days=${d}`
-      const [a, c, v] = await Promise.all([
+      // §3.C · calibration 也带 symbol 过滤
+      const caliUrl = sym
+        ? `/api/backtest/calibration?days=${d}&symbol=${encodeURIComponent(sym)}`
+        : `/api/backtest/calibration?days=${d}`
+      const [a, c, v, cl] = await Promise.all([
         fetch(accUrl, { headers: authH() }).then(r => r.json()),
         fetch(`/api/backtest/consistency?days=${d}`, { headers: authH() }).then(r => r.json()),
         fetch(`/api/backtest/reversals?limit=50`, { headers: authH() }).then(r => r.json()),
+        fetch(caliUrl, { headers: authH() }).then(r => r.json()),
       ])
       if (a?.detail) setErr(a.detail)
       setAcc(a?.detail ? null : a)
       setCons(c?.detail ? null : c)
+      setCali(cl?.detail ? null : cl)
       // reversals 客户端按 symbol 过滤(API 不带 symbol 参数)· 全部时留 20 条
       const items = v?.items || []
       setRevs(sym ? items.filter((r: Reversal) => r.symbol === sym) : items.slice(0, 20))
@@ -365,6 +389,12 @@ export default function EvaluationPage() {
           ) : <Empty />}
         </Panel>
 
+        {/* 概率校准(§3.C · 复赛新增) */}
+        <Panel title="概率校准"
+               subtitle="Reliability diagram + Brier + ECE · 越贴对角线越校准 · 越低越好">
+          <CalibrationView cali={cali} />
+        </Panel>
+
         {/* 合规底栏 · 演示数据说明 */}
         <div className="pt-4 pb-8 text-xs opacity-60 text-center leading-relaxed">
           Hunter Community · 预测评估看板 · 数据仅供研究参考 · 不构成投资建议 ·
@@ -405,4 +435,134 @@ function Panel({ title, subtitle, children }:
 
 function Empty() {
   return <div className="text-sm opacity-50 py-8 text-center">暂无数据</div>
+}
+
+
+// ─── 概率校准视图(§3.C 复赛验证) ────────────────────────────
+// reliability diagram · SVG 手绘 · 45° 对角线 = 完美校准
+// 严禁 mock 兜底 · note 存在或 sample_size < 30 直接显数据不足
+
+function CalibrationView({ cali }: { cali: Calibration | null }) {
+  if (!cali) return <Empty />
+  if (cali.note || cali.sample_size < 30) {
+    return (
+      <div className="text-sm py-6 text-center opacity-70">
+        {cali.note || `样本量 ${cali.sample_size} < 30 · 数据不足以给出校准评估`}
+      </div>
+    )
+  }
+  const rc = cali.reliability || []
+  const bins = rc.filter(b => b.avg_pred !== null && b.freq !== null && b.n > 0)
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {/* 左:reliability diagram */}
+      <div className="md:col-span-2">
+        <ReliabilityDiagram bins={bins} />
+        <div className="mt-2 text-[10px]" style={{ color: 'var(--text-muted)' }}>
+          横轴:该桶预测概率平均 avg_pred · 纵轴:该桶实际频率 freq ·
+          点越贴 45° 对角线越校准 · 点大小 = 样本量 n
+        </div>
+      </div>
+      {/* 右:Brier · ECE · 样本 */}
+      <div className="space-y-3">
+        <BigMetric label="Brier Score"
+                   value={cali.brier === null ? '—' : cali.brier.toFixed(3)}
+                   hint="越低越好 · 0.25 = 抛硬币 · 0 = 完美"
+                   color={cali.brier !== null && cali.brier < 0.25 ? '#22c55e' : '#f59e0b'} />
+        <BigMetric label="ECE"
+                   value={cali.ece === null ? '—' : cali.ece.toFixed(3)}
+                   hint="Expected Calibration Error · 越低越校准" />
+        <BigMetric label="样本量"
+                   value={cali.sample_size.toLocaleString()}
+                   hint={`最近 ${cali.window_days} 天`} />
+        {cali.prob_model && (
+          <div className="text-[10px] opacity-60 pt-2">
+            {cali.prob_model}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function ReliabilityDiagram({ bins }: { bins: ReliabilityBin[] }) {
+  const size = 280, pad = 32
+  const inner = size - pad * 2
+  // n → 半径 · 3-10 px 范围
+  const maxN = Math.max(...bins.map(b => b.n), 1)
+  const rOf = (n: number) => 3 + 7 * Math.sqrt(n / maxN)
+
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}
+         style={{ display: 'block' }}>
+      {/* 背景网格 */}
+      {[0.25, 0.5, 0.75].map(t => {
+        const p = pad + t * inner
+        return (
+          <g key={t}>
+            <line x1={pad} y1={p} x2={size - pad} y2={p}
+                  stroke="rgba(148,163,184,0.15)" strokeWidth={1} />
+            <line x1={p} y1={pad} x2={p} y2={size - pad}
+                  stroke="rgba(148,163,184,0.15)" strokeWidth={1} />
+          </g>
+        )
+      })}
+      {/* 对角线 · 完美校准 */}
+      <line x1={pad} y1={size - pad} x2={size - pad} y2={pad}
+            stroke="#94a3b8" strokeWidth={1.5} strokeDasharray="4 4" />
+      {/* 坐标 · 底部 X · 左侧 Y */}
+      <line x1={pad} y1={size - pad} x2={size - pad} y2={size - pad}
+            stroke="var(--text-muted)" strokeWidth={1} />
+      <line x1={pad} y1={pad} x2={pad} y2={size - pad}
+            stroke="var(--text-muted)" strokeWidth={1} />
+      {[0, 0.5, 1.0].map(t => {
+        const px = pad + t * inner
+        const py = size - pad - t * inner
+        return (
+          <g key={t}>
+            <text x={px} y={size - pad + 12} textAnchor="middle"
+                  style={{ fontSize: 9, fill: 'var(--text-muted)' }}>{t.toFixed(1)}</text>
+            <text x={pad - 4} y={py + 3} textAnchor="end"
+                  style={{ fontSize: 9, fill: 'var(--text-muted)' }}>{t.toFixed(1)}</text>
+          </g>
+        )
+      })}
+      {/* 数据点 · 半径按 n · 颜色按偏离对角线程度 */}
+      {bins.map((b, i) => {
+        const x = pad + (b.avg_pred! * inner)
+        const y = size - pad - (b.freq! * inner)
+        const dev = Math.abs((b.avg_pred || 0) - (b.freq || 0))
+        const color = dev < 0.05 ? '#22c55e' : dev < 0.15 ? '#f59e0b' : '#ef4444'
+        return (
+          <g key={i}>
+            <circle cx={x} cy={y} r={rOf(b.n)} fill={color} fillOpacity={0.5}
+                    stroke={color} strokeWidth={1.5} />
+            <title>bin [{b.bin[0]}-{b.bin[1]}] · avg_pred {b.avg_pred?.toFixed(3)} ·
+                   freq {b.freq?.toFixed(3)} · n {b.n}</title>
+          </g>
+        )
+      })}
+      {/* 轴标签 */}
+      <text x={size / 2} y={size - 6} textAnchor="middle"
+            style={{ fontSize: 10, fill: 'var(--text-muted)' }}>预测概率 avg_pred</text>
+      <text x={10} y={size / 2} textAnchor="middle"
+            transform={`rotate(-90 10 ${size / 2})`}
+            style={{ fontSize: 10, fill: 'var(--text-muted)' }}>实际频率 freq</text>
+    </svg>
+  )
+}
+
+function BigMetric({ label, value, hint, color }:
+  { label: string; value: string; hint?: string; color?: string }) {
+  return (
+    <div className="p-3 rounded border border-gray-200 dark:border-gray-700
+                    bg-white dark:bg-gray-900">
+      <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{label}</div>
+      <div className="font-mono font-bold text-2xl mt-1" style={{ color: color || 'var(--text)' }}>
+        {value}
+      </div>
+      {hint && <div className="text-[10px] opacity-60 mt-1">{hint}</div>}
+    </div>
+  )
 }

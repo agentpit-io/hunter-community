@@ -535,6 +535,10 @@ async def compute_pro_prediction(
         if adjusted_predictions else 0
     )
 
+    # 复赛 §3.C · 概率分布输出 · 复用 Day4 calibration 模块
+    # 严禁 mock 兜底 · 样本 < 30 一律 None · 前端显"数据不足"
+    distribution = _build_distribution(code, adj_return_pct)
+
     return {
         **kronos_result,
         'predictions': adjusted_predictions,
@@ -548,5 +552,68 @@ async def compute_pro_prediction(
             'conflict_level':       conflict,
             'factors':              factor_list,
             'sigma_daily_pct':      round(sigma * 100, 2),
+            'distribution':         distribution,   # 复赛 §3.C · 见 backtest/calibration.py
         },
     }
+
+
+def _build_distribution(code: str, point_pct: float) -> dict:
+    """§3.C 概率分布 · 拿 calibration 模块两个方法组合 · 拉不到就每字段 None.
+
+    · interval_from_residuals(code, days=90, horizon=1) → p80 / p95
+    · class_prob_from_history(code, point_pct, days=180) → up/flat/down
+    · 严禁 mock 兜底 · 任何一步样本不够都 None · note 字段区分原因
+    """
+    try:
+        from app.services.backtest import calibration
+    except Exception as e:
+        logger.warning("[factor:{}] calibration import failed: {}", code, e)
+        return {
+            "point_pct": round(point_pct, 4),
+            "interval_80": None, "interval_95": None, "prob": None,
+            "sample": 0, "note": "calibration_unavailable",
+        }
+
+    # 需要 symbol 带交易所后缀(pred_backtest 用 600519.SH 格式)· kpred 传的 code 也带
+    # 复赛 seed 的 3 只:600519.SH / 000001.SZ / 600276.SH
+    symbol = code if "." in code else _normalize_a_symbol(code)
+
+    iv = None
+    pb = None
+    try:
+        iv = calibration.interval_from_residuals(symbol, days=90, horizon=1)
+    except Exception as e:
+        logger.warning("[factor:{}] interval failed: {}", symbol, e)
+    try:
+        pb = calibration.class_prob_from_history(symbol, point_pct, days=180)
+    except Exception as e:
+        logger.warning("[factor:{}] prob failed: {}", symbol, e)
+
+    note = None
+    if iv is None and pb is None:
+        note = "sample_small"
+    elif iv is None:
+        note = "interval_sample_small"
+    elif pb is None:
+        note = "prob_sample_small"
+
+    return {
+        "point_pct":   round(point_pct, 4),
+        "interval_80": iv["p80"] if iv else None,
+        "interval_95": iv["p95"] if iv else None,
+        "residual_std": iv["residual_std"] if iv else None,
+        "prob":        {"up": pb["up"], "flat": pb["flat"], "down": pb["down"]} if pb else None,
+        "prob_bucket": pb["bucket"] if pb else None,
+        "prob_sample_in_bucket": pb["sample_in_bucket"] if pb else None,
+        "sample":      iv["sample"] if iv else (pb["sample_total"] if pb else 0),
+        "note":        note,
+    }
+
+
+def _normalize_a_symbol(bare: str) -> str:
+    """把 600519 → 600519.SH · 000001 → 000001.SZ · 沪深首字判断"""
+    if not bare or "." in bare:
+        return bare
+    if bare.startswith(("6", "5", "9")):
+        return f"{bare}.SH"
+    return f"{bare}.SZ"
