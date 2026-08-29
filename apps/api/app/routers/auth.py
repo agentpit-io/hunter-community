@@ -384,6 +384,52 @@ async def me(request: Request):
     }
 
 
+# ─── 合规声明确认(复赛 §3.D.3) ─────────────────────────────────
+
+# 当前合规声明的版本 · 修改文案时递增 · 老 ack 记录自动失效
+COMPLIANCE_CURRENT_VERSION = "v1.0"
+
+
+@router.get("/auth/compliance-status")
+async def compliance_status(request: Request):
+    """§3.D · 查当前用户合规确认状态 · AuthGuard 挂载时调
+    · 返 { acked: bool, version: 'v1.0', current_version: 'v1.0' }
+    · acked=false 表示要弹层
+    """
+    uid = getattr(request.state, "user_id", None)
+    if not uid:
+        raise HTTPException(401, "需要登录")
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute("SELECT compliance_ack_at, compliance_ack_version FROM users WHERE id=%s", (uid,))
+    row = cur.fetchone(); conn.close()
+    if not row:
+        raise HTTPException(404, "用户不存在")
+    ack_at, ack_ver = row
+    acked = bool(ack_at) and (ack_ver == COMPLIANCE_CURRENT_VERSION)
+    return {
+        "acked": acked,
+        "version": ack_ver,
+        "current_version": COMPLIANCE_CURRENT_VERSION,
+        "ack_at": ack_at.isoformat() if ack_at else None,
+    }
+
+
+@router.post("/auth/compliance-ack")
+async def compliance_ack(request: Request):
+    """§3.D · 用户在弹层里点了"我已知悉" · 写入 users.compliance_ack_at"""
+    uid = getattr(request.state, "user_id", None)
+    if not uid:
+        raise HTTPException(401, "需要登录")
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute(
+        """UPDATE users SET compliance_ack_at = NOW(), compliance_ack_version = %s
+           WHERE id = %s""",
+        (COMPLIANCE_CURRENT_VERSION, uid),
+    )
+    conn.commit(); conn.close()
+    return {"ok": True, "version": COMPLIANCE_CURRENT_VERSION}
+
+
 @router.post("/auth/local-session", response_model=TokenResp)
 async def local_session(request: Request):
     """Hand out a session for the built-in local account · no credentials.

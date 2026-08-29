@@ -3,6 +3,7 @@ import { useState, useRef, useEffect } from 'react'
 import Link from 'next/link'
 import ReactECharts from 'echarts-for-react'
 import { TrendingUp, Search, Loader2, AlertCircle, Info, X, Activity, ExternalLink } from 'lucide-react'
+import ComplianceWatermark from '../components/ComplianceWatermark'
 
 type Bar = { date: string; open: number; high: number; low: number; close: number; volume: number }
 type PredResult = {
@@ -539,7 +540,8 @@ export default function KPredPage() {
 
         {/* 结果 */}
         {result && (
-          <div className="rounded-xl overflow-hidden" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+          <div className="rounded-xl overflow-hidden relative" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+            <ComplianceWatermark />
             {/* 头部信息 */}
             <div className="flex items-center justify-between px-5 py-3 border-b"
               style={{ borderColor: 'var(--border)' }}>
