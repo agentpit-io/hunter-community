@@ -826,8 +826,26 @@ async def run_backtest_sync(body: BacktestIn, request: Request):
     hit = cur.fetchone()
     if hit:
         cur.close(); conn.close()
+        # 复赛 §3.B · cache 命中时 · trading_cost/gross_metrics 已丢失(旧记录未存)·
+        # 用 broker_preset 现算 preset dump 补一份 · 但毛/净收益字段留 null · UI
+        # 据此显示"缓存记录 · 成本明细已重算 · 请重跑得完整对比"
+        from app.services.quant.broker import defaults as _bd
+        _pkey = strategy["config"].get("broker_preset")
+        _preset = _bd.resolve(_pkey)
         return {"result_id": hit[0], "cached": True,
-                "metrics": hit[1], "nav_series": hit[2], "positions": hit[3]}
+                "metrics": hit[1], "nav_series": hit[2], "positions": hit[3],
+                "trading_cost": {
+                    "broker": _preset.to_dict(),
+                    "cost_bps_used": _preset.total_bps_per_side,
+                    "cached_note": "缓存记录 · 毛/净收益已丢 · 重跑一次拿完整对比",
+                    "gross_total_return_pct": None,
+                    "net_total_return_pct": None,
+                    "cost_ratio_of_gross_pct": None,
+                    "total_bps_consumed": None,
+                    "breakdown": {k: {"bps": v, "share_pct": None, "cost_used": None}
+                                  for k, v in _preset.breakdown_avg().items()},
+                    "turnover_total": None,
+                }}
 
     result = backtest_engine.run_backtest(strategy, start, end, str(uid) if uid else None)
     if "error" in result:
@@ -851,9 +869,13 @@ async def run_backtest_sync(body: BacktestIn, request: Request):
     new_id = cur.fetchone()[0]
     conn.commit(); cur.close(); conn.close()
 
+    # 复赛 §3.B · 新算的完整结构透传 · trading_cost + gross_metrics + nav_gross_series
     return {"result_id": new_id, "cached": False,
             "metrics": result["metrics"], "nav_series": result["nav_series"],
-            "positions": positions, "duration_ms": result["duration_ms"]}
+            "positions": positions, "duration_ms": result["duration_ms"],
+            "gross_metrics": result.get("gross_metrics"),
+            "nav_gross_series": result.get("nav_gross_series"),
+            "trading_cost": result.get("trading_cost")}
 
 
 # ═══════════════════════════════════════════════════════════════
