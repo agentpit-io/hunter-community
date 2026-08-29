@@ -2,7 +2,7 @@
 // SKILL · hunter-UZI-Skill 深度分析（Sprint 3 P2 · Phase 1 MVP）
 // 展示 stock_deep_analysis tool 的 markdown 结果 + 数据覆盖率 + LLM 元信息
 import { Radar, CheckCircle2, AlertCircle, Copy, Loader2 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { HUNTER } from '../../../lib/hunter-theme'
@@ -147,10 +147,7 @@ export default function UziDeepAnalysisCard({ data }: { data: UziData }) {
             {data.markdown}
           </ReactMarkdown>
         ) : (
-          <div style={{ color: HUNTER.INK_F, fontStyle: 'italic', textAlign: 'center', padding: 20 }}>
-            <Loader2 size={16} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-            分析生成中 · 请稍候（5-10 秒）
-          </div>
+          <StalledAnalysisNotice durationMs={data.duration_ms || 0} coverage={coverage} />
         )}
       </div>
 
@@ -199,4 +196,49 @@ const cardStyle: React.CSSProperties = {
   borderRadius: 14,
   overflow: 'hidden',
   boxShadow: '0 4px 18px rgba(40,35,27,.04)',
+}
+
+
+// 分析长时间未出内容时的提示(§3.C 复赛演示 UX · 2026-08-29 用户报)
+// 逻辑:三档提醒
+//   0-15s   转圈 · 请稍候
+//   15-45s  转圈 · 稍慢 · 大概再等 20 秒(thinking 模型消耗大)
+//   45s+    警告 · 分析未出内容 · 建议重试(不再无声等待)
+function StalledAnalysisNotice({ durationMs, coverage }: { durationMs: number; coverage: number }) {
+  const [elapsed, setElapsed] = useState(Math.round(durationMs / 1000))
+  useEffect(() => {
+    const t = setInterval(() => setElapsed(e => e + 1), 1000)
+    return () => clearInterval(t)
+  }, [])
+
+  if (elapsed < 15) {
+    return (
+      <div style={{ color: HUNTER.INK_F, fontStyle: 'italic', textAlign: 'center', padding: 20 }}>
+        <Loader2 size={16} style={{ verticalAlign: 'middle', marginRight: 6 }} />
+        分析生成中 · 请稍候({elapsed}s / 覆盖率 {coverage}%)
+      </div>
+    )
+  }
+  if (elapsed < 45) {
+    return (
+      <div style={{
+        color: HUNTER.COPPER3, textAlign: 'center', padding: 20,
+        background: HUNTER.BRAND_PALE, borderRadius: 6,
+      }}>
+        <Loader2 size={16} style={{ verticalAlign: 'middle', marginRight: 6 }} />
+        分析仍在生成 · 已 {elapsed} 秒 · Gemini 3.5 thinking 模型消耗较大 · 通常 30-45 秒内出结果
+      </div>
+    )
+  }
+  // 45s+ 明确异常
+  return (
+    <div style={{
+      color: HUNTER.UP, textAlign: 'center', padding: 20,
+      background: '#fde7e0', borderRadius: 6,
+    }}>
+      <AlertCircle size={16} style={{ verticalAlign: 'middle', marginRight: 6 }} />
+      分析已跑 {elapsed} 秒仍未出内容 · 可能异常(LLM 超时 / max_tokens 全被 reasoning 占用)·
+      请<b>关闭本条对话重新发起</b>。若持续无法出结果 · 联系管理员查 opencode 日志。
+    </div>
+  )
 }

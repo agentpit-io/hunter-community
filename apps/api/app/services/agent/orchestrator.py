@@ -258,7 +258,7 @@ class ChatOrchestrator:
             return self._client.chat.completions.create(
                 model=MODEL_ROUTER, messages=messages,
                 tools=tools, tool_choice=tc_mode,
-                temperature=0.2, max_tokens=1024,
+                temperature=0.2, max_tokens=4096,
             )
         resp = await asyncio.to_thread(_do)
 
@@ -376,7 +376,7 @@ class ChatOrchestrator:
         def _stream():
             return self._client.chat.completions.create(
                 model=MODEL_ROUTER, messages=messages,
-                temperature=0.4, max_tokens=1200, stream=True,
+                temperature=0.4, max_tokens=4096, stream=True,
             )
         stream = await asyncio.to_thread(_stream)
         # openai v1 sdk 返回 sync iterator；用线程转异步
@@ -426,7 +426,7 @@ class ChatOrchestrator:
             return self._client.chat.completions.create(
                 model=model, messages=messages,
                 tools=[{"type": "google_search"}],
-                temperature=0.4, max_tokens=1600, stream=True,
+                temperature=0.4, max_tokens=8192, stream=True,
             )
         try:
             stream = await asyncio.to_thread(_stream)
@@ -436,7 +436,7 @@ class ChatOrchestrator:
             def _stream_fallback():
                 return self._client.chat.completions.create(
                     model=model, messages=messages,
-                    temperature=0.4, max_tokens=1600, stream=True,
+                    temperature=0.4, max_tokens=8192, stream=True,
                 )
             stream = await asyncio.to_thread(_stream_fallback)
 
