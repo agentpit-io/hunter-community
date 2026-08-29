@@ -16,7 +16,7 @@ from datetime import date
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from app.services.backtest import store, jobs
+from app.services.backtest import store, jobs, calibration
 from app.services.factor_engine import FACTOR_LABELS
 
 log = logging.getLogger(__name__)
@@ -85,6 +85,65 @@ async def get_evolution(code: str, limit: int = Query(40, ge=1, le=200)):
         log.warning("evolution failed: %s", e)
         raise HTTPException(503, "回测数据暂不可用")
     return {"symbol": code, "evolution": rows, "accuracy": acc}
+
+
+@router.get("/backtest/calibration")
+async def get_calibration(
+    days: int = Query(90, ge=30, le=365),
+    symbol: str = "",
+    threshold_pct: float = Query(0.5, ge=0.1, le=5.0),
+):
+    """复赛 §3.C · 概率校准报告 · Brier + ECE + reliability curve
+
+    · sample_size < 30 显示 "数据不足" · 不给假数
+    · reliability 每桶含 [bin范围 · avg_pred · freq · n] · 前端画 diagram
+    · brier 越低越好 · 0.25 = 抛硬币 · 0 = 完美预言
+    · ece 越低越校准
+    """
+    try:
+        return await asyncio.to_thread(calibration.get_calibration_report,
+                                       days, symbol.strip(), threshold_pct)
+    except Exception as e:
+        log.warning("calibration failed: %s", e)
+        raise HTTPException(503, "校准数据暂不可用")
+
+
+@router.get("/backtest/interval/{code}")
+async def get_interval(
+    code: str,
+    days: int = Query(90, ge=30, le=365),
+    horizon: int = Query(1, ge=1, le=20),
+):
+    """复赛 §3.C · 单股预测残差分位区间 · 80/95 区间
+
+    响应:
+      { p80: [-2.1, +6.3], p95: [-4.5, +8.7], sample: 305, residual_std: 2.1 }
+      404 · 样本量 < 30
+    """
+    result = await asyncio.to_thread(calibration.interval_from_residuals,
+                                     code.strip(), days, horizon)
+    if result is None:
+        raise HTTPException(404, f"样本量不足 · 需 ≥ {calibration.MIN_SAMPLE_INTERVAL} 条历史预测")
+    return result
+
+
+@router.get("/backtest/prob/{code}")
+async def get_class_prob(
+    code: str,
+    pred_change: float = Query(..., ge=-50, le=50),
+    days: int = Query(180, ge=30, le=365),
+):
+    """复赛 §3.C · 三类概率(up/flat/down)· 基于历史经验频率分桶
+
+    响应:
+      { up: 0.62, flat: 0.18, down: 0.20, bucket: '(1.0%, 1.5%]', sample_in_bucket: 45, sample_total: 305 }
+      404 · 样本量不足
+    """
+    result = await asyncio.to_thread(calibration.class_prob_from_history,
+                                     code.strip(), pred_change, days)
+    if result is None:
+        raise HTTPException(404, f"样本量不足 · 该股近 {days} 天历史预测不够")
+    return result
 
 
 @router.get("/backtest/stock/{code}")
