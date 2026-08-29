@@ -1,6 +1,7 @@
 """隔夜复盘(gm端) —— GET /api/gm/recap
 聚合用户美股自选隔夜真实表现+临近财报 → Gemini中文复盘。按用户+日期缓存12h。"""
 import os
+import re
 import json
 import logging
 from datetime import date
@@ -13,6 +14,59 @@ from app.services.gm.yahoo_hk import _cache_get, _cache_set
 
 log = logging.getLogger(__name__)
 router = APIRouter()
+
+# 抽 "名字 ±X.XX%" 二元组, 用于 LLM 编造数字防护
+# 2026-08-29 事故: Gemini 把 NVDA -4.57% 写成 +8.74% 全站找不到出处
+_NUM_RE = re.compile(r"([一-龥A-Za-z0-9·\.·\- ]+?)\s*([+-]\d+(?:\.\d+)?)\s*%")
+
+
+def _rule_ai(perf: list, ups: int, upcoming: list) -> dict:
+    """规则模板产出 ai 结构, 数字必然来自 perf 真值, 用作 LLM 兜底或润色基线。"""
+    if not perf:
+        return {"headline": "无自选股数据", "portfolio": "", "highlights": [], "watch_today": []}
+    top = perf[0]
+    return {
+        "headline": f"隔夜{ups}涨{len(perf) - ups}跌, {top['name']}{top['chg']:+.2f}%",
+        "portfolio": f"{ups}涨{len(perf) - ups}跌",
+        "highlights": [f"{p['name']} {p['chg']:+.2f}%" for p in perf[:3]],
+        "watch_today": upcoming[:2] or ["暂无重点日程"],
+    }
+
+
+def _verify_numbers(payload: dict, perf: list) -> tuple[bool, str]:
+    """遍历 payload 里所有字符串, 抽 (名字, 百分比) 二元组, 逐一比对 perf。
+    返回 (是否全部匹配, 首个失败原因)。误差阈值 0.01 —— 基线本就用 .2f 输入,
+    LLM 只要不改数字就能通过; 一旦四舍五入到 .1f 就当作编造(直接落回规则文本更安全)。"""
+    name2chg = {p["name"]: p["chg"] for p in perf}
+    texts: list[str] = []
+    for k in ("headline", "portfolio"):
+        v = payload.get(k)
+        if isinstance(v, str):
+            texts.append(v)
+    for k in ("highlights", "watch_today"):
+        for s in (payload.get(k) or []):
+            if isinstance(s, str):
+                texts.append(s)
+    for t in texts:
+        for name_raw, chg_str in _NUM_RE.findall(t):
+            name = name_raw.strip(" ·-")
+            try:
+                chg = float(chg_str)
+            except ValueError:
+                return False, f"数字解析失败: '{chg_str}' in '{t}'"
+            # 名字须为已知自选(允许前缀/后缀空白+中文标点)
+            real = name2chg.get(name)
+            if real is None:
+                # 尝试宽松匹配: name 可能被 LLM 加了"美股"/"港股"前缀
+                for n, c in name2chg.items():
+                    if n in name or name.endswith(n):
+                        real = c
+                        break
+            if real is None:
+                return False, f"提到未在自选里的股票: '{name}' → {chg:+.2f}%"
+            if abs(real - chg) >= 0.01:
+                return False, f"数字与真值不符: {name} 真={real:+.2f}% LLM={chg:+.2f}%"
+    return True, "ok"
 
 
 @router.get("/recap")
@@ -73,38 +127,49 @@ def build_recap(user_id: str) -> dict:
     perf_lines = "\n".join(
         f"- {'[美]' if p['market'] == 'US' else '[港]'}{p['name']}({p['code']}): 收{p['close']}{p['currency']} {p['chg']:+.2f}%"
         for p in perf)
-    prompt = f"""你是投研助理。基于以下真实数据, 为用户写一份简明的美港股复盘(美股为隔夜表现, 港股为最近交易日, 数据日{session_date})。
 
-【自选股表现】{ups}涨{len(perf) - ups}跌
+    # 基线永远用规则模板产出(数字必真); LLM 只负责润色措辞, 数字须与基线完全一致才采信。
+    # 2026-08-29 事故: Gemini 把 NVDA -4.57% 写成 +8.74%, 无任何校验直接推给用户
+    ai = _rule_ai(perf, ups, upcoming)
+
+    api_key = os.getenv("ONE_API_KEY", "")
+    if api_key:
+        polish_prompt = f"""基于以下真实数据, 润色 headline / portfolio / highlights / watch_today 的中文措辞。
+
+【真实数据 · 数据日 {session_date}】
 {perf_lines}
 【临近财报】{'; '.join(upcoming) or '无'}
 
-要求: 只用给定数据, 严禁编造; 中文口语化但专业; 严格按JSON输出:
-{{"headline": "一句话总结(<=30字)", "portfolio": "组合表现一句话",
-  "highlights": ["要点1(点名最大异动及幅度)", "要点2", "要点3"],
-  "watch_today": ["今日关注1", "今日关注2"]}}"""
+【当前文本(数字锁死, 你不能改)】
+headline: {ai['headline']}
+portfolio: {ai['portfolio']}
+highlights: {json.dumps(ai['highlights'], ensure_ascii=False)}
+watch_today: {json.dumps(ai['watch_today'], ensure_ascii=False)}
 
-    api_key = os.getenv("ONE_API_KEY", "")
-    ai = None
-    if api_key:
+铁律:
+1. 每一个百分比数字必须与"真实数据"里对应股票的 chg 完全一致(保留两位小数, 保留正负号), 一个字符都不能改
+2. 不许提到不在自选里的股票, 不许编造新数字
+3. 允许调整语气/加动词/补一句非数字的行情背景
+4. 每支被提及的股票名, 必须直接使用【真实数据】里出现的原始名称
+5. 严格返回 JSON, 结构与"当前文本"完全一致
+
+返回: {{"headline":"...", "portfolio":"...", "highlights":["...","...","..."], "watch_today":["...","..."]}}"""
         try:
             client = OpenAI(api_key=api_key,
                             base_url=os.getenv("ONE_API_BASE_URL", "http://104.197.139.51:3000/v1"),
                             timeout=60)
             resp = client.chat.completions.create(
                 model=os.getenv("ONE_API_MODEL", "gemini-3-flash-preview"),
-                messages=[{"role": "user", "content": prompt}],
-                response_format={"type": "json_object"}, temperature=0.3, max_tokens=800)
-            ai = json.loads(resp.choices[0].message.content or "{}")
+                messages=[{"role": "user", "content": polish_prompt}],
+                response_format={"type": "json_object"}, temperature=0.2, max_tokens=800)
+            polished = json.loads(resp.choices[0].message.content or "{}")
+            ok, why = _verify_numbers(polished, perf)
+            if ok and polished.get("headline"):
+                ai = polished
+            else:
+                log.warning("recap llm polish rejected: %s | raw=%s", why, resp.choices[0].message.content)
         except Exception as e:
-            log.warning("recap llm failed: %s", e)
-    if not ai or "headline" not in ai:
-        # LLM失败时降级为规则文本, 数据仍真实
-        top = perf[0]
-        ai = {"headline": f"隔夜{ups}涨{len(perf) - ups}跌, 最大异动{top['name']}{top['chg']:+.1f}%",
-              "portfolio": f"{ups}涨{len(perf) - ups}跌",
-              "highlights": [f"{p['name']} {p['chg']:+.2f}%" for p in perf[:3]],
-              "watch_today": upcoming[:2] or ["暂无重点日程"]}
+            log.warning("recap llm polish failed: %s", e)
 
     result = {"date": session_date, "stocks": perf, "ai": ai,
               "upcoming_earnings": upcoming,
