@@ -451,7 +451,7 @@ export default function ChatSidebar({ currentSessionId, onSelectSession, onNewSe
             style={{
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
               width: '100%', padding: '6px',
-              background: 'transparent', border: `1px dashed ${HUNTER.BORDER}`,
+              background: 'transparent', border: `1px dashed ${HUNTER.LINE}`,
               borderRadius: 8, color: HUNTER.INK_F,
               fontSize: 11, cursor: 'pointer',
             }}
