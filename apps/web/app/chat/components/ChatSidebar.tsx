@@ -426,33 +426,41 @@ export default function ChatSidebar({ currentSessionId, onSelectSession, onNewSe
         </div>
       )}
 
-      {/* 平台 key 入口 · 只在未解锁时显示(已解锁后隐藏 · 减少侧栏噪音) */}
-      {!unlocked && (
-        <div style={{ padding: '6px 10px 0' }}>
+      {/* 平台 key 入口 · 未解锁大按钮 · 已解锁小图标(2026-08-29 事故:key 配上后
+          按钮消失 · 用户想删/换找不到入口 · 只能 curl DELETE 或改数据库) */}
+      <div style={{ padding: '6px 10px 0' }}>
+        {!unlocked ? (
           <button
             onClick={() => setShowUnlock(true)}
             title="申请免费 key · 解锁全部工具与 SKILL"
             style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 6,
-              width: '100%',
-              padding: '8px 6px',
-              background: HUNTER.BRAND_PALE,
-              border: `1px solid ${HUNTER.THEME}`,
-              borderRadius: 8,
-              color: HUNTER.COPPER3,
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+              width: '100%', padding: '8px 6px',
+              background: HUNTER.BRAND_PALE, border: `1px solid ${HUNTER.THEME}`,
+              borderRadius: 8, color: HUNTER.COPPER3,
+              fontSize: 12, fontWeight: 600, cursor: 'pointer',
             }}
           >
             <Unlock size={13} strokeWidth={1.8} />
             <span>申请 Key · 解锁全部工具</span>
           </button>
-        </div>
-      )}
+        ) : (
+          <button
+            onClick={() => setShowUnlock(true)}
+            title="Hunter key 已配置 · 点击查看/更换/清除"
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+              width: '100%', padding: '6px',
+              background: 'transparent', border: `1px dashed ${HUNTER.BORDER}`,
+              borderRadius: 8, color: HUNTER.INK_F,
+              fontSize: 11, cursor: 'pointer',
+            }}
+          >
+            <Unlock size={11} strokeWidth={1.6} />
+            <span>Hunter key 已配置 · 管理</span>
+          </button>
+        )}
+      </div>
 
       {/* 底部工具入口 · MCP 组件已迁入 /library(数据源+工具箱)· 策略中心已成第三 tab · 此处不再展示 */}
 
