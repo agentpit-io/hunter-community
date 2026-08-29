@@ -4,16 +4,15 @@
 
 const TOKEN_KEY = 'hunter_token';
 
-export function getToken(): string {
-  if (typeof window === 'undefined') return '';
-  return localStorage.getItem(TOKEN_KEY) || '';
-}
-
 export function setToken(t: string) {
   if (typeof window !== 'undefined') localStorage.setItem(TOKEN_KEY, t);
 }
 
-/** 从URL ?t= 捕获token(微信OAuth跳转带过来), 存后清URL。gm/layout挂载时调用 */
+/** 从URL ?t= 捕获token(微信OAuth跳转带过来), 存后清URL。
+ * 2026-08-29: 从 gm/layout useEffect 调用 → 挪进 getToken() 内联,
+ * 因为 React effect bottom-up 顺序会让子页面(如 /gm/recap)先跑 useEffect
+ * 读到空 token 后直接 setState('empty'), 父 layout 再 captureTokenFromUrl 就晚了。
+ * 现在任何 getToken() 调用都会先消化 URL 里的 ?t=, 消除竞态。*/
 export function captureTokenFromUrl() {
   if (typeof window === 'undefined') return;
   const url = new URL(window.location.href);
@@ -23,6 +22,12 @@ export function captureTokenFromUrl() {
     url.searchParams.delete('t');
     window.history.replaceState({}, '', url.toString());
   }
+}
+
+export function getToken(): string {
+  if (typeof window === 'undefined') return '';
+  captureTokenFromUrl();
+  return localStorage.getItem(TOKEN_KEY) || '';
 }
 
 export async function gmFetch<T = unknown>(

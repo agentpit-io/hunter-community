@@ -80,13 +80,31 @@ def _check_once_sync() -> list[dict]:
 _recap_pushed_date: str | None = None
 
 
-def _recap_users() -> list[str]:
+def _recap_users_with_email() -> list[tuple[str, str]]:
+    """返回 [(ap_user_id, email)] · email 用于签 JWT 时装 payload · 缺 email 也不阻塞 · 缺时 email=''"""
     from app.services.database import get_conn
     conn = get_conn(); cur = conn.cursor()
-    cur.execute("SELECT DISTINCT user_id FROM stocks WHERE enabled = TRUE AND market IN ('US','HK')")
-    rows = [r[0] for r in cur.fetchall()]
+    cur.execute("""
+        SELECT DISTINCT s.user_id, COALESCE(u.email, '')
+        FROM stocks s
+        LEFT JOIN hermes_intel_users u ON u.ap_user_id = s.user_id
+        WHERE s.enabled = TRUE AND s.market IN ('US','HK')
+    """)
+    rows = [(r[0], r[1]) for r in cur.fetchall() if r[0]]
     conn.close()
     return rows
+
+
+def _sign_recap_jwt(uid: str, email: str) -> str:
+    """签一个 365d 有效期的 JWT · 供推送 URL 里 ?t= 用 · 用户点击后前端 captureTokenFromUrl 会覆盖 localStorage 里失效 token。
+    2026-08-29 事故: 只发相对路径 /gm/recap 时用户历史 token 若失效会永远 401 看不到详情。"""
+    import os, time
+    import jwt
+    secret = os.getenv("JWT_SECRET", "hermes-jwt-secret-2026")
+    return jwt.encode(
+        {"sub": uid, "email": email or "", "role": "USER",
+         "iat": int(time.time()), "exp": int(time.time()) + 365 * 24 * 3600},
+        secret, algorithm="HS256")
 
 
 async def _maybe_push_recaps():
@@ -100,16 +118,16 @@ async def _maybe_push_recaps():
     _recap_pushed_date = today
     if now.weekday() not in (1, 2, 3, 4, 5):
         return
-    import os
+    import os, time
     from app.routers.gm.recap import build_recap
     # P2: wx_push removed · push channel refactor lands in P3
     async def broadcast(**_kw):
         log.info("[gm_recap] would push (P2 stub): %s", _kw.get("title"))
         return 0
     oa = os.getenv("OA_DOMAIN", "https://yiqihecheng.net")
-    users = await asyncio.to_thread(_recap_users)
+    users = await asyncio.to_thread(_recap_users_with_email)
     sent = 0
-    for uid in users:
+    for uid, email in users:
         try:
             rec = await asyncio.to_thread(build_recap, uid)
             if not rec or rec.get("error"):
@@ -117,9 +135,11 @@ async def _maybe_push_recaps():
             ai = rec.get("ai") or {}
             content = (str(ai.get("portfolio", "")) + "\n" +
                        "\n".join("· " + h for h in (ai.get("highlights") or [])[:3]))[:500]
+            tok = _sign_recap_jwt(uid, email)
+            detail_url = f"{oa}/gm/recap?t={tok}&cb={int(time.time())}"
             sent += await broadcast(title=f"🌙 隔夜复盘 · {ai.get('headline', rec.get('date', ''))}",
                                     content=content, log_id="", user_id=uid,
-                                    push_type="gm_recap", detail_url=oa + "/gm/recap")
+                                    push_type="gm_recap", detail_url=detail_url)
         except Exception as e:
             log.warning("[gm_recap] push uid=%s failed: %s", uid, e)
     log.info("[gm_recap] daily 08:00 done: users=%d wx_sent=%d", len(users), sent)
