@@ -16,10 +16,39 @@ log = logging.getLogger(__name__)
 FINDATA_DB_URL = os.getenv("FINDATA_DB_URL", "")
 
 
+def _dsn() -> str:
+    """FINDATA_DB_URL → DATABASE_URL 兜底。
+
+    ## 为什么要兜底(2026-08-31 修)
+
+    原来这里只认 `FINDATA_DB_URL`,不配就 `raise`。而 FINDATA_DB_URL 指的是
+    **我们自己的 finance-data 服务器** —— 开源版用户 clone 下来根本没有这个
+    变量,也不该有(那是我们的私有库)。
+
+    后果是:凡是走 backtest 数据层的接口对开源用户**全部 503**——
+
+        GET /api/backtest/calibration    概率校准(评委建议 C)
+        GET /api/backtest/interval/{c}   预测区间
+        GET /api/backtest/prob/{c}       三类概率
+        GET /api/backtest/stock/{c}      单股预测评估(评委建议 A)
+
+    这四个恰好是复赛评委点名要看的功能。默认配置下点进去只有一句
+    "校准数据暂不可用",看起来像功能没做 —— 实际上代码全在,只是连不上库。
+
+    三张表(pred_snapshot / pred_backtest / pred_consistency)的建表语句在
+    `db/migrations/0004_pred_backtest.sql`,本地主库里就有,所以退到
+    `DATABASE_URL` 是可行的、也是开源版的正确默认。
+
+    生产仍优先用 FINDATA_DB_URL —— 那边数据全,这个改动不影响线上取数路径。
+    """
+    return FINDATA_DB_URL or os.getenv("DATABASE_URL", "")
+
+
 def conn():
-    if not FINDATA_DB_URL:
-        raise RuntimeError("FINDATA_DB_URL 未配置")
-    return psycopg2.connect(FINDATA_DB_URL, connect_timeout=10)
+    dsn = _dsn()
+    if not dsn:
+        raise RuntimeError("FINDATA_DB_URL / DATABASE_URL 均未配置")
+    return psycopg2.connect(dsn, connect_timeout=10)
 
 
 # ── 预测快照 ─────────────────────────────────────────────

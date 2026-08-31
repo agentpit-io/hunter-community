@@ -2,6 +2,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from app.services.database import (
+    get_conn,
     get_stocks, add_stock, remove_stock, hard_remove_stock,
     list_stocks_with_thesis, get_thesis, upsert_thesis, delete_thesis,
     get_stocks_by_user, add_stock_by_user, remove_stock_by_user,
@@ -84,6 +85,32 @@ async def add_to_watchlist(stock: StockIn, request: Request):
                      "why": f"{type(e).__name__}: {str(e)[:80]}"}
     return {"ok": True, "added": added, "finance_data": fd_result,
             "quant": quant}
+
+
+class SharesIn(BaseModel):
+    shares: int = 0
+
+
+@router.patch("/stocks/{code}/shares")
+async def set_shares(code: str, body: SharesIn, request: Request):
+    """设置持仓手数 —— 供 /cost 页把抽象费率换算成真实金额。
+
+    为什么放在 stocks 而不是 portfolio:portfolio 是另一套模型
+    (建仓价/成本/盈亏/调仓建议),而这里只要一个数量。
+    为一个整数去耦合一整套持仓模型不划算。
+    """
+    n = max(0, int(body.shares or 0))
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("UPDATE stocks SET shares=%s WHERE code=%s", (n, code))
+        if cur.rowcount == 0:
+            # 不在自选里就别静默成功 —— 用户会以为存上了
+            return {"error": "not_in_watchlist",
+                    "message": f"{code} 不在你的自选股里,先添加再设置持仓"}
+        conn.commit()
+        return {"ok": True, "code": code, "shares": n}
+    finally:
+        cur.close(); conn.close()
 
 
 @router.delete("/watchlist/{code}")

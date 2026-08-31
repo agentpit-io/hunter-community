@@ -13,7 +13,7 @@
  *   │ 1297.40      +0.39%  │
  *   ├──────┬──────┬────────┤
  *   │📊预测│💰成本│🎲概率  │   三个小框附属在下面
- *   │命中57│ 2 手 │开发中  │
+ *   │命中57│ 2 手 │ 查看  │
  *   └──────┴──────┴────────┘
  *
  * ## 三个小框为什么是这三个
@@ -50,6 +50,8 @@ type Quote = {
 }
 
 type Perf = {
+  /** demo-v1 = seed 造的演示数据 · 要在界面上标出来 */
+  model_ver?: string
   /** 方向命中率 0-1 · 拿不到时为 undefined —— **不填 0**,
    *  0 和"没数据"在界面上长得一样,而含义完全相反 */
   hit_rate?: number
@@ -106,7 +108,7 @@ export default function WatchlistPanel({ wide }: { wide?: boolean } = {}) {
         if (x.status !== 'fulfilled') return
         const [code, p] = x.value
         const hit = p?.direction_hit_rate ?? p?.hit_rate
-        if (typeof hit === 'number') pmap[code] = { hit_rate: hit, samples: p?.samples }
+        if (typeof hit === 'number') pmap[code] = { hit_rate: hit, samples: p?.samples, model_ver: p?.model_ver }
       })
       setPerf(pmap)
     } catch (e: any) {
@@ -189,7 +191,14 @@ function StockCard({ stock, quote, perf }: { stock: Stock; quote?: Quote; perf?:
   const pctColor = up ? '#C0392B' : down ? '#1E8449' : HUNTER.INK_F
 
   const hit = perf?.hit_rate
-  const hitTxt = typeof hit === 'number' ? `命中 ${Math.round(hit * 100)}%` : '暂无'
+  // **seed 数据要标出来。** pred_backtest 里的预测是 model_ver='demo-v1' —— 
+  // 真实收盘是真的,但"模型当初预测了多少"是合成的(真实历史 + 高斯噪声)。
+  // 不标的话评委看到"命中 57%"会以为是真实模型表现,问起来就很难看。
+  // seed 脚本自己的合规提示里就写着"前端应展示演示数据徽标"。
+  const isDemo = perf?.model_ver === 'demo-v1'
+  const hitTxt = typeof hit === 'number'
+    ? `命中 ${Math.round(hit * 100)}%${isDemo ? ' ·演示' : ''}`
+    : '暂无'
   // 55% 是文档里定的高亮线(§3.A.2.2)· 保持一致
   const hitColor = typeof hit === 'number' && hit >= 0.55 ? '#1E8449' : HUNTER.INK_S
 
@@ -222,17 +231,21 @@ function StockCard({ stock, quote, perf }: { stock: Stock; quote?: Quote; perf?:
           title="该股近 90 日方向命中率 · 点击看完整评估看板"
         />
         <MiniBox
-          href={`/strategies/backtest.html?symbol=${encodeURIComponent(stock.code)}`}
+          // 原来链的是 /strategies/backtest.html —— **那是组合回测,不是这只股票的成本**。
+          // 评委要的是"我持仓 N 手,买卖一趟付多少钱";回测页给的是
+          // "选因子选股票池看毛净收益曲线"。完全两回事,链过去用户会一脸茫然。
+          href={`/cost?symbol=${encodeURIComponent(stock.code)}`}
           icon="💰" label="交易成本"
           value={stock.shares ? `${stock.shares} 手` : '未填'}
           title="按持仓手数算真实买卖成本 · 点击填手数并看毛/净对比"
           border
         />
         <MiniBox
+          // 2026-08-31 /calibration 页已建 —— 不再是占位符,去掉 dim
           href={`/calibration?symbol=${encodeURIComponent(stock.code)}`}
-          icon="🎲" label="概率校准" value="开发中"
-          title="预测区间与三类概率 · 后端已就绪,前端开发中"
-          border dim
+          icon="🎲" label="概率校准" value="查看"
+          title="Brier / ECE / 可靠性曲线 + 80/95 预测区间"
+          border
         />
       </div>
     </div>
