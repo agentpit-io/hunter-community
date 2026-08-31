@@ -19,6 +19,21 @@ import os
 # work regardless of this flag. Only impacts the polling / scheduled jobs.
 HUNTER_MINIMAL_BOOT = os.getenv("HUNTER_MINIMAL_BOOT", "0") == "1"
 
+# HUNTER_API_KEY 缺失是最常见的"静默失败"根因:调 Kronos / 工具 / 数据全 403 ·
+# 用户看不出为何 · 排查半天。启动阶段直接 log 醒目 ERROR + /api/health 暴露状态。
+# 不阻塞启动 —— 用户仍可在 UI 左下角「解锁全部工具」现填现用。
+_HUNTER_API_KEY_CONFIGURED = bool(os.getenv("HUNTER_API_KEY", "").strip())
+if not _HUNTER_API_KEY_CONFIGURED:
+    logger.error(
+        "═" * 60 + "\n"
+        "❌ HUNTER_API_KEY 未配置 · 走 hunter 网关的功能(Kronos 预测 / "
+        "K 线 / 财报 / 新闻 / 工具 / SKILL) 将全部返回 403\n"
+        "   申请: https://hunter.agentpit.io/dev/api-keys  (免费 · 约 30 秒)\n"
+        "   填到: .env 里 HUNTER_API_KEY=hunt_tools_xxxx · 然后 docker compose up -d api\n"
+        "   或在 UI 左下角「解锁全部工具」现填现用\n"
+        + "═" * 60
+    )
+
 _signal_task = None
 _gm_alert_task = None
 _backtest_task = None
@@ -338,4 +353,10 @@ app.include_router(catalog_router.router, prefix="/api")
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok", "service": "hunter"}
+    # hunter_api_key 字段让 docker healthcheck 和运维一眼看出 SaaS 功能可不可用
+    # missing 时不返 503(不阻塞 web depends_on) · 但明确暴露状态
+    return {
+        "status": "ok",
+        "service": "hunter",
+        "hunter_api_key": "configured" if _HUNTER_API_KEY_CONFIGURED else "missing",
+    }

@@ -73,7 +73,9 @@ services:
       # MCP 回调 /api/internal/* 的共享口令 · **必须与 opencode 容器同值**
       # 两边都空时恰好也能对上,但那等于没有认证,所以给个默认值
       HUNTER_INTERNAL_KEY: ${HUNTER_INTERNAL_KEY:-hunter-internal-local}
-      # 平台 key · 解锁左侧全部工具与 SKILL(免费申请 hunter.agentpit.io/dev/api-keys)
+      # ⭐ 唯一必填的 hunter-side key · 一把管所有 SaaS 功能(Kronos + 数据 + 工具 + SKILL)
+      # 服务端按 key 归属计量/限流/鉴权 · 每部署自己申请一把即可(免费 · 30 秒)
+      # 申请: hunter.agentpit.io/dev/api-keys
       # 留空也能跑:聊天用你自己的 LLM key,工具则在 UI 左下角「解锁全部工具」里填 key
       HUNTER_API_KEY: ${HUNTER_API_KEY:-}
       # 独立运行模式 · 兜底默认改成空 · .env 里显式清空即真清空 · 不再默默指回平台
@@ -82,6 +84,8 @@ services:
       # 默认留空 = 自动选:配了 key 走 hunter 网关,没配则 akshare(A股免 key)
       DATA_SOURCE_PROVIDER: ${DATA_SOURCE_PROVIDER:-}
       HUNTER_SAAS_DATA_URL: ${HUNTER_SAAS_DATA_URL:-}
+      # 不推荐设 · 留空即自动 fallback 到 HUNTER_API_KEY(代码 finance_data_auth.py 已实现)
+      # 仅在需要"数据源用独立 key 分账"时才填 · 99% 用户直接留空
       HUNTER_SAAS_DATA_KEY: ${HUNTER_SAAS_DATA_KEY:-}
       # 预测回测三张表(pred_snapshot/pred_backtest/pred_consistency)默认走 finance-data
       # 库。留空则 /api/backtest/* 一律返 503。独立部署时若想让 hunter-community
@@ -120,6 +124,8 @@ services:
       FORECAST_PROVIDER: ${FORECAST_PROVIDER:-}
       KRONOS_LOCAL_URL: ${KRONOS_LOCAL_URL:-}
       HUNTER_SAAS_KRONOS_URL: ${HUNTER_SAAS_KRONOS_URL:-}
+      # 不推荐设 · 留空即自动 fallback 到 HUNTER_API_KEY(代码 providers/forecast/__init__.py 已实现)
+      # 仅在需要"Kronos 用独立 key 分账"时才填 · 99% 用户直接留空
       HUNTER_SAAS_KRONOS_KEY: ${HUNTER_SAAS_KRONOS_KEY:-}
       # SKILL 现在是 skills/ 下的标准 SKILL.md 文件(_14 Step A),api 要读它们
       HUNTER_SKILLS_DIR: /opt/hunter-skills
