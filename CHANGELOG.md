@@ -3,6 +3,66 @@
 All notable changes to Hunter Community Edition follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc1] - 2026-09-01
+
+### 复赛 4 类评委优化(A/B/C/D 全部就绪)
+
+#### ✨ 新增 · Added
+- **阶段 1** klines Daily ETL cron 挂载(6adcbd8)
+  - 每交易日 15:30 CST A股 · 17:00 港股 · 03:30 CST 次日 美股
+  - POST /api/admin/etl/run-market 手动触发端点
+  - GET /api/admin/etl/health 数据新鲜度暴露
+- **阶段 2** Kronos provider 生产切 kronos_saas(f633b2a)
+  - 修 upstream API 字段 code → symbol 422 bug
+  - 生产 .env FORECAST_PROVIDER=noop → kronos_saas
+  - kronos.agentpit.io gateway 端到端通
+- **阶段 3** scheduler 真跑 · daily_pipeline 端到端(小王 + 我 · 昨晚打通最后堵点)
+  - snapshot_job / backtest_job / consistency_job 三步已存在
+  - daily_close view v2 加 adv_20d(98da971 + 21cb47f)
+  - CSI300 300 只 seed + backtest_config 27 字段(0efd7ed)
+- **阶段 4** 逐笔成本 + sqrt_impact 冲击模型(21cb47f + 9312a16)
+  - backtest_trade 表 · 每笔含 commission/stamp_tax/slippage/other/adv_20d/impact_bps_actual
+  - broker preset(cn/hk/us/zero)· bp_static / sqrt_impact 双档滑点
+  - GET /api/quant/backtest/{id}/trades · 前 200 笔 JSON
+  - GET /api/quant/backtest/{id}/trades.csv · 全量 UTF-8 BOM CSV
+  - 前端 backtest.html 加逐笔明细面板 + 导出按钮
+- **阶段 5** 分享页 /p/{token}(小王 ee4f8d3)
+  - SSR + 演示数据黄条 + 事后 outcome 展示 + 免责声明
+- **阶段 6** 合规硬约束 · 灰度开关(小王 + 我 9815033)
+  - orchestrator SYSTEM_PROMPT 5 条合规硬约束
+  - compliance_guard 三档(strict/permissive/off)
+  - compliance_violation_log 表 · fire-and-forget 落库
+  - 报告水印扩到 5 页
+
+### 🔧 变更 · Changed
+- `providers/forecast/kronos_http.py` request body 加 symbol 字段(向后兼容 code)
+- `backtest_result` 加 trading_cost / gross_metrics / slippage_model 3 列(持久化 · 修缓存命中丢失)
+- `daily_close` view v2 · 加 adv_20d(20 日均成交额)
+
+### 🐛 修复 · Fixed
+- Kronos SaaS gateway 422 错误(f633b2a)
+- 缓存命中时 trading_cost 丢失
+
+### 📝 文档 · Docs
+- doc/开源hunter-community/04开源比赛/ 一批新方案 + 接手 + 交接文档
+- doc/01远程服务器编程/README-hunter-community.md fin-r1 手册
+
+### 🏗️ 数据库变更 · Migrations
+- 0009 compliance_violation_log
+- 0010 daily_close view v1
+- 0011 backtest_config
+- 0012 company_master
+- 0013 backtest_trade + backtest_result 加 3 列
+- 0014 daily_close v2(加 adv_20d)
+
+### 🎯 剩余工作(v1.0.0 正式发)
+- 观察连续 3 个交易日 scheduler 全绿
+- pred_backtest 积到 30+ 样本 · 校准 tab 有真数据
+- Grafana dashboard 关键指标
+- 稳定观察 3 天 → tag v1.0.0
+
+---
+
 ## [0.1.0-alpha] - 2026-08-10
 
 First public preview cutting five compressed sprints into `main`.
