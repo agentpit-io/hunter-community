@@ -2,6 +2,7 @@
 // 模型回测 · Admin 后台
 // 三块: 总览看板 / 股票池管理(可增删) / 参数配置
 import { useCallback, useEffect, useState } from 'react'
+import ComplianceWatermark from '../components/ComplianceWatermark'
 import { Activity, Settings, ListPlus, Trash2, RefreshCw, Play, Loader2, AlertCircle } from 'lucide-react'
 
 type Cfg = {
@@ -350,7 +351,9 @@ export default function BacktestPage() {
       {/* ── 股票池 ── */}
       {tab === 'pool' && (
         <div className="space-y-5">
-          <div className="rounded-xl border p-4" style={{ borderColor: 'var(--border)', background: 'var(--card)' }}>
+          <div className="relative rounded-xl border p-4 pb-6" style={{ borderColor: 'var(--border)', background: 'var(--card)' }}>
+            {/* 合规第 2 层 · 报告卡水印(见 ComplianceWatermark 注释) */}
+            <ComplianceWatermark compact />
             <h3 className="font-semibold text-sm mb-3">添加股票到回测池</h3>
             <div className="flex gap-2">
               <input value={newCode} onChange={e => setNewCode(e.target.value)} placeholder="6位代码 如 300308"

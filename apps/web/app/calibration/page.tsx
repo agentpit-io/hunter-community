@@ -32,6 +32,7 @@
 import { useEffect, useState, useCallback, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import TopNav from '../components/TopNav'
+import ComplianceWatermark from '../components/ComplianceWatermark'
 import { HUNTER } from '../lib/hunter-theme'
 
 type Bin = { bin: [number, number]; avg_pred: number; freq: number; n: number }
@@ -153,6 +154,8 @@ function CalInner() {
                 落在对角线下方 = 过度自信(说得比做到的多)。
               </p>
               <Reliability bins={rep.reliability!} />
+              {/* 合规第 2 层 · 报告卡水印 */}
+              <ComplianceWatermark compact />
             </section>
 
             {(rep.brier ?? 0) >= 0.25 && (
@@ -198,6 +201,7 @@ function CalInner() {
                 {itvMsg || '加载中…'}
               </div>
             )}
+            <ComplianceWatermark compact />
           </section>
         )}
 
@@ -281,7 +285,8 @@ function Metric({ title, v, note, bad, raw }: {
 
 const cardS: React.CSSProperties = {
   background: '#fff', border: `1px solid ${HUNTER.LINE}`,
-  borderRadius: 10, padding: '14px 16px', marginBottom: 14,
+  borderRadius: 10, padding: '14px 16px 22px', marginBottom: 14,
+  position: 'relative',   // ComplianceWatermark 是 absolute · 需要定位父元素
 }
 const label: React.CSSProperties = {
   fontSize: 12.5, fontWeight: 600, color: HUNTER.INK_S,

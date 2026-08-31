@@ -3,6 +3,7 @@
 // 与 /backtest (admin 后台) 分开:这里没有 pool/config 编辑 · 只展示 4 API 结果
 // 关联方案:doc/开源hunter-community/04开源比赛/2026-08-28_复赛验证方案-*.md §3.A
 import { useCallback, useEffect, useState } from 'react'
+import ComplianceWatermark from '../components/ComplianceWatermark'
 import { Activity, AlertTriangle, RefreshCw, TrendingUp, TrendingDown } from 'lucide-react'
 
 type Accuracy = {
@@ -422,13 +423,17 @@ function MetricCard({ title, value, subtitle, highlight }:
 function Panel({ title, subtitle, children }:
                { title: string; subtitle?: string; children: React.ReactNode }) {
   return (
-    <div className="p-4 rounded-lg border border-gray-200 dark:border-gray-700
+    // relative 是水印必需的 —— ComplianceWatermark 用 absolute 定位,
+    // 没有定位父元素的话它会跑到 body 右下角去
+    <div className="relative p-4 pb-6 rounded-lg border border-gray-200 dark:border-gray-700
                     bg-white dark:bg-gray-900">
       <div className="mb-3">
         <div className="font-semibold">{title}</div>
         {subtitle && <div className="text-xs opacity-60 mt-0.5">{subtitle}</div>}
       </div>
       {children}
+      {/* 合规第 2 层 · 每张报告卡常驻 —— 分享/截图出去也带得走 */}
+      <ComplianceWatermark compact />
     </div>
   )
 }

@@ -29,6 +29,7 @@
 import { useEffect, useState, useCallback, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import TopNav from '../components/TopNav'
+import ComplianceWatermark from '../components/ComplianceWatermark'
 import { HUNTER } from '../lib/hunter-theme'
 
 type Preset = {
@@ -236,6 +237,8 @@ function CostInner() {
                   滑点按静态 {p.breakdown?.slippage || 0}bps 估;
                   <b>大单的实际冲击会更高</b>,精确的冲击成本模型(sqrt_impact)还没做。
                 </div>
+                {/* 合规第 2 层 · 报告卡水印 */}
+                <ComplianceWatermark compact />
               </>
             ) : (
               <div style={{ fontSize: 13, color: HUNTER.INK_F, padding: '12px 0' }}>
@@ -273,7 +276,9 @@ function Big({ title, v, pct, strong }: { title: string; v: number; pct: number;
 
 const card: React.CSSProperties = {
   background: '#fff', border: `1px solid ${HUNTER.LINE}`,
-  borderRadius: 12, padding: '14px 16px', marginBottom: 12,
+  borderRadius: 12, padding: '14px 16px 22px', marginBottom: 12,
+  // ComplianceWatermark 是 absolute 定位 · 没有 relative 父元素会飘到 body 角上
+  position: 'relative',
 }
 const label: React.CSSProperties = { fontSize: 13, fontWeight: 600, color: HUNTER.INK }
 const th: React.CSSProperties = { textAlign: 'left', padding: '4px 6px', fontWeight: 500 }
