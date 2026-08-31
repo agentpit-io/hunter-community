@@ -21,7 +21,10 @@ class KronosHTTPForecast(IForecast):
 
     async def predict(self, code: str, pred_len: int = 10) -> dict:
         r = await self._client.post(
-            "/predict", json={"code": code, "pred_len": pred_len}
+            "/predict",
+            # 上游 hunter gateway API 期望字段是 symbol (2026-08-31 排查)
+            # code 保留 · 便于向下兼容潜在旧版
+            json={"symbol": code, "code": code, "pred_len": pred_len},
         )
         r.raise_for_status()
         out = r.json()
