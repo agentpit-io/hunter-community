@@ -585,7 +585,12 @@ class ChatOrchestrator:
         content = self._assistant_content
         try:
             from app.services.agent import compliance_guard
-            content, hits = compliance_guard.apply(content)
+            content, hits = compliance_guard.apply(
+                content,
+                user_id=self.user_id,
+                session_id=self.session_id,
+                model=MODEL_ROUTER,
+            )
             if hits:
                 logger.warning("[orch] session={} 合规改写 {} 处: {}",
                                self.session_id, len(hits),
