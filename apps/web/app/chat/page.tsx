@@ -6,6 +6,7 @@ import { HUNTER } from '../lib/hunter-theme'
 import TopNav from '../components/TopNav'
 import ChatSidebar from './components/ChatSidebar'
 import ChatWorkspace from './components/ChatWorkspace'
+import WatchlistPanel from './components/WatchlistPanel'
 import ArtifactPanel, { type ReportContent } from './components/ArtifactPanel'
 import DebateDepthPicker from './components/DebateDepthPicker'
 import type { MessagePartTool } from './lib/types'
@@ -15,6 +16,10 @@ function ChatPageInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [ready, setReady] = useState(false)
+  /** 侧栏当前标签 —— 决定主区显对话还是自选股。
+   *  自选股列表放主区而不是侧栏:侧栏 280px 塞不下"大框+三个小框"的卡片,
+   *  而且切到自选股时对话界面本来就该让位 */
+  const [mainTab, setMainTab] = useState<'chat' | 'watchlist'>('chat')
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [artifactPart, setArtifactPart] = useState<MessagePartTool | null>(null)
   const [reportContent, setReportContent] = useState<ReportContent | null>(null)
@@ -250,6 +255,7 @@ function ChatPageInner() {
             onNewSession={handleNewSession}
             onPickSkill={handlePickSkill}
             onCollapse={isMobile ? () => setMobileMenuOpen(false) : () => setSidebarCollapsed(true)}
+            onTabChange={setMainTab}
           />
         </div>
       )}
@@ -310,6 +316,17 @@ function ChatPageInner() {
         </button>
       )}
 
+      {/* 主区 · 按侧栏标签分流 —— 自选股时整块换掉,不是叠在对话上面。
+        * ChatWorkspace 用 display:none 藏起来而不是卸载:它内部有会话状态和
+        * 未发送的草稿,卸载再挂回来这些都没了 —— 用户切一下标签就丢输入,
+        * 那是比"多占点内存"糟得多的体验 */}
+      {mainTab === 'watchlist' && (
+        <div style={{ flex: 1, overflowY: 'auto', background: '#fff' }}>
+          <WatchlistPanel wide />
+        </div>
+      )}
+
+      <div style={{ flex: 1, minWidth: 0, display: mainTab === 'chat' ? 'flex' : 'none' }}>
       <ChatWorkspace
         sessionId={sessionId}
         onSessionCreated={setSessionId}
@@ -326,6 +343,7 @@ function ChatPageInner() {
         onSkillConsumed={() => setPendingSkillKey(null)}
         debateDepth={debateDepth}
       />
+      </div>
 
       {/* ArtifactPanel · 移动端不显示 (空间小) · 桌面端展开时占空间 */}
       {isArtifactOpen && !isMobile && (

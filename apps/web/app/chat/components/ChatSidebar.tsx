@@ -7,7 +7,6 @@ import { HUNTER, HUNTER_LOGO } from '../../lib/hunter-theme'
 import type { Session } from '../lib/types'
 import { listSessions, createSession } from '../lib/opencodeClient'
 import CapabilityPanel from './CapabilityPanel'
-import WatchlistPanel from './WatchlistPanel'
 import SkillManager from './SkillManager'
 import ProfileEditor from './ProfileEditor'
 import { getProfile } from '../lib/profileClient'
@@ -23,6 +22,10 @@ interface Props {
   onPickSkill?: (tpl: string, key: string) => void
   /** 折叠侧栏 · 由父级 sidebarCollapsed state 控制 */
   onCollapse?: () => void
+  /** 侧栏标签切换 → 通知父级换主区内容(对话 / 自选股)。
+   *  自选股列表放右边主区,不放侧栏 —— 侧栏 280px 塞不下卡片,
+   *  而且切到自选股时对话界面本来就该让位 */
+  onTabChange?: (tab: 'chat' | 'watchlist') => void
 }
 
 // Claude 风米黄 · 温暖但克制
@@ -83,7 +86,7 @@ function groupSessions(sessions: Session[]) {
   return { today, yesterday, week, older }
 }
 
-export default function ChatSidebar({ currentSessionId, onSelectSession, onNewSession, onPickSkill, onCollapse }: Props) {
+export default function ChatSidebar({ currentSessionId, onSelectSession, onNewSession, onPickSkill, onCollapse, onTabChange }: Props) {
   const router = useRouter()
   const [sessions, setSessions] = useState<Session[]>([])
   const [loading, setLoading] = useState(false)
@@ -96,8 +99,13 @@ export default function ChatSidebar({ currentSessionId, onSelectSession, onNewSe
     return (localStorage.getItem('hunter_sidebar_tab') as any) === 'watchlist' ? 'watchlist' : 'chat'
   })
   const switchTab = (t: 'chat' | 'watchlist') => {
+    onTabChange?.(t)
     setActiveTab(t)
     try { localStorage.setItem('hunter_sidebar_tab', t) } catch { /* ignore */ }
+
+  // 首次挂载把当前标签同步给父级 —— localStorage 记着上次是"自选股"的话,
+  // 刷新后主区也该直接显自选股,而不是显对话再等用户点一下
+  useEffect(() => { onTabChange?.(activeTab) }, [])   // eslint-disable-line react-hooks/exhaustive-deps
   }
   const [skillRefresh, setSkillRefresh] = useState(0)
   const [showProfile, setShowProfile] = useState(false)
@@ -444,11 +452,12 @@ export default function ChatSidebar({ currentSessionId, onSelectSession, onNewSe
         </div>
       )}
 
-      {/* 自选股 · 卡片式 · 每张卡挂三个入口(预测评估 / 交易成本 / 概率校准)
-       * —— 正好对上复赛评委的三项建议 */}
       {activeTab === 'watchlist' && (
-        <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0 8px', minHeight: 120 }}>
-          <WatchlistPanel />
+        <div style={{ flex: 1, padding: '18px 14px', color: HUNTER.INK_F, fontSize: 12, lineHeight: 1.9 }}>
+          自选股显示在右边 →<br />
+          每只股票下有<b>预测评估 / 交易成本 / 概率校准</b>三个入口。<br /><br />
+          也可以<b>直接在对话里说</b>:<br />
+          <span style={{ color: HUNTER.COPPER3 }}>「把贵州茅台加进自选,买了 2 手」</span>
         </div>
       )}
 

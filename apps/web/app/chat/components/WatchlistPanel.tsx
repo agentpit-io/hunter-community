@@ -56,7 +56,7 @@ type Perf = {
   samples?: number
 }
 
-export default function WatchlistPanel() {
+export default function WatchlistPanel({ wide }: { wide?: boolean } = {}) {
   const [stocks, setStocks] = useState<Stock[]>([])
   const [quotes, setQuotes] = useState<Record<string, Quote>>({})
   const [perf, setPerf] = useState<Record<string, Perf>>({})
@@ -139,7 +139,18 @@ export default function WatchlistPanel() {
   }
 
   return (
-    <div style={{ padding: '8px 10px 4px' }}>
+    <div style={{ padding: wide ? '20px 24px' : '8px 10px 4px', maxWidth: wide ? 1100 : undefined, margin: wide ? '0 auto' : undefined }}>
+      {wide && (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 18, fontWeight: 600, color: HUNTER.INK }}>自选股</div>
+          <div style={{ fontSize: 12.5, color: HUNTER.INK_F, marginTop: 4, lineHeight: 1.8 }}>
+            每只股票下面三个入口对应复赛评委的三项建议:
+            <b>预测评估</b>(模型对它准不准)· <b>交易成本</b>(真交易要付多少)·
+            <b>概率校准</b>(预测有多确定)。<br />
+            也可以直接在对话里说「把贵州茅台加进自选,买了 2 手」。
+          </div>
+        </div>
+      )}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         marginBottom: 8, padding: '0 2px',
@@ -155,9 +166,15 @@ export default function WatchlistPanel() {
         </button>
       </div>
 
-      {stocks.map(s => (
-        <StockCard key={s.code} stock={s} quote={quotes[s.code]} perf={perf[s.code]} />
-      ))}
+      <div style={wide ? {
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+        gap: 12,
+      } : undefined}>
+        {stocks.map(s => (
+          <StockCard key={s.code} stock={s} quote={quotes[s.code]} perf={perf[s.code]} />
+        ))}
+      </div>
 
       <AddButton />
     </div>
