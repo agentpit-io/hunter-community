@@ -145,6 +145,42 @@ container.innerHTML = `
     </details>
   </div>` : ''}
 
+  <!-- 阶段 4 · 逐笔明细面板 · 真实成交逐笔 + 全量 CSV 导出 -->
+  <details class="cost-panel" id="trades-panel" style="margin:12px 0;padding:14px 16px;border:1px solid var(--border,#e5e7eb);border-radius:10px;background:var(--bg-card,#fafafa)">
+    <summary style="cursor:pointer;font-weight:600;font-size:14px;display:flex;justify-content:space-between;align-items:baseline;gap:12px">
+      <span>📋 逐笔明细 · 前 <span id="trades-count">0</span> 笔</span>
+      <a href="#" id="trades-csv-link" style="font-size:12px;color:#3b82f6;font-weight:500"
+         onclick="downloadTradesCSV(); return false;">导出全部 CSV ↓</a>
+    </summary>
+    <div style="max-height:420px;overflow:auto;margin-top:12px">
+      <table style="width:100%;border-collapse:collapse;font-size:11.5px;white-space:nowrap">
+        <thead style="position:sticky;top:0;background:var(--panel-2,#f3f4f6);z-index:1">
+          <tr style="text-align:right">
+            <th style="padding:6px 8px;text-align:left">交易日</th>
+            <th style="padding:6px 8px;text-align:left">代码</th>
+            <th style="padding:6px 8px;text-align:center">方向</th>
+            <th style="padding:6px 8px">股数</th>
+            <th style="padding:6px 8px">价格</th>
+            <th style="padding:6px 8px">成交额</th>
+            <th style="padding:6px 8px">佣金</th>
+            <th style="padding:6px 8px">印花税</th>
+            <th style="padding:6px 8px">滑点</th>
+            <th style="padding:6px 8px">其他</th>
+            <th style="padding:6px 8px">合计</th>
+            <th style="padding:6px 8px">ADV20</th>
+            <th style="padding:6px 8px">占ADV</th>
+          </tr>
+        </thead>
+        <tbody id="trades-tbody">
+          <tr><td colspan="13" style="padding:16px;text-align:center;color:var(--muted)">加载逐笔明细…</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div style="margin-top:8px;opacity:.55;font-size:11px">
+      逐笔成本按回测所用滑点模型逐笔结算 · 冲击 bps 为 sqrt_impact 模型实际算出(static 表示按静态 bps)· 历史表现不代表未来收益。
+    </div>
+  </details>
+
   <!-- 6 指标卡 -->
   <div class="metric-grid">
     <div class="m-card">
@@ -388,6 +424,108 @@ container.innerHTML = `
     </div>`
   throw err
 }
+
+// ─────────────────────────────────────────────────────────────
+// 阶段 4 · 逐笔明细面板 · 表格 + 全量 CSV 导出
+// realResult 结构:
+//   · result_id 存在(缓存命中 / 已落库)→ 走后端 /trades 拿最新逐笔 + CSV 走后端全量
+//   · 无 result_id(异步跑完未持久化)→ 回退用 realResult.trades(引擎已返全量真数据)
+//     CSV 则前端用这份真数据生成 Blob(不伪造 · 只是数据来源换成 localStorage)
+//   · 两处都没有 → 显示"无逐笔数据 · 请重跑"(空的比假的好)
+// ─────────────────────────────────────────────────────────────
+const currentResultId = realResult?.result_id ?? null
+
+function _tdNum(v, digits = 2) {
+  return (v === null || v === undefined || Number.isNaN(+v)) ? '—' : (+v).toFixed(digits)
+}
+function _tdInt(v) {
+  return (v === null || v === undefined || v === '') ? '—'
+    : (+v).toLocaleString('zh-CN', { maximumFractionDigits: 0 })
+}
+function _slipCell(t) {
+  const s = _tdNum(t.slippage)
+  const tag = t.slippage_model === 'sqrt_impact'
+    ? (t.impact_bps_actual != null ? `${(+t.impact_bps_actual).toFixed(1)}bps` : 'sqrt')
+    : (t.slippage_model || 'static')
+  return `${s}<br><small style="opacity:.55">${tag}</small>`
+}
+function _renderTradesRows(trades) {
+  const tbody = document.getElementById('trades-tbody')
+  if (!tbody) return
+  if (!trades || trades.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="13" style="padding:16px;text-align:center;color:var(--muted)">该回测无逐笔数据(可能是历史缓存 · 请重跑一次)</td></tr>'
+    const cnt = document.getElementById('trades-count'); if (cnt) cnt.textContent = '0'
+    return
+  }
+  const rows = trades.map(t => {
+    const sideColor = t.side === 'buy' ? '#2C6B55' : '#B0532C'
+    const sideLabel = t.side === 'buy' ? '买' : (t.side === 'sell' ? '卖' : t.side)
+    const advRatio = (t.order_value_to_adv_ratio === null || t.order_value_to_adv_ratio === undefined)
+      ? '—' : (100 * +t.order_value_to_adv_ratio).toFixed(3) + '%'
+    return `<tr style="text-align:right;border-top:1px solid var(--border,#eee)">
+      <td style="padding:5px 8px;text-align:left">${t.trade_date ?? '—'}</td>
+      <td style="padding:5px 8px;text-align:left">${t.code ?? '—'}</td>
+      <td style="padding:5px 8px;text-align:center;color:${sideColor};font-weight:600">${sideLabel}</td>
+      <td style="padding:5px 8px">${_tdInt(t.shares)}</td>
+      <td style="padding:5px 8px">${_tdNum(t.price)}</td>
+      <td style="padding:5px 8px">${_tdInt(t.turnover)}</td>
+      <td style="padding:5px 8px">${_tdNum(t.commission)}</td>
+      <td style="padding:5px 8px">${_tdNum(t.stamp_tax)}</td>
+      <td style="padding:5px 8px">${_slipCell(t)}</td>
+      <td style="padding:5px 8px">${_tdNum(t.other)}</td>
+      <td style="padding:5px 8px;font-weight:600">${_tdNum(t.total_cost)}</td>
+      <td style="padding:5px 8px">${_tdInt(t.adv_20d)}</td>
+      <td style="padding:5px 8px">${advRatio}</td>
+    </tr>`
+  }).join('')
+  tbody.innerHTML = rows
+  const cnt = document.getElementById('trades-count'); if (cnt) cnt.textContent = trades.length
+}
+
+async function loadTrades() {
+  const tbody = document.getElementById('trades-tbody')
+  if (!tbody) return
+  // 优先走后端(拿 DB 最新 · 前 100 笔);拿不到再回退 localStorage 里引擎返的真逐笔
+  if (currentResultId != null) {
+    try {
+      const resp = await fetch(`/api/quant/backtest/${currentResultId}/trades?limit=100`)
+      if (resp.ok) {
+        const data = await resp.json()
+        _renderTradesRows(data.trades || [])
+        return
+      }
+    } catch (e) { console.warn('[trades] 后端拉取失败 · 回退本地', e) }
+  }
+  _renderTradesRows(realResult?.trades || [])
+}
+
+function downloadTradesCSV() {
+  // 有 result_id → 后端全量 CSV(含 UTF-8 BOM · Excel 直开)
+  if (currentResultId != null) {
+    window.location.href = `/api/quant/backtest/${currentResultId}/trades.csv`
+    return
+  }
+  // 无 result_id → 用本地真逐笔生成 CSV(异步回测未落库时 · 引擎已返全量)
+  const trades = realResult?.trades || []
+  if (!trades.length) { toast('无逐笔数据可导出 · 请重跑一次回测', 'warn'); return }
+  const head = ['交易日','代码','方向','股数','价格','成交额','佣金','印花税','滑点','其他','合计成本','滑点模型','冲击bps','ADV20日','单量占ADV']
+  const cols = ['trade_date','code','side','shares','price','turnover','commission','stamp_tax','slippage','other','total_cost','slippage_model','impact_bps_actual','adv_20d','order_value_to_adv_ratio']
+  const esc = (v) => {
+    if (v === null || v === undefined) return ''
+    const s = String(v)
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+  }
+  const lines = [head.join(',')]
+  for (const t of trades) lines.push(cols.map(c => esc(t[c])).join(','))
+  const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = `backtest_${currentResultId ?? 'local'}_trades.csv`
+  document.body.appendChild(a); a.click(); a.remove()
+  URL.revokeObjectURL(url)
+}
+
+if (isReal) loadTrades();
 
 // B3 · echarts NAV 曲线 · 用真 nav_series
 (function initNavChart() {

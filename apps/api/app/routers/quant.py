@@ -806,6 +806,81 @@ async def backtest_persist(task_id: str, request: Request):
 
 
 # ═══════════════════════════════════════════════════════════════
+# 阶段 4 · 逐笔明细查询 + 全量 CSV 导出(供前端「逐笔明细」面板)
+# ═══════════════════════════════════════════════════════════════
+
+# 前端表格取的字段(顺序即建表顺序 · 与 backtest_trade 列一一对应)
+_TRADE_VIEW_COLS = [
+    "id", "trade_date", "code", "side", "shares", "price", "turnover",
+    "commission", "stamp_tax", "slippage", "other", "total_cost",
+    "slippage_model", "impact_bps_actual", "adv_20d", "order_value_to_adv_ratio",
+]
+
+
+@router.get("/backtest/{result_id}/trades")
+async def get_trades(result_id: int, limit: int = 200):
+    """取某次回测的逐笔明细 · 默认前 200 笔 · 供前端表格显示。
+
+    trade_date 转 ISO 字符串(JSON 可序列化);无记录时 trades 为 []。
+    """
+    limit = max(1, min(limit, 2000))
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute(
+        """SELECT id, trade_date, code, side, shares, price, turnover,
+                  commission, stamp_tax, slippage, other, total_cost,
+                  slippage_model, impact_bps_actual, adv_20d, order_value_to_adv_ratio
+             FROM backtest_trade WHERE result_id=%s
+             ORDER BY trade_date, id LIMIT %s""",
+        (result_id, limit),
+    )
+    rows = cur.fetchall()
+    cur.close(); conn.close()
+
+    trades = []
+    for r in rows:
+        d = dict(zip(_TRADE_VIEW_COLS, r))
+        if d.get("trade_date") is not None:
+            d["trade_date"] = d["trade_date"].isoformat()
+        trades.append(d)
+    return {"result_id": result_id, "count": len(trades), "trades": trades}
+
+
+@router.get("/backtest/{result_id}/trades.csv")
+async def download_trades_csv(result_id: int):
+    """下载全量逐笔明细 CSV · UTF-8 BOM · Excel 可直接打开。"""
+    import csv, io
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute(
+        """SELECT trade_date, code, side, shares, price, turnover,
+                  commission, stamp_tax, slippage, other, total_cost,
+                  slippage_model, impact_bps_actual, adv_20d, order_value_to_adv_ratio
+             FROM backtest_trade WHERE result_id=%s
+             ORDER BY trade_date, id""",
+        (result_id,),
+    )
+    rows = cur.fetchall()
+    cur.close(); conn.close()
+
+    buf = io.StringIO()
+    buf.write("﻿")  # BOM · Excel 认 UTF-8
+    w = csv.writer(buf)
+    w.writerow([
+        "交易日", "代码", "方向", "股数", "价格", "成交额",
+        "佣金", "印花税", "滑点", "其他", "合计成本",
+        "滑点模型", "冲击bps", "ADV20日", "单量占ADV",
+    ])
+    for r in rows:
+        w.writerow(r)
+
+    filename = f"backtest_{result_id}_trades.csv"
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ═══════════════════════════════════════════════════════════════
 # D-5 · Bootstrap 稳健性检验(异步 · 100 次)
 # ═══════════════════════════════════════════════════════════════
 

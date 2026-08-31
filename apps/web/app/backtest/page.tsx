@@ -41,6 +41,11 @@ const POOL_LABEL: Record<string, string> = {
   core: '产业链代表股(推荐)', chain_all: '产业链全部股', watchlist: '用户自选股', custom: '纯自定义',
 }
 
+// TODO(阶段4 · 逐笔明细): 本页是因子准确率/持仓池/配置面板 · 不含 trading_cost/trades 回测报告结构。
+//   逐笔明细面板已在主入口 apps/web/public/strategies/backtest.html 落地(loadTrades + CSV 导出)。
+//   若后续本页要展示回测报告 · 复用后端两个端点:
+//     GET /api/quant/backtest/{result_id}/trades?limit=100   → 前 N 笔 JSON
+//     GET /api/quant/backtest/{result_id}/trades.csv          → 全量 UTF-8 BOM CSV
 export default function BacktestPage() {
   const [tab, setTab] = useState<'board' | 'pool' | 'config'>('board')
   const [cfg, setCfg] = useState<Cfg | null>(null)
