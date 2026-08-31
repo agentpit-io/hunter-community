@@ -73,6 +73,25 @@ def query_active_at(index_code: str, on_date: date) -> list[str]:
         codes = []
     finally:
         cur.close(); conn.close()
+
+    # ── 没有那一天的历史快照 → 回落到当前成分股 ──────────────
+    #
+    # 我们的 index_component 只有一个快照(首次 seed 那天)。
+    # 回测按调仓日逐期回查历史成分,于是**一年前的调仓日查到 0 只** ——
+    # 整个回测报 empty_universe,而表里明明有 300 行。
+    #
+    # 严格做法是攒够历史快照,但那要等时间。在此之前:
+    #   回落到当前成分股,**并让调用方知道这份结果有生存者偏差**
+    #   (用今天还在指数里的股票去回测过去,天然剔掉了退市和被调出的)
+    #
+    # **回落而不是报错**的理由:报错的话整个回测功能不可用;
+    # 回落之后结果可用,只是要标注偏差。而**不标注地回落**是最糟的 ——
+    # 用户会以为这是无偏的回测结果。标注在 backtest_engine 的 warn 字段里。
+    if not codes:
+        codes = query_current(index_code)
+        if codes:
+            log.info("[universe] %s 在 %s 无历史快照 · 回落当前成分股 %d 只 "
+                     "(存在生存者偏差)", index_code, on_date, len(codes))
     return codes
 
 
