@@ -68,6 +68,12 @@ _PUBLIC_PREFIXES = (
     # ⚠️ 只放这一条路径 —— `/api/user_sources` 其余端点(CRUD/test)
     # 都带用户凭证,必须登录,所以**不能**把 "/api/user_sources/" 整个放进来
     "/api/user_sources/templates",
+    # 预测存证分享 · 公开只读(方案 §3.1)
+    # 「要登录才能看的公开链接」不叫公开链接 —— 评委不登录就要能核对。
+    # ⚠️ 只放这一条子路径:/api/backtest/ 其余端点是全库汇总,仍须登录。
+    # token = secrets.token_urlsafe(9) ≈ 71bit 猜不动;表里没有 user_id 列,
+    # 不泄露身份;只有显式发过 token 的行才可达(其余 share_token IS NULL)。
+    "/api/backtest/share/",
     # Internal MCP bridge · shared-secret authenticated separately
     "/api/internal/",
 )

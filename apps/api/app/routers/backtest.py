@@ -108,6 +108,51 @@ async def get_calibration(
         raise HTTPException(503, "校准数据暂不可用")
 
 
+# ═══════════════════════════════════════════════════════════════
+# 预测存证分享 · 方案见 04开源比赛/2026-08-31_预测存证分享页_方案.md
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/backtest/share/{token}")
+async def get_share(token: str, request: Request):
+    """公开只读 · **不需要登录**。
+
+    要登录才能看的"公开链接"不叫公开链接 —— 这一条是整个功能的意义所在。
+    路径已加进 middleware/auth.py 的 _PUBLIC_PREFIXES,**只放这一条子路径**:
+    /api/backtest/ 其余端点(calibration/interval/stock/accuracy)是全库汇总,
+    仍然要登录,不该匿名可查。
+
+    响应里已验证和未验证的 horizon 都给 —— 只挑已验证的返回,
+    就又变成"挑好的给你看"了。
+    """
+    tok = (token or "").strip()
+    if not (6 <= len(tok) <= 16):
+        raise HTTPException(404, "分享链接无效")
+    data = await asyncio.to_thread(store.get_by_share_token, tok)
+    if not data:
+        raise HTTPException(404, "分享链接无效或已过期")
+    # 公开端点 · 留一条访问日志便于观察是否被刷(不记 UA/不落表)
+    log.info("[share] 访问 token=%s symbol=%s client=%s",
+             tok, data["symbol"], request.client.host if request.client else "?")
+    return data
+
+
+@router.post("/backtest/share/{code}")
+async def create_share(code: str):
+    """给该股**已有的最近一次快照**发公开 token(要登录)。
+
+    不是"现在跑一条新预测再分享" —— 见方案 §2:存证要证明
+    「这条预测在 T 时刻就已经存在」,当场生成的预测证明不了任何事。
+    """
+    sym = (code or "").strip()
+    if not sym:
+        raise HTTPException(400, "缺少股票代码")
+    r = await asyncio.to_thread(store.mint_share_token, sym)
+    if not r:
+        raise HTTPException(404, f"{sym} 还没有任何历史预测快照 · 无可存证")
+    r["share_path"] = f"/p/{r['token']}"
+    return r
+
+
 @router.get("/backtest/interval/{code}")
 async def get_interval(
     code: str,

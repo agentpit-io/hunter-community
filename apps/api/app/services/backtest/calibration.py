@@ -18,6 +18,8 @@ from typing import Optional
 
 from app.services.backtest.store import conn
 
+from app.services.backtest import store
+
 log = logging.getLogger(__name__)
 
 MIN_SAMPLE_INTERVAL = 30      # 残差分位所需最少样本
@@ -56,6 +58,7 @@ def interval_from_residuals(
 
     残差定义: real_change - pred_change · 分位数直接加到点估计 pred_change 上即得区间.
     """
+    symbol = store.resolve_symbol(symbol)   # 裸码补后缀 · 见 store.resolve_symbol
     c = conn(); cur = c.cursor()
     where = "symbol = %s AND pred_date > CURRENT_DATE - %s AND pred_change IS NOT NULL AND real_change IS NOT NULL"
     args = [symbol, days]
@@ -101,6 +104,7 @@ def class_prob_from_history(
         {up: 0.62, flat: 0.18, down: 0.20, bucket: '(1.0, 1.5]', sample_in_bucket: 45}
         None: 样本量 < 30 或桶内样本 < 8
     """
+    symbol = store.resolve_symbol(symbol)   # 裸码补后缀 · 见 store.resolve_symbol
     c = conn(); cur = c.cursor()
     cur.execute(
         """SELECT pred_change, real_change FROM pred_backtest
@@ -220,6 +224,7 @@ def get_calibration_report(
     · reliability: 用 pred_change 大小 → 经验命中率 · 分 10 桶
     · sample_size + note: 供 UI 判是否显"数据不足"
     """
+    symbol = store.resolve_symbol(symbol)   # 裸码补后缀 · 见 store.resolve_symbol
     c = conn(); cur = c.cursor()
     where = "pred_date > CURRENT_DATE - %s AND pred_change IS NOT NULL AND real_change IS NOT NULL"
     args = [days]

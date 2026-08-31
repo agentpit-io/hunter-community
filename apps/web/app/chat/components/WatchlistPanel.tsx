@@ -211,7 +211,10 @@ function StockCard({ stock, quote, perf }: { stock: Stock; quote?: Quote; perf?:
       <div style={{ padding: '9px 11px 8px' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
           <span style={{ fontSize: 13.5, fontWeight: 600, color: HUNTER.INK }}>{stock.name}</span>
-          <span style={{ fontSize: 11, color: HUNTER.INK_F }}>{stock.code}</span>
+          <span style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+            <ShareBtn code={stock.code} />
+            <span style={{ fontSize: 11, color: HUNTER.INK_F }}>{stock.code}</span>
+          </span>
         </div>
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginTop: 3 }}>
           <span style={{ fontSize: 15, fontWeight: 600, color: HUNTER.INK }}>
@@ -249,6 +252,61 @@ function StockCard({ stock, quote, perf }: { stock: Stock; quote?: Quote; perf?:
         />
       </div>
     </div>
+  )
+}
+
+/** 存证分享 · 方案见 04开源比赛/2026-08-31_预测存证分享页_方案.md
+ *
+ * 放在卡片头部而不是加第四个小框 —— 三个小框对应评委的三项建议,
+ * 是有意的一一对应,加第四个会把这层对应关系搞浑。
+ *
+ * 点一下 = 发 token + 复制链接。**不弹新窗口**:用户多半是想
+ * 把链接发给别人,而不是自己再看一遍。
+ */
+function ShareBtn({ code }: { code: string }) {
+  const [state, setState] = useState<'' | 'busy' | 'done' | 'none' | 'err'>('')
+
+  const go = async (e: React.MouseEvent) => {
+    e.preventDefault(); e.stopPropagation()
+    if (state === 'busy') return
+    setState('busy')
+    try {
+      const t = localStorage.getItem('hunter_token')
+      const r = await fetch(`/api/backtest/share/${encodeURIComponent(code)}`, {
+        method: 'POST',
+        headers: t ? { Authorization: `Bearer ${t}` } : {},
+      })
+      if (r.status === 404) { setState('none'); return }   // 这只票还没有任何历史预测
+      if (!r.ok) { setState('err'); return }
+      const d = await r.json()
+      const url = `${location.origin}${d.share_path}`
+      try {
+        await navigator.clipboard.writeText(url)
+      } catch {
+        // 非 https / 无权限时 clipboard 会抛 —— 别让复制失败吃掉链接本身
+        window.prompt('复制这个存证链接:', url)
+      }
+      setState('done')
+    } catch {
+      setState('err')
+    }
+    setTimeout(() => setState(''), 2600)
+  }
+
+  const txt = state === 'busy' ? '…'
+            : state === 'done' ? '已复制'
+            : state === 'none' ? '无记录'
+            : state === 'err'  ? '失败'
+            : '分享存证'
+
+  return (
+    <button onClick={go} title="生成公开存证链接 · 别人不用登录也能核对这条预测"
+      style={{
+        fontSize: 10.5, padding: '1px 7px', borderRadius: 20, cursor: 'pointer',
+        fontFamily: 'inherit', background: 'transparent',
+        border: `1px solid ${state === 'done' ? '#1E8449' : HUNTER.LINE}`,
+        color: state === 'done' ? '#1E8449' : HUNTER.INK_F,
+      }}>{txt}</button>
   )
 }
 

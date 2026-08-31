@@ -50,6 +50,54 @@ def conn():
         raise RuntimeError("FINDATA_DB_URL / DATABASE_URL 均未配置")
     return psycopg2.connect(dsn, connect_timeout=10)
 
+def resolve_symbol(code: str) -> str:
+    """把裸代码补成带交易所后缀的 symbol。
+
+    ## 起因(2026-08-31)
+
+    两张表的代码格式不一样:
+
+        stocks.code       600519       ← 自选股表 · 裸码
+        pred_snapshot.symbol  600519.SH   ← 预测表 · 带后缀
+
+    前端自选股卡片把 `stock.code` 原样传给 /api/backtest/accuracy,
+    于是 `symbol=600519` 一行都匹配不上:
+
+        symbol=600519      sample=0    hit_rate=null    ← 界面显示"暂无"
+        symbol=600519.SH   sample=320  hit_rate=54.7%
+
+    结果是**每只自选股的「预测评估」框都显示暂无**,看起来像功能没做,
+    实际上数据一直都在。而且不报错、不告警 —— sample=0 是个合法响应。
+
+    ## 为什么在后端补,而不是前端拼后缀
+
+    调用点不止一处:预测评估框、概率校准框、/evaluation 页、/calibration 页、
+    存证分享。每处都拼一次,就有每处都拼错的机会。
+    在数据层补一次,所有调用方一起修好。
+
+    ## 为什么查库而不是按规则推
+
+    "6 开头是沪市"这类规则有例外(北交所 8/4 开头、科创 688、退市代码),
+    推错了会静默查不到 —— 跟现在这个 bug 一模一样。
+    直接问库里实际存的是什么,查不到就原样返回(调用方照旧拿到空结果)。
+    """
+    c = (code or "").strip()
+    if not c or "." in c:
+        return c
+    try:
+        conn_ = conn(); cur = conn_.cursor()
+        cur.execute("SELECT symbol FROM pred_snapshot WHERE symbol LIKE %s LIMIT 1",
+                    (c + ".%",))
+        row = cur.fetchone()
+        cur.close(); conn_.close()
+        if row:
+            return row[0]
+    except Exception as e:
+        log.debug("[store] resolve_symbol(%s) 查库失败: %s", c, e)
+    return c
+
+
+
 
 # ── 预测快照 ─────────────────────────────────────────────
 
@@ -219,6 +267,7 @@ def save_consistency(rows: list[dict]) -> int:
 
 def accuracy_stats(days: int = 30, symbol: str = "") -> dict:
     """整体/分horizon/分信号档 的方向命中率与平均误差"""
+    symbol = resolve_symbol(symbol)   # 裸码补后缀 · 见 resolve_symbol 的说明
     c = conn(); cur = c.cursor()
     where = "pred_date > CURRENT_DATE - %s"
     args: list = [days]
@@ -301,6 +350,7 @@ def symbol_detail(symbol: str, runs: int = 5) -> dict:
       matrix: 用于画"同一目标日的历次预测"对比 {pred_date: {run_date: change_pct}}
       reversals: 该股的反转记录
     """
+    symbol = resolve_symbol(symbol)
     c = conn(); cur = c.cursor()
 
     # 近 N 次预测发起日
@@ -368,6 +418,7 @@ def symbol_detail(symbol: str, runs: int = 5) -> dict:
 
 def symbol_evolution(symbol: str, limit: int = 40) -> list[dict]:
     """单股的预测演变(轻量版, 兼容旧调用)"""
+    symbol = resolve_symbol(symbol)
     c = conn(); cur = c.cursor()
     cur.execute("""SELECT pred_date, run_date, change_pct, signal
                    FROM pred_snapshot WHERE symbol = %s
@@ -377,3 +428,169 @@ def symbol_evolution(symbol: str, limit: int = 40) -> list[dict]:
            for r in cur.fetchall()]
     c.close()
     return out
+
+
+# ═══════════════════════════════════════════════════════════════
+# 预测存证分享 · 方案见 doc/开源hunter-community/04开源比赛/
+#                    2026-08-31_预测存证分享页_方案.md
+# ═══════════════════════════════════════════════════════════════
+
+def mint_share_token(symbol: str) -> dict | None:
+    """给某只股票**已存在的最近一次快照**发一个公开 token。
+
+    ## 为什么是"已存在的",不是"现在跑一条"
+
+    原方案写的是 `from-live` —— 用户点分享,立刻跑一遍模型,存快照,返 token。
+    这里有意偏离,理由在方案 §2:
+
+    存证要证明的是「这条预测在 T 时刻就已经存在」。如果预测是点击那一刻才
+    生成的,它的诞生时间就晚于它所预测的日期 —— **这样的链接证明不了任何事**,
+    拿今天的数据算今天的"预测"当然准。
+
+    分享一条早就躺在库里、run_date 明写在页面上的旧预测,
+    它的价值恰恰在于是旧的。
+
+    ## 一次快照一个 token · token 落在"锚点行"上
+
+    方案原文写的是「同一 base_date 的多个 horizon 共用一个 token」,
+    实现时撞了库:
+
+        idx_pred_snap_share_token  UNIQUE (share_token) WHERE share_token IS NOT NULL
+
+    **share_token 是全表唯一的**,同一个值不可能写进 5 个 horizon 行 ——
+    UPDATE 直接 UniqueViolation。
+
+    改法:token 只写在 horizon 最小的那一行(锚点),读取时由锚点找出
+    (symbol, base_date) 下的全部 horizon。对外行为完全一致 ——
+    一个链接看全 1/2/3/5/10 天 —— 只是存法不同,而且不用动索引
+    (生产库规则禁 DROP/ALTER 约束)。
+
+    重复调用返回原 token,不重新发:多个链接指向同一条预测,
+    存证的唯一性就没了。
+    """
+    symbol = resolve_symbol(symbol)
+    import secrets
+
+    c = conn(); cur = c.cursor()
+    try:
+        # 最近一次快照的 base_date
+        cur.execute("""
+            SELECT base_date FROM pred_snapshot
+             WHERE symbol = %s
+             ORDER BY base_date DESC, run_date DESC
+             LIMIT 1
+        """, (symbol,))
+        row = cur.fetchone()
+        if not row:
+            return None
+        base_date = row[0]
+
+        # 这次快照下已经有人发过 token 了吗(任一 horizon 上有就算)
+        cur.execute("""
+            SELECT share_token FROM pred_snapshot
+             WHERE symbol = %s AND base_date = %s AND share_token IS NOT NULL
+             LIMIT 1
+        """, (symbol, base_date))
+        hit = cur.fetchone()
+        if hit:
+            log.info("[share] %s base=%s 已有 token · 复用", symbol, base_date)
+            return {"token": hit[0], "symbol": symbol,
+                    "base_date": base_date.isoformat(), "reused": True}
+
+        # token_urlsafe(9) → 12 字符 ≈ 71 bit · 猜不动(列宽 varchar(16))
+        # 只写 horizon 最小的那一行 —— share_token 全表唯一,写不进多行
+        token = secrets.token_urlsafe(9)
+        cur.execute("""
+            UPDATE pred_snapshot SET share_token = %s
+             WHERE symbol = %s AND base_date = %s
+               AND horizon = (SELECT MIN(horizon) FROM pred_snapshot
+                               WHERE symbol = %s AND base_date = %s)
+        """, (token, symbol, base_date, symbol, base_date))
+        if cur.rowcount != 1:
+            c.rollback()
+            log.warning("[share] %s base=%s 锚点行更新影响 %d 行(预期 1)· 放弃",
+                        symbol, base_date, cur.rowcount)
+            return None
+        c.commit()
+        log.info("[share] %s base=%s 发 token(锚点 horizon)", symbol, base_date)
+        return {"token": token, "symbol": symbol,
+                "base_date": base_date.isoformat(), "reused": False}
+    finally:
+        cur.close(); c.close()
+
+
+def get_by_share_token(token: str) -> dict | None:
+    """按 token 取整条存证 —— 公开只读,无需登录。
+
+    **已验证和未验证的都返回。** outcome=None 表示还没到验证日,
+    前端必须照样显示 —— 只挑已验证的给看,就又变成挑好的了。
+    """
+    c = conn(); cur = c.cursor()
+    try:
+        # ① 锚点行(token 只落在 horizon 最小的那行 · 见 mint_share_token)
+        cur.execute("""
+            SELECT symbol, base_date FROM pred_snapshot WHERE share_token = %s
+        """, (token,))
+        anchor = cur.fetchone()
+        if not anchor:
+            return None
+        symbol, base_date = anchor
+
+        # ② 由锚点取出这次快照的全部 horizon
+        cur.execute("""
+            SELECT symbol, run_date, base_date, pred_date, horizon,
+                   last_close, pred_close, change_pct, direction,
+                   signal, confidence, factors, model_ver
+              FROM pred_snapshot
+             WHERE symbol = %s AND base_date = %s
+             ORDER BY horizon
+        """, (symbol, base_date))
+        rows = cur.fetchall()
+        if not rows:
+            return None
+
+        run_date = rows[0][1]
+
+        # 事后真实结果 —— 对得上就带上,对不上留 None
+        cur.execute("""
+            SELECT horizon, real_change, dir_hit, abs_error, pred_date
+              FROM pred_backtest
+             WHERE symbol = %s AND base_date = %s
+        """, (symbol, base_date))
+        outcomes = {
+            r[0]: {
+                "real_change": float(r[1]) if r[1] is not None else None,
+                "dir_hit": r[2],
+                "abs_error": float(r[3]) if r[3] is not None else None,
+                "pred_date": r[4].isoformat() if r[4] else None,
+            } for r in cur.fetchall()
+        }
+    finally:
+        cur.close(); c.close()
+
+    def _f(v):
+        return float(v) if v is not None else None
+
+    model_ver = rows[0][12]
+    return {
+        "token": token,
+        "symbol": symbol,
+        "run_date": run_date.isoformat(),
+        "base_date": base_date.isoformat(),
+        "model_ver": model_ver,
+        # demo-v1 是 seed 合成的演示数据 —— 分享页是最容易被截图转发的一页,
+        # 这个标记必须传到前端(方案 §5)
+        "is_demo": model_ver == "demo-v1",
+        "factors": rows[0][11] or {},
+        "predictions": [{
+            "horizon": r[4],
+            "pred_date": r[3].isoformat(),
+            "last_close": _f(r[5]),
+            "pred_close": _f(r[6]),
+            "change_pct": _f(r[7]),
+            "direction": r[8],
+            "signal": r[9],
+            "confidence": _f(r[10]),
+            "outcome": outcomes.get(r[4]),
+        } for r in rows],
+    }
