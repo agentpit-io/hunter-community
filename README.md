@@ -440,7 +440,7 @@ description: 一句话说明什么时候该用它 —— 模型据此判断要�
 | 接入你自己的 MCP / 数据源 | ✅ 无需任何我方 key | ✅ |
 | 内置 23 SKILL(方法论) | ✅ 全部随代码分发 · 无需任何 key | ✅ |
 | UZI 深度分析(22 维) | ✅ 数据源三选一(免费源/自接/平台管道)| ✅ |
-| Kronos 走势预测 | ✅ 平台管道(免费) · 或自建 GPU | ✅ |
+| Kronos 走势预测 | ✅ 平台管道(免费) · 或自建 GPU · [直连](./docs/kronos-direct-access.md)(oapk_ key)| ✅ |
 | TrueSource 另类情报 | ✅ 平台管道(免费) · 或自采 | ✅ |
 | 投资记忆体(本地存储) | ✅ 永久免费 · 本地 Postgres | ✅ |
 | GitHub 一键装 SKILL | ✅ (v0.2.3) | ✅ |
