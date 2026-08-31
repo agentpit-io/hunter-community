@@ -14,7 +14,7 @@ import json
 import logging
 import math
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from datetime import date, timedelta
 
 from app.services.database import get_conn
@@ -36,6 +36,166 @@ def compute_spec_hash(strategy: dict, start: date, end: date) -> str:
         "end": end.isoformat(),
     }, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+# ═══════════════════════════════════════════════════════════════
+# 逐笔交易记录 + 单笔成本模型(阶段 4)
+# ═══════════════════════════════════════════════════════════════
+
+@dataclass
+class TradeRecord:
+    """一次买入或卖出的完整记录 · 用于逐笔明细展示 · 写入 backtest_trade 表"""
+    trade_date: date
+    code: str
+    side: str           # buy / sell
+    shares: int
+    price: float
+    turnover: float
+    commission: float
+    stamp_tax: float
+    slippage: float
+    other: float
+    total_cost: float
+    net_pnl: float | None
+    slippage_model: str
+    impact_bps_actual: float
+    adv_20d: float | None
+    order_value_to_adv_ratio: float | None
+
+
+def _suffix_code(code: str) -> str:
+    """裸 code 补市场后缀 · 与 daily_close view 同一套规则(6 开头 → 沪 · 余 → 深)"""
+    return code + (".SH" if code.startswith("6") else ".SZ")
+
+
+def _compute_trade_cost(
+    side: str,
+    turnover: float,
+    preset,  # BrokerPreset
+    adv_20d: float,
+    slippage_model: str = "bp_static",
+    impact_k: float = 0.2,
+) -> dict:
+    """算单笔交易成本 · 返 dict 供 TradeRecord 用。
+
+    bp_static:滑点走 preset 静态 bps。
+    sqrt_impact:冲击成本 = k · sqrt(order_value / ADV) · 单位 bps —— 大单相对
+    当日成交额越大 · 冲击越高。仍取 max(静态, 冲击) · 不会比静态更乐观。
+    ADV 缺失(新股/数据缺)时静默退回静态 bps · **不编造冲击值**。
+    """
+    side_cost = preset.buy if side == "buy" else preset.sell
+    commission_bps = side_cost.commission
+    stamp_tax_bps = side_cost.stamp_tax
+    other_bps = side_cost.other
+
+    if slippage_model == "sqrt_impact" and adv_20d and adv_20d > 0:
+        ratio = turnover / adv_20d
+        impact_bps = impact_k * (ratio ** 0.5) * 10000
+        slippage_bps = max(side_cost.slippage, impact_bps)
+    else:
+        slippage_bps = side_cost.slippage
+        impact_bps = 0.0
+
+    commission = turnover * commission_bps / 10000
+    stamp_tax = turnover * stamp_tax_bps / 10000
+    slippage = turnover * slippage_bps / 10000
+    other = turnover * other_bps / 10000
+
+    return {
+        "commission": commission,
+        "stamp_tax": stamp_tax,
+        "slippage": slippage,
+        "other": other,
+        "total_cost": commission + stamp_tax + slippage + other,
+        "slippage_bps": slippage_bps,
+        "impact_bps": impact_bps,
+    }
+
+
+def _price_and_adv(codes: list[str], dt: date) -> dict:
+    """一次查一批股在 dt(或之前最近交易日)的收盘价 + 20 日均成交额(元)。
+
+    返回 {code: (price, adv_20d)} · price/adv 可能为 None(停牌/新股/数据缺)。
+    直接算 amount = close × volume × 100(volume 单位是手)· 与 daily_close view 同口径。
+    拿不到就给 None —— 上层跳过这笔 · 不编造价格。
+    """
+    if not codes:
+        return {}
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT c.code,
+             (SELECT close FROM klines k WHERE k.code=c.code AND k.period='daily'
+                AND k.ts <= %s AND k.close IS NOT NULL
+              ORDER BY k.ts DESC LIMIT 1) AS px,
+             (SELECT AVG(close * volume * 100) FROM (
+                SELECT close, volume FROM klines k WHERE k.code=c.code AND k.period='daily'
+                  AND k.ts <= %s AND k.close IS NOT NULL AND k.volume IS NOT NULL
+                ORDER BY k.ts DESC LIMIT 20
+              ) s) AS adv
+           FROM (SELECT unnest(%s::text[]) AS code) c""",
+        (dt, dt, codes),
+    )
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    out = {}
+    for code, px, adv in rows:
+        out[code] = (
+            float(px) if px is not None else None,
+            float(adv) if adv is not None else None,
+        )
+    return out
+
+
+def _rebalance_trades(
+    dt0: date,
+    to_buy: set,
+    to_sell: set,
+    notional_per_name: float,
+    preset,
+    slippage_model: str,
+    impact_k: float,
+) -> list["TradeRecord"]:
+    """一次调仓的逐笔记录 · 等权 · 每只股分到 notional_per_name 元。
+
+    shares 取整到 lot_size 倍(一手)· 拿不到价格或凑不满一手的跳过(不编造)。
+    net_pnl 暂不算(需逐笔跟踪建仓成本 · 阶段 4 先留 None · schema 允许)。
+    """
+    codes_all = sorted(to_buy) + sorted(to_sell)
+    if not codes_all or notional_per_name <= 0:
+        return []
+    price_adv = _price_and_adv(codes_all, dt0)
+    recs: list[TradeRecord] = []
+    for code in codes_all:
+        side = "buy" if code in to_buy else "sell"
+        px, adv = price_adv.get(code, (None, None))
+        if not px or px <= 0:
+            continue  # 拿不到价格 · 跳过 · 不编造
+        shares = int(notional_per_name / px // preset.lot_size) * preset.lot_size
+        if shares <= 0:
+            continue  # 凑不满一手
+        turnover_amt = shares * px
+        cost = _compute_trade_cost(side, turnover_amt, preset, adv or 0.0, slippage_model, impact_k)
+        recs.append(TradeRecord(
+            trade_date=dt0,
+            code=_suffix_code(code),
+            side=side,
+            shares=shares,
+            price=round(px, 4),
+            turnover=round(turnover_amt, 2),
+            commission=round(cost["commission"], 4),
+            stamp_tax=round(cost["stamp_tax"], 4),
+            slippage=round(cost["slippage"], 4),
+            other=round(cost["other"], 4),
+            total_cost=round(cost["total_cost"], 4),
+            net_pnl=None,
+            slippage_model=slippage_model,
+            impact_bps_actual=round(cost["impact_bps"], 4),
+            adv_20d=round(adv, 2) if adv else None,
+            order_value_to_adv_ratio=round(turnover_amt / adv, 6) if adv and adv > 0 else None,
+        ))
+    return recs
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -317,6 +477,17 @@ def run_backtest(strategy: dict, start: date, end: date, user_id: str | None = N
     else:
         cost_bps = _explicit_bps
 
+    # 阶段 4 · 逐笔成本参数(可选 · 从 strategy.config 读)
+    #   slippage_model: bp_static(默认)/ sqrt_impact
+    #   impact_k: sqrt_impact 冲击系数 · 默认 0.2(保守)
+    # capital 只用于把归一化 nav 折成"元" · 让 turnover / ADV 有物理意义
+    # (逐笔明细是**额外产出** · 不参与 nav 计算 · 向后兼容)
+    slippage_model = (strategy["config"].get("slippage_model") or "bp_static").lower()
+    if slippage_model not in ("bp_static", "sqrt_impact"):
+        slippage_model = "bp_static"
+    impact_k = float(strategy["config"].get("impact_k") or 0.2)
+    capital_base = float(strategy["config"].get("capital") or 1_000_000)
+
     nav = [1.0]              # 净值(扣成本)
     nav_gross = [1.0]        # 毛净值(不扣成本 · 复赛演示对比用)
     nav_series = []
@@ -324,6 +495,7 @@ def run_backtest(strategy: dict, start: date, end: date, user_id: str | None = N
     positions_hist = []          # 每期 code list
     picks_hist = []              # 每期完整 picks(含 factor_contrib) · 用于最后一期展示
     turnover_hist = []
+    trades: list[TradeRecord] = []   # 阶段 4 · 逐笔明细(额外产出 · 不入 nav)
     for i in range(len(schedule) - 1):
         dt0, dt1 = schedule[i], schedule[i+1]
         picks = score_and_select(strategy, dt0, user_id)
@@ -331,6 +503,15 @@ def run_backtest(strategy: dict, start: date, end: date, user_id: str | None = N
         prev_codes = positions_hist[-1] if positions_hist else []
         turnover = _calc_turnover(prev_codes, codes)
         cost = turnover * cost_bps / 10000
+        # 阶段 4 · 逐笔 · 本期换出/换入的股 · 各分到等权 notional
+        # 用 nav[-1](本期期初净值)× capital 折成元 · 只为让 turnover/ADV 有意义
+        to_sell = set(prev_codes) - set(codes)
+        to_buy = set(codes) - set(prev_codes)
+        if to_sell or to_buy:
+            _denom = max(len(codes), len(prev_codes), 1)
+            _notional = capital_base * nav[-1] / _denom
+            trades.extend(_rebalance_trades(
+                dt0, to_buy, to_sell, _notional, preset, slippage_model, impact_k))
         period_ret = _period_return(codes, dt0, dt1)
         nav.append(nav[-1] * (1 - cost) * (1 + period_ret))
         nav_gross.append(nav_gross[-1] * (1 + period_ret))
@@ -494,7 +675,13 @@ def run_backtest(strategy: dict, start: date, end: date, user_id: str | None = N
             "cost_ratio_of_gross_pct": cost_ratio_pct,   # 成本吃了毛收益的百分之多少
             "breakdown": cost_breakdown,            # 每项成本各占多少 bps + 各消耗多少
             "turnover_total": round(sum(turnover_hist), 4),
+            # 阶段 4 · 逐笔成本模型标记
+            "slippage_model": slippage_model,
+            "impact_k": impact_k if slippage_model == "sqrt_impact" else None,
+            "trades_count": len(trades),
         },
+        # 阶段 4 · 逐笔明细 · 全部返回(router 落 backtest_trade · 前 200 笔发前端)
+        "trades": [{**asdict(t), "trade_date": t.trade_date.isoformat()} for t in trades],
         "duration_ms": int((time.time() - t0) * 1000),
         # 取不到指数数据时显式给 null(而不是省略,也不是补一条平线)——
         # 前端据此把基准线整块隐藏。补出来的基准会让超额收益看起来很漂亮。

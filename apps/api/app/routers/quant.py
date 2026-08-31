@@ -22,6 +22,41 @@ from pydantic import BaseModel
 from app.services.database import get_conn
 from app.services.quant import factor_defs, strategy_engine, backtest_engine
 
+try:
+    from psycopg2.extras import execute_values
+except Exception:  # pragma: no cover · psycopg2 缺失时逐笔落库降级为空
+    execute_values = None
+
+
+# 阶段 4 · 逐笔明细字段(与 backtest_trade 表列一一对应)
+_TRADE_COLS = [
+    "trade_date", "code", "side", "shares", "price", "turnover",
+    "commission", "stamp_tax", "slippage", "other", "total_cost",
+    "net_pnl", "slippage_model", "impact_bps_actual",
+    "adv_20d", "order_value_to_adv_ratio",
+]
+
+
+def _persist_trades(cur, result_id: int, trades: list[dict]) -> int:
+    """把回测返回的逐笔 trades 批量写入 backtest_trade · 返写入笔数。
+
+    先删旧记录(ON CONFLICT 覆盖 result 时逐笔也要跟着刷新)· 再批量插。
+    trades 为空或 execute_values 不可用时安静跳过(不阻断主流程)。
+    """
+    cur.execute("DELETE FROM backtest_trade WHERE result_id=%s", (result_id,))
+    if not trades or execute_values is None:
+        return 0
+    rows = [
+        [result_id] + [t.get(c) for c in _TRADE_COLS]
+        for t in trades
+    ]
+    execute_values(
+        cur,
+        "INSERT INTO backtest_trade (result_id, " + ", ".join(_TRADE_COLS) + ") VALUES %s",
+        rows,
+    )
+    return len(rows)
+
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/quant", tags=["quant"])
@@ -675,12 +710,28 @@ async def run_backtest_ep(body: BacktestIn, request: Request, bg: BackgroundTask
     # cache 命中
     spec_hash = backtest_engine.compute_spec_hash(strategy, start, end)
     conn = get_conn(); cur = conn.cursor()
-    cur.execute("SELECT id, metrics, nav_series, positions FROM backtest_result WHERE spec_hash=%s", (spec_hash,))
+    # 阶段 4 · 命中直接带上持久化的 trading_cost/gross_metrics + 前 200 笔逐笔
+    cur.execute(
+        "SELECT id, metrics, nav_series, positions, trading_cost, gross_metrics "
+        "FROM backtest_result WHERE spec_hash=%s", (spec_hash,))
     hit = cur.fetchone()
-    cur.close(); conn.close()
     if hit:
-        return {"cached": True, "result_id": hit[0],
-                "metrics": hit[1], "nav_series": hit[2], "positions": hit[3]}
+        _rid = hit[0]
+        _trades = []
+        if hit[4] is not None:
+            cur.execute(
+                "SELECT " + ", ".join(_TRADE_COLS) + " FROM backtest_trade "
+                "WHERE result_id=%s ORDER BY trade_date, id LIMIT 200", (_rid,))
+            _trades = [
+                {c: (v.isoformat() if hasattr(v, "isoformat") else v)
+                 for c, v in zip(_TRADE_COLS, row)}
+                for row in cur.fetchall()
+            ]
+        cur.close(); conn.close()
+        return {"cached": True, "result_id": _rid,
+                "metrics": hit[1], "nav_series": hit[2], "positions": hit[3],
+                "trading_cost": hit[4], "gross_metrics": hit[5], "trades": _trades}
+    cur.close(); conn.close()
 
     # 异步入队
     from app.services.quant import backtest_task
@@ -722,25 +773,36 @@ async def backtest_persist(task_id: str, request: Request):
     spec_hash = result.get("spec_hash") or backtest_engine.compute_spec_hash(
         {"factors": [], "config": {}}, date.today(), date.today()
     )
+    _tc = result.get("trading_cost")
+    _slip_model = (_tc or {}).get("slippage_model")
     conn = get_conn(); cur = conn.cursor()
     cur.execute(
         """INSERT INTO backtest_result (strategy_id, spec_hash, start_date, end_date,
-             metrics, nav_series, positions, cost_used, duration_ms)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+             metrics, nav_series, positions, cost_used, duration_ms,
+             trading_cost, gross_metrics, slippage_model)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
            ON CONFLICT (spec_hash) DO UPDATE
              SET metrics = EXCLUDED.metrics, nav_series = EXCLUDED.nav_series,
                  positions = EXCLUDED.positions, cost_used = EXCLUDED.cost_used,
-                 duration_ms = EXCLUDED.duration_ms
+                 duration_ms = EXCLUDED.duration_ms,
+                 trading_cost = EXCLUDED.trading_cost,
+                 gross_metrics = EXCLUDED.gross_metrics,
+                 slippage_model = EXCLUDED.slippage_model
            RETURNING id""",
         (body_strategy_id, spec_hash,
          date.fromisoformat(result["start"]), date.fromisoformat(result["end"]),
          json.dumps(result["metrics"]), json.dumps(result["nav_series"]),
          json.dumps(result.get("positions", [])), result.get("cost_used", 0),
-         result.get("duration_ms", 0)),
+         result.get("duration_ms", 0),
+         json.dumps(_tc) if _tc is not None else None,
+         json.dumps(result.get("gross_metrics")) if result.get("gross_metrics") is not None else None,
+         _slip_model),
     )
     new_id = cur.fetchone()[0]
+    # 阶段 4 · 逐笔全部落 backtest_trade
+    _n_trades = _persist_trades(cur, new_id, result.get("trades", []))
     conn.commit(); cur.close(); conn.close()
-    return {"result_id": new_id, "spec_hash": spec_hash}
+    return {"result_id": new_id, "spec_hash": spec_hash, "trades_persisted": _n_trades}
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -822,17 +884,35 @@ async def run_backtest_sync(body: BacktestIn, request: Request):
 
     spec_hash = backtest_engine.compute_spec_hash(strategy, start, end)
     conn = get_conn(); cur = conn.cursor()
-    cur.execute("SELECT id, metrics, nav_series, positions FROM backtest_result WHERE spec_hash=%s", (spec_hash,))
+    # 阶段 4 · 一并取持久化的 trading_cost/gross_metrics · 不再靠 preset 现补兜底
+    cur.execute(
+        "SELECT id, metrics, nav_series, positions, trading_cost, gross_metrics "
+        "FROM backtest_result WHERE spec_hash=%s", (spec_hash,))
     hit = cur.fetchone()
     if hit:
+        _rid = hit[0]
+        _tc, _gm = hit[4], hit[5]
+        if _tc is not None:
+            # 新记录:trading_cost 已落库 · 直接还原完整对比 + 前 200 笔逐笔
+            cur.execute(
+                "SELECT " + ", ".join(_TRADE_COLS) + " FROM backtest_trade "
+                "WHERE result_id=%s ORDER BY trade_date, id LIMIT 200", (_rid,))
+            _trows = cur.fetchall()
+            cur.close(); conn.close()
+            _trades = [
+                {c: (v.isoformat() if hasattr(v, "isoformat") else v)
+                 for c, v in zip(_TRADE_COLS, row)}
+                for row in _trows
+            ]
+            return {"result_id": _rid, "cached": True,
+                    "metrics": hit[1], "nav_series": hit[2], "positions": hit[3],
+                    "gross_metrics": _gm, "trading_cost": _tc, "trades": _trades}
+        # 旧记录:trading_cost 从未存过 · 沿用 preset 现补兜底(毛/净留 null)
         cur.close(); conn.close()
-        # 复赛 §3.B · cache 命中时 · trading_cost/gross_metrics 已丢失(旧记录未存)·
-        # 用 broker_preset 现算 preset dump 补一份 · 但毛/净收益字段留 null · UI
-        # 据此显示"缓存记录 · 成本明细已重算 · 请重跑得完整对比"
         from app.services.quant.broker import defaults as _bd
         _pkey = strategy["config"].get("broker_preset")
         _preset = _bd.resolve(_pkey)
-        return {"result_id": hit[0], "cached": True,
+        return {"result_id": _rid, "cached": True,
                 "metrics": hit[1], "nav_series": hit[2], "positions": hit[3],
                 "trading_cost": {
                     "broker": _preset.to_dict(),
@@ -858,24 +938,43 @@ async def run_backtest_sync(body: BacktestIn, request: Request):
         for p in positions:
             p["name"] = name_map.get(p["code"], p["code"])
 
+    _tc = result.get("trading_cost")
+    _slip_model = (_tc or {}).get("slippage_model")
     cur.execute(
         """INSERT INTO backtest_result (strategy_id, spec_hash, start_date, end_date,
-             metrics, nav_series, positions, cost_used, duration_ms)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+             metrics, nav_series, positions, cost_used, duration_ms,
+             trading_cost, gross_metrics, slippage_model)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+           ON CONFLICT (spec_hash) DO UPDATE
+             SET metrics = EXCLUDED.metrics, nav_series = EXCLUDED.nav_series,
+                 positions = EXCLUDED.positions, cost_used = EXCLUDED.cost_used,
+                 duration_ms = EXCLUDED.duration_ms,
+                 trading_cost = EXCLUDED.trading_cost,
+                 gross_metrics = EXCLUDED.gross_metrics,
+                 slippage_model = EXCLUDED.slippage_model
+           RETURNING id""",
         (body.strategy_id, spec_hash, start, end,
          json.dumps(result["metrics"]), json.dumps(result["nav_series"]),
-         json.dumps(positions), result["cost_used"], result["duration_ms"]),
+         json.dumps(positions), result["cost_used"], result["duration_ms"],
+         json.dumps(_tc) if _tc is not None else None,
+         json.dumps(result.get("gross_metrics")) if result.get("gross_metrics") is not None else None,
+         _slip_model),
     )
     new_id = cur.fetchone()[0]
+    # 阶段 4 · 逐笔全部落 backtest_trade
+    _n_trades = _persist_trades(cur, new_id, result.get("trades", []))
     conn.commit(); cur.close(); conn.close()
 
     # 复赛 §3.B · 新算的完整结构透传 · trading_cost + gross_metrics + nav_gross_series
+    # 阶段 4 · trades 前 200 笔发前端(全部已落库)
     return {"result_id": new_id, "cached": False,
             "metrics": result["metrics"], "nav_series": result["nav_series"],
             "positions": positions, "duration_ms": result["duration_ms"],
             "gross_metrics": result.get("gross_metrics"),
             "nav_gross_series": result.get("nav_gross_series"),
-            "trading_cost": result.get("trading_cost")}
+            "trading_cost": result.get("trading_cost"),
+            "trades": result.get("trades", [])[:200],
+            "trades_persisted": _n_trades}
 
 
 # ═══════════════════════════════════════════════════════════════
