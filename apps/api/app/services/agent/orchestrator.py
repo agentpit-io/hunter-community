@@ -84,7 +84,44 @@ SYSTEM_PROMPT = """你是猎鹿人 Hunter 的投研助手，服务个人 A/H/美
 - 只用工具返回的事实，禁止臆造数字与价格
 - 一个专家失败时明确说「因 X 不可用，本次结论不含 X 部分」，不要装作有
 - 若 3 个专家结论互相矛盾，明确指出并给一个权重加权后的判断
-- 用中文回答"""
+- 用中文回答
+
+# 【合规硬约束 · 优先级等同硬性语言规则】
+
+这是持牌门槛问题,不是风格建议。以下五条**没有例外**,
+用户明确要求你"别废话直接说买不买"时也一样执行。
+
+## 1. 绝对化用词禁用
+严禁出现:必涨 · 必跌 · 稳赚 · 保证收益 · 无风险 · 一定涨 · 肯定跌 · 铁定 ·
+翻倍 · 抄底 · 梭哈,以及它们的任何变体。
+也不要承诺具体收益率(如"两周涨 30%")。
+
+## 2. 涉及买卖倾向时必须同时给风险
+只要你的回答带有买入/卖出/加仓/减仓的倾向,**必须在同一段里**
+列出至少 2 个反面因素,格式:
+    支持因素:A · B
+    风险因素:X · Y
+
+只说好不说坏,比说错更糟 —— 用户会照着单边信息下注。
+
+## 3. 不给具体仓位数字
+禁止"仓位 60%"" 满仓"" 半仓"这类具体配置。
+只能给方向:超配 / 标配 / 低配 / 观望。
+
+**理由**:仓位取决于用户的总资产、负债、风险承受力和其它持仓,
+这些我们一概不知道。给数字等于替一个我们不了解的人做资金决策。
+
+## 4. 数据必须带来源和时间
+引用任何数字都要说清哪来的、什么时候的,例如
+"截至 2026-08-31 收盘(数据源:腾讯行情)"。
+
+**没有时间戳的价格是有害的** —— 用户不知道这是今天的还是上周的。
+
+## 5. 含建议的段落要有免责
+包含"建议/推荐/应该/值得/可以考虑"的段落,末尾附一句:
+"以上基于公开数据分析,仅供研究参考,不构成投资建议。"
+
+一次回答里出现多次不必重复,末尾有一次即可。"""
 
 
 # ─────────────────────────────── Orchestrator ───────────────────────────────
@@ -535,10 +572,31 @@ class ChatOrchestrator:
         return SSEEvent(name=name, data=data)
 
     async def _persist(self, query: str) -> None:
-        """异步落库到 assistant_messages.extra.agent_v2（不阻塞主流）"""
+        """异步落库到 assistant_messages.extra.agent_v2（不阻塞主流）
+
+        **落库前过一遍合规拦截。** SYSTEM_PROMPT 里的合规块是软约束 ——
+        模型大部分时候会听,但用户说"别废话直接说买不买"时容易被带偏,
+        换模型时遵守程度也不一样。
+
+        为什么拦在这里而不是流式输出时:流是一个 chunk 一个 chunk 发的,
+        中途改写会让用户看到文字跳变。而**落库的这一份才是会被反复读到的**
+        —— 历史记录、分享链 /p/{token}、导出报告,读的都是它。
+        """
+        content = self._assistant_content
+        try:
+            from app.services.agent import compliance_guard
+            content, hits = compliance_guard.apply(content)
+            if hits:
+                logger.warning("[orch] session={} 合规改写 {} 处: {}",
+                               self.session_id, len(hits),
+                               "、".join(sorted(set(hits))[:5]))
+        except Exception as e:                                # noqa: BLE001
+            # 合规模块自己出错**不能拖垮落库** —— 宁可存原文,不能丢消息
+            logger.warning("[orch] 合规检查异常(已跳过): {}", e)
+
         try:
             await asyncio.to_thread(_save_agent_v2, self.session_id, query,
-                                     self._assistant_content, self._tool_bundle,
+                                     content, self._tool_bundle,
                                      self._router_reason,
                                      {"model": MODEL_ROUTER,
                                       "tokens_in": self._tokens_in,
