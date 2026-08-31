@@ -318,7 +318,7 @@ def resolve(universe_key: str, on_date: date | None = None, user_id: str | None 
     """统一入口 · **不支持的池子返回空,不静默回落**。
 
     · hs300 / zz500  从 index_component 拉
-    · my_watchlist   从 stocks WHERE user_id 拉(用户在「自选」页加的)
+    · my_watchlist   从 stocks WHERE user_id 拉(用户在对话页「⭐ 自选股」加的)
     · 其余           返回 [],由调用方告诉用户"这个池子还没有数据"
     """
     # 前端历史上传过 my_watchlist,而这里判断的是 my_watch —— 永远匹配不上,
@@ -369,7 +369,9 @@ def describe_universe(universe_key: str, n: int, user_id: str | None = None) -> 
     if n:
         return ""
     if universe_key in ("my_watchlist", "my_watch"):
-        return ("「我的自选」是空的 —— 先到「自选」页加几只股票,"
+        # 文案指路必须跟着导航走:顶栏「自选」入口已在 2026-08-30 导航重构里删掉,
+        # 现在自选股是对话页左侧的第二个 tab。指向一个不存在的入口比不指路更糟。
+        return ("「我的自选」是空的 —— 先到对话页左侧「⭐ 自选股」加几只股票,"
                 "或者换成沪深 300 / 中证 500。") if user_id else "「我的自选」需要先登录。"
     if universe_key in SUPPORTED_UNIVERSES:
         return f"{universe_key} 的成分股还没有同步 —— 稍后再试。"

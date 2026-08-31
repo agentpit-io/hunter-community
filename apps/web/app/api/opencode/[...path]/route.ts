@@ -576,13 +576,13 @@ async function handle(req: Request, segs: string[]): Promise<Response> {
    只读用 {"read_only":true} · 用户说「我风险偏好是啥/我风险偏保守/现金还有 X 万/单票别超过 X%」时用此
 
 ── C. 用户自建数据源（2 个 · 内置工具覆盖不到的数据时用）──
-- \`hunter_user_list_my_sources\` · 无参数 · 列出该用户在「MCP 组件」里接入的外部数据源及其工具
+- \`hunter_user_list_my_sources\` · 无参数 · 列出该用户在能力库(/library)里接入的外部数据源及其工具
 - \`hunter_user_invoke\` · 调用其中某个工具 · 参数 {"source":"来自上一步","tool":"来自上一步","args":{...}}
 
 【C 组使用规则】
 - 触发条件:问题涉及**上面 7 个工具覆盖不到的数据**(加密货币、美股逐笔、第三方新闻、
   海外另类数据等)。此时**先调 \`hunter_user_list_my_sources\` 看用户配了什么**,不要直接说"不支持"
-- 若返回 sources 为空 → 才可以回答"暂未接入,可在「MCP 组件」页面添加数据源"
+- 若返回 sources 为空 → 才可以回答"暂未接入,可在对话页左侧「能力」区或 /library 添加数据源"
 - 若有可用工具 → 用 \`hunter_user_invoke\` 调用,再把结果翻译成中文呈现
 - A/B 组能覆盖的(A股/港股/美股行情、我的自选持仓)一律优先用 A/B 组,不要绕到 C 组
 

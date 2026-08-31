@@ -139,7 +139,7 @@ def resolve_scope(scope: dict, user_id: str | None = None) -> tuple[list[str], s
     if kind == "watchlist":
         codes = _watchlist_codes(user_id)
         if not codes:
-            return [], "「我的自选」是空的 —— 先到「自选」页加几只股票"
+            return [], "「我的自选」是空的 —— 先到对话页左侧「⭐ 自选股」加几只股票"
         return codes, ""
 
     if kind == "all_a":

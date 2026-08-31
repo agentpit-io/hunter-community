@@ -14,8 +14,12 @@
 """
 from __future__ import annotations
 
+import logging
+
 from dataclasses import dataclass, asdict
 from typing import Literal
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -171,10 +175,32 @@ DEFAULT_PRESET_KEY = "cn_default"
 
 
 def resolve(preset_key: str | None) -> BrokerPreset:
-    """把 preset 名解析到 BrokerPreset · 兜底 CN_DEFAULT · 不返 None"""
+    """把 preset 名解析到 BrokerPreset · 兜底 CN_DEFAULT · 不返 None
+
+    ⚠ 兜底是**静默**的,这里补一条日志。
+
+    起因(2026-08-31):测评委动线时用了个不存在的 `cn_low`,回测照常返回
+    200 + 一组完整的成本数字 —— 看着像"低佣金档算出来的",实际是
+    CN_DEFAULT 的 10.6bps。两个不同 preset 跑出一模一样的净收益,
+    第一反应是"成本模型没生效 / 结果被缓存了",查了半天才发现是名字打错。
+
+    评委手册里恰好有一段是循环换 preset 比较净收益。他们要是拼错一个名字,
+    会得到"换了档位数字纹丝不动"的现象,直接怀疑这个功能是假的。
+
+    仍然兜底不抛错(回测中途 500 更糟),但**要在日志里留痕**。
+    """
     if not preset_key:
         return CN_DEFAULT
-    return BROKER_PRESETS.get(preset_key.strip().lower(), CN_DEFAULT)
+    key = preset_key.strip().lower()
+    hit = BROKER_PRESETS.get(key)
+    if hit is None:
+        log.warning(
+            "[broker] 未知 broker_preset=%r · 已回落 CN_DEFAULT(%.1f bps/单边)· "
+            "可用: %s", preset_key, CN_DEFAULT.total_bps_per_side,
+            "/".join(BROKER_PRESETS),
+        )
+        return CN_DEFAULT
+    return hit
 
 
 def list_presets() -> list[dict]:
