@@ -6,11 +6,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import {
-  Star, Target, Bell, Plug, ChevronDown, LogOut, Settings,
-  LayoutGrid, Activity, TrendingUp, Zap, Radio, History, Newspaper,
-  BarChart3, Users, Gift,
-} from 'lucide-react'
+import { Target, Bell, LogOut, Settings, Gift } from 'lucide-react'
 import { HUNTER } from '../lib/hunter-theme'
 
 
@@ -27,12 +23,10 @@ interface NavProps {
 
 export default function TopNav({ active }: NavProps) {
   const router = useRouter()
-  const [moreOpen, setMoreOpen] = useState(false)
   const [userOpen, setUserOpen] = useState(false)
   const [userEmail, setUserEmail] = useState('')
   const [userInitial, setUserInitial] = useState('U')
   const [isAdmin, setIsAdmin] = useState(false)
-  const moreRef = useRef<HTMLDivElement>(null)
   const userRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -52,12 +46,11 @@ export default function TopNav({ active }: NavProps) {
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
-      if (moreOpen && !moreRef.current?.contains(e.target as Node)) setMoreOpen(false)
       if (userOpen && !userRef.current?.contains(e.target as Node)) setUserOpen(false)
     }
     document.addEventListener('mousedown', onClick)
     return () => document.removeEventListener('mousedown', onClick)
-  }, [moreOpen, userOpen])
+  }, [userOpen])
 
   const handleLogout = () => {
     localStorage.removeItem('hunter_token')
@@ -101,53 +94,25 @@ export default function TopNav({ active }: NavProps) {
         }}>· Hunter</span>
       </Link>
 
-      {/* 一级菜单 · 5 项 · 全部 target=_blank */}
-      <NavLink href="/watchlist" icon={<Star size={14} />} label="自选" active={active === 'watchlist'} />
+      {/* 一级菜单 · **只剩策略中心一个**(2026-08-30 导航重构)
+       *
+       * 原来是「自选 / 策略中心 / MCP 组件 / 更多∨」四个,砍到一个。
+       * 砍的理由不是"太多了"这种感觉,是每一项都有更好的去处:
+       *
+       *   自选     → 侧栏新标签「自选股」· 卡片式 · 每张卡带
+       *              预测评估/交易成本/概率校准三个入口
+       *   MCP 组件 → 侧栏「对话」下的能力区(数据源/工具箱/SKILL)
+       *   更多∨    → 里面的页面依赖我们平台的分析逻辑,开源版跑不全,
+       *              留着入口只会让用户点了失望
+       *
+       * ⚠️ **只删入口,不删路由。** /watchlist /mcp-config /kpred
+       * /online-analysis 等页面全部保留可直接访问 —— 评委测试说明里的
+       * URL 照样能开,而且哪天要恢复入口只是加回几行。
+       *
+       * 方案见 doc/开源hunter-community/04开源比赛/
+       *        2026-08-30_导航重构方案-对话与自选股双栏.md
+       */}
       <NavLink href="/strategies/index.html" icon={<Target size={14} />} label="策略中心" active={active === 'strategies'} />
-      {/* P2: /push removed with SaaS strip · P3 will re-add SMTP/Slack channel */}
-      <NavLink href="/mcp-config" icon={<Plug size={14} />} label="MCP 组件" active={active === 'mcp'} />
-
-      {/* 更多 · 下拉 · 覆盖剩余功能 */}
-      <div ref={moreRef} style={{ position: 'relative' }}>
-        <button
-          onClick={() => setMoreOpen(v => !v)}
-          style={{
-            display: 'inline-flex', alignItems: 'center', gap: 5,
-            height: 32, padding: '0 12px', marginRight: 4,
-            background: moreOpen ? HOVER : 'transparent',
-            border: 'none', borderRadius: 8,
-            color: HUNTER.INK_S, fontSize: 13, cursor: 'pointer',
-            transition: 'background .1s', fontFamily: 'inherit',
-          }}
-          onMouseEnter={(e) => { if (!moreOpen) e.currentTarget.style.background = HOVER }}
-          onMouseLeave={(e) => { if (!moreOpen) e.currentTarget.style.background = 'transparent' }}
-        >
-          更多 <ChevronDown size={11} style={{ opacity: 0.6 }} />
-        </button>
-        {moreOpen && (
-          <div style={dropdownStyle}>
-            <SectionLabel>深度工具</SectionLabel>
-            <DropdownLink href="/overview" icon={<LayoutGrid size={13} />} label="综合总览" />
-            <DropdownLink href="/online-analysis" icon={<Activity size={13} />} label="在线分析" badge="抗投毒" />
-            <DropdownLink href="/kpred" icon={<TrendingUp size={13} />} label="K 线预测" badge="AI" />
-            <DropdownLink href="/signals" icon={<Radio size={13} />} label="信号看板" />
-            <DropdownLink href="/event-analysis" icon={<Zap size={13} />} label="事件分析" />
-            <DropdownLink href="/online-analysis/history" icon={<History size={13} />} label="分析历史" />
-            <DropdownLink href="/news" icon={<Newspaper size={13} />} label="资讯" />
-
-            <SectionLabel>持仓与配置</SectionLabel>
-            <DropdownLink href="/portfolio" icon={<Target size={13} />} label="持仓报告" />
-            {/* P2: /push-manage removed · P3 re-adds SMTP/Slack channel UI */}
-
-            {isAdmin && <>
-              <SectionLabel>管理后台</SectionLabel>
-              <DropdownLink href="/backtest" icon={<BarChart3 size={13} />} label="回测看板" badge="admin" />
-              <DropdownLink href="/user-insight" icon={<Users size={13} />} label="用户画像" badge="admin" />
-              {/* P2: /booth-admin (AdventureX SaaS) removed */}
-            </>}
-          </div>
-        )}
-      </div>
 
       {/* 弹簧 */}
       <div style={{ flex: 1 }} />
@@ -259,15 +224,6 @@ function DropdownLink({ href, icon, label, badge }: { href: string; icon: React.
   )
 }
 
-
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <div style={{
-      padding: '8px 12px 4px', fontSize: 10.5, fontWeight: 600,
-      color: '#a0a098', textTransform: 'uppercase', letterSpacing: '.06em',
-    }}>{children}</div>
-  )
-}
 
 
 const dropdownStyle: React.CSSProperties = {

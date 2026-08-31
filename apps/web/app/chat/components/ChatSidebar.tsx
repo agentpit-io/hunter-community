@@ -7,6 +7,7 @@ import { HUNTER, HUNTER_LOGO } from '../../lib/hunter-theme'
 import type { Session } from '../lib/types'
 import { listSessions, createSession } from '../lib/opencodeClient'
 import CapabilityPanel from './CapabilityPanel'
+import WatchlistPanel from './WatchlistPanel'
 import SkillManager from './SkillManager'
 import ProfileEditor from './ProfileEditor'
 import { getProfile } from '../lib/profileClient'
@@ -90,11 +91,11 @@ export default function ChatSidebar({ currentSessionId, onSelectSession, onNewSe
   const [showSkillMgr, setShowSkillMgr] = useState(false)
   // Tab 切换 · 一次只显对话或能力 · localStorage 持久 · 默认对话(最常用)
   // (2026-08-17 方案 A · doc: sidebar-history-space-plan.md)
-  const [activeTab, setActiveTab] = useState<'chat' | 'capability'>(() => {
+  const [activeTab, setActiveTab] = useState<'chat' | 'watchlist'>(() => {
     if (typeof window === 'undefined') return 'chat'
-    return (localStorage.getItem('hunter_sidebar_tab') as any) === 'capability' ? 'capability' : 'chat'
+    return (localStorage.getItem('hunter_sidebar_tab') as any) === 'watchlist' ? 'watchlist' : 'chat'
   })
-  const switchTab = (t: 'chat' | 'capability') => {
+  const switchTab = (t: 'chat' | 'watchlist') => {
     setActiveTab(t)
     try { localStorage.setItem('hunter_sidebar_tab', t) } catch { /* ignore */ }
   }
@@ -378,31 +379,26 @@ export default function ChatSidebar({ currentSessionId, onSelectSession, onNewSe
         </button>
       </div>
 
-      {/* Tab 切换栏 · 对话/能力/策略 三选一(方案 A + 策略中心迁入) */}
+      {/* Tab 切换栏 · **对话 / 自选股 两选一**(2026-08-30 导航重构)
+       *
+       * 原来是「对话 / 能力 / 策略↗」三个。改动理由:
+       *   · 「策略↗」和顶栏「策略中心」是同一个页面 —— 两个按钮一个去处
+       *   · 「能力」不该是个平级标签 —— 它是对话的辅助信息,不是另一种视图。
+       *     而且切过去之后对话列表就看不见了,来回切很烦
+       *   · 腾出来的位置给「自选股」—— 每张卡片挂预测评估/交易成本/概率校准
+       *     三个入口,正好对上复赛评委的三项建议
+       *
+       * 方案见 doc/开源hunter-community/04开源比赛/
+       *        2026-08-30_导航重构方案-对话与自选股双栏.md
+       */}
       <div style={{ display: 'flex', borderBottom: `1px solid ${HUNTER.LINE}`, padding: '0 12px' }}>
         <button onClick={() => switchTab('chat')} style={tabBtn(activeTab === 'chat')} title="历史对话">
           💬 对话
         </button>
-        <button onClick={() => switchTab('capability')} style={tabBtn(activeTab === 'capability')} title="能力(数据源 / 工具箱 / SKILL)">
-          ✨ 能力
+        <button onClick={() => switchTab('watchlist')} style={tabBtn(activeTab === 'watchlist')} title="自选股 · 预测评估 / 交易成本 / 概率校准">
+          ⭐ 自选股
         </button>
-        {/* 策略中心 · 点击新窗口打开(完整展示 · 避免侧栏太窄挤不下) · 不切 activeTab */}
-        <a href="/strategies/index.html" target="_blank" rel="noopener noreferrer"
-           style={tabBtn(false)} title="策略中心 · 多因子选股 / 组合回测(新窗口)">
-          📊 策略 ↗
-        </a>
       </div>
-
-      {/* 能力区 · Tab 选中"能力"时才显 · 关闭时释放 ~480px 给历史对话 */}
-      {activeTab === 'capability' && onPickSkill && (
-        <div style={{ flex: 1, overflowY: 'auto' }}>
-          <CapabilityPanel
-            onPick={onPickSkill}
-            onManage={() => setShowSkillMgr(true)}
-            refreshKey={skillRefresh}
-          />
-        </div>
-      )}
 
       {/* Session 列表 · Tab 选中"对话"时占满剩余空间(~700px = 15-17 条对话) */}
       {activeTab === 'chat' && (
@@ -423,6 +419,36 @@ export default function ChatSidebar({ currentSessionId, onSelectSession, onNewSe
               {renderGroup('Older', groups.older)}
             </>
           )}
+        </div>
+      )}
+
+      {/* 能力区 · **常驻在对话列表下方**,不再是独立标签(2026-08-30)
+       *
+       * 原来它是「能力」标签,切过去对话列表就没了。而实际情况是:
+       * 侧栏下半部分本来就是空的(对话通常只有几条),
+       * 而数据源/工具箱/SKILL 却要切换才能看到 —— **位置有,东西没放对**。
+       *
+       * 现在放在这里:不用切换就看得见,顺便填上那片空白。
+       * `flexShrink: 0` 保证对话多的时候它不被压扁,而是对话区先滚动。
+       */}
+      {activeTab === 'chat' && onPickSkill && (
+        <div style={{
+          flexShrink: 0, maxHeight: 260, overflowY: 'auto',
+          borderTop: `1px solid ${HUNTER.LINE}`,
+        }}>
+          <CapabilityPanel
+            onPick={onPickSkill}
+            onManage={() => setShowSkillMgr(true)}
+            refreshKey={skillRefresh}
+          />
+        </div>
+      )}
+
+      {/* 自选股 · 卡片式 · 每张卡挂三个入口(预测评估 / 交易成本 / 概率校准)
+       * —— 正好对上复赛评委的三项建议 */}
+      {activeTab === 'watchlist' && (
+        <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0 8px', minHeight: 120 }}>
+          <WatchlistPanel />
         </div>
       )}
 
