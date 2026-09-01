@@ -230,9 +230,24 @@ async def snapshot_job(symbols: list[str], progress: dict | None = None) -> dict
     # 存完快照顺手发存证链接 —— 见 store.mint_tokens_for_run 的说明。
     # 存证的价值在于"预测作出的当时就有链接",事后补发证明力弱一层。
     # 失败不影响流水线(函数内部已吞异常),预测数据本身已经存好了。
+    # ⚠️ 不能用 expect_base 当条件。
+    #
+    # `_latest_trade_date()` 拿不到就返回**空字符串**(日志里写"未知, 不校验"),
+    # 这时 `if saved and expect_base` 直接短路 —— 快照照存,**链接一条不发**。
+    # 实测 9/1 那次自动流水线:2120 条真预测入库,share_token 只有 1 个
+    # (还是手动发的),就是踩在这里。
+    #
+    # 改成从**实际存进去的行**里取 base_date,不依赖那个可能为空的期望值。
     minted = 0
-    if saved and expect_base:
-        minted = await asyncio.to_thread(store.mint_tokens_for_run, expect_base)
+    if saved:
+        _base = expect_base
+        if not _base:
+            # expect_base 为空时,用这批快照里实际的 base_date
+            _base = next((r.get("base_date") for r in all_rows if r.get("base_date")), None)
+        if _base:
+            minted = await asyncio.to_thread(store.mint_tokens_for_run, _base)
+        else:
+            log.warning("[share] 拿不到 base_date · 这批 %d 行没发存证链接", saved)
 
     return {"ok": ok, "fail": fail, "rows": saved, "rejected": rejected,
             "base_date": expect_base, "base_mismatch": len(mism),
