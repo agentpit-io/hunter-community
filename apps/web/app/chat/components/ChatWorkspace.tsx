@@ -497,6 +497,8 @@ export default function ChatWorkspace({
       setBusy(false)
       // 这一轮里模型可能暂存了 SKILL · 查一次
       void checkStaged()
+      // 收尾时用服务端的版本对一次账 —— 见 reconcileMessages 的说明
+      void reconcileMessages(sessionId)
     }
   }
 
@@ -504,6 +506,56 @@ export default function ChatWorkspace({
    *
    *  查不到/报错**一律静默**:绝大多数对话跟装 SKILL 无关,
    *  为它弹个错误提示是纯噪音。 */
+  /**
+   * 一轮结束后用服务端的消息覆盖本地 —— 修「回复不完全」。
+   *
+   * ## 为什么需要
+   *
+   * 流式文本是靠 SSE 的 `message.part.delta` **逐段累加**出来的:
+   *
+   *     parts[idx].text = 已有文本 + delta
+   *
+   * 只要中途丢一个 delta(SSE 断一次、切了下网、代理超时),
+   * 那一段就**永远补不回来** —— 后面的 delta 照常追加,
+   * 于是用户看到的回复停在半句话上:
+   *
+   *     「由于它是一个纯代码库,本系统无法直接将其作为 AI 投研技能(SKILL)进」
+   *
+   * 断在"进"字。看起来像模型没说完,其实是我们漏收了。
+   * 而且**不会报错** —— 前端不知道自己少收了东西。
+   *
+   * 服务端那份是完整的(opencode 落了库)。一轮结束后拉一次,
+   * 以服务端为准,漏掉的自动补齐。
+   *
+   * ## 为什么不实时对账
+   *
+   * 流式过程中拉全量会和 delta 打架(拉回来的是某个瞬间的快照,
+   * 覆盖上去反而把新到的 delta 冲掉)。只在**收尾**做一次,
+   * 这时已经没有新 delta 了。
+   *
+   * 失败不处理:拉不到就保持现状,总比把已有内容清空好。
+   */
+  const reconcileMessages = useCallback(async (sid: string) => {
+    if (!sid) return
+    try {
+      const server = await listMessages(sid)
+      if (!server || server.length === 0) return
+      setMessages((prev) => {
+        // 只补 opencode 的消息;debate / kpred 是我们本地注入的,
+        // 服务端没有,不能被这次覆盖冲掉
+        const localOnly = prev.filter(
+          (m) => m.id.startsWith('kpred_') || m.id.startsWith('debate_'),
+        )
+        const merged = [...server, ...localOnly]
+        return merged.sort(
+          (a, b) => (a.time?.created || 0) - (b.time?.created || 0),
+        )
+      })
+    } catch {
+      /* 拉不到就保持现状 —— 总比清空好 */
+    }
+  }, [])
+
   const checkStaged = useCallback(async () => {
     if (!sessionId) return
     try {
