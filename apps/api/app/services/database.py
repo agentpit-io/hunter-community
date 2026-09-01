@@ -984,15 +984,21 @@ def get_stocks_by_user(user_id: str) -> list[dict]:
     # 之前 gm 端与 A 股端隔离,导致从 A 股页添加港股后 SQL 过滤看不到 · 用户产品决策合并
     conn = get_conn()
     cur = conn.cursor()
+    # shares / avg_cost 也要带上 —— 少了它们,自选股卡片的「交易成本」框
+    # 永远显示"未填",用户填完刷新一下又回到"未填",看起来像没存上。
+    # (实际存进库了,只是这个查询没 select 出来。)
     cur.execute(
-        "SELECT code, name, market, exchange, COALESCE(asset_type,'stock') "
+        "SELECT code, name, market, exchange, COALESCE(asset_type,'stock'), "
+        "       COALESCE(shares, 0), avg_cost "
         "FROM stocks WHERE enabled = TRUE AND user_id = %s "
         "ORDER BY market, code",
         (user_id,),
     )
     rows = cur.fetchall()
     conn.close()
-    return [{"code": r[0], "name": r[1], "market": r[2], "exchange": r[3], "asset_type": r[4]} for r in rows]
+    return [{"code": r[0], "name": r[1], "market": r[2], "exchange": r[3],
+             "asset_type": r[4], "shares": r[5],
+             "avg_cost": float(r[6]) if r[6] is not None else None} for r in rows]
 
 
 def get_all_stocks_by_user(user_id: str) -> list[dict]:

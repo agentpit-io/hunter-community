@@ -38,6 +38,8 @@ import { Plus, RefreshCw } from 'lucide-react'
 import { HUNTER } from '../../lib/hunter-theme'
 
 type Stock = {
+  /** 买入均价 · null = 未填 */
+  avg_cost?: number | null
   code: string
   name: string
   market?: string
@@ -208,6 +210,25 @@ function StockCard({ stock, quote, perf }: { stock: Stock; quote?: Quote; perf?:
   // 于是不管准不准全是绿的 —— 高亮等于没高亮。
   const hitColor = typeof hit === 'number' && hit >= 55 ? '#1E8449' : HUNTER.INK_S
 
+  // 交易成本框显示什么 —— 三态
+  //   有手数 + 有买入价 → 扣完成本的净盈亏率(最有用)
+  //   只有手数           → 手数
+  //   都没有             → 未填
+  //
+  // 净盈亏率这里用**近似**:毛涨跌幅 − 往返成本率。精确值(含 lot_size
+  // 取整、买卖分别按各自价格计费)在 /cost 页算,卡片上只要一个量级正确的
+  // 提示。差异在小数点后第二位,不影响"赚还是亏"这个判断。
+  const ROUND_TRIP_PCT = 0.106 * 2   // A股 cn_default 单边 10.6bps → 往返约 0.21%
+  let costTxt = '未填'
+  let costColor: string | undefined
+  if (stock.shares && stock.avg_cost && quote?.price != null) {
+    const netPct = (quote.price - stock.avg_cost) / stock.avg_cost * 100 - ROUND_TRIP_PCT
+    costTxt = `${netPct >= 0 ? '+' : ''}${netPct.toFixed(2)}%`
+    costColor = netPct > 0 ? '#C0392B' : netPct < 0 ? '#1E8449' : HUNTER.INK_S
+  } else if (stock.shares) {
+    costTxt = `${stock.shares} 手`
+  }
+
   return (
     <div style={{
       border: `1px solid ${HUNTER.LINE}`, borderRadius: 10,
@@ -245,8 +266,14 @@ function StockCard({ stock, quote, perf }: { stock: Stock; quote?: Quote; perf?:
           // "选因子选股票池看毛净收益曲线"。完全两回事,链过去用户会一脸茫然。
           href={`/cost?symbol=${encodeURIComponent(stock.code)}`}
           icon="💰" label="交易成本"
-          value={stock.shares ? `${stock.shares} 手` : '未填'}
-          title="按持仓手数算真实买卖成本 · 点击填手数并看毛/净对比"
+          // 填了买入价就直接把**扣完成本的盈亏率**显示在卡片上 ——
+          // "2 手"只是个数量,用户看不出好坏;"+3.2%(净)"才是他关心的。
+          // 只填了手数就退回显示手数,都没填显示"未填"。
+          value={costTxt}
+          valueColor={costColor}
+          title={stock.avg_cost
+            ? `买入 ${stock.avg_cost} · 已扣买卖两趟的佣金/印花税/滑点`
+            : '按持仓手数和买入价算真实盈亏 · 点击填写'}
           border
         />
         <MiniBox

@@ -89,26 +89,57 @@ async def add_to_watchlist(stock: StockIn, request: Request):
 
 class SharesIn(BaseModel):
     shares: int = 0
+    # 买入均价 · 不传 = 不动原值 · 传 0/null = 清空(见下面的三态处理)
+    avg_cost: Optional[float] = None
 
 
 @router.patch("/stocks/{code}/shares")
 async def set_shares(code: str, body: SharesIn, request: Request):
-    """设置持仓手数 —— 供 /cost 页把抽象费率换算成真实金额。
+    """设置持仓手数 + 买入均价 —— 供 /cost 页把抽象费率换算成真实金额。
 
     为什么放在 stocks 而不是 portfolio:portfolio 是另一套模型
-    (建仓价/成本/盈亏/调仓建议),而这里只要一个数量。
-    为一个整数去耦合一整套持仓模型不划算。
+    (建仓批次/加减仓/调仓建议),而这里只要「多少手 + 什么价买的」两个数。
+    为两个数字去耦合一整套持仓模型不划算。
+
+    ## avg_cost 的三态
+
+    · 不传字段        → 不动原值(只改手数时不会把均价清掉)
+    · 传 > 0 的数     → 更新
+    · 传 0 或 null    → 清空(用户主动删掉均价)
+
+    NULL 和 0 要分开:0 元买入是无意义的,不该被当成"填了"。
     """
     n = max(0, int(body.shares or 0))
+    uid = _get_user_id(request)
+
+    # ⚠️ 必须按 user_id 过滤。
+    #
+    # 原来是 `UPDATE stocks SET shares=%s WHERE code=%s` —— 而 stocks 的主键是
+    # (code, user_id),库里同一个 code 可以有多行(每个用户一行,外加 seed 进来
+    # 的 300 只无主沪深300)。少了这个条件,A 用户填自己的持仓手数会**顺手改掉
+    # 所有人的**,而且不报错。
+    if not uid:
+        return {"error": "unauthorized", "message": "请先登录"}
+
+    sets = ["shares=%s"]
+    args: list = [n]
+    if body.avg_cost is not None:
+        c = float(body.avg_cost)
+        sets.append("avg_cost=%s")
+        args.append(c if c > 0 else None)   # 0 → NULL,见上面的三态说明
+    args += [code, uid]
+
     conn = get_conn(); cur = conn.cursor()
     try:
-        cur.execute("UPDATE stocks SET shares=%s WHERE code=%s", (n, code))
+        cur.execute(f"UPDATE stocks SET {', '.join(sets)} "
+                    f"WHERE code=%s AND user_id=%s", args)
         if cur.rowcount == 0:
             # 不在自选里就别静默成功 —— 用户会以为存上了
             return {"error": "not_in_watchlist",
                     "message": f"{code} 不在你的自选股里,先添加再设置持仓"}
         conn.commit()
-        return {"ok": True, "code": code, "shares": n}
+        return {"ok": True, "code": code, "shares": n,
+                "avg_cost": body.avg_cost}
     finally:
         cur.close(); conn.close()
 

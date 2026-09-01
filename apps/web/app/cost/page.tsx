@@ -52,6 +52,7 @@ function CostInner() {
   const [presets, setPresets] = useState<Record<string, Preset>>({})
   const [presetKey, setPresetKey] = useState('cn_default')
   const [shares, setShares] = useState<number>(0)
+  const [avgCost, setAvgCost] = useState<number>(0)   // 买入均价 · 0 = 未填
   const [price, setPrice] = useState<number | null>(null)
   const [name, setName] = useState('')
   const [saving, setSaving] = useState(false)
@@ -94,6 +95,7 @@ function CostInner() {
       .then(d => {
         const s = (d?.stocks || []).find((x: any) => x.code === symbol)
         if (s?.shares) setShares(s.shares)
+        if (s?.avg_cost) setAvgCost(s.avg_cost)
         if (s?.name && !name) setName(s.name)
       })
       .catch(() => {})
@@ -105,6 +107,31 @@ function CostInner() {
   const notional = shares && price ? shares * lot * price : 0
   const bps = (v: number) => (notional * v) / 10000
 
+  // ── 有买入价时才算得出「这笔到底赚没赚」──────────────────
+  //
+  // 只有手数,页面能回答的最多是"买卖一趟花 27.5 元" —— 用户看完
+  // 仍不知道这 27.5 元疼不疼。有了买入价,三个真正有用的数才出得来:
+  //
+  //   净盈亏  = 毛盈亏 − 买入当时已付的成本 − 现在卖出还要付的成本
+  //   保本价  = 涨到多少才真回本(把往返成本折进价格)
+  //   成本吃掉了盈利的百分之多少
+  //
+  // 这就是评委那句「交易成本」的毛/净框架,只不过落在用户自己的持仓上。
+  const qty = shares * lot
+  const hasPos = qty > 0 && avgCost > 0 && price != null && p != null
+  // 买入时按买入价计的市值(成本要按当时的金额算,不是按现价)
+  const buyNotional = hasPos ? qty * avgCost : 0
+  const buyCost = hasPos ? (buyNotional * p!.total_bps_per_side) / 10000 : 0
+  const sellCost = hasPos ? (qty * price! * (p!.total_bps_round_trip - p!.total_bps_per_side)) / 10000 : 0
+  const grossPnl = hasPos ? qty * (price! - avgCost) : 0
+  const netPnl = grossPnl - buyCost - sellCost
+  // 保本价:卖出价 × (1 - 卖出费率) = 买入价 × (1 + 买入费率)
+  const buyFee = p ? p.total_bps_per_side / 10000 : 0
+  const sellFee = p ? (p.total_bps_round_trip - p.total_bps_per_side) / 10000 : 0
+  const breakEven = hasPos ? (avgCost * (1 + buyFee)) / (1 - sellFee) : 0
+  const money = (v: number) =>
+    `${v < 0 ? '-' : ''}${Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+
   const saveShares = async () => {
     if (!symbol) return
     setSaving(true); setSavedMsg('')
@@ -112,7 +139,7 @@ function CostInner() {
       const r = await fetch(`/api/stocks/${encodeURIComponent(symbol)}/shares`, {
         method: 'PATCH',
         headers: { ...auth(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shares }),
+        body: JSON.stringify({ shares, avg_cost: avgCost || 0 }),
       })
       setSavedMsg(r.ok ? '已保存' : `保存失败 HTTP ${r.status}`)
     } catch (e: any) {
@@ -151,6 +178,15 @@ function CostInner() {
                 border: `1px solid ${HUNTER.LINE}`, borderRadius: 8, color: HUNTER.INK,
               }} />
             <span style={{ fontSize: 13, color: HUNTER.INK_S }}>手 · 每手 {lot} 股</span>
+            <span style={{ fontSize: 13, color: HUNTER.INK_S, marginLeft: 4 }}>买入价</span>
+            <input
+              type="number" min={0} step="0.01" value={avgCost || ''}
+              onChange={e => { setAvgCost(Math.max(0, Number(e.target.value) || 0)); setSavedMsg('') }}
+              placeholder="选填"
+              style={{
+                width: 96, padding: '7px 10px', fontSize: 15, fontWeight: 600,
+                border: `1px solid ${HUNTER.LINE}`, borderRadius: 8, color: HUNTER.INK,
+              }} />
             {symbol && (
               <>
                 <button onClick={saveShares} disabled={saving}
@@ -234,8 +270,13 @@ function CostInner() {
                   往返成本占市值 <b>{(p.total_bps_round_trip / 100).toFixed(2)}%</b> ——
                   也就是说这只票<b>至少要涨 {(p.total_bps_round_trip / 100).toFixed(2)}%</b> 你才回本。
                   <br />
-                  滑点按静态 {p.breakdown?.slippage || 0}bps 估;
-                  <b>大单的实际冲击会更高</b>,精确的冲击成本模型(sqrt_impact)还没做。
+                  本页滑点按静态 {p.breakdown?.slippage || 0}bps 估。
+                  大单的实际冲击更高 —— 策略回测那边支持
+                  <b>平方根冲击模型(sqrt_impact)</b>,按下单额占日均成交额的比例
+                  逐笔计算,已计入净收益。
+                  <br />
+                  以上按 <b>{p.label}</b> 档费率扣除;
+                  <b>实盘可能因流动性与成交时机与此不同</b>。
                 </div>
                 {/* 合规第 2 层 · 报告卡水印 */}
                 <ComplianceWatermark compact />
@@ -253,7 +294,59 @@ function CostInner() {
           费率参数对标 2026 年现行监管规则,但**各家券商佣金有差异** ——
           实际以你的开户券商为准。此页仅供测算,不构成投资建议。
         </p>
+        {/* ④ 有买入价才出现 · 这一页真正的落点 */}
+        {hasPos && (
+          <section style={card}>
+            <div style={label}>④ 这笔现在赚没赚(扣完成本)</div>
+            <div style={{ display: 'flex', gap: 14, marginTop: 10, flexWrap: 'wrap' }}>
+              <PnlBox title="毛盈亏" v={grossPnl} sub="只看股价涨跌" money={money} />
+              <PnlBox title="净盈亏" v={netPnl} strong
+                      sub="扣掉买入已付 + 卖出将付" money={money} />
+            </div>
+            <div style={{ fontSize: 12.5, color: HUNTER.INK_F, marginTop: 14, lineHeight: 2 }}>
+              买入 {shares} 手 × {lot} 股 @ <b>{avgCost.toFixed(2)}</b>,
+              现价 <b>{price!.toFixed(2)}</b>
+              <br />
+              买入时已付 <b>{money(buyCost)}</b> 元 · 现在卖出还要付 <b>{money(sellCost)}</b> 元
+              <br />
+              <b style={{ color: HUNTER.INK }}>
+                保本价 {breakEven.toFixed(2)}
+              </b>
+              {price! >= breakEven
+                ? <>(现价已过保本线)</>
+                : <>(还差 {((breakEven - price!) / price! * 100).toFixed(2)}%)</>}
+              {grossPnl > 0 && (
+                <><br />成本吃掉了这笔毛利的 <b>
+                  {((buyCost + sellCost) / grossPnl * 100).toFixed(1)}%
+                </b></>
+              )}
+            </div>
+            <ComplianceWatermark compact />
+          </section>
+        )}
+
       </main>
+    </div>
+  )
+}
+
+/** 盈亏数字 · A 股口径红涨绿跌 */
+function PnlBox({ title, v, sub, strong, money }: {
+  title: string; v: number; sub: string; strong?: boolean
+  money: (n: number) => string
+}) {
+  const c = v > 0 ? '#C0392B' : v < 0 ? '#1E8449' : HUNTER.INK
+  return (
+    <div style={{
+      flex: '1 1 200px', padding: '12px 14px', borderRadius: 10,
+      border: `1px solid ${strong ? HUNTER.THEME : HUNTER.LINE}`,
+      background: strong ? HUNTER.BRAND_PALE : '#fff',
+    }}>
+      <div style={{ fontSize: 11.5, color: HUNTER.INK_F }}>{title}</div>
+      <div style={{ fontSize: 22, fontWeight: 600, color: c, marginTop: 2 }}>
+        {v > 0 ? '+' : ''}{money(v)} 元
+      </div>
+      <div style={{ fontSize: 11, color: HUNTER.INK_F, marginTop: 2 }}>{sub}</div>
     </div>
   )
 }
