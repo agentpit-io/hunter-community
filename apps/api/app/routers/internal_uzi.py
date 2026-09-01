@@ -210,7 +210,7 @@ def _fmt_financials(fin) -> str:
 
 def _fmt_lhb(lhb: list[dict]) -> str:
     if not lhb:
-        return "龙虎榜：近 30 日无上榜（或数据未 seed）"
+        return "龙虎榜：近 30 日无上榜"
     lines = [f"共 {len(lhb)} 次上榜"]
     for record in lhb[:5]:
         net = record.get("net_buy_amount") or 0
@@ -228,7 +228,7 @@ def _fmt_lhb(lhb: list[dict]) -> str:
 def _fmt_research(reports: list[dict]) -> str:
     """近期研报（评级 / 目标价 / 标题）· 显示前 5 篇 · 帮 LLM 感知机构一致预期。"""
     if not reports:
-        return "研报：近期无（或数据未 seed）"
+        return "研报：近期暂无收录"
     lines = [f"共 {len(reports)} 篇研报（显示最新 5 篇）"]
     for r in reports[:5]:
         date = str(r.get("publish_date") or "?")[:10]
@@ -242,9 +242,9 @@ def _fmt_research(reports: list[dict]) -> str:
 
 def _fmt_governance(g) -> str:
     if not g:
-        return "治理：数据未 seed"
+        return "治理：暂无数据"
     if isinstance(g, list):
-        if not g: return "治理：数据未 seed"
+        if not g: return "治理：暂无数据"
         g = g[0]
     if not isinstance(g, dict):
         return "治理：格式异常"
@@ -263,7 +263,7 @@ def _fmt_governance(g) -> str:
 
 def _fmt_fund_holders(holders: list[dict]) -> str:
     if not holders:
-        return "十大股东：数据未 seed"
+        return "十大股东：暂无数据"
     top3 = holders[:3]
     lines = [f"前三大：" + " / ".join(
         f"{h.get('holder_name', '?')}({h.get('shares_pct')}%)" for h in top3
@@ -282,48 +282,114 @@ def _fmt_news(news: list[dict], limit: int = 5) -> str:
     return "\n".join(lines)
 
 
+def _market_of(code: str) -> str:
+    """A / HK / US —— 决定哪些数据段**根本不该出现在提示词里**。
+
+    ## 为什么必须分市场
+
+    龙虎榜、十大流通股东、股权质押率、东财研报,全部是 **A 股专属**:
+    · 龙虎榜   沪深交易所的每日异动榜,港美股没有这个东西
+    · 十大流通股东  A 股的"流通股"概念,美股对应的是 13F,口径完全不同
+    · 质押率   A 股大股东股权质押,美股不适用
+
+    原来不分市场,给 NVDA 也拼上这几段。上游当然查不到,于是模型照实写:
+
+        「近30日龙虎榜数据未 seed,十大流通股东最新持股变动数据未 seed」
+
+    两个问题叠在一起:
+      ① 拿 A 股的工具去查美股 —— 本来就不该查
+      ② "未 seed" 是我们内部的说法,直接糊到了用户脸上
+
+    用户看到的是"这个系统连英伟达的基本面都拿不到",而真相是
+    "我们拿 A 股的龙虎榜去查美股,当然查不到"。
+    """
+    bare = (code or "").split(".")[0].strip()
+    if bare.isdigit() and len(bare) == 6:
+        return "A"
+    if bare.isdigit() and len(bare) == 5:
+        return "HK"
+    return "US"
+
+
+# 每个市场**有意义**的数据段。不在表里的直接不拼进提示词 ——
+# 拼进去再让模型说"没有",等于让它替我们的选型错误背书。
+_SECTIONS_BY_MARKET = {
+    "A":  ["quote", "kline", "financials", "lhb", "fund_holders",
+           "governance", "news", "research"],
+    "HK": ["quote", "kline", "financials", "news"],
+    "US": ["quote", "kline", "financials", "news"],
+}
+
+
 def _build_llm_context(code: str, bundle: dict) -> str:
-    """把 8 数据组织成给 Gemini 的上下文 · 尽量密集不冗余。"""
+    """把数据组织成给 Gemini 的上下文 · 尽量密集不冗余。
+
+    **按市场裁剪**:龙虎榜/十大流通股东/治理/研报是 A 股专属,
+    港美股连拼都不拼进来 —— 见 _market_of 的说明。
+    """
+    mk = _market_of(code)
+    allow = set(_SECTIONS_BY_MARKET.get(mk, _SECTIONS_BY_MARKET["US"]))
+
+    blocks: list[str] = []
+    n = 0
+
+    def _add(key: str, title: str, body: str) -> None:
+        nonlocal n
+        if key not in allow:
+            return
+        n += 1
+        blocks.append(f"## {n}. {title}\n{body}")
+
+    _add("quote", "实时行情", _fmt_price_block(bundle.get("quote")))
+    _add("kline", "K 线（近 30 日）", _fmt_kline_summary(bundle.get("kline") or []))
+    _add("financials", "财务（TTM · 最新季）", _fmt_financials(bundle.get("financials")))
+    _add("lhb", "龙虎榜（近 30 日）", _fmt_lhb(bundle.get("lhb") or []))
+    _add("fund_holders", "十大流通股东（最新季度）",
+         _fmt_fund_holders(bundle.get("fund_holders") or []))
+    _add("governance", "治理指标", _fmt_governance(bundle.get("governance")))
+    _add("news", "近期公告 / 新闻", _fmt_news(bundle.get("news") or []))
+    _add("research", "近期研报（券商一致预期）", _fmt_research(bundle.get("research") or []))
+
+    market_label = {"A": "A 股", "HK": "港股", "US": "美股"}[mk]
+
+    # 「资金/情绪」那一段该看什么,随市场变。
+    # A 股看龙虎榜和十大股东;港美股这两样根本不存在,只能看新闻主线 ——
+    # 硬要求它"结合龙虎榜"的话,它只会写一句"龙虎榜数据缺失"。
+    if mk == "A":
+        senti_hint = "（结合龙虎榜 · 十大股东 · 新闻主线 · 研报评级）"
+        fund_hint = "（结合财务 · ROE · 增速 · 治理）"
+        extra_rule = (
+            "   - **匿名化游资/席位名**：龙虎榜里如出现\"章盟主 / 赵老哥 / 佛山无影脚\""
+            "等游资/席位真名 · 改用\"A 席位 / B 席位\"或\"活跃席位\"泛化描述\n"
+        )
+    else:
+        # ⚠️ 提示里**不要出现**"龙虎榜""十大流通股东"这些词,哪怕是在否定句里。
+        # 写成「本市场没有龙虎榜,不要提」的话,这几个字仍然进了上下文,
+        # 模型很容易顺手就在输出里复述一句"本市场无龙虎榜数据" ——
+        # 用户看到的还是一句莫名其妙的 A 股术语。
+        # 正确做法是只说该看什么,不说不该看什么。
+        senti_hint = "（结合新闻主线与成交量变化 · 只用上面给出的数据段）"
+        fund_hint = "（结合财务 · ROE · 增速）"
+        extra_rule = ""
+
     return f"""基于以下真实数据（全部来自内部 finance-data 平台 · 只用这些数据 · 不要外推），生成结构化"深度分析卡片"markdown 摘要（500-800 字）。
 
-标的：{code}
+标的：{code}（{market_label}）
 分析深度：lite
 
 ⚠️ **严格要求**：
 1. 直接从 "### 一、多空核心观点" 开始输出 · 不要任何前言 / 元描述 / 草稿
 2. 全部使用中文 · 除标的代码/百分号外
-3. 数据未 seed 的维度直接注明"数据未 seed"或跳过 · **绝对不要编造数据**
+3. 下面**没有列出**的数据维度 = 这个市场不适用,**不要提它、更不要说它"缺失"**;
+   列出了但内容为空的,说一句"暂无数据"即可 · **绝对不要编造数据**
 4. **合规硬约束（不可违反）**：
    - **不给"买入 / 卖出 / 增持 / 减持"评级** · 用"值得关注 / 需观察 / 暂时旁观"这类研究性表述
-   - **匿名化游资/席位名**：龙虎榜里如出现"章盟主 / 赵老哥 / 佛山无影脚"等游资/席位真名 · 改用"A 席位 / B 席位"或"活跃席位"泛化描述
-   - **不做投资建议** · 只做数据观察与研究判断
+{extra_rule}   - **不做投资建议** · 只做数据观察与研究判断
    - **不写免责声明** · 已由平台侧统一处理
 
 # 数据
 
-## 1. 实时行情
-{_fmt_price_block(bundle.get("quote"))}
-
-## 2. K 线（近 30 日）
-{_fmt_kline_summary(bundle.get("kline") or [])}
-
-## 3. 财务（TTM · 最新季）
-{_fmt_financials(bundle.get("financials"))}
-
-## 4. 龙虎榜（近 30 日）
-{_fmt_lhb(bundle.get("lhb") or [])}
-
-## 5. 十大流通股东（最新季度）
-{_fmt_fund_holders(bundle.get("fund_holders") or [])}
-
-## 6. 治理指标
-{_fmt_governance(bundle.get("governance"))}
-
-## 7. 近期公告 / 新闻
-{_fmt_news(bundle.get("news") or [])}
-
-## 8. 近期研报（券商一致预期）
-{_fmt_research(bundle.get("research") or [])}
+{chr(10).join(blocks)}
 
 # 输出要求
 
@@ -337,10 +403,10 @@ def _build_llm_context(code: str, bundle: dict) -> str:
 （结合 K 线趋势 / 高低点位置 / 成交额）
 
 ### 三、基本面（1 段 · 2-3 句）
-（结合财务 · ROE · 增速 · 治理）
+{fund_hint}
 
 ### 四、资金/情绪信号（1 段 · 2-3 句）
-（结合龙虎榜 · 十大股东 · 新闻主线 · 研报评级）
+{senti_hint}
 
 ### 五、催化 / 风险（各 2 条 bullet）
 - 催化 1: ...
@@ -351,7 +417,7 @@ def _build_llm_context(code: str, bundle: dict) -> str:
 ### 六、结论（1 句）
 一句话说清"当前性价比 / 关注度"（研究性表述 · 不做投资建议）。
 
-⚠️ 数据缺失的维度直接注明"数据未 seed"或跳过 · 不编造。
+⚠️ 上面没给的数据不要编 · 也不要罗列"缺了什么"。
 """
 
 

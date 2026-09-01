@@ -412,6 +412,76 @@ function MdText({ text }: { text: string }) {
  * 只改渲染分组,不动数据:messages 数组本身、事件 reducer、
  * artifact 与 message id 的对应关系全部不变。合并只是视觉上的。
  */
+/**
+ * 这段文本看起来是模型的**内部盘算**,不是给用户的答复。
+ *
+ * ## 为什么需要
+ *
+ * 原来只有一条位置规则:「隐藏最后一个 tool_call 之前的 text 段」。
+ * 它假设模型一定会调工具 —— planning 在前、工具在中、答复在后。
+ *
+ * 但模型**卡住时一个工具都不调**。用户问「帮我写一份 长鑫科技 的深度投研报告」,
+ * 而长鑫科技(ChangXin Memory)还没上市、查不到代码,模型就在原地打转:
+ *
+ *     , I will find the stock code for 长鑫科技 (ChangXin Storage) or perform...
+ *     Wait, the rules say: "若股票代码/名称有歧义 · 直接调 watchlist_stock_quickview"...
+ *     Let's do this: First check user sources to see if there any web search...
+ *     No preambles! No explanations! No thinking output!
+ *
+ * 一个 tool_call 都没有 → lastToolIdx = -1 → **一段都不隐藏**,
+ * 整屏英文自言自语原样糊在用户脸上,里面还把我们的系统提示词一条条念了出来。
+ *
+ * ## 为什么是折叠而不是删掉
+ *
+ * 删掉的话,模型只输出了盘算(没给出答复)的那次,用户会看到一个**空回复** ——
+ * 比看到乱码更让人不知所措。折叠起来至少还能展开看到"它卡在哪了"。
+ *
+ * ## 判定:宁可漏,不可滥
+ *
+ * 要 3 个以上标志才算。真正的答复不会连着说三次 "Let's call the tools"。
+ * 只命中一两个(比如一句正常的英文里带了 "First,")的照常显示 ——
+ * 误折叠用户的正经答复,比漏折叠一段盘算糟得多。
+ */
+const PLANNING_MARKERS = [
+  /\bLet'?s\s+(do|call|check|look|run|write|start|see|try)\b/i,
+  /\bWait[,!]/,
+  /\bI (will|must|should|need to)\s+(call|check|find|use|search)\b/i,
+  /\bFirst,?\s+(I|let)\b/i,
+  /the (rules|instructions) say/i,
+  /No preambles|No explanations|No thinking output/i,
+  /\bActually,\s+let/i,
+  /\bSo I (will|must)\b/i,
+]
+
+function looksLikePlanning(text: string): boolean {
+  const t = (text || '').trim()
+  if (t.length < 80) return false          // 太短的不折 · 可能就是一句正常回答
+  let hits = 0
+  for (const re of PLANNING_MARKERS) if (re.test(t)) hits++
+  return hits >= 3
+}
+
+/** 折叠起来的内部盘算 —— 默认收起 · 想看能展开 */
+function PlanningBlock({ text }: { text: string }) {
+  return (
+    <details style={{
+      margin: '6px 0', padding: '6px 10px', borderRadius: 8,
+      background: '#F7F5F1', border: '1px solid #E7E2D9',
+    }}>
+      <summary style={{
+        cursor: 'pointer', fontSize: 12, color: '#8C857A', userSelect: 'none',
+      }}>
+        模型的内部推演(没有调用任何工具)· 点开查看
+      </summary>
+      <div style={{
+        marginTop: 6, fontSize: 12, color: '#6B6459', lineHeight: 1.8,
+        whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+        maxHeight: 320, overflowY: 'auto',
+      }}>{text}</div>
+    </details>
+  )
+}
+
 function groupTurns(
   messages: Message[],
 ): Array<{ role: 'user' | 'assistant'; msgs: Message[] }> {
@@ -539,7 +609,12 @@ export default function MessageList({ messages, onOpenArtifact, onPickSuggestion
               {parts.map((part, i) => {
                 // 隐藏所有位于最后 tool_call 之前的 text 段
                 if (isText(part) && i < lastToolIdx) return null
-                if (isText(part)) return <MdText key={i} text={part.text} />
+                if (isText(part)) {
+                  // 没调工具时位置规则失效 —— 再按内容判一次(见 looksLikePlanning)
+                  return looksLikePlanning(part.text)
+                    ? <PlanningBlock key={i} text={part.text} />
+                    : <MdText key={i} text={part.text} />
+                }
                 if (isTool(part)) return <ToolCallCard key={i} part={part} onOpenArtifact={onOpenArtifact} />
                 return null
               })}

@@ -505,7 +505,26 @@ function upload (f) {
     try { d = JSON.parse(xhr.responseText) } catch (e) {
       upBox.style.display = 'none'
       upMsg.style.color = '#B4472A'
-      upMsg.textContent = '上传失败 · 服务端没有正常返回'
+      // 响应不是 JSON —— 多半根本没到后端,而是被中间层挡了。
+      // 原来这里一律显示「上传失败 · 服务端没有正常返回」,
+      // 用户从这句话里得不到任何可行动的信息:
+      // 是文件太大?网断了?服务挂了?没法判断,也不知道下一步该干什么。
+      // 按状态码分开说,尤其是 413 —— 那是最常见的一种,
+      // 而且它有明确的解法(换小包 / 直接把 tar 放进 data-packages/)。
+      const sizeMB = (f.size / 1048576).toFixed(0)
+      if (xhr.status === 413) {
+        upMsg.textContent =
+          `文件太大被服务器挡下了(${sizeMB} MB)。` +
+          `可以把 .tar 直接放进服务器的 data-packages/ 目录,再点上面的「刷新」。`
+      } else if (xhr.status === 0) {
+        upMsg.textContent = '上传中断 —— 网络断开或请求被取消,重试一次。'
+      } else if (xhr.status >= 500) {
+        upMsg.textContent = `服务端出错(HTTP ${xhr.status})· 稍后重试,或看服务日志。`
+      } else {
+        upMsg.textContent =
+          `上传失败 · HTTP ${xhr.status} · 返回的不是 JSON` +
+          (xhr.responseText ? `:${xhr.responseText.slice(0, 80)}` : '')
+      }
       return
     }
     upBox.style.display = 'none'
