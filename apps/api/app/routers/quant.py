@@ -712,7 +712,7 @@ async def run_backtest_ep(body: BacktestIn, request: Request, bg: BackgroundTask
     conn = get_conn(); cur = conn.cursor()
     # 阶段 4 · 命中直接带上持久化的 trading_cost/gross_metrics + 前 200 笔逐笔
     cur.execute(
-        "SELECT id, metrics, nav_series, positions, trading_cost, gross_metrics "
+        "SELECT id, metrics, nav_series, positions, trading_cost, gross_metrics, positions_hist "
         "FROM backtest_result WHERE spec_hash=%s", (spec_hash,))
     hit = cur.fetchone()
     if hit:
@@ -779,15 +779,16 @@ async def backtest_persist(task_id: str, request: Request):
     cur.execute(
         """INSERT INTO backtest_result (strategy_id, spec_hash, start_date, end_date,
              metrics, nav_series, positions, cost_used, duration_ms,
-             trading_cost, gross_metrics, slippage_model)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             trading_cost, gross_metrics, slippage_model, positions_hist)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
            ON CONFLICT (spec_hash) DO UPDATE
              SET metrics = EXCLUDED.metrics, nav_series = EXCLUDED.nav_series,
                  positions = EXCLUDED.positions, cost_used = EXCLUDED.cost_used,
                  duration_ms = EXCLUDED.duration_ms,
                  trading_cost = EXCLUDED.trading_cost,
                  gross_metrics = EXCLUDED.gross_metrics,
-                 slippage_model = EXCLUDED.slippage_model
+                 slippage_model = EXCLUDED.slippage_model,
+                 positions_hist = EXCLUDED.positions_hist
            RETURNING id""",
         (body_strategy_id, spec_hash,
          date.fromisoformat(result["start"]), date.fromisoformat(result["end"]),
@@ -796,7 +797,10 @@ async def backtest_persist(task_id: str, request: Request):
          result.get("duration_ms", 0),
          json.dumps(_tc) if _tc is not None else None,
          json.dumps(result.get("gross_metrics")) if result.get("gross_metrics") is not None else None,
-         _slip_model),
+         _slip_model,
+         # 逐期持仓 —— 不存的话缓存命中时「持仓变化」是空的:
+         # 同一个策略第一次有调仓记录、第二次没有,用户无法理解(迁移 0016)
+         json.dumps(result.get("positions_hist", []))),
     )
     new_id = cur.fetchone()[0]
     # 阶段 4 · 逐笔全部落 backtest_trade
@@ -961,7 +965,7 @@ async def run_backtest_sync(body: BacktestIn, request: Request):
     conn = get_conn(); cur = conn.cursor()
     # 阶段 4 · 一并取持久化的 trading_cost/gross_metrics · 不再靠 preset 现补兜底
     cur.execute(
-        "SELECT id, metrics, nav_series, positions, trading_cost, gross_metrics "
+        "SELECT id, metrics, nav_series, positions, trading_cost, gross_metrics, positions_hist "
         "FROM backtest_result WHERE spec_hash=%s", (spec_hash,))
     hit = cur.fetchone()
     if hit:
@@ -979,9 +983,14 @@ async def run_backtest_sync(body: BacktestIn, request: Request):
                  for c, v in zip(_TRADE_COLS, row)}
                 for row in _trows
             ]
+            # positions_hist 从表里读(迁移 0016 加的列)。
+            # 不加这一列的话,同一个策略跑第二次(缓存命中)反而显示
+            # "还没有调仓记录" —— 第一次有、第二次没有,用户完全无法理解。
+            # 老结果这列是 NULL(它们确实没存过),按空处理。
             return {"result_id": _rid, "cached": True,
                     "metrics": hit[1], "nav_series": hit[2], "positions": hit[3],
-                    "gross_metrics": _gm, "trading_cost": _tc, "trades": _trades}
+                    "gross_metrics": _gm, "trading_cost": _tc, "trades": _trades,
+                    "positions_hist": hit[6] or []}
         # 旧记录:trading_cost 从未存过 · 沿用 preset 现补兜底(毛/净留 null)
         cur.close(); conn.close()
         from app.services.quant.broker import defaults as _bd
@@ -1018,22 +1027,26 @@ async def run_backtest_sync(body: BacktestIn, request: Request):
     cur.execute(
         """INSERT INTO backtest_result (strategy_id, spec_hash, start_date, end_date,
              metrics, nav_series, positions, cost_used, duration_ms,
-             trading_cost, gross_metrics, slippage_model)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             trading_cost, gross_metrics, slippage_model, positions_hist)
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
            ON CONFLICT (spec_hash) DO UPDATE
              SET metrics = EXCLUDED.metrics, nav_series = EXCLUDED.nav_series,
                  positions = EXCLUDED.positions, cost_used = EXCLUDED.cost_used,
                  duration_ms = EXCLUDED.duration_ms,
                  trading_cost = EXCLUDED.trading_cost,
                  gross_metrics = EXCLUDED.gross_metrics,
-                 slippage_model = EXCLUDED.slippage_model
+                 slippage_model = EXCLUDED.slippage_model,
+                 positions_hist = EXCLUDED.positions_hist
            RETURNING id""",
         (body.strategy_id, spec_hash, start, end,
          json.dumps(result["metrics"]), json.dumps(result["nav_series"]),
          json.dumps(positions), result["cost_used"], result["duration_ms"],
          json.dumps(_tc) if _tc is not None else None,
          json.dumps(result.get("gross_metrics")) if result.get("gross_metrics") is not None else None,
-         _slip_model),
+         _slip_model,
+         # 逐期持仓 —— 不存的话缓存命中时「持仓变化」是空的:
+         # 同一个策略第一次有调仓记录、第二次没有,用户无法理解(迁移 0016)
+         json.dumps(result.get("positions_hist", []))),
     )
     new_id = cur.fetchone()[0]
     # 阶段 4 · 逐笔全部落 backtest_trade
@@ -1049,7 +1062,12 @@ async def run_backtest_sync(body: BacktestIn, request: Request):
             "nav_gross_series": result.get("nav_gross_series"),
             "trading_cost": result.get("trading_cost"),
             "trades": result.get("trades", [])[:200],
-            "trades_persisted": _n_trades}
+            "trades_persisted": _n_trades,
+            # 逐期持仓 —— 「持仓变化」面板要用。
+            # ⚠️ 这个 return 是**白名单式**的:引擎返回什么不重要,
+            # 这里没列的字段一律到不了前端。加字段时容易只改引擎忘了改这里,
+            # 表现是"本地直调有数据、走 API 就是空的",而且不报错。
+            "positions_hist": result.get("positions_hist", [])}
 
 
 # ═══════════════════════════════════════════════════════════════
