@@ -88,7 +88,9 @@ a{text-decoration:none;color:inherit}
 /* ── 应用外壳 ────────────────────────────── */
 .app{
   min-height:100vh;display:grid;
-  grid-template-columns:72px 1fr;
+  /* 单列 —— 左侧 railbar 已移除(见 app.js renderShell 的注释)。
+     忘了改这里的话会留下 72px 的空白竖条,比留着导航还怪。 */
+  grid-template-columns:1fr;
   background:var(--bg);
 }
 .railbar{

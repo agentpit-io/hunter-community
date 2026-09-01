@@ -123,8 +123,44 @@ function loadDraft() {
   } catch {}
   return defaultDraft()
 }
+/** 回测结果的 localStorage 键 —— 与 workbench/backtest 页共用一个名字 */
+const LS_RESULT = 'hunter_backtest_result'
+
+/** 两个策略是不是同一套配置(因子集 + 权重 + 股票池 + 换仓 + 成本档) */
+function sameStrategyShape(a, b) {
+  if (!a || !b) return false
+  const sig = (x) => JSON.stringify({
+    f: (x.factors || []).map((k, i) => [k, (x.weights || [])[i]])
+                        .sort((p, q) => String(p[0]).localeCompare(String(q[0]))),
+    c: x.config || {},
+  })
+  try { return sig(a) === sig(b) } catch { return false }
+}
+
 function saveDraft(d) {
   d.updated_at = Date.now()
+
+  // ⚠️ 换了策略就把上一次的回测结果作废。
+  //
+  // 原来只写 draft 不动 result。而 backtest.html 是这么取数的:
+  //     配置行  ← draft(刚换的新策略)
+  //     结果区  ← localStorage['hunter_backtest_result'](上一次跑的)
+  //
+  // 于是从策略广场点「高股息防御」和点「质量+动量」,页面顶部的因子、
+  // 股票池、换仓都跟着变了,底下的年化/夏普/回撤/换手却**一个数字都不动**,
+  // 连"655ms"这个耗时都一模一样 —— 因为压根就是上一次那份结果。
+  //
+  // 用户看到的是"换了策略回测没变化",最自然的结论是回测功能是假的。
+  //
+  // 这里按配置指纹判断:配置没变(比如只改了名字)就留着结果,
+  // 真换了策略就清掉,让 backtest.html 显示「尚未回测」。
+  try {
+    const prev = JSON.parse(localStorage.getItem(LS_DRAFT) || 'null')
+    if (prev && !sameStrategyShape(prev, d)) {
+      localStorage.removeItem(LS_RESULT)
+    }
+  } catch { localStorage.removeItem(LS_RESULT) }
+
   localStorage.setItem(LS_DRAFT, JSON.stringify(d))
 }
 function defaultDraft() {
@@ -343,17 +379,20 @@ function askHunterAboutOfficial(strategy) {
 function renderShell(activeTab, title, subTitle, actions) {
   return `
 <div class="app">
-  <nav class="railbar">
-    <a href="/chat" class="rail-icon brand" title="猎鹿人"><span class="hi hi-deer"></span></a>
-    <a href="/chat" class="rail-icon" title="对话"><span class="hi hi-chat"></span><span class="lbl">对话</span></a>
-    <a href="/watchlist" class="rail-icon" title="自选"><span class="hi hi-star"></span><span class="lbl">自选</span></a>
-    <a href="/strategies/index.html" class="rail-icon active" title="策略中心"><span class="hi hi-chart"></span><span class="lbl">策略</span></a>
-    <a href="/push" class="rail-icon" title="推送"><span class="hi hi-bell"></span><span class="lbl">推送</span></a>
-    <div class="rail-spacer"></div>
-    <a href="/chat" class="rail-icon" title="账户"><span class="hi hi-user"></span><span class="lbl">账户</span></a>
-  </nav>
+  <!-- 左侧竖排图标栏已移除(2026-09-01)。
+       它是老版四入口导航的遗留:对话 / 自选 / 策略 / 推送。
+       08-30 导航重构后主站顶栏只剩「策略中心」一个入口,自选股移进了
+       /chat 左侧标签 —— 这条竖栏指向的 /watchlist、/push 都不再是
+       一级入口,留着只会让用户在两套导航之间来回跳。
+       取而代之:标题左边一个「返回对话」按钮,一步回 /chat。 -->
   <div class="main">
     <div class="topbar">
+      <a href="/chat" title="返回对话"
+         style="color:var(--muted);display:inline-flex;align-items:center;gap:4px;
+                padding:4px 10px 4px 6px;border:1px solid var(--divider);border-radius:8px;
+                font-size:12.5px;margin-right:10px;text-decoration:none">
+        <span style="font-size:14px;line-height:1">←</span> 返回对话
+      </a>
       <a href="/strategies/index.html" style="color:var(--text);display:inline-flex;align-items:center;gap:8px">
         <span class="hi hi-deer" style="font-size:22px;color:var(--brand)"></span>
         <div class="title">策略中心</div>

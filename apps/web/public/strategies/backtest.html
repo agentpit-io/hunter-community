@@ -34,6 +34,24 @@ document.body.innerHTML = renderShell(
 
 const container = document.getElementById('page-content')
 
+// 没有结果时给一条明确的出路。
+//
+// saveDraft 现在会在换策略时清掉上一次的结果(否则新策略配旧数字,
+// 用户会以为"换了策略回测没变化")。清掉之后这一页会是空的 ——
+// 空页面不告诉用户下一步该干什么,和显示错数字一样糟。
+if (!isReal) {
+  const tip = document.createElement('div')
+  tip.style.cssText = 'margin:16px 0;padding:14px 16px;border:1px solid #E3C89A;' +
+    'background:#FDF8EE;border-radius:10px;font-size:13px;line-height:1.9;color:#8A5A1B'
+  tip.innerHTML = '<b>这个策略还没跑过回测。</b><br>' +
+    '下面的指标位都是空的 —— 不是策略不赚钱,是还没算。' +
+    '<div style="margin-top:10px"><a href="/strategies/workbench.html" ' +
+    'style="display:inline-block;padding:6px 14px;border-radius:8px;' +
+    'background:var(--brand,#A9714B);color:#fff;text-decoration:none;font-size:12.5px">' +
+    '去策略工作台跑回测 →</a></div>'
+  container.parentNode.insertBefore(tip, container)
+}
+
 // **不再用 mock 补齐**(_17 §1)。
 //
 // 原来这里是 Object.assign({ir:0.98, win_rate:0.62, ...}, realResult.metrics) ——
