@@ -68,13 +68,45 @@ def _suffix_code(code: str) -> str:
     return code + (".SH" if code.startswith("6") else ".SZ")
 
 
+# 平方根冲击模型的系数 —— 它的量纲是**日波动率**,不是"保守程度"。
+#
+# ## 为什么从 0.2 改成 0.02(2026-09-01)
+#
+# 公式是 `impact_bps = k * sqrt(下单额/ADV) * 10000`。
+# 文献里的标准形式(Almgren 等)是:
+#
+#     冲击(收益单位) ≈ σ_日 · sqrt(Q / ADV)
+#
+# 也就是说 k 就是**日波动率**。A 股 σ_日 ≈ 2%,所以 k ≈ 0.02。
+#
+# 原来写 0.2,大了整整 10 倍:
+#
+#     Q/ADV      k=0.2      k=0.02     文献量级
+#      0.1%     63.2 bps    6.3 bps     ~6 bps
+#      1.0%    200.0 bps   20.0 bps    ~20 bps
+#      3.4%    368.8 bps   36.9 bps    ~37 bps
+#
+# 老板在测试方案 §5.8 里记的观察正好印证:他期望小单(<1% ADV)
+# 大约 20 bps,而 k=0.2 在 1% ADV 上给出 200 bps。
+#
+# ## 为什么之前没人发现
+#
+# 因为冲击成本**根本没进净值**(见 _impact_excess_frac)。逐笔明细里
+# 那些 300+ bps 的数字没有任何下游消费者,错了也不会表现出来。
+# 一把这两件事都修好,1 亿资金的回测立刻变成"净收益 -11.57%、
+# 成本吃掉毛收益 121%" —— 荒谬得很明显,才暴露出系数的问题。
+#
+# 仍可按策略覆盖(`config.impact_k`):做市/高频场景的有效 σ 不一样。
+IMPACT_K_DEFAULT = 0.02
+
+
 def _compute_trade_cost(
     side: str,
     turnover: float,
     preset,  # BrokerPreset
     adv_20d: float,
     slippage_model: str = "bp_static",
-    impact_k: float = 0.2,
+    impact_k: float = IMPACT_K_DEFAULT,
 ) -> dict:
     """算单笔交易成本 · 返 dict 供 TradeRecord 用。
 
@@ -89,6 +121,11 @@ def _compute_trade_cost(
     other_bps = side_cost.other
 
     if slippage_model == "sqrt_impact" and adv_20d and adv_20d > 0:
+        # 平方根冲击模型:impact = k · sqrt(下单额 / 日均成交额)
+        #
+        # ⚠ k 的量纲是**日波动率**,不是一个随手拍的"保守系数"。
+        # 文献里的标准形式是 impact ≈ σ_日 · sqrt(Q/ADV)(Almgren 等),
+        # A 股 σ_日 ≈ 2%,所以 k ≈ 0.02。见 IMPACT_K_DEFAULT 的说明。
         ratio = turnover / adv_20d
         impact_bps = impact_k * (ratio ** 0.5) * 10000
         slippage_bps = max(side_cost.slippage, impact_bps)
@@ -537,13 +574,13 @@ def run_backtest(strategy: dict, start: date, end: date, user_id: str | None = N
 
     # 阶段 4 · 逐笔成本参数(可选 · 从 strategy.config 读)
     #   slippage_model: bp_static(默认)/ sqrt_impact
-    #   impact_k: sqrt_impact 冲击系数 · 默认 0.2(保守)
+    #   impact_k: sqrt_impact 冲击系数 · 默认 IMPACT_K_DEFAULT(= 日波动率)
     # capital 只用于把归一化 nav 折成"元" · 让 turnover / ADV 有物理意义
     # (逐笔明细是**额外产出** · 不参与 nav 计算 · 向后兼容)
     slippage_model = (strategy["config"].get("slippage_model") or "bp_static").lower()
     if slippage_model not in ("bp_static", "sqrt_impact"):
         slippage_model = "bp_static"
-    impact_k = float(strategy["config"].get("impact_k") or 0.2)
+    impact_k = float(strategy["config"].get("impact_k") or IMPACT_K_DEFAULT)
     capital_base = float(strategy["config"].get("capital") or 1_000_000)
 
     nav = [1.0]              # 净值(扣成本)
