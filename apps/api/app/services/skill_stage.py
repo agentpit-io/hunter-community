@@ -158,6 +158,107 @@ def stage(user: str, repo: str, name: str, content: str,
     return out
 
 
+# ═══════════════════════════════════════════════════════════════
+# 仓库清单 —— 「装了什么 / 跳过了什么」靠它算,不靠模型自觉汇报
+# ═══════════════════════════════════════════════════════════════
+
+# user_id -> {"repo": str, "at": float, "found": [SKILL.md 路径]}
+_inventory: dict[str, dict] = {}
+
+
+def remember_inventory(user: str, repo: str, skill_paths: list[str]) -> None:
+    """记下这个仓库里**一共有哪些 SKILL** —— 在 repo_open 时调用。
+
+    ## 为什么需要
+
+    用户说「按这个地址装这个 SKILL」,模型自己决定装哪几个。实测它会
+    自作主张:读到 fundamental-analysis 之后说一句「这个已经合并到
+    stock-eval 里了,我们换一个更有价值的 technical-analysis」,然后
+    只暂存了一个。
+
+    用户从界面上**完全看不出**仓库里原本有 5 个、装了 1 个、跳过 4 个 ——
+    确认卡只显示"待确认 1 个"。他以为整个仓库都装好了,
+    过一会儿在能力库里找不到 fundamental-analysis,以为是我们的 bug。
+
+    ## 为什么不让模型自己报
+
+    最直接的做法是加个"请汇报你跳过了什么"的工具或 prompt 规则。
+    但**跳过恰恰是模型自己的判断**,让它汇报自己的省略,等于让它
+    先意识到自己省略了 —— 它当时的想法是"我在做一个更好的选择",
+    不是"我跳过了"。这条路不可靠。
+
+    repo_open 的返回里本来就有 `skill_md_paths`(仓库全量清单),
+    记下来,peek 时和暂存列表一比,差集就是没装的。**不需要模型配合。**
+    """
+    if not user or not skill_paths:
+        return
+    with _lock:
+        _gc_inventory()
+        _inventory[user] = {
+            "repo": repo or "", "at": time.time(),
+            "found": list(skill_paths)[:200],
+        }
+
+
+def _gc_inventory() -> None:
+    now = time.time()
+    for k in [k for k, v in _inventory.items() if now - v["at"] > TTL_SEC]:
+        _inventory.pop(k, None)
+
+
+def _skipped(user: str, staged: list[dict]) -> dict:
+    """算出「发现 N 个 · 这次装 M 个 · 剩下哪几个没装」。
+
+    ## 匹配为什么不能只比名字
+
+    模型暂存时经常改名:仓库里叫 `stock-eval`,它落盘成 `invest_stock_eval`
+    (加了个来源前缀)。只比名字的话这条会被误判成"没装",
+    确认卡上就会出现一条假的"跳过" —— 比不显示还糟。
+
+    三级匹配,命中任一即认为已装:
+      ① source_path 完全相同   —— 模型填了就用这个,最准
+      ② 目录名归一后相同       —— `stock-eval` ↔ `stock_eval`
+      ③ 暂存名包含目录名       —— `invest_stock_eval` 含 `stock_eval`
+
+    宁可漏报(该提示的没提示)也不误报:用户看到一条"没装 xxx"然后
+    发现其实装了,下次就不信这个提示了。
+    """
+    with _lock:
+        inv = _inventory.get(user)
+    if not inv:
+        return {}
+    found = inv["found"]
+
+    def _leaf(path: str) -> str:
+        # plugins/us-stock-analysis/skills/fundamental-analysis/SKILL.md
+        #   → fundamental-analysis
+        parts = [x for x in path.split("/") if x and x != "SKILL.md"]
+        return parts[-1] if parts else path
+
+    def _norm(x: str) -> str:
+        return x.replace("-", "_").replace(".", "_").lower()
+
+    staged_paths = {(i.get("source_path") or "").strip() for i in staged}
+    staged_norm = {_norm(i["name"]) for i in staged}
+
+    def _is_staged(path: str) -> bool:
+        if path in staged_paths:
+            return True
+        leaf = _norm(_leaf(path))
+        if leaf in staged_norm:
+            return True
+        return any(leaf and leaf in n for n in staged_norm)
+
+    skipped = [{"name": _leaf(p), "path": p} for p in found if not _is_staged(p)]
+    return {
+        "repo": inv["repo"],
+        "found_count": len(found),
+        "staged_count": len(staged),
+        "skipped": skipped[:30],
+        "skipped_count": len(skipped),
+    }
+
+
 def peek(user: str) -> dict:
     """看暂存了什么 —— 确认卡的数据源。
 
@@ -169,12 +270,18 @@ def peek(user: str) -> dict:
         if not slot:
             return {"repo": "", "items": [], "total": 0}
         items = [asdict(v) for v in slot["items"].values()]
-    return {
+    out = {
         "repo": slot["repo"],
         "items": items,
         "total": len(items),
         "risk_count": sum(len(i["risks"]) for i in items),
     }
+    # 仓库里还有哪些没被暂存 —— 确认卡要把这个显式告诉用户,
+    # 否则他以为整个仓库都装好了(见 remember_inventory 的说明)
+    inv = _skipped(user, items)
+    if inv:
+        out["inventory"] = inv
+    return out
 
 
 def discard(user: str) -> int:

@@ -32,6 +32,14 @@ interface Staged {
   items: StagedItem[]
   total: number
   risk_count?: number
+  /** 仓库全量清单对比 —— 后端算的,不依赖模型自觉汇报 */
+  inventory?: {
+    repo: string
+    found_count: number
+    staged_count: number
+    skipped: { name: string; path: string }[]
+    skipped_count: number
+  }
 }
 
 async function api(method: string, path: string, body?: any) {
@@ -144,6 +152,35 @@ export default function SkillStagedCard({ onInstalled, onDismiss }: Props) {
           </>
         )}
       </div>
+
+      {/* 仓库里还有哪些没装 —— 这块是后端拿 repo 全量清单减去暂存算的,
+          不依赖模型汇报。
+          起因:用户说「按这个地址装这个 SKILL」,模型读到一半自己决定
+          「fundamental-analysis 已经合并到 stock-eval 里了,换一个更有价值的」,
+          于是 5 个只装了 1 个。而确认卡只写"待确认 1 个",用户以为整个仓库
+          都装好了,过后在能力库里找不到,以为是我们的 bug。 */}
+      {data.inventory && data.inventory.skipped_count > 0 && (
+        <div style={{
+          margin: '0 12px 10px', padding: '9px 11px', borderRadius: 8,
+          background: '#FDF8EE', border: '1px solid #E3C89A',
+          fontSize: 12, color: '#8A5A1B', lineHeight: 1.85,
+        }}>
+          这个仓库里一共有 <b>{data.inventory.found_count}</b> 个 SKILL,
+          这次只装 <b>{data.inventory.staged_count}</b> 个。
+          <div style={{ marginTop: 5 }}>
+            没装的 {data.inventory.skipped_count} 个:
+            {data.inventory.skipped.map((x) => (
+              <code key={x.path} style={{
+                display: 'inline-block', margin: '3px 5px 0 0', padding: '1px 6px',
+                background: '#F4F1EC', borderRadius: 4, fontSize: 11,
+              }}>{x.name}</code>
+            ))}
+          </div>
+          <div style={{ marginTop: 6, fontSize: 11.5, color: HUNTER.INK_F }}>
+            想要哪个,直接说名字让我装。
+          </div>
+        </div>
+      )}
 
       {data.items.map((i) => {
         const isOpen = open === i.name

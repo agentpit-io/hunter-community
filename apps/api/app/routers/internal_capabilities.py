@@ -126,14 +126,28 @@ async def cap_skill_repo_open(body: RepoIn, request: Request):
     这是 `_23` 的入口。与 `inspect()` 的区别:那个替模型做完了判断
     (扫 SKILL.md、分 L1-L4),这个只把材料摆出来,由模型自己读。
     """
-    _auth(request)
-    from app.services import skill_install
+    # ⚠️ uid 必须和 skill_stage 那边取法一致(`_auth(request) or "anon"`)——
+    # 两边不一致的话清单存进 A 键、peek 从 B 键读,永远对不上,
+    # 而且不报错,只是"跳过列表"神秘地总是空的。
+    uid = _auth(request) or "anon"
+    from app.services import skill_install, skill_stage
     try:
-        return skill_install.open_repo(body.repo.strip())
+        out = skill_install.open_repo(body.repo.strip())
     except Exception as e:                                   # noqa: BLE001
         # 转成结构化 body 而不是抛 —— MCP 会把它交给模型,
         # 模型能据此告诉用户"这个仓库打不开,原因是…",而不是干等超时
         return {"error": "repo_open_failed", "message": str(e)[:300]}
+
+    # 记下这个仓库里一共有哪些 SKILL —— 确认卡靠它算出"跳过了哪几个"。
+    # 放在这里而不是让模型汇报:跳过恰恰是模型自己的判断,
+    # 让它汇报自己的省略不可靠(详见 skill_stage.remember_inventory)。
+    try:
+        skill_stage.remember_inventory(
+            uid, body.repo.strip(), out.get("skill_md_paths") or [])
+    except Exception as e:                                   # noqa: BLE001
+        logger.debug("[skill] 记录仓库清单失败(非致命): {}", e)
+
+    return out
 
 
 class RepoReadIn(BaseModel):
