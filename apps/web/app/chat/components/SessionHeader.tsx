@@ -18,6 +18,14 @@ interface Props {
 export default function SessionHeader({ sessionId, onSessionUpdated, onSessionDeleted, onShare, onExport }: Props) {
   const [session, setSession] = useState<Session | null>(null)
   const [open, setOpen] = useState(false)
+  /** 菜单从哪个按钮打开的 —— 决定它贴左还是贴右。
+   *
+   *  这个下拉被**两个**按钮共用:标题右边那个 ∨,和最右上角的 ···。
+   *  而菜单一直写死 `left: 24`(贴着标题)。于是从右上角的 ··· 点开时,
+   *  菜单出现在屏幕最左边、离按钮一整个屏幕宽 ——
+   *  用户点了右上角,东西弹在左上角,第一反应是"这是不是弹错了"。
+   */
+  const [anchor, setAnchor] = useState<'title' | 'more'>('title')
   const [editing, setEditing] = useState(false)
   const [editTitle, setEditTitle] = useState('')
   const [copied, setCopied] = useState(false)
@@ -138,7 +146,7 @@ export default function SessionHeader({ sessionId, onSessionUpdated, onSessionDe
       ) : (
         <button
           type="button"
-          onClick={() => setOpen(!open)}
+          onClick={() => { setAnchor('title'); setOpen(!open) }}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -181,7 +189,8 @@ export default function SessionHeader({ sessionId, onSessionUpdated, onSessionDe
           style={{
             position: 'absolute',
             top: '100%',
-            left: 24,
+            // 从标题的 ∨ 打开就贴左,从右上角的 ··· 打开就贴右
+            ...(anchor === 'more' ? { right: 16 } : { left: 24 }),
             marginTop: 4,
             minWidth: 200,
             background: '#fff',
@@ -235,7 +244,7 @@ export default function SessionHeader({ sessionId, onSessionUpdated, onSessionDe
           label="导出"
         />
         <SoftBtn
-          onClick={() => setOpen(true)}
+          onClick={() => { setAnchor('more'); setOpen(true) }}
           title="更多"
           icon={<MoreHorizontal size={14} />}
           label=""

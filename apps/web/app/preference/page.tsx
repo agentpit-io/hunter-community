@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Save, Loader2, CheckCircle } from 'lucide-react'
+import { IDLE_LOGOUT_KEY } from '../components/AuthGuard'
 
 function getToken() {
   if (typeof window === 'undefined') return ''
@@ -29,7 +30,19 @@ interface Pref {
   push_focus:       string
 }
 
+const IDLE_OPTIONS = [
+  { v: 0,   label: '不自动登出' },
+  { v: 15,  label: '15 分钟' },
+  { v: 30,  label: '30 分钟' },
+  { v: 60,  label: '1 小时' },
+  { v: 240, label: '4 小时' },
+]
+
 export default function PreferencePage() {
+  const [idleMin, setIdleMin] = useState(0)
+  useEffect(() => {
+    try { setIdleMin(Number(localStorage.getItem(IDLE_LOGOUT_KEY) || 0) || 0) } catch {}
+  }, [])
   const router = useRouter()
   const [pref, setPref] = useState<Pref>({
     investment_style: '',
@@ -134,6 +147,41 @@ export default function PreferencePage() {
             value={pref.market_scope}
             onChange={v => setPref(p => ({ ...p, market_scope: v }))}
           />
+        </Section>
+
+        {/* 安全 · 闲置自动登出
+            存 localStorage 不走后端:这是**这台设备上**的行为,
+            不该跟着账号同步到别的机器(公司电脑想 15 分钟锁,
+            家里那台不一定想)。 */}
+        <Section title="闲置自动登出" subtitle="这台设备生效 · 不同步到其他设备">
+          <div className="flex flex-wrap gap-2">
+            {IDLE_OPTIONS.map(o => {
+              const active = idleMin === o.v
+              return (
+                <button
+                  key={o.v}
+                  onClick={() => {
+                    setIdleMin(o.v)
+                    try {
+                      if (o.v) localStorage.setItem(IDLE_LOGOUT_KEY, String(o.v))
+                      else localStorage.removeItem(IDLE_LOGOUT_KEY)
+                    } catch { /* 隐私模式 */ }
+                  }}
+                  className="px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors"
+                  style={{
+                    background:  active ? 'var(--blue)' : 'transparent',
+                    color:       active ? '#fff' : 'var(--text)',
+                    borderColor: active ? 'var(--blue)' : 'var(--border)',
+                  }}
+                >
+                  {o.label}
+                </button>
+              )
+            })}
+          </div>
+          <div className="text-xs mt-2" style={{ color: 'var(--text-muted)' }}>
+            选「不自动登出」时,登录状态会自动续期,长时间不动也不会掉线。
+          </div>
         </Section>
 
         {/* 关注板块（多选） */}

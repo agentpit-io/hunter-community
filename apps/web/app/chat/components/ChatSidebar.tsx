@@ -2,10 +2,10 @@
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Plus, MessageSquare, LogOut, ChevronDown, PanelLeftClose, Unlock, ShieldCheck } from 'lucide-react'
+import { ArrowLeft, Plus, MessageSquare, LogOut, ChevronDown, PanelLeftClose, Unlock, ShieldCheck, X, Check } from 'lucide-react'
 import { HUNTER, HUNTER_LOGO } from '../../lib/hunter-theme'
 import type { Session } from '../lib/types'
-import { listSessions, createSession } from '../lib/opencodeClient'
+import { listSessions, createSession, deleteSession } from '../lib/opencodeClient'
 import CapabilityPanel from './CapabilityPanel'
 import SkillManager from './SkillManager'
 import ProfileEditor from './ProfileEditor'
@@ -89,6 +89,36 @@ function groupSessions(sessions: Session[]) {
 export default function ChatSidebar({ currentSessionId, onSelectSession, onNewSession, onPickSkill, onCollapse, onTabChange }: Props) {
   const router = useRouter()
   const [sessions, setSessions] = useState<Session[]>([])
+  /** 待确认删除的会话 id —— 两步删除,见列表里那个按钮的注释 */
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null)
+
+  /** 删一个会话 · 乐观更新 + 失败回滚。
+   *
+   *  删的是**当前正在看的那个**时,要把用户带走 —— 否则右边还停在
+   *  一个已经不存在的会话上,再发消息会 404,而他不知道为什么。
+   *  带去哪:剩下的第一个;一个都不剩就开一个新的。
+   */
+  const removeSession = async (id: string) => {
+    const snapshot = sessions
+    setPendingDelete(null)
+    setSessions((prev) => prev.filter((x) => x.id !== id))
+    try {
+      await deleteSession(id)
+      if (id === currentSessionId) {
+        const rest = snapshot.filter((x) => x.id !== id)
+        if (rest.length) onSelectSession(rest[0].id)
+        else {
+          const fresh = await createSession()
+          onNewSession(fresh.id)
+        }
+      }
+    } catch (e) {
+      // 删失败就把它放回去 —— 列表里少一条而服务端还在,
+      // 用户刷新后它又出现,那才是真的困惑
+      console.error('[sidebar] deleteSession:', e)
+      setSessions(snapshot)
+    }
+  }
   const [loading, setLoading] = useState(false)
   const [creating, setCreating] = useState(false)
   const [showSkillMgr, setShowSkillMgr] = useState(false)
@@ -210,46 +240,86 @@ export default function ChatSidebar({ currentSessionId, onSelectSession, onNewSe
         </div>
         {list.map((s) => {
           const isActive = s.id === currentSessionId
+          const confirming = pendingDelete === s.id
           return (
-            <button
+            <div
               key={s.id}
-              onClick={() => onSelectSession(s.id)}
+              className="hunter-session-row"
               style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                width: '100%',
-                padding: '7px 10px',
-                margin: '1px 4px',
+                display: 'flex', alignItems: 'center', gap: 4,
+                margin: '1px 4px', borderRadius: 6,
                 background: isActive ? SB_ACTIVE : 'transparent',
-                border: 'none',
-                borderRadius: 6,
-                color: isActive ? HUNTER.INK : HUNTER.INK_S,
-                fontSize: 13,
-                textAlign: 'left',
-                cursor: 'pointer',
-                transition: 'background 0.1s',
-                fontFamily: 'inherit',
               }}
               onMouseEnter={(e) => {
                 if (!isActive) e.currentTarget.style.background = SB_HOVER
               }}
               onMouseLeave={(e) => {
                 if (!isActive) e.currentTarget.style.background = 'transparent'
+                // 鼠标移开就取消待确认 —— 免得那个红勾一直挂在那儿吓人
+                if (confirming) setPendingDelete(null)
               }}
             >
-              <MessageSquare size={13} style={{ flexShrink: 0, color: HUNTER.INK_F }} />
-              <span
+              <button
+                onClick={() => onSelectSession(s.id)}
                 style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
                   flex: 1,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
+                  minWidth: 0,
+                  padding: '7px 4px 7px 10px',
+                  background: 'transparent',
+                  border: 'none',
+                  color: isActive ? HUNTER.INK : HUNTER.INK_S,
+                  fontSize: 13,
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
                 }}
               >
-                {fmtTitle(s.title)}
-              </span>
-            </button>
+                <MessageSquare size={13} style={{ flexShrink: 0, color: HUNTER.INK_F }} />
+                <span
+                  style={{
+                    flex: 1,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {fmtTitle(s.title)}
+                </span>
+              </button>
+
+              {/* 删除 · 两步:第一下变成红勾,再点一下才真删。
+                  不用 window.confirm —— 那个弹窗会打断整个页面,
+                  而删一条对话是个小操作,不值得一个模态框。
+                  也不做撤销:opencode 那边是硬删,做不出"回收站"的假象。 */}
+              <button
+                title={confirming ? '再点一次确认删除' : '删除这个对话'}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  if (!confirming) { setPendingDelete(s.id); return }
+                  void removeSession(s.id)
+                }}
+                style={{
+                  flexShrink: 0,
+                  padding: '5px 7px',
+                  marginRight: 3,
+                  background: 'transparent',
+                  border: 'none',
+                  borderRadius: 5,
+                  cursor: 'pointer',
+                  color: confirming ? '#C0392B' : HUNTER.INK_F,
+                  opacity: confirming ? 1 : 0.55,
+                  lineHeight: 1,
+                  fontFamily: 'inherit',
+                }}
+              >
+                {confirming
+                  ? <Check size={13} />
+                  : <X size={13} />}
+              </button>
+            </div>
           )
         })}
       </div>

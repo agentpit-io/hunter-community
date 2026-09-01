@@ -760,6 +760,22 @@ def run_backtest(strategy: dict, start: date, end: date, user_id: str | None = N
         "nav_series": nav_series,                   # net
         "nav_gross_series": nav_gross_series,       # 复赛 §3.B
         "positions": positions,
+        # 逐期持仓 —— 「持仓变化」面板要用真数据。
+        #
+        # 之前那个面板整块是**写死的假数据**:山西汾酒/陕西煤业/隆基绿能,
+        # 日期 2026-08-01…,和这次回测持的票(平安银行/茅台/恒瑞)毫无关系,
+        # 底下还写着"展开全部 36 次调仓"—— 36 也是硬编码的。
+        # 用户点"展开全部"什么都没发生,因为后面根本没有东西。
+        #
+        # 违反项目铁律「严禁 mock 兜底 · 空的比假的好」:
+        # 一份看着像真的调仓记录,比一句"暂无数据"危险得多 ——
+        # 用户会拿它去理解策略行为,而它和策略毫无关系。
+        #
+        # positions_hist 每期一条 {date, codes},前端自己算换入换出。
+        "positions_hist": [
+            {"date": schedule[i].isoformat(), "codes": positions_hist[i]}
+            for i in range(len(positions_hist))
+        ],
         # cost_used 保留旧口径(bps 累积值)· 兼容旧前端消费
         "cost_used": total_bps_used,
         # 复赛 §3.B · 结构化的交易成本报告

@@ -315,20 +315,18 @@ container.innerHTML = `
     <div class="chart-panel">
       <div class="hd">
         <div class="title"><span class="hi hi-refresh" style="color:var(--brand)"></span> 持仓变化</div>
-        <div class="actions">
-          <button class="btn small ghost">近 6 次</button>
-          <button class="btn small">全部</button>
+        <div class="actions" id="pos-range">
+          <button class="btn small" data-n="6">近 6 次</button>
+          <button class="btn small ghost" data-n="0">全部</button>
         </div>
       </div>
-      <div class="tl-panel" style="padding:0;border:0;box-shadow:none">
-        <div class="tl-item"><div class="date">2026-08-01</div><div class="stocks"><span class="in">+ 山西汾酒 · 陕西煤业</span><br><span class="out">- 隆基绿能 · 通威股份</span><div style="color:var(--muted);font-size:11px;margin-top:4px">换仓 2 只（10%）· 新能源估值/动量双落</div></div></div>
-        <div class="tl-item"><div class="date">2026-07-01</div><div class="stocks"><span class="in">+ 迈瑞医疗 · 海尔智家</span><br><span class="out">- 三一重工 · 顺丰控股</span><div style="color:var(--muted);font-size:11px;margin-top:4px">换仓 2 只 · 医疗动量修复</div></div></div>
-        <div class="tl-item"><div class="date">2026-06-01</div><div class="stocks"><span class="in">+ 中国平安 · 农业银行</span><br><span class="out">- 中远海控 · 万科A</span><div style="color:var(--muted);font-size:11px;margin-top:4px">换仓 2 只 · 金融 ROE 修复</div></div></div>
-        <div class="tl-item"><div class="date">2026-05-01</div><div class="stocks"><span style="color:var(--muted)">当月无变化 · 持仓稳定</span></div></div>
-        <div style="text-align:center;padding:10px 0;color:var(--brand);font-size:12px;cursor:pointer">
-          展开全部 36 次调仓 <span class="hi hi-arrow-r"></span>
-        </div>
-      </div>
+      <!-- 这里原来是**整块写死的假数据**:山西汾酒/陕西煤业/隆基绿能,
+           日期 2026-08-01…,和这次回测持的票毫无关系,底下还写着
+           "展开全部 36 次调仓" —— 36 也是硬编码的,点了什么都不会发生。
+           违反铁律「严禁 mock 兜底 · 空的比假的好」:一份看着像真的调仓
+           记录比一句"暂无数据"危险得多,用户会拿它去理解策略行为。
+           现在从 realResult.positions_hist 逐期算换入换出。 -->
+      <div class="tl-panel" id="pos-timeline" style="padding:0;border:0;box-shadow:none"></div>
     </div>
   </div>
 
@@ -367,7 +365,7 @@ container.innerHTML = `
   <div class="chart-panel" id="orders-panel">
     <div class="hd">
       <div class="title"><span class="hi hi-download" style="color:var(--brand)"></span> 生成券商下单清单(CSV)</div>
-      <div class="actions"><span style="color:var(--muted);font-size:11.5px">按当前持仓 + 等权 + 最新 close 生成</span></div>
+      <div class="actions"><span id="ord-count-hint" style="color:var(--muted);font-size:11.5px">按当前持仓 + 等权 + 最新 close 生成</span></div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:12px">
       <div class="field">
@@ -599,7 +597,152 @@ if (isReal) loadTrades();
        symbol: 'none'}] : []),
     ],
   })
+
+  // ── 区间按钮 1M / 6M / 1Y / 3Y / 全部 ────────────────────
+  //
+  // 这五个按钮之前**只是五个 <button>,一个 onclick 都没有** ——
+  // 点了没反应,也没有请求发出去,用户以为功能坏了。
+  //
+  // 顺带解释产品经理说的"区间不符合":回测请求的是
+  // 2025-12-15 → 2026-08-15,而图上 X 轴只画到 2026-04-01。
+  // 那不是图错了 —— 是这次回测**只跑出了 3 期**(页面顶部
+  // "这次回测的成色"里写着「3 期里有 2 期没选出票」)。
+  // 数据到哪图就到哪。但光看图看不出这件事,所以下面补一行说明。
+  function applyRange(months) {
+    const all = realResult.nav_series
+    let from = 0
+    if (months) {
+      const last = new Date(all[all.length - 1].date)
+      const cut = new Date(last)
+      cut.setMonth(cut.getMonth() - months)
+      from = all.findIndex(p => new Date(p.date) >= cut)
+      if (from < 0) from = 0
+    }
+    const sub = all.slice(from)
+    chart.setOption({
+      xAxis: { data: sub.map(p => p.date) },
+      series: [
+        { data: sub.map(p => p.nav) },
+        ...(bench ? [{ data: bench.slice(from) }] : []),
+      ],
+    })
+  }
+
+  const rangeBox = el.closest('.chart-panel')?.querySelector('.actions')
+  if (rangeBox) {
+    const MONTHS = { '1M': 1, '6M': 6, '1Y': 12, '3Y': 36, '全部': 0 }
+    rangeBox.querySelectorAll('button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        rangeBox.querySelectorAll('button').forEach(b => b.classList.add('ghost'))
+        btn.classList.remove('ghost')
+        applyRange(MONTHS[btn.textContent.trim()] ?? 0)
+      })
+    })
+    // 默认落在"全部" —— 原来高亮的是 3Y,而多数回测根本没有 3 年数据,
+    // 高亮一个空档位只会让人以为图裂了
+    rangeBox.querySelectorAll('button').forEach(b => {
+      b.classList.toggle('ghost', b.textContent.trim() !== '全部')
+    })
+  }
+
+  // 请求区间 vs 实际画出来的区间 —— 对不上就说清楚为什么
+  ;(function noteCoverage() {
+    const want0 = realResult.start, want1 = realResult.end
+    const got0 = dates[0], got1 = dates[dates.length - 1]
+    if (want0 === got0 && want1 === got1) return
+    const tip = document.createElement('div')
+    tip.style.cssText = 'font-size:11.5px;color:var(--muted);padding:6px 4px 0;line-height:1.8'
+    tip.innerHTML =
+      `请求区间 <b>${want0} → ${want1}</b>,图上实际画到 <b>${got1}</b>` +
+      `(共 ${dates.length} 期)。` +
+      `曲线只画有持仓数据的调仓日 —— 因子在某些时点没数据时那几期会被跳过。`
+    el.parentNode.appendChild(tip)
+  })()
+
   window.addEventListener('resize', () => chart.resize())
+})()
+
+
+// ─── 下单清单会生成几条 · 先说清楚 ───────────────────────
+//
+// 产品经理反馈"CSV 记录不全,至少应该有 36 条"。查下来 CSV 本身没问题:
+// 它是**按最后一期持仓**生成的委托单(当时 3 只 → 3 条),
+// 而"36"这个数来自旁边那块**写死的假数据**("展开全部 36 次调仓")。
+//
+// 假数据已经清掉了。这里再把条数显式写出来 —— 下载前就知道会有几条,
+// 就不会下完之后才觉得"是不是漏了"。
+;(function initOrderCountHint() {
+  const hint = document.getElementById('ord-count-hint')
+  if (!hint) return
+  const n = (isReal && Array.isArray(realResult.positions)) ? realResult.positions.length : 0
+  hint.textContent = n
+    ? `将生成 ${n} 条委托 · 按最后一期持仓(${n} 只)+ 等权 + 最新 close`
+    : '按当前持仓 + 等权 + 最新 close 生成 · 需先跑回测'
+})()
+
+// ─── 持仓变化 · 用 positions_hist 逐期算换入换出(真数据)───
+;(function initPositionTimeline() {
+  const box = document.getElementById('pos-timeline')
+  if (!box) return
+  const hist = realResult?.positions_hist || []
+
+  if (!isReal || hist.length < 2) {
+    // 空比假好 —— 这里原来是四条编好的调仓记录
+    box.innerHTML = `<div style="padding:28px 16px;text-align:center;color:var(--muted);font-size:12.5px;line-height:1.9">
+      还没有调仓记录<br>
+      <span style="font-size:11.5px">跑一次回测后,这里会按每个调仓日列出换入/换出的股票</span>
+    </div>`
+    return
+  }
+
+  // 从后往前:每期和上一期比,算出换入/换出
+  const rows = []
+  for (let i = hist.length - 1; i >= 1; i--) {
+    const cur = new Set(hist[i].codes || [])
+    const prev = new Set(hist[i - 1].codes || [])
+    const ins = [...cur].filter(c => !prev.has(c))
+    const outs = [...prev].filter(c => !cur.has(c))
+    rows.push({ date: hist[i].date, ins, outs, n: Math.max(ins.length, outs.length) })
+  }
+
+  const nameOf = c => (window.STOCK_NAMES && window.STOCK_NAMES[c]) || c
+
+  function render(limit) {
+    const show = limit ? rows.slice(0, limit) : rows
+    box.innerHTML = show.map(r => {
+      if (!r.ins.length && !r.outs.length) {
+        return `<div class="tl-item"><div class="date">${r.date}</div>
+          <div class="stocks"><span style="color:var(--muted)">当期无变化 · 持仓稳定</span></div></div>`
+      }
+      const pct = hist[0].codes?.length
+        ? Math.round(r.n / hist[0].codes.length * 100) : null
+      return `<div class="tl-item"><div class="date">${r.date}</div><div class="stocks">
+        ${r.ins.length ? `<span class="in">+ ${r.ins.map(nameOf).join(' · ')}</span><br>` : ''}
+        ${r.outs.length ? `<span class="out">- ${r.outs.map(nameOf).join(' · ')}</span>` : ''}
+        <div style="color:var(--muted);font-size:11px;margin-top:4px">换仓 ${r.n} 只${pct !== null ? `（${pct}%）` : ''}</div>
+      </div></div>`
+    }).join('')
+      + (limit && rows.length > limit
+        ? `<div id="pos-more" style="text-align:center;padding:10px 0;color:var(--brand);font-size:12px;cursor:pointer">
+             展开全部 ${rows.length} 次调仓 →</div>`
+        : '')
+    const more = document.getElementById('pos-more')
+    if (more) more.addEventListener('click', () => render(0))
+  }
+
+  render(6)
+
+  // 「近 6 次 / 全部」也接上 —— 原来同样是两个死按钮
+  const rb = document.getElementById('pos-range')
+  if (rb) {
+    rb.querySelectorAll('button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        rb.querySelectorAll('button').forEach(b => b.classList.add('ghost'))
+        btn.classList.remove('ghost')
+        render(Number(btn.dataset.n) || 0)
+      })
+    })
+  }
 })()
 
 // ─── C4.1 · 分档收益 · echarts 柱状图 ───

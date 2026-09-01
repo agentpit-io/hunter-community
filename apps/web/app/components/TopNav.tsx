@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Target, Bell, LogOut, Settings, Gift } from 'lucide-react'
-import { HUNTER } from '../lib/hunter-theme'
+import { HUNTER, HUNTER_LOGO } from '../lib/hunter-theme'
 
 
 const NAV_HEIGHT = 48
@@ -82,7 +82,17 @@ export default function TopNav({ active }: NavProps) {
         display: 'flex', alignItems: 'center', gap: 8,
         marginRight: 20, color: HUNTER.INK, textDecoration: 'none',
       }}>
-        <span style={{ fontSize: 18 }}>🦌</span>
+        {/* 顶栏原来用的是 emoji 🦌,而侧栏/对话气泡/首页用的都是
+            HUNTER_LOGO 那张圆形鹿头图 —— 同一个页面上下两个不同的品牌标,
+            用户第一眼会以为是两个产品。统一用 HUNTER_LOGO。
+            尺寸取 20:顶栏高度有限,再大会把这一行撑开。 */}
+        <img
+          src={HUNTER_LOGO}
+          alt="猎鹿人"
+          width={20}
+          height={20}
+          style={{ width: 20, height: 20, borderRadius: '50%', display: 'block' }}
+        />
         <span style={{
           fontFamily: HUNTER.SERIF, fontSize: 15, fontWeight: 700,
           letterSpacing: '.02em',
