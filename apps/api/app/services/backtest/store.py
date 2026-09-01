@@ -289,13 +289,32 @@ def accuracy_stats(days: int = 30, symbol: str = "") -> dict:
                     GROUP BY signal ORDER BY count(*) DESC""", args)
     by_sig = [{"signal": r[0], "n": r[1], "hit_rate": round(float(r[2]) * 100, 1) if r[2] else None}
               for r in cur.fetchall()]
+
+    # 这批样本是哪个模型版本产生的 —— **必须回传给前端**。
+    #
+    # 起因(2026-09-01):自选股卡片上写着「命中 63.1%」,而这三只票的
+    # 570×3 条记录 model_ver 全是 'demo-v1'(真实收盘 + 高斯噪声合成的
+    # 演示数据)。前端本来做了「·演示」徽标,但这个接口不返回 model_ver,
+    # isDemo 永远是 false —— **等于把合成数据当成真实模型表现展示给评委**。
+    #
+    # 老板已定:复赛演示就用 demo 数据(时间来不及跑够真样本)。
+    # 正因为如此,标记才更不能省 —— 用 demo 可以,不标就是另一回事了。
+    #
+    # 混合的情况取占比最高的那个;真样本一旦超过 demo,徽标自然消失。
+    cur.execute(f"""SELECT model_ver, count(*) FROM pred_backtest WHERE {where}
+                    GROUP BY model_ver ORDER BY count(*) DESC LIMIT 1""", args)
+    _mv = cur.fetchone()
     c.close()
     return {
         "sample": n or 0,
+        # ⚠️ 这几个 hit_rate 已经是**百分数**(×100 过了)。
+        # 前端拿到 63.1 直接显示 "63.1%",别再乘一次 —— 界面上曾出现过
+        # "命中 6310%",就是又乘了一遍 100。
         "hit_rate": round(float(hit) * 100, 1) if hit else None,
         "amt_hit_rate": round(float(amt) * 100, 1) if amt else None,
         "mae": round(float(mae), 2) if mae else None,
         "by_horizon": by_h, "by_signal": by_sig, "window_days": days,
+        "model_ver": _mv[0] if _mv else None,
     }
 
 
@@ -594,3 +613,75 @@ def get_by_share_token(token: str) -> dict | None:
             "outcome": outcomes.get(r[4]),
         } for r in rows],
     }
+
+
+def mint_tokens_for_run(base_date, limit: int = 1000) -> int:
+    """给某一次 snapshot 里**还没有 token** 的股票批量发存证链接。
+
+    ## 为什么要自动发
+
+    原来 token 只能靠 `POST /api/backtest/share/{code}` 手动发一条。
+    结果是:每天流水线跑出 306 只票的预测,却一个链接都没有 ——
+    存证功能存在,但没有任何一条预测真的可被外部核验。
+
+    存证的价值恰恰在于**预测作出的当时就已经有链接了**。事后想起来
+    才补发,链接的诞生时间晚于预测,证明力就弱了一层
+    (虽然 run_date 写在页面上,但"为什么这条补了那条没补"是说不清的)。
+    所以改成:流水线存完快照,顺手把这一批全发了。
+
+    ## 一次快照一个 token · 落在锚点行
+
+    `idx_pred_snap_share_token` 是全表唯一索引,同一个 token 写不进
+    多个 horizon 行。所以只写 horizon 最小的那一行作为锚点,
+    读取时由锚点找出同 (symbol, base_date) 的全部 horizon
+    —— 见 `mint_share_token` / `get_by_share_token`。
+
+    ## 幂等
+
+    只处理"这一批里一个 token 都没有"的 symbol。同一天重复跑
+    (流水线重试、手动补跑)不会产生第二个链接 —— 一条预测一个链接,
+    这是存证的唯一性要求。
+
+    返回新发放的数量。
+    """
+    import secrets
+
+    c = conn(); cur = c.cursor()
+    minted = 0
+    try:
+        # 这一批里还没有任何 token 的 symbol,取其锚点 horizon
+        cur.execute("""
+            SELECT symbol, MIN(horizon)
+              FROM pred_snapshot
+             WHERE base_date = %s
+             GROUP BY symbol
+            HAVING count(share_token) = 0
+             LIMIT %s
+        """, (base_date, limit))
+        targets = cur.fetchall()
+
+        for symbol, anchor_h in targets:
+            # 撞唯一索引的概率约 0(71 bit),但真撞上时重试比抛异常好 ——
+            # 一只票发失败不该让整批 306 只都回滚
+            for _attempt in range(3):
+                token = secrets.token_urlsafe(9)
+                try:
+                    cur.execute("""
+                        UPDATE pred_snapshot SET share_token = %s
+                         WHERE symbol = %s AND base_date = %s AND horizon = %s
+                    """, (token, symbol, base_date, anchor_h))
+                    c.commit()
+                    minted += 1
+                    break
+                except Exception as e:                       # noqa: BLE001
+                    c.rollback()
+                    log.debug("[share] %s 发 token 重试(%s)", symbol, str(e)[:60])
+        if minted:
+            log.info("[share] base=%s 自动发放存证链接 %d 条", base_date, minted)
+    except Exception as e:                                   # noqa: BLE001
+        # **不阻塞流水线** —— 发链接失败只是少了个分享入口,
+        # 预测数据本身已经存好了,不该因此让整条流水线报失败
+        log.warning("[share] 批量发 token 失败(非致命): %s", e)
+    finally:
+        cur.close(); c.close()
+    return minted

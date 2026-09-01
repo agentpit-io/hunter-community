@@ -196,11 +196,17 @@ function StockCard({ stock, quote, perf }: { stock: Stock; quote?: Quote; perf?:
   // 不标的话评委看到"命中 57%"会以为是真实模型表现,问起来就很难看。
   // seed 脚本自己的合规提示里就写着"前端应展示演示数据徽标"。
   const isDemo = perf?.model_ver === 'demo-v1'
+  // ⚠️ hit 已经是**百分数**(后端 accuracy_stats 里 ×100 过了)。
+  // 这里曾经又 `* 100`,界面上就成了「命中 6310%」——
+  // 63.1 × 100。数字大得离谱反而不容易第一眼看出是量纲错。
   const hitTxt = typeof hit === 'number'
-    ? `命中 ${Math.round(hit * 100)}%${isDemo ? ' ·演示' : ''}`
+    ? `命中 ${hit.toFixed(1)}%${isDemo ? ' ·演示' : ''}`
     : '暂无'
   // 55% 是文档里定的高亮线(§3.A.2.2)· 保持一致
-  const hitColor = typeof hit === 'number' && hit >= 0.55 ? '#1E8449' : HUNTER.INK_S
+  // 同上:hit 是百分数,门槛写 55 不是 0.55。
+  // 原来写 0.55 时**所有**票都 >= 0.55(因为最小的也有 55.5),
+  // 于是不管准不准全是绿的 —— 高亮等于没高亮。
+  const hitColor = typeof hit === 'number' && hit >= 55 ? '#1E8449' : HUNTER.INK_S
 
   return (
     <div style={{

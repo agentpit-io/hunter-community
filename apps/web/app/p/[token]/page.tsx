@@ -83,6 +83,15 @@ export async function generateMetadata(
     title: `${t} | Hunter`,
     description: `${d.run_date} 作出的预测与事后真实结果对照 · 仅供研究,非投资建议`,
     openGraph: { title: t, description: '预测存证 · 公开可核验' },
+    // 不进搜索引擎。
+    //
+    // 这一页是**公开可读**的(不用登录 —— 那是存证的意义所在),但
+    // "公开可读" ≠ "该被收录"。两个理由:
+    //   · 一条个股预测被 Google 收录后,会以「Hunter 预测茅台涨 3.2%」
+    //     这样的形式出现在搜索结果里,脱离上下文就成了对外荐股
+    //   · token 是分享给特定的人看的,不是给全网检索的
+    // nofollow 一并加上,页内链接也不传递权重。
+    robots: { index: false, follow: false },
   }
 }
 

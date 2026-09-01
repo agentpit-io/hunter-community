@@ -148,6 +148,36 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("[quant.local] 本地流水线挂载失败(非致命): {}", e)
 
+    # ─── 数据与预测两条主线 · 同样不需要外部凭据 · 放在 MINIMAL_BOOT 之前 ───
+    #
+    # 2026-09-01 从 MINIMAL_BOOT 之后挪上来。原因和上面那条本地流水线一样:
+    #
+    # 生产上 HUNTER_MINIMAL_BOOT=1,于是这两条**从来没有自动跑过** ——
+    # 代码写好了、测试文档里把「16:30 自动跑」列为关键验证项,而实际上
+    # 启动日志只有一行 "skipping background schedulers",没有任何地方提示
+    # 这两条被关了。表现出来就是:数据停在最后一次手动灌的那天,
+    # 预测快照永远只有手动跑出来的那几条。
+    #
+    # 这两条都不碰外部凭据:
+    #   · klines ETL   走腾讯/新浪/akshare 三源直连
+    #   · 预测流水线   走 hunter 网关(HUNTER_API_KEY,和主站同一个 key)
+    #
+    # ⚠️ 代价要说清楚:预测流水线跑的是 `stocks` 表里**所有**启用的票
+    # (当前 306 只,含 seed 的沪深300),一轮约 50 分钟,期间持续调
+    # 上游 Kronos。要缩小范围就改 scheduler.collect_symbols 的 scope。
+    try:
+        from app.services.backtest import scheduler as bt_scheduler
+        _backtest_task = asyncio.create_task(bt_scheduler.run_loop())
+        logger.info("[backtest] 预测流水线已挂载(每交易日 16:30 CST)")
+    except Exception as e:
+        logger.warning("[backtest] scheduler 启动失败(非致命): {}", e)
+
+    try:
+        _klines_etl_task = asyncio.create_task(_klines_etl_loop())
+        logger.info("[klines.etl] 每日 ETL loop 已挂载(A股 15:30 · 港股 17:00 · 美股次日 03:30 CST)")
+    except Exception as e:
+        logger.warning("[klines.etl] loop 挂载失败(非致命): {}", e)
+
     if HUNTER_MINIMAL_BOOT:
         logger.warning("[hunter-community] HUNTER_MINIMAL_BOOT=1 · skipping background schedulers only (tables OK)")
         yield
@@ -165,21 +195,6 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
     _gm_alert_task = asyncio.create_task(gm_alert_checker.run_loop())
-
-    # 预测回测流水线(每交易日 16:30 CST): 预测留档 → 事后回测 → 重叠一致性归因
-    try:
-        from app.services.backtest import scheduler as bt_scheduler
-        _backtest_task = asyncio.create_task(bt_scheduler.run_loop())
-    except Exception as e:
-        logger.warning("[backtest] scheduler 启动失败(非致命): {}", e)
-
-    # klines 每日 ETL(15:30 CST A股 · 17:00 CST 港股 · 03:30 CST 次日美股)
-    # 走三源直连不需要 key · 但会拉全股票池下载数据 · 故只在非 MINIMAL_BOOT 挂载
-    try:
-        _klines_etl_task = asyncio.create_task(_klines_etl_loop())
-        logger.info("[klines.etl] 每日 ETL loop 已挂载(A股 15:30 · 港股 17:00 · 美股次日 03:30 CST)")
-    except Exception as e:
-        logger.warning("[klines.etl] loop 挂载失败(非致命): {}", e)
 
     # 启动时同步一次 stocks_catalog (若表空则从 akshare/baseline 初始化)
     # 每日 03:00 CST 由 APScheduler 触发 seed 保持新鲜

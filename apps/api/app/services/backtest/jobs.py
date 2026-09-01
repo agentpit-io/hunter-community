@@ -226,8 +226,17 @@ async def snapshot_job(symbols: list[str], progress: dict | None = None) -> dict
                     len(mism), expect_base, mism[:3])
     log.info("[backtest] snapshot: %d只成功 %d只失败, 入池剔除%d只, 基准日不符%d只, 入库%d行",
              ok, fail, len(rejected), len(mism), saved)
+
+    # 存完快照顺手发存证链接 —— 见 store.mint_tokens_for_run 的说明。
+    # 存证的价值在于"预测作出的当时就有链接",事后补发证明力弱一层。
+    # 失败不影响流水线(函数内部已吞异常),预测数据本身已经存好了。
+    minted = 0
+    if saved and expect_base:
+        minted = await asyncio.to_thread(store.mint_tokens_for_run, expect_base)
+
     return {"ok": ok, "fail": fail, "rows": saved, "rejected": rejected,
-            "base_date": expect_base, "base_mismatch": len(mism)}
+            "base_date": expect_base, "base_mismatch": len(mism),
+            "share_tokens": minted}
 
 
 # ────────────────────────── ② 事后准确性回测 ──────────────────────────
