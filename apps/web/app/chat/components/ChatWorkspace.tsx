@@ -426,8 +426,27 @@ export default function ChatWorkspace({
     }
 
     // ── Kronos 走势预测 SKILL (Sprint E) ──
-    // 模式匹配: "用 Kronos 预测" 是 SKILL 模板固定短语
-    const isKpredByPattern = /用\s*Kronos\s*预测/i.test(text) || /Kronos.*未来.*天走势/i.test(text)
+    //
+    // ⚠️ 这条判断决定用户拿到的是 **K 线图 artifact** 还是一段普通 markdown。
+    // 走进来 → runKpred → 右侧面板出 K 线 + 综合评分 + 8 因子 + 每日预测表;
+    // 没走进来 → 掉到通用 LLM,模型自己找工具、吐一段文字。
+    //
+    // 原来只认两个含 "Kronos" 的写法:
+    //     /用\s*Kronos\s*预测/  和  /Kronos.*未来.*天走势/
+    //
+    // 而能力库里「K 线走势预测」那张卡的模板是
+    //     `预测 {股票} 未来 5 天走势`          ← tool_catalog.py:134
+    // **一个 Kronos 都没有**。用户从能力库点「用它 →」,填完股票发出去,
+    // 正则匹配不上 → 走通用分支 → 拿到的是 📄 markdown 而不是 📈 K 线图。
+    // 招牌功能从最显眼的入口进去反而是坏的。
+    //
+    // 现在按「预测 + 走势/走向 + 天数」这个语义组合识别,不再依赖必须出现
+    // "Kronos" 这个内部模型名 —— 用户没有理由知道我们的模型叫什么。
+    const isKpredByPattern =
+      /用\s*Kronos\s*预测/i.test(text) ||
+      /Kronos.*未来.*天走势/i.test(text) ||
+      // 能力库模板 & 用户自然说法:「预测 XX 未来 5 天走势」「预测 XX 后市走向」
+      (/预测/.test(text) && /走势|走向|行情/.test(text) && /\d+\s*(天|日|个交易日)|未来|后市/.test(text))
     if (!hasAttachments && (pendingSkillKey === 'forecast' || isKpredByPattern)) {
       onSkillConsumed?.()
       void handleKpredSend(text, sessionId)

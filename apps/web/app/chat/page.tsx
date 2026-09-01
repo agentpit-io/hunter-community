@@ -53,6 +53,11 @@ function ChatPageInner() {
     setReady(true)
 
     const q = searchParams.get('q')
+    // 能力库跳过来时会带 `&skill=forecast|debate` —— 标记这一条要走特殊
+    // handler(Kronos 出 K 线 artifact / 多空辩论走独立编排)。
+    // 不带就是普通对话。见 /library 的 SPECIAL_SKILL_KEY。
+    const skillFromUrl = searchParams.get('skill')
+    if (skillFromUrl) setPendingSkillKey(skillFromUrl)
     if (q) {
       // ⚠️ **带 `{占位符}` 的模板不能自动发。**
       //

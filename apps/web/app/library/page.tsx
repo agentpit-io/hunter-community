@@ -163,10 +163,35 @@ function LibraryContent() {
     setSelected({ kind: 'cap', item }); setDetailOpen(true)
   }, [])
 
+  /** 能力 key → 特殊 handler key。
+   *
+   *  只有这几个能力不走通用对话:
+   *    hunter_cap_kpred → forecast(Kronos K 线预测 · 出 HTML artifact)
+   *    debate 类       → debate(多空辩论 · 走独立编排)
+   *  其余留空即可,ChatWorkspace 会当普通消息发。 */
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const SPECIAL_SKILL_KEY: Record<string, string> = {
+    hunter_cap_kpred: 'forecast',
+    kpred: 'forecast',
+    forecast: 'forecast',
+    debate: 'debate',
+  }
+
   /** 双击/「用它」—— 跳对话框并填好模板。**老板要的就是这个动作。**
    *  工具与 SKILL 走同一条路径,这正是"合并入口"的落点。 */
   const onUseCap = useCallback((item: CapabilityItem) => {
-    window.location.href = `/chat?q=${encodeURIComponent(item.prompt_tpl)}`
+    // 带上 skill key。
+    //
+    // 原来只传 `?q=模板`,chat 页的 pendingSkillKey 就永远是 null,
+    // 于是走不走特殊 handler(Kronos K 线图 / 多空辩论)完全靠正则猜模板文本。
+    // 而「K 线走势预测」的模板是「预测 {股票} 未来 5 天走势」——
+    // 里面一个 "Kronos" 都没有,正则匹配不上,用户从能力库这个最显眼的
+    // 入口点进去,拿到的反而是普通 markdown 而不是招牌的 K 线图。
+    //
+    // 显式传 key 之后就不用猜了;正则作为用户手打时的兜底继续留着。
+    const k = SPECIAL_SKILL_KEY[item.key]
+    const q = `/chat?q=${encodeURIComponent(item.prompt_tpl)}`
+    window.location.href = k ? `${q}&skill=${encodeURIComponent(k)}` : q
   }, [])
 
   // 把 SKILL 提问模板送回 chat 输入框 · 走 /chat?q= autoText 通道

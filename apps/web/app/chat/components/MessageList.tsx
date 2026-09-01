@@ -385,6 +385,50 @@ function MdText({ text }: { text: string }) {
   )
 }
 
+/**
+ * 把消息列表按「轮」分组 —— 连续的 assistant 消息合并成一块。
+ *
+ * ## 为什么需要
+ *
+ * opencode 每做一步就发一条 assistant 消息。用户说一句「按这个地址装 SKILL」,
+ * 模型要 open repo → read SKILL.md → read plugin.json → stage → read 下一个,
+ * 五次工具调用就是**五条独立消息**,界面上排出五个「猎鹿人 Hunter」头像块:
+ *
+ *     猎鹿人 Hunter   深度思考完成 · 数据截至 2026/08/31
+ *       [hunter_cap_skill_repo_open  999ms]
+ *     猎鹿人 Hunter   深度思考完成 · 数据截至 2026/08/31
+ *       [hunter_cap_skill_repo_read  396ms]
+ *     ...
+ *
+ * 每块都重复一遍头像、名字、"深度思考完成"。用户看到的是"AI 回复了五次",
+ * 而实际上这是**一次回答的五个步骤**。
+ *
+ * ## 合并规则
+ *
+ * 一条 user 消息开一轮,后面所有连续的 assistant 消息归进同一轮,
+ * 直到下一条 user 消息。工具卡片按原顺序排在一起,最终答复在最下面 ——
+ * 也就是产品经理说的"把这些都合并到最底下,一次回复完"。
+ *
+ * 只改渲染分组,不动数据:messages 数组本身、事件 reducer、
+ * artifact 与 message id 的对应关系全部不变。合并只是视觉上的。
+ */
+function groupTurns(
+  messages: Message[],
+): Array<{ role: 'user' | 'assistant'; msgs: Message[] }> {
+  const out: Array<{ role: 'user' | 'assistant'; msgs: Message[] }> = []
+  for (const m of messages) {
+    const role: 'user' | 'assistant' = m.role === 'user' ? 'user' : 'assistant'
+    const last = out[out.length - 1]
+    // user 永远自成一块(两条相邻的用户消息也该分开显示)
+    if (role === 'assistant' && last && last.role === 'assistant') {
+      last.msgs.push(m)
+    } else {
+      out.push({ role, msgs: [m] })
+    }
+  }
+  return out
+}
+
 export default function MessageList({ messages, onOpenArtifact, onPickSuggestion, busy, onOpenReport, extraBottom, onPickSkill, heroInput, htmlArtifacts, onReopenHtmlArtifact }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -455,29 +499,29 @@ export default function MessageList({ messages, onOpenArtifact, onPickSuggestion
         }}
       >
 
-        {messages.map((msg, idx) => {
-          const isUser = msg.role === 'user'
-          const parts = msg.parts || []
-
-          if (isUser) {
-            const text = parts.filter(isText).map((p) => p.text).join('\n')
-            return <UserBubble key={msg.id} text={text} />
+        {groupTurns(messages).map((turn, tIdx, turns) => {
+          if (turn.role === 'user') {
+            const m = turn.msgs[0]
+            const text = (m.parts || []).filter(isText).map((p) => p.text).join('\n')
+            return <UserBubble key={m.id} text={text} />
           }
 
-          // 是否最后一条 assistant · 用于决定是否显示 FollowUp
-          const isLastAssistant =
-            idx === messages.length - 1 ||
-            !messages.slice(idx + 1).some((m) => m.role === 'assistant')
+          // 这一轮里所有 assistant 消息的 parts 拼在一起(见 groupTurns 的说明)
+          const parts = turn.msgs.flatMap((m) => m.parts || [])
+          // 锚点 = 这一轮的最后一条。artifact / 报告按钮都挂在它上面 ——
+          // 前面几条只是过程中的工具调用。
+          const anchor = turn.msgs[turn.msgs.length - 1]
+          const anchorIdx = messages.indexOf(anchor)
+
+          const isLastAssistant = tIdx === turns.length - 1
           const hasText = parts.some((p) => isText(p) && (p as MessagePartText).text)
+          const reportWorthy = isReportWorthy(anchor, isLastAssistant ? !!busy : false)
 
-          // 报告检测 · 长文 + markdown 特征
-          const reportWorthy = isReportWorthy(msg, isLastAssistant ? !!busy : false)
-
-          // mode-note · 数据截至日期 · 由 message.time 派生
-          const ts = msg.time?.updated || msg.time?.created
+          const ts = anchor.time?.updated || anchor.time?.created
           const modeNote = ts
             ? `深度思考完成 · 数据截至 ${new Date(ts).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })}`
             : undefined
+
           // A · 过滤 Gemini function-calling 前置 planning 段
           // Gemini 常在调 tool 前吐 "I will predict... First I need to..."
           // 这类文本是内部编排 · 用户不需要 · 找到最后一个 tool_call 位置 ·
@@ -487,8 +531,11 @@ export default function MessageList({ messages, onOpenArtifact, onPickSuggestion
             .filter((i) => i >= 0)
             .pop() ?? -1
 
+          // artifact 可能挂在这一轮的任意一条上,逐条找
+          const artMsgId = turn.msgs.map((m) => m.id).find((id) => htmlArtifacts?.[id])
+
           return (
-            <AssistantBlock key={msg.id} modeNote={modeNote}>
+            <AssistantBlock key={anchor.id} modeNote={modeNote}>
               {parts.map((part, i) => {
                 // 隐藏所有位于最后 tool_call 之前的 text 段
                 if (isText(part) && i < lastToolIdx) return null
@@ -497,26 +544,23 @@ export default function MessageList({ messages, onOpenArtifact, onPickSuggestion
                 return null
               })}
 
-              {/* 报告预览按钮 · 每条 assistant 满足启发式条件都显示 */}
-              {reportWorthy && onOpenReport && !htmlArtifacts?.[msg.id] && (
+              {reportWorthy && onOpenReport && !artMsgId && (
                 <ReportPreviewButton
-                  onOpen={() => onOpenReport(getAssistantText(msg), msg.id)}
+                  onOpen={() => onOpenReport(getAssistantText(anchor), anchor.id)}
                 />
               )}
 
-              {/* Sprint E · HTML artifact 预览按钮 · 用户关闭 Artifact 面板后可再打开 */}
-              {htmlArtifacts?.[msg.id] && onReopenHtmlArtifact && (
+              {artMsgId && onReopenHtmlArtifact && (
                 <ReportPreviewButton
                   artifactType="html"
-                  onOpen={() => onReopenHtmlArtifact(msg.id)}
+                  onOpen={() => onReopenHtmlArtifact(artMsgId)}
                 />
               )}
 
-              {/* 每条最后 assistant · 且非 busy · 且有 text · 显示 5 追问建议 */}
-              {isLastAssistant && !busy && hasText && onPickSuggestion && (
+              {isLastAssistant && !busy && hasText && onPickSuggestion && anchorIdx >= 0 && (
                 <FollowUpSuggestions
                   messages={messages}
-                  currentIndex={idx}
+                  currentIndex={anchorIdx}
                   onPick={onPickSuggestion}
                 />
               )}
