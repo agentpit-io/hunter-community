@@ -601,6 +601,12 @@ export default function MessageList({ messages, onOpenArtifact, onPickSuggestion
             .filter((i) => i >= 0)
             .pop() ?? -1
 
+          // 这一轮的正文合起来 —— 传给富卡片,让它自己判断有没有被复述
+          const turnText = parts
+            .filter(isText)
+            .map((p) => (p as MessagePartText).text || '')
+            .join(String.fromCharCode(10))
+
           // artifact 可能挂在这一轮的任意一条上,逐条找
           const artMsgId = turn.msgs.map((m) => m.id).find((id) => htmlArtifacts?.[id])
 
@@ -615,7 +621,7 @@ export default function MessageList({ messages, onOpenArtifact, onPickSuggestion
                     ? <PlanningBlock key={i} text={part.text} />
                     : <MdText key={i} text={part.text} />
                 }
-                if (isTool(part)) return <ToolCallCard key={i} part={part} onOpenArtifact={onOpenArtifact} />
+                if (isTool(part)) return <ToolCallCard key={i} part={part} onOpenArtifact={onOpenArtifact} turnText={turnText} />
                 return null
               })}
 

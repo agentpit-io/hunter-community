@@ -32,7 +32,43 @@ const DIM_LABEL: Record<string, string> = {
   research:     '研报',
 }
 
-export default function UziDeepAnalysisCard({ data }: { data: UziData }) {
+/**
+ * 模型是不是把这张卡的内容又复述了一遍。
+ *
+ * ## 为什么要判断,而不是一律折叠
+ *
+ * 一律折叠有个反效果:系统提示本来就要求模型「不复述卡片里的数字,
+ * 只给一句简短总结」。**如果它照做了**,而卡片又默认折叠,
+ * 用户就只剩一个折叠条加一句话 —— 比之前更糟。
+ *
+ * 所以不赌模型听不听话,直接看这一轮的正文里到底有没有卡片的内容:
+ *   复述了 → 折叠(屏幕上留一份就够)
+ *   没复述 → 展开(卡片就是唯一的内容)
+ *
+ * ## 判定
+ *
+ * 从卡片 markdown 里抽出若干条 ≥12 字的实质句子,看有多少出现在正文里。
+ * 超过四成就算复述。取样而不是全文比对:模型复述时常会改标点、
+ * 调语序、加一两句自己的话,全文比对会漏判。
+ */
+function looksDuplicated(markdown?: string, turnText?: string): boolean {
+  if (!markdown || !turnText) return false
+  if (turnText.length < 200) return false      // 正文很短 = 只是一句总结,没复述
+  const norm = (x: string) => x.replace(/[\s*#`>\-—·、,。:;!?()【】]/g, '')
+  const body = norm(turnText)
+  const lines = markdown
+    .split(/[\n。]/)
+    .map(norm)
+    .filter((l) => l.length >= 12)
+  if (lines.length < 3) return false
+  const sample = lines.filter((_, i) => i % Math.max(1, Math.floor(lines.length / 12)) === 0).slice(0, 12)
+  const hit = sample.filter((l) => body.includes(l.slice(0, 12))).length
+  return hit / sample.length > 0.4
+}
+
+export default function UziDeepAnalysisCard(
+  { data, turnText }: { data: UziData; turnText?: string },
+) {
   const [copied, setCopied] = useState(false)
   /** 卡片正文默认折叠。
    *
@@ -46,7 +82,8 @@ export default function UziDeepAnalysisCard({ data }: { data: UziData }) {
    *
    *  头部一直可见 —— 它带着覆盖率、耗时、数据维度这些正文里没有的信息。
    */
-  const [expanded, setExpanded] = useState(false)
+  // 被复述了才折叠 —— 见 looksDuplicated 的说明
+  const [expanded, setExpanded] = useState(() => !looksDuplicated(data.markdown, turnText))
 
   // 老 session 里可能存的是缺少覆盖度字段的 output（早期 tool schema · 或只回了 markdown）,
   // 不兜底会 undefined.length 直接把整个 /chat 页崩成白屏 —— 上层 tryRenderRichCard

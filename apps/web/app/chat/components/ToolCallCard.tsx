@@ -64,6 +64,9 @@ function fmtArgs(input: any): string {
 }
 
 interface Props {
+  /** 这一轮 assistant 的正文 —— 富卡片用它判断"模型是不是把我复述了一遍",
+   *  复述了就默认折叠,没复述就默认展开(见 UziDeepAnalysisCard) */
+  turnText?: string
   part: MessagePartTool
   onOpenArtifact?: (part: MessagePartTool) => void
 }
@@ -71,7 +74,7 @@ interface Props {
 /** 自选股整合 6 tool · 完成时渲染富卡片 · 否则走 fallback 通用卡
  *  opencode 会给 MCP tool 加 server 前缀（portfolio_update_risk_profile 等），
  *  这里剥离前缀取本名匹配。 */
-function tryRenderRichCard(part: MessagePartTool): React.ReactNode | null {
+function tryRenderRichCard(part: MessagePartTool, turnText?: string): React.ReactNode | null {
   const name = normalizeToolName(part.tool)
   if (!RICH_CARD_TOOLS.has(name)) return null
   if (part.state?.status !== 'completed') return null
@@ -85,7 +88,7 @@ function tryRenderRichCard(part: MessagePartTool): React.ReactNode | null {
       case 'portfolio_rebalance':return <PortfolioRebalanceCard data={data} />
       case 'portfolio_stress':   return <PortfolioStressCard data={data} />
       case 'update_risk_profile':return <RiskProfileCard data={data} />
-      case 'stock_deep_analysis':return <UziDeepAnalysisCard data={data} />
+      case 'stock_deep_analysis':return <UziDeepAnalysisCard data={data} turnText={turnText} />
     }
   } catch (e) {
     console.error('[ToolCallCard] rich card render failed:', part.tool, e)
@@ -94,9 +97,9 @@ function tryRenderRichCard(part: MessagePartTool): React.ReactNode | null {
   return null
 }
 
-export default function ToolCallCard({ part, onOpenArtifact }: Props) {
+export default function ToolCallCard({ part, onOpenArtifact, turnText }: Props) {
   // 富卡片优先 · 5 tool 之一且完成时直接渲染
-  const rich = tryRenderRichCard(part)
+  const rich = tryRenderRichCard(part, turnText)
   if (rich) return <>{rich}</>
   const [open, setOpen] = useState(false)
   const state = part.state
