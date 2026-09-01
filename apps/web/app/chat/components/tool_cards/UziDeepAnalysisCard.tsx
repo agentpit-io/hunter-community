@@ -34,6 +34,19 @@ const DIM_LABEL: Record<string, string> = {
 
 export default function UziDeepAnalysisCard({ data }: { data: UziData }) {
   const [copied, setCopied] = useState(false)
+  /** 卡片正文默认折叠。
+   *
+   *  模型拿到这张卡之后**还会把里面的内容再复述一遍**(系统提示里那条
+   *  "不需要复述卡片里的数字"它并不总是遵守)。于是同一份深度分析在
+   *  屏幕上出现两次:上面是这张富卡片,下面是模型的正文,一字不差。
+   *  用户要往下滚很久才发现下面是重复的。
+   *
+   *  哪个该折?折卡片。正文是对话的主体、还带着模型自己的组织和补充;
+   *  卡片是过程产物,想看原始排版再展开。
+   *
+   *  头部一直可见 —— 它带着覆盖率、耗时、数据维度这些正文里没有的信息。
+   */
+  const [expanded, setExpanded] = useState(false)
 
   // 老 session 里可能存的是缺少覆盖度字段的 output（早期 tool schema · 或只回了 markdown）,
   // 不兜底会 undefined.length 直接把整个 /chat 页崩成白屏 —— 上层 tryRenderRichCard
@@ -57,13 +70,17 @@ export default function UziDeepAnalysisCard({ data }: { data: UziData }) {
 
   return (
     <div style={cardStyle}>
-      {/* 头部 */}
-      <div style={{
-        padding: '14px 18px',
-        display: 'flex', alignItems: 'center', gap: 8,
-        borderBottom: `1px solid ${HUNTER.LINE}`,
-        background: `linear-gradient(90deg, ${HUNTER.BRAND_PALE} 0%, ${HUNTER.PAPER} 100%)`,
-      }}>
+      {/* 头部 · 点击展开/收起正文 */}
+      <div
+        onClick={() => setExpanded(v => !v)}
+        title={expanded ? '收起分析正文' : '展开分析正文'}
+        style={{
+          padding: '14px 18px',
+          display: 'flex', alignItems: 'center', gap: 8,
+          borderBottom: expanded ? `1px solid ${HUNTER.LINE}` : 'none',
+          background: `linear-gradient(90deg, ${HUNTER.BRAND_PALE} 0%, ${HUNTER.PAPER} 100%)`,
+          cursor: 'pointer', userSelect: 'none',
+        }}>
         <Radar size={16} style={{ color: HUNTER.COPPER3 }} />
         <span style={{ fontFamily: HUNTER.SERIF, fontWeight: 700, fontSize: 14 }}>
           {data.name || data.code} · 深度分析
@@ -81,10 +98,13 @@ export default function UziDeepAnalysisCard({ data }: { data: UziData }) {
         <span style={{ marginLeft: 'auto', color: HUNTER.INK_F, fontSize: 11 }}>
           {(data.duration_ms / 1000).toFixed(1)}s · 覆盖率 {coverage}%
         </span>
+        <span style={{ color: HUNTER.INK_F, fontSize: 11, marginLeft: 6 }}>
+          {expanded ? '收起 ▲' : '展开 ▼'}
+        </span>
       </div>
 
-      {/* 数据覆盖度 chips */}
-      <div style={{
+      {/* 数据覆盖度 chips · 跟着折叠 */}
+      {expanded && <div style={{
         padding: '10px 18px',
         display: 'flex',
         flexWrap: 'wrap',
@@ -93,7 +113,7 @@ export default function UziDeepAnalysisCard({ data }: { data: UziData }) {
         background: HUNTER.PAPER2,
       }}>
         {dimsCovered.map(d => (
-          <span key={d} title="数据已 seed" style={{
+          <span key={d} title="该维度有数据" style={{
             display: 'inline-flex', alignItems: 'center', gap: 3,
             padding: '2px 7px', borderRadius: 4, fontSize: 10.5,
             background: '#fde7e0', color: HUNTER.UP, fontWeight: 600,
@@ -111,10 +131,10 @@ export default function UziDeepAnalysisCard({ data }: { data: UziData }) {
             <AlertCircle size={10} /> {DIM_LABEL[d] || d}
           </span>
         ))}
-      </div>
+      </div>}
 
-      {/* markdown 正文 */}
-      <div className="uzi-md" style={{
+      {/* markdown 正文 · 默认折叠(见 expanded 的说明) */}
+      {expanded && <div className="uzi-md" style={{
         padding: '16px 20px',
         fontSize: 13.5, lineHeight: 1.75, color: HUNTER.INK,
         maxHeight: 720, overflowY: 'auto',
@@ -149,10 +169,11 @@ export default function UziDeepAnalysisCard({ data }: { data: UziData }) {
         ) : (
           <StalledAnalysisNotice durationMs={data.duration_ms || 0} coverage={coverage} />
         )}
-      </div>
+      </div>}
 
-      {/* footer */}
-      <div style={{
+      {/* footer · 复制按钮也跟着折叠 —— 正文都收起来了,
+          留一个"复制 markdown"在那儿会让人以为要复制的是别的东西 */}
+      {expanded && <div style={{
         padding: '10px 18px',
         display: 'flex', alignItems: 'center', gap: 10,
         borderTop: `1px solid ${HUNTER.LINE}`,
@@ -173,7 +194,7 @@ export default function UziDeepAnalysisCard({ data }: { data: UziData }) {
         >
           <Copy size={11} /> {copied ? '已复制' : '复制 markdown'}
         </button>
-      </div>
+      </div>}
 
       {data.note && (
         <div style={{
