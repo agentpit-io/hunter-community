@@ -173,9 +173,123 @@ function renderMiddlePanel() {
         <button class="btn ask-hunter" style="width:100%;margin-top:10px;height:38px" id="btn-ask-2">
           <span class="hi hi-seal"></span>让 Hunter 解读这个组合
         </button>
+
+        <!-- 回测结果就地展示 —— 不再跳去 backtest.html。
+             原来跑完直接 location.href 换页,用户被甩到另一个页面,
+             想改个权重再跑一次得先点回来。配参数和看结果本来就是
+             同一个动作的两半,拆成两页等于每次迭代都要来回跳。
+             完整报告(因子分档 / Bootstrap / 逐笔 / 下单 CSV)仍在
+             backtest.html,这里给一个入口。 -->
+        <div id="bt-inline" style="display:none;margin-top:16px"></div>
       </div>
     </div>
   `
+}
+
+// ─── 回测结果就地渲染 ────────────────────────────────────
+//
+// 产品经理:「回测结果显示在下方,不要跳转页面了」。
+//
+// 原来跑完 location.href 换页,用户被甩到 backtest.html;想改个权重
+// 再跑一次,得先点回来。**配参数和看结果本来是同一个动作的两半**,
+// 拆成两页等于每次迭代都要来回跳。
+//
+// 这里只放"看一眼就知道行不行"的部分:六个核心指标 + 毛净成本对比
+// + 净值曲线。完整报告(因子分档验证 / Bootstrap / 逐笔明细 / 下单 CSV)
+// 还在 backtest.html —— 那些是"决定要用这个策略之后"才看的东西,
+// 全搬过来会把工作台撑成第二个报告页,反而失去了"边调边看"的意义。
+function renderInlineResult(d, draft) {
+  const box = document.getElementById('bt-inline')
+  if (!box) return
+  // 结果仍然写 localStorage —— 「查看完整报告」那一步靠它。
+  //
+  // ⚠️ 顺序:**先 draft 后 result**,而且 draft 用 setItem 不用 saveDraft()。
+  // saveDraft() 里有「配置变了就清掉旧回测结果」的逻辑(问题12 的修复),
+  // 走它的话会把这次刚跑出来的结果自己清掉 —— 用户点「查看完整报告」
+  // 会看到"这个策略还没跑过回测",而他一分钟前刚跑完。
+  //
+  // 这里的场景恰恰相反:draft 和 result 是同一次运行的一对,天然一致。
+  //
+  // 另:键名是 hunter_strategy_draft(app.js 的 LS_DRAFT)。
+  // 原代码写的 hunter_backtest_draft **从来没人读过**,是个死键。
+  try {
+    localStorage.setItem('hunter_strategy_draft', JSON.stringify(draft))
+    localStorage.setItem('hunter_backtest_result', JSON.stringify(d))
+  } catch {}
+
+  const m = d.metrics || {}
+  const tc = d.trading_cost || {}
+  const ns = d.nav_series || []
+  const q  = d.quality || {}
+
+  const num = (v, suffix = '', digits = 2) =>
+    (v === null || v === undefined || Number.isNaN(v)) ? '—' : Number(v).toFixed(digits) + suffix
+  const cell = (label, val, note) => `
+    <div style="flex:1 1 120px;padding:10px 12px;border:1px solid var(--divider);border-radius:10px;background:var(--card)">
+      <div style="font-size:11px;color:var(--muted)">${label}</div>
+      <div style="font-size:18px;font-weight:700;margin-top:2px">${val}</div>
+      ${note ? `<div style="font-size:10.5px;color:var(--muted);margin-top:2px">${note}</div>` : ''}
+    </div>`
+
+  box.style.display = 'block'
+  box.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+      <span class="hi hi-chart" style="color:var(--brand)"></span>
+      <b style="font-size:13.5px">回测结果</b>
+      <span style="font-size:11px;color:var(--muted)">
+        ${d.start || ''} → ${d.end || ''} · ${ns.length} 期${d.cached ? ' · 缓存' : ''}
+      </span>
+      <a href="/strategies/backtest.html" style="margin-left:auto;font-size:12px;color:var(--brand)">
+        查看完整报告 →</a>
+    </div>
+
+    ${(q.notes && q.notes.length) ? `
+      <div style="padding:8px 11px;margin-bottom:10px;border:1px solid #E3C89A;background:#FDF8EE;
+                  border-radius:8px;font-size:11.5px;color:#8A5A1B;line-height:1.8">
+        <b>这次回测的成色</b><br>${q.notes.map(x => '· ' + x).join('<br>')}
+      </div>` : ''}
+
+    <div style="display:flex;flex-wrap:wrap;gap:8px">
+      ${cell('年化收益', num(m.annual_return_pct, '%'))}
+      ${cell('夏普比率', num(m.sharpe, '', 2))}
+      ${cell('最大回撤', num(m.max_drawdown_pct, '%'))}
+      ${cell('月度胜率', num(m.win_rate_pct, '%'))}
+      ${cell('平均换手', num(m.turnover_pct, '%'))}
+    </div>
+
+    ${tc.gross_total_return_pct !== undefined ? `
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
+        ${cell('毛收益', num(tc.gross_total_return_pct, '%'), '不扣手续费/税/滑点')}
+        ${cell('净收益', num(tc.net_total_return_pct, '%'), '这是实盘能拿到的')}
+        ${cell('成本吃掉', num(tc.cost_ratio_of_gross_pct, '%'), `${tc.cost_bps_used || 0} bps 单边`)}
+      </div>` : ''}
+
+    <div id="bt-inline-chart" style="height:220px;margin-top:12px"></div>
+  `
+
+  // 净值曲线 —— echarts 已经在页面里(app.js 引的)
+  const el = document.getElementById('bt-inline-chart')
+  if (el && window.echarts && ns.length) {
+    const chart = echarts.init(el)
+    chart.setOption({
+      grid: { left: 48, right: 16, top: 16, bottom: 28 },
+      tooltip: { trigger: 'axis' },
+      xAxis: { type: 'category', data: ns.map(p => p.date),
+               axisLabel: { fontSize: 10, color: '#a2a49d' } },
+      yAxis: { type: 'value', scale: true,
+               axisLabel: { fontSize: 10, color: '#a2a49d', formatter: v => v.toFixed(2) },
+               splitLine: { lineStyle: { color: '#efeee8' } } },
+      series: [{
+        name: '净值', type: 'line', smooth: true, symbol: 'none',
+        data: ns.map(p => p.nav),
+        lineStyle: { color: '#b56b2d', width: 2.2 },
+        areaStyle: { color: 'rgba(181,107,45,0.06)' },
+      }],
+    })
+    window.addEventListener('resize', () => chart.resize())
+  }
+
+  box.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
 }
 
 function renderRightPanel() {
@@ -381,9 +495,9 @@ document.getElementById('btn-backtest').addEventListener('click', async () => {
 
     // cache 命中 · 直接跳
     if (submitD.cached) {
-      localStorage.setItem('hunter_backtest_result', JSON.stringify(submitD))
-      localStorage.setItem('hunter_backtest_draft', JSON.stringify(draft))
-      location.href = '/strategies/backtest.html'
+      renderInlineResult(submitD, draft)
+      btn.classList.remove('loading')
+      btn.innerHTML = '<span class="hi hi-play"></span>重新跑回测'
       return
     }
 
@@ -414,9 +528,9 @@ document.getElementById('btn-backtest').addEventListener('click', async () => {
     }
     if (!d) throw new Error('超时(3 分钟)· 请重试或缩短回测范围')
 
-    localStorage.setItem('hunter_backtest_result', JSON.stringify(d))
-    localStorage.setItem('hunter_backtest_draft', JSON.stringify(draft))
-    location.href = '/strategies/backtest.html'
+    renderInlineResult(d, draft)
+    btn.classList.remove('loading')
+    btn.innerHTML = '<span class="hi hi-play"></span>重新跑回测'
   } catch (e) {
     toast('回测失败: ' + e.message, 'warn')
     btn.classList.remove('loading'); btn.innerHTML = '<span class="hi hi-play"></span>跑 8 个月回测'
