@@ -175,7 +175,9 @@ export default function RecommendedSkills({ onDone }: { onDone: (msg: string) =>
               </div>
               <button style={miniBtn} disabled={!!busy}
                       onClick={() => expand(it)}>
-                {busy === it.repo && !isOpen ? '读取中…'
+                {/* 原来是 `busy === repo && !isOpen`,而 expand() 先 setOpen 再发请求,
+                    isOpen 立刻为 true —— 这个"读取中"分支从来没被走到过。 */}
+                {busy === it.repo ? '读取中…'
                   : isOpen ? <><ChevronDown size={11} style={{ verticalAlign: -1 }} /> 收起</>
                   : <><ChevronRight size={11} style={{ verticalAlign: -1 }} /> 看看有什么</>}
               </button>
@@ -187,7 +189,17 @@ export default function RecommendedSkills({ onDone }: { onDone: (msg: string) =>
 
             {isOpen && (
               <div style={{ marginTop: 8 }}>
-                {list.length === 0 && <div style={hint}>这个仓库里没找到 SKILL.md。</div>}
+                {/* 问题33:「这个仓库里没找到 SKILL.md。」曾经在**还在读**的时候就显示。
+                    expand() 先 setOpen 再发请求,而 `cands[repo] || []` 把
+                    "还没读"和"读完是空的"当成同一件事 —— 用户先看到一句
+                    斩钉截铁的"没有",几秒后 SKILL 又冒出来,像系统在自我否定。
+                    用 `repo in cands` 区分:没这个键 = 还没读完。 */}
+                {!(it.repo in cands) && (
+                  <div style={hint}>正在读取仓库里的 SKILL…</div>
+                )}
+                {it.repo in cands && list.length === 0 && (
+                  <div style={hint}>这个仓库里没找到 SKILL.md。</div>
+                )}
                 {list.length > 0 && (
                   <>
                     <div style={{ ...fieldLabel, marginBottom: 5 }}>

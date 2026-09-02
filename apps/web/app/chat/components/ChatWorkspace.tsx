@@ -27,6 +27,10 @@ import { runKpred, listSessionKpreds, extractDays, type KpredProgressEvent } fro
 
 interface Props {
   sessionId: string | null
+  /** 从能力库带 ?new=1 进来 —— 必须建**新**会话,不许挂回最近一条 */
+  forceNew?: boolean
+  /** 新会话建好后通知 page 清掉 forceNew · 否则下次删会话又会凭空多建一个 */
+  onForceNewConsumed?: () => void
   onSessionCreated: (id: string) => void
   onSessionUpdated: () => void
   onSessionDeleted: () => void
@@ -144,6 +148,8 @@ function reduceEvents(prev: Message[], events: OpencodeEvent[]): Message[] {
 
 export default function ChatWorkspace({
   sessionId,
+  forceNew,
+  onForceNewConsumed,
   onSessionCreated,
   onSessionUpdated,
   onSessionDeleted,
@@ -239,6 +245,25 @@ export default function ChatWorkspace({
 
       for (let attempt = 0; !cancelled; attempt++) {
         try {
+          // 问题31 复发的真因就在这一句。
+          //
+          // 能力库点「用它」跳 /chat?new=1,page 那边 setSessionId(null),
+          // **然后这里立刻把最近一条会话挂了回来** —— 于是模板填进了
+          // 上一轮对话(可能是另一只股票的深度分析)的输入框,
+          // 表现就是"点用它没有新开对话"。
+          //
+          // 而且 setSessionId(null) 本身是个空操作:整页跳转,
+          // sessionId 初值本来就是 null。真正决定行为的是这里选谁。
+          //
+          // forceNew 时直接建新会话,不看已有列表。
+          if (forceNew) {
+            const s = await createSession('新对话')
+            if (cancelled) return
+            onSessionCreated(s.id)
+            onForceNewConsumed?.()
+            setError('')
+            return
+          }
           const list = await listSessions()
           if (cancelled) return
           const latest = list.sort(
@@ -264,7 +289,7 @@ export default function ChatWorkspace({
     })()
 
     return () => { cancelled = true }
-  }, [sessionId, onSessionCreated])
+  }, [sessionId, forceNew, onSessionCreated, onForceNewConsumed])
 
   useEffect(() => {
     if (!sessionId) {

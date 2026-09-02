@@ -21,6 +21,10 @@ function ChatPageInner() {
    *  而且切到自选股时对话界面本来就该让位 */
   const [mainTab, setMainTab] = useState<'chat' | 'watchlist'>('chat')
   const [sessionId, setSessionId] = useState<string | null>(null)
+  /** 能力库带 ?new=1 进来 —— 强制建新会话。
+   *  光 setSessionId(null) 没用:整页跳转时它本来就是 null,
+   *  而 ChatWorkspace 在 null 时会自动挂回最近一条会话(问题31 复发的真因)。 */
+  const [forceNew, setForceNew] = useState(false)
   const [artifactPart, setArtifactPart] = useState<MessagePartTool | null>(null)
   const [reportContent, setReportContent] = useState<ReportContent | null>(null)
   const [sidebarKey, setSidebarKey] = useState(0)
@@ -69,6 +73,7 @@ function ChatPageInner() {
     // 在首次发送时建会话,不用先跑一次 createSession 再来一次跳转。
     if (searchParams.get('new') === '1') {
       setSessionId(null)
+      setForceNew(true)
       setSidebarKey((k) => k + 1)
     }
     if (q) {
@@ -347,6 +352,8 @@ function ChatPageInner() {
       <div style={{ flex: 1, minWidth: 0, display: mainTab === 'chat' ? 'flex' : 'none' }}>
       <ChatWorkspace
         sessionId={sessionId}
+        forceNew={forceNew}
+        onForceNewConsumed={() => setForceNew(false)}
         onSessionCreated={setSessionId}
         onSessionUpdated={handleSessionUpdated}
         onSessionDeleted={handleSessionDeleted}
