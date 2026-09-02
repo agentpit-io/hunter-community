@@ -189,15 +189,21 @@ function LibraryContent() {
     // 入口点进去,拿到的反而是普通 markdown 而不是招牌的 K 线图。
     //
     // 显式传 key 之后就不用猜了;正则作为用户手打时的兜底继续留着。
+    // 问题31:点「用它」要**新开一个对话**,而不是接在当前会话后面。
+    //
+    // 从能力库点一个能力,是在开始一件新事情。接在上一轮
+    // (可能是另一只股票的深度分析)后面,模型会带着上文跑偏,
+    // 用户也很难在一长条历史里找到这次的结果。
     const k = SPECIAL_SKILL_KEY[item.key]
-    const q = `/chat?q=${encodeURIComponent(item.prompt_tpl)}`
+    const q = `/chat?new=1&q=${encodeURIComponent(item.prompt_tpl)}`
     window.location.href = k ? `${q}&skill=${encodeURIComponent(k)}` : q
   }, [])
 
   // 把 SKILL 提问模板送回 chat 输入框 · 走 /chat?q= autoText 通道
   // (与 SkillDetailPage 详情页"在 Hunter chat 里使用"按钮同一链路)
   const onPickSkillToChat = useCallback((item: CatalogSkillItem) => {
-    window.location.href = `/chat?q=${encodeURIComponent(item.prompt_tpl)}`
+    // 同 onUseCap:从能力库进来一律新开对话(问题31)
+    window.location.href = `/chat?new=1&q=${encodeURIComponent(item.prompt_tpl)}`
   }, [])
 
   return (

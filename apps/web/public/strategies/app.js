@@ -404,7 +404,13 @@ function renderShell(activeTab, title, subTitle, actions) {
       <a href="/strategies/index.html"     class="tab-h ${activeTab==='marketplace'?'active':''}">策略广场</a>
       <a href="/strategies/factors.html"   class="tab-h ${activeTab==='factors'?'active':''}">因子广场</a>
       <a href="/strategies/workbench.html" class="tab-h ${activeTab==='workbench'?'active':''}">策略工作台</a>
-      <a href="/strategies/backtest.html"  class="tab-h ${activeTab==='backtest'?'active':''}">回测结果</a>
+      <!-- 「回测结果」tab 已移除(问题24)。
+           9/1 把回测结果并进了策略工作台(跑完就地出结果,不跳页),
+           这个 tab 就成了一个**多余的中转**:用户点进去多半是空的,
+           还得再找回工作台去跑。
+           页面本身保留 —— 工作台里「查看完整报告 →」还指着它,
+           那里有因子分档验证 / Bootstrap / 逐笔明细 / 下单 CSV,
+           是"决定要用这个策略之后"才看的东西。只是不再占一个一级入口。 -->
       <a href="/strategies/data.html"      class="tab-h ${activeTab==='data'?'active':''}">数据</a>
     </div>
     <div id="page-content"></div>

@@ -58,6 +58,19 @@ function ChatPageInner() {
     // 不带就是普通对话。见 /library 的 SPECIAL_SKILL_KEY。
     const skillFromUrl = searchParams.get('skill')
     if (skillFromUrl) setPendingSkillKey(skillFromUrl)
+
+    // 问题31:能力库点「用它」带 new=1 —— 开一个新对话再填模板。
+    //
+    // 从能力库点一个能力是在开始一件新事情。接在上一轮
+    // (可能是另一只股票的深度分析)后面,模型会带着上文跑偏,
+    // 用户也很难在一长条历史里找到这次的结果。
+    //
+    // setSessionId(null) 就是"新对话"——ChatWorkspace 拿到 null 会
+    // 在首次发送时建会话,不用先跑一次 createSession 再来一次跳转。
+    if (searchParams.get('new') === '1') {
+      setSessionId(null)
+      setSidebarKey((k) => k + 1)
+    }
     if (q) {
       // ⚠️ **带 `{占位符}` 的模板不能自动发。**
       //

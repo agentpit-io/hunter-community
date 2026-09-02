@@ -24,6 +24,18 @@ export default function CategoryNav({ query, sources, caps, onAdd, onReset }: Pr
   const actionable = query.tab !== 'overview'
   return (
     <nav style={navStyle}>
+      {/* 问题28:「＋ 添加」原来在侧栏**最底下**,要滚到底才看得见。
+          它是这一页最主要的动作(接数据源 / 装能力),不该藏在末尾。
+          挪到顶部,和「概览」并列。 */}
+      <div style={{ padding: '0 12px 10px' }}>
+        <button
+          style={mgmtBtnStyle(!actionable)} disabled={!actionable}
+          // 不能写 onClick={onAdd} —— onAdd 的第一个参数现在是预选来源(string),
+          // 直接当 handler 会把 MouseEvent 当成来源传进去
+          onClick={() => onAdd?.()}
+          title={actionable ? ADD_HINT[query.tab] : '先选一个分类(数据源 / 能力)'}
+        >＋ 添加</button>
+      </div>
       {TABS.map((tab) => {
         const isActiveTab = query.tab === tab.id
         return (
@@ -44,9 +56,13 @@ export default function CategoryNav({ query, sources, caps, onAdd, onReset }: Pr
                 onAddTo={onAdd} />
             )}
             {tab.id === 'capabilities' && caps && (
+              /* 问题27:能力这边原来不传 onAddTo,于是只有数据源那几行有 ＋,
+                 能力这几行光秃秃 —— 同一个侧栏两套规矩,用户会以为能力不能加。
+                 传上之后两边形式统一。 */
               <GroupList tabId={tab.id} groups={caps.map(g => ({
                 id: g.category, label: g.category, total: g.total, ready: g.ready,
-              }))} activeGroup={isActiveTab ? query.group : undefined} />
+              }))} activeGroup={isActiveTab ? query.group : undefined}
+                onAddTo={onAdd} />
             )}
           </div>
         )
@@ -55,19 +71,8 @@ export default function CategoryNav({ query, sources, caps, onAdd, onReset }: Pr
       <div style={separatorStyle} />
 
       <div style={{ padding: '0 12px' }}>
-        <button
-          style={mgmtBtnStyle(!actionable)} disabled={!actionable}
-          // 不能写 onClick={onAdd} —— onAdd 的第一个参数现在是预选来源(string),
-          // 直接当 handler 会把 MouseEvent 当成来源传进去
-          onClick={() => onAdd?.()}
-          title={actionable ? ADD_HINT[query.tab] : '先选一个分类(数据源 / 工具箱 / SKILL)'}
-        >＋ 添加</button>
-        {/* 数据源那条按钮 `_24` §3.1 **删了**。
-            它原来叫「↻ 一键用官方默认」,做的是"停用你自己的源、全部走官方"。
-            那个功能的前提是我们还在提供数据 —— 撤架之后前提没了,
-            留着就等于留一个「其实不用配也能用,只要你买我们的 key」的按钮,
-            和这次改造直接冲突。
-            能力那条保留:它删的是用户自己加的东西,和平台无关。 */}
+        {/* 数据源那条按钮 `_24` §3.1 **删了**(撤架后前提没了)。
+            能力这条保留:它删的是用户自己加的东西,和平台无关。 */}
         {query.tab !== 'sources' && (
           <button
             style={mgmtBtnStyle(!actionable)} disabled={!actionable}

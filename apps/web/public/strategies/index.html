@@ -232,7 +232,14 @@ container.innerHTML = `
           factors: draftFactors, weights: draftWeights, config: s.config,
           name: s.name, _metrics: s.metrics, updated_at: Date.now(),
         })
-        location.href = '/strategies/backtest.html'
+        // 问题24:点策略卡直接进**策略工作台**,不再进回测结果页。
+        //
+        // 原来跳 backtest.html,而那一页在没跑过回测时是空的 ——
+        // 用户点了一个策略,看到一屏空指标位,还得自己找到「策略工作台」
+        // 再点一次「跑回测」。而 9/1 已经把回测结果并进工作台了
+        // (跑完就地出结果,不跳页),所以现在一步到位:
+        // 进工作台 → 因子权重已经填好 → 点「跑回测」→ 结果就在下面。
+        location.href = '/strategies/workbench.html'
       })
     })
   }
@@ -315,7 +322,17 @@ document.querySelectorAll('.s-card').forEach(card => {
     const fromApi = card.dataset.fromApi === '1'
     let strat
     if (card.dataset.mine) {
-      strat = loadMine().find(m => m.id === id)
+      // 问题32:点「我的策略」卡片没反应。
+      //
+      // 根因是这里用了**严格相等**:`m.id === id`。
+      // `card.dataset.id` 永远是**字符串**(DOM data-* 的规矩),
+      // 而策略从后端拉回来时 id 是**数字** —— 于是 3 === "3" 为 false,
+      // find 返回 undefined,下面 `if (!strat) return` 直接静默退出。
+      //
+      // 不报错、不跳转,用户看到的就是"点了没反应"。
+      // 旁边那个 API 分支早就写成 String(x.id) === String(id) 了,
+      // 这里漏了。
+      strat = loadMine().find(m => String(m.id) === String(id))
     } else if (fromApi) {
       // 从异步拿的 API 策略中找 · 简化:重取一次
       fetchOfficialFromApi().then(list => {
@@ -329,7 +346,7 @@ document.querySelectorAll('.s-card').forEach(card => {
           updated_at: Date.now(),
         }
         saveDraft(draft)
-        location.href = '/strategies/backtest.html'
+        location.href = '/strategies/workbench.html'      // 问题24 · 同上
       })
       return
     } else {
@@ -348,7 +365,7 @@ document.querySelectorAll('.s-card').forEach(card => {
       updated_at: Date.now(),
     }
     saveDraft(draft)
-    location.href = '/strategies/backtest.html'
+    location.href = '/strategies/workbench.html'          // 问题24 · 同上
   })
 })
 }   // end bindCardClicks

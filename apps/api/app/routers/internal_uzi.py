@@ -421,6 +421,37 @@ def _build_llm_context(code: str, bundle: dict) -> str:
 """
 
 
+# 模型在正文之前爱说的那些话。命中就往下再看一行。
+_META_PREFIX = (
+    "here's", "here is", "sure", "okay", "ok,", "alright",
+    "let's", "let me", "i'll", "i will", "based on the provided",
+    "below is", "certainly", "of course", "好的", "以下是", "根据以上",
+)
+
+
+def _strip_leading_meta(md: str) -> str:
+    """剥掉正文之前的元话唠 —— 给没有固定锚点的模板兜底。
+
+    判定"正文开始了"的标志:markdown 标题、加粗行、列表项,
+    或者一行以中文开头且不在元话唠清单里的内容。
+
+    保守起见:全篇都被判成元话唠时(说明判断错了)原样返回。
+    """
+    lines = md.split("\n")
+    for i, raw in enumerate(lines):
+        ln = raw.strip()
+        if not ln:
+            continue
+        low = ln.lower().lstrip(",.、,。 ")
+        if any(low.startswith(p) for p in _META_PREFIX):
+            continue
+        # 一行以标点开头(", here's ...")是被截断的元话唠残渣
+        if ln[0] in ",.,。;;:":
+            continue
+        return "\n".join(lines[i:]).strip()
+    return md.strip()
+
+
 def _clean_llm_markdown(md: str) -> str:
     """剥 Gemini 的 draft / review 元话唠 · 保守策略：
     1. 找**最后一次** '### 一、多空核心观点' 出现的行作为正文起点（跳过前面的 outline plan）
@@ -437,7 +468,22 @@ def _clean_llm_markdown(md: str) -> str:
         if line.startswith("### 一、"):
             start_idx = i
     if start_idx is None:
-        return md.strip()
+        # 找不到 '### 一、' —— **不能原样返回**。
+        #
+        # 这个函数原本只服务「深度分析」那一种模板(它固定以
+        # "### 一、多空核心观点" 开头)。但同一条链路也在跑别的 SKILL,
+        # 比如「66 位大佬评审团」用的是完全不同的结构,根本没有这个锚点。
+        # 于是 start_idx 为 None → 原样 return → 模型的英文前言被留在卡片里:
+        #
+        #     , here's the structured markdown analysis based on the
+        #     provided data. Let's write it directly.
+        #
+        # 用户看到的富卡片里就只有这一句英文,正文全在下面的对话正文里。
+        #
+        # 兜底:把开头的元话唠逐行剥掉,直到遇到第一行像正文的内容
+        # (标题 / 加粗 / 列表 / 中文段落)。剥不动就原样返回,
+        # 宁可多留几个字,也不要把正文剪没了。
+        return _strip_leading_meta(md)
 
     end_idx = len(lines)
     for i in range(start_idx + 1, len(lines)):

@@ -484,7 +484,10 @@ def grouped_by_upstream(user_id: str | None = None) -> list[dict]:
     user_items = [to_dict(s) for s in _user_sources(user_id)] if user_id else []
     out.append({
         "upstream": "user",
-        "label": "你自己的",
+        # 「你自己的」→「已接入数据」(产品经理反馈:原描述不专业)。
+        # 前者像在跟用户说话,后者是个状态描述 —— 界面上的分组名
+        # 应该说"这是什么",而不是"这是谁的"。
+        "label": "已接入数据",
         "owner": "user",
         "total": len(user_items),
         "ready": len([i for i in user_items if i["status"] not in ("unavailable", "need_key")]),

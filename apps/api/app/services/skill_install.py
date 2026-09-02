@@ -565,6 +565,24 @@ _COUPLING = [
     (r"\bfrom\s+[\w.]+\s+import\b", "import 作者的模块"),
     (r"\brun\.py\b", "调仓库入口脚本"),
     (r"\bnpm\s+run\b|\bnode\s+[\w./-]+\.js", "跑 Node 脚本"),
+    # ⬇ 2026-09-02 补:**读作者仓库里的附属文档**。
+    #
+    # 上面七条只盯着"跑脚本",漏了"读文件"。而实测最常见的恰恰是后者:
+    # tigersking520/stock-analysis-skill 的 SKILL.md 里写着
+    #
+    #     数据源规则见 `references/data-sources.md`
+    #     排雷清单见 `references/financial-red-flags.md`
+    #
+    # 我们只装 SKILL.md,那 5 个 references/*.md 一个都没有。
+    # 模型读到"见 xxx.md"就去找,找不到 → 要么空转要么直接放弃,
+    # 表现就是用户说的"这个 skill 用不了"——**而且不报错**。
+    #
+    # 产品经理反馈的 discord-admin-bot 同理(它引用 api_reference.md、
+    # scripts/discover.py、discord_config.json 共 6 个文件)。
+    (r"references/[\w./-]+\.md", "读作者仓库里的参考文档(我们只装了 SKILL.md)"),
+    (r"examples/[\w./-]+\.md", "读作者仓库里的示例文档"),
+    (r"\btemplates?/[\w./-]+\.(md|json|ya?ml)", "读作者仓库里的模板文件"),
+    (r"[\w./-]*config\.json", "读作者的配置文件"),
 ]
 
 

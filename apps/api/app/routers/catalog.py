@@ -313,7 +313,7 @@ async def list_capabilities(request: Request):
             "kind": "tool", "kind_label": "直接执行",
             "category": head.category or "接入与自查",
             "hint": "贴一个 GitHub 地址,我读它的 README 按作者说的方式装 —— "
-                    "装完属于你,在「你装的」里",
+                    "装完属于你,在「自定义安装」里",
             "prompt_tpl": head.prompt_tpl, "brand": "",
             "builtin": head.origin is not tool_catalog.ToolOrigin.USER,
             "slow": any(t.slow for t in _chain_entries),
@@ -347,7 +347,9 @@ async def list_capabilities(request: Request):
     # 用户自己装的**单独成一组并置顶**(`_23`)—— 与数据源的「你自己的」一致。
     # 混在内置类目里的话,用户装完找不到自己刚装的那个;而这恰恰是他
     # 最想立刻试一下的东西。分组也让"哪些是我加的"一眼可见,便于清理。
-    USER_GROUP = "你装的"
+    # 「你装的」→「自定义安装」(产品经理反馈:原描述不专业)。
+    # 同数据源那边的「已接入数据」,分组名说清"这是什么",不说"这是谁的"。
+    USER_GROUP = "自定义安装"
     order = {c: i for i, c in enumerate(skill_files.CATEGORY_ORDER)}
     groups: dict[str, list] = {}
     for i in items:

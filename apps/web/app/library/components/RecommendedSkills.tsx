@@ -113,7 +113,7 @@ export default function RecommendedSkills({ onDone }: { onDone: (msg: string) =>
       const tail = d.synced === false
         ? ` ⚠️ ${d.message || '需要重启 opencode 才会对模型生效'}`
         : ''
-      onDone(`从 ${it.repo} 装了 ${n} 个能力 —— 它们现在在「你装的」里。${tail}`)
+      onDone(`从 ${it.repo} 装了 ${n} 个能力 —— 它们现在在「自定义安装」里。${tail}`)
       setData((s) => s && ({
         ...s,
         items: s.items.map((x) => x.repo === it.repo ? { ...x, installed: true } : x),

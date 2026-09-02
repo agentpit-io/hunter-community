@@ -36,7 +36,7 @@ export default function DetailPane({ source, cap, onUseCap, tool, skill, onClose
       <div style={{ padding: '12px 16px', overflowY: 'auto', flex: 1 }}>
         {empty && <div style={{ color: HUNTER.INK_F, fontSize: 12 }}>点左侧任一卡片查看详情</div>}
         {source && <SourceDetail item={source} onChanged={onChanged} />}
-        {cap && <CapDetail item={cap} onUse={onUseCap} />}
+        {cap && <CapDetail item={cap} onUse={onUseCap} onChanged={onChanged} />}
         {tool && <ToolDetail item={tool} />}
         {skill && <SkillDetail item={skill} onPickToChat={onPickSkillToChat} />}
       </div>
@@ -191,7 +191,9 @@ const preStyle: React.CSSProperties = {
  *  两者展示的字段几乎一样(名字/类目/说明/提问模板/依赖),
  *  区别只在 kind_label 那一行。分成两个组件写会让"改一处忘另一处"
  *  变成常态 —— 这两天已经因为同一份知识散落多处吃过几次亏。 */
-function CapDetail({ item, onUse }: { item: CapabilityItem; onUse?: (i: CapabilityItem) => void }) {
+function CapDetail({ item, onUse, onChanged }: {
+  item: CapabilityItem; onUse?: (i: CapabilityItem) => void; onChanged?: () => void
+}) {
   const blocked = item.status !== 'ready'
   return (
     <div style={{ fontSize: 12, color: HUNTER.INK_S }}>
@@ -219,7 +221,61 @@ function CapDetail({ item, onUse }: { item: CapabilityItem; onUse?: (i: Capabili
               style={{ ...useBtnBig, opacity: item.prompt_tpl ? 1 : 0.4 }}>
         在对话框里用它 →
       </button>
+
+      {/* 问题30:能力详情原来没有删除入口。
+          数据源详情早就有了(见 UserSourceActions),能力这边缺 ——
+          用户装错一个 SKILL 就只能去侧栏点「↻ 恢复初始」,
+          而那个是**把自己加的全删掉**,为了删一个赔上全部。
+          只对用户自己加的显示:内置的删不得。 */}
+      {!item.builtin && <CapDeleteButton item={item} onChanged={onChanged} />}
     </div>
+  )
+}
+
+function CapDeleteButton({ item, onChanged }: {
+  item: CapabilityItem; onChanged?: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  async function remove() {
+    if (!window.confirm(
+      `删除能力「${item.name}」?
+
+` +
+      `它是你自己加的,删掉后对话里就调不到了。` +
+      `从 GitHub 装来的可以再装一次;自己写的内容会丢。`
+    )) return
+    setBusy(true); setErr('')
+    try {
+      const h: Record<string, string> = {}
+      const t = typeof window !== 'undefined' ? localStorage.getItem('hunter_token') || '' : ''
+      if (t) h['Authorization'] = `Bearer ${t}`
+      const r = await fetch(`/api/chat/skills/${encodeURIComponent(item.key)}`,
+                            { method: 'DELETE', headers: h, cache: 'no-store' })
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}))
+        throw new Error(d?.detail || `HTTP ${r.status}`)
+      }
+      onChanged?.()
+    } catch (e: any) {
+      setErr(e?.message || String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <>
+      <button onClick={remove} disabled={busy}
+              style={{ ...useBtnBig, marginTop: 8, background: 'transparent',
+                       color: '#9B3A22', border: `1px solid ${HUNTER.LINE}` }}>
+        {busy ? '删除中…' : '删除这个能力'}
+      </button>
+      {err && (
+        <div style={{ marginTop: 6, fontSize: 11, color: '#9B3A22' }}>删除失败 · {err}</div>
+      )}
+    </>
   )
 }
 
