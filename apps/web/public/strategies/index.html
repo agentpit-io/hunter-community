@@ -229,7 +229,7 @@ container.innerHTML = `
         const draftFactors = s.factors.map(f => f.key)
         const draftWeights = Object.fromEntries(s.factors.map(f => [f.key, f.weight_pct]))
         saveDraft({
-          factors: draftFactors, weights: draftWeights, config: s.config,
+          factors: draftFactors, weights: draftWeights, params: s.params || {}, config: s.config,
           name: s.name, _metrics: s.metrics, updated_at: Date.now(),
         })
         // 问题24:点策略卡直接进**策略工作台**,不再进回测结果页。
@@ -341,6 +341,7 @@ document.querySelectorAll('.s-card').forEach(card => {
         const draft = {
           factors: s.factors.map(f => f.key),
           weights: Object.fromEntries(s.factors.map(f => [f.key, f.weight_pct])),
+          params: s.params || {},
           config: s.config,
           name: s.name,
           updated_at: Date.now(),

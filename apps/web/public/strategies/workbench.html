@@ -45,6 +45,36 @@ function renderLeftPanel() {
   ` : draft.factors.map(k => {
     const f = factorByKey(k)
     const w = draft.weights[k] || 0
+    // 参数区 · 只有可调参的因子才有。默认折叠,点「参数」展开 ——
+    // 评委问「你这个 RSI 实际参数是多少」时,展开就能直接指给他看
+    const spec = FACTOR_PARAMS[k] || []
+    const cur = paramsOf(k, draft.params)
+    const dirty = spec.length && !isDefaultParams(k, draft.params)
+    const paramsHtml = !spec.length ? '' : `
+      <div style="padding:0 10px 8px">
+        <button type="button" data-ptoggle="${k}"
+          style="background:none;border:0;padding:0;cursor:pointer;font-size:11px;
+                 color:${dirty ? 'var(--brand)' : 'var(--muted)'}">
+          ⚙ 参数 ${dirty ? '· 已自定义' : `· ${spec.map(p => cur[p.key]).join('/')}`} ▾
+        </button>
+        <div data-pbox="${k}" style="display:none;margin-top:6px;border-top:1px solid var(--line);padding-top:8px">
+          ${spec.map(p => `
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+              <span style="font-size:11px;color:var(--muted);width:64px;flex:none">${p.label}</span>
+              <input type="number" data-param="${k}" data-pkey="${p.key}"
+                     value="${cur[p.key]}" min="${p.min}" max="${p.max}" step="${p.step}"
+                     style="width:58px;padding:3px 5px;font-size:11px;border:1px solid var(--line);
+                            border-radius:4px;background:var(--bg);color:var(--fg)" />
+              <span style="font-size:10.5px;color:var(--muted)">${p.unit}</span>
+              <span style="font-size:10.5px;color:var(--muted);flex:1;text-align:right"
+                    title="${p.hint}">范围 ${p.min}~${p.max}</span>
+            </div>
+            ${p.hint ? `<div style="font-size:10.5px;color:var(--muted);line-height:1.5;margin:-2px 0 8px 70px">${p.hint}</div>` : ''}
+          `).join('')}
+          <button type="button" data-preset="${k}" class="btn small" style="font-size:11px;padding:2px 8px">恢复默认</button>
+        </div>
+      </div>
+    `
     return `
       <div class="f-pill" data-key="${k}" style="flex-direction:column;align-items:stretch;gap:0;padding:0">
         <div style="display:flex;align-items:center;gap:8px;padding:10px 10px 4px">
@@ -56,6 +86,7 @@ function renderLeftPanel() {
         <div class="slider-row" style="padding:0 10px 8px">
           <input type="range" min="0" max="100" value="${w}" data-slider="${k}" />
         </div>
+        ${paramsHtml}
       </div>
     `
   }).join('')
@@ -317,8 +348,7 @@ function renderRightPanel() {
 async function refreshPicks() {
   const body = document.getElementById('picks-body')
   if (!body) return
-  const factors = draft.factors.map(k => ({ key: k, weight_pct: draft.weights[k] || 0 }))
-                                .filter(f => f.weight_pct > 0)
+  const factors = factorsPayload(draft)
   if (factors.length === 0) {
     body.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted)">先在左侧选几个因子</div>'
     return
@@ -391,6 +421,46 @@ function bindLeft() {
       draft.weights[k] = parseInt(sl.value, 10)
       document.querySelector(`[data-w="${k}"]`).textContent = sl.value + '%'
       saveDraft(draft)
+    })
+  })
+  // 参数区展开/收起
+  document.querySelectorAll('[data-ptoggle]').forEach(b => {
+    b.addEventListener('click', () => {
+      const box = document.querySelector(`[data-pbox="${b.dataset.ptoggle}"]`)
+      if (box) box.style.display = box.style.display === 'none' ? 'block' : 'none'
+    })
+  })
+  // 参数输入 · change 而不是 input:边打字边重算会把 RSI 周期
+  // 当成 1 → 2 → 14 连算三遍,前两次还都是越界值
+  document.querySelectorAll('input[data-param]').forEach(inp => {
+    inp.addEventListener('change', () => {
+      const k = inp.dataset.param, pk = inp.dataset.pkey
+      const spec = (FACTOR_PARAMS[k] || []).find(p => p.key === pk)
+      if (!spec) return
+      let v = Number(inp.value)
+      if (!Number.isFinite(v)) v = spec.def
+      v = Math.max(spec.min, Math.min(spec.max, Math.round(v / spec.step) * spec.step))
+      inp.value = v                                  // 越界当场夹回去,让用户看见
+      draft.params = draft.params || {}
+      draft.params[k] = { ...paramsOf(k, draft.params), [pk]: v }
+      saveDraft(draft)
+      document.getElementById('left-col').innerHTML = renderLeftPanel()
+      bindLeft()
+      const box = document.querySelector(`[data-pbox="${k}"]`)
+      if (box) box.style.display = 'block'           // 重绘后保持展开
+      refreshPicks()                                 // 参数变了,选股当场跟着变
+    })
+  })
+  document.querySelectorAll('[data-preset]').forEach(b => {
+    b.addEventListener('click', () => {
+      const k = b.dataset.preset
+      if (draft.params) delete draft.params[k]
+      saveDraft(draft)
+      document.getElementById('left-col').innerHTML = renderLeftPanel()
+      bindLeft()
+      const box = document.querySelector(`[data-pbox="${k}"]`)
+      if (box) box.style.display = 'block'
+      refreshPicks()
     })
   })
   // 删除
@@ -479,8 +549,7 @@ document.getElementById('btn-backtest').addEventListener('click', async () => {
   const btn = document.getElementById('btn-backtest')
   btn.classList.add('loading')
   btn.textContent = '⏳ 提交回测...'
-  const factors = draft.factors.map(k => ({ key: k, weight_pct: draft.weights[k] || 0 }))
-                                .filter(f => f.weight_pct > 0)
+  const factors = factorsPayload(draft)
   try {
     const { start, end, fmt } = backtestRange()
     const submitR = await fetch('/api/quant/backtest/run', {

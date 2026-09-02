@@ -7,6 +7,7 @@ from collections import defaultdict
 from datetime import date, timedelta
 
 from app.services.database import get_conn
+from app.services.quant import factor_engine as _fe
 from app.services.quant.factor_defs import get_factor
 
 
@@ -74,7 +75,11 @@ def score_and_select(strategy: dict, trade_date: date, user_id: str | None = Non
         if w <= 0:
             continue
         sign = -1.0 if fdef.reverse else 1.0
-        zs = _fetch_z_scores(f["key"], trade_date, codes)
+        # 用户在工作台调了参数(RSI 超卖线之类)→ 按他的参数现算;
+        # 没调 / 调回默认 → compute_z_live 返 {},照旧查 factor_value 表。
+        # 不这样做的话调参只是动了个数字,回测结果一模一样。
+        zs = _fe.compute_z_live(f["key"], codes, trade_date, f.get("params")) \
+            or _fetch_z_scores(f["key"], trade_date, codes)
         for c, z in zs.items():
             contrib = sign * z * w
             scores[c] += contrib

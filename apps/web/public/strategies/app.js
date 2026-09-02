@@ -133,6 +133,10 @@ function sameStrategyShape(a, b) {
     f: (x.factors || []).map((k, i) => [k, (x.weights || [])[i]])
                         .sort((p, q) => String(p[0]).localeCompare(String(q[0]))),
     c: x.config || {},
+    // 只改 RSI 超卖线、因子和权重一个没动 —— 也是换了一个策略。
+    // 不把 params 算进签名的话,结果区会继续显示上一次的年化/夏普,
+    // 用户以为"调参没用",其实是根本没重跑
+    p: x.params || {},
   })
   try { return sig(a) === sig(b) } catch { return false }
 }
@@ -201,19 +205,25 @@ function strategyToApi(record) {
   return {
     name: record.name,
     description: record.description || '',
-    factors: (record.factors || []).map(k => ({
-      key: k,
-      weight_pct: (record.weights || {})[k] || 0,
-    })),
+    // 自定义参数一起存。不存的话:用户把 RSI 超卖线调到 20、
+    // 存成策略、明天打开 —— 参数悄悄变回 30,选出来的票也变了,
+    // 而界面上没有任何提示
+    factors: (record.factors || []).map(k => {
+      const f = { key: k, weight_pct: (record.weights || {})[k] || 0 }
+      if (hasParams(k) && !isDefaultParams(k, record.params)) f.params = paramsOf(k, record.params)
+      return f
+    }),
     config: record.config || {},
   }
 }
 function strategyFromApi(row) {
   const factors = []
   const weights = {}
+  const params = {}
   for (const f of (row.factors || [])) {
     factors.push(f.key)
     weights[f.key] = f.weight_pct
+    if (f.params) params[f.key] = f.params      // 存进去的自定义参数要读回来
   }
   return {
     id: row.id,             // 后端整数 id · 前端 detect 用 (typeof id === 'number' → 后端)
@@ -221,6 +231,7 @@ function strategyFromApi(row) {
     description: row.description || '',
     factors,
     weights,
+    params,
     config: row.config || {},
     created_at: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
     _from_api: true,
@@ -315,6 +326,80 @@ async function migrateLocalToServer() {
 // 工具
 // ═════════════════════════════════════════════════════════════════
 function factorByKey(key) { return FACTORS.find(f => f.key === key) }
+
+// ═════════════════════════════════════════════════════════════════
+// 因子参数 · 界面镜像
+// ═════════════════════════════════════════════════════════════════
+//
+// 产品经理:「这些因子大部分需要进一步设置参数,比如 RSI 超买卖多少
+// 才算超,让客户自己设置。现在这种只拖动滚动条调节没有意义。」
+//
+// 这份表只管**怎么画**(范围、步长、说明文字)。真正算的时候以后端
+// `FACTOR_PARAMS` 为准 —— 后端会夹取越界值、丢弃没登记的字段,
+// 所以就算这里和后端偶尔对不上,也不会算出脏结果。
+// 后端接口 `/api/quant/factors` 也返回同一份表,可用于比对。
+//
+// 不在表里的因子 = 没有可调参数(pe_inv 就是 1/PE,没什么好调)。
+const FACTOR_PARAMS = {
+  rsi: [
+    { key:'period',     label:'RSI 周期',  def:14, min:2,  max:60, step:1, unit:'日',
+      hint:'算 RSI 用最近多少天。短了灵敏也更吵,长了稳但滞后。' },
+    { key:'oversold',   label:'超卖线',    def:30, min:5,  max:45, step:1, unit:'',
+      hint:'RSI 低于这条线算超卖(打高分)。越低越苛刻。' },
+    { key:'overbought', label:'超买线',    def:70, min:55, max:95, step:1, unit:'',
+      hint:'RSI 高于这条线算超买(打低分)。这是个反向因子。' },
+  ],
+  macd: [
+    { key:'fast',      label:'快线 EMA',   def:12, min:3,  max:50,  step:1, unit:'日', hint:'短周期均线。' },
+    { key:'slow',      label:'慢线 EMA',   def:26, min:10, max:120, step:1, unit:'日', hint:'长周期均线,要大于快线。' },
+    { key:'signal',    label:'信号线',     def:9,  min:2,  max:40,  step:1, unit:'日', hint:'对 MACD 再平滑一次,差值就是柱子。' },
+    { key:'atr_period',label:'ATR 归一',   def:14, min:5,  max:60,  step:1, unit:'日', hint:'用 ATR 归一,不同价位的票才能比。' },
+  ],
+  ma_align: [
+    { key:'ma1', label:'均线 1', def:5,  min:2,  max:20,  step:1, unit:'日', hint:'多头排列最短的那条。' },
+    { key:'ma2', label:'均线 2', def:10, min:3,  max:60,  step:1, unit:'日', hint:'' },
+    { key:'ma3', label:'均线 3', def:20, min:5,  max:120, step:1, unit:'日', hint:'' },
+    { key:'ma4', label:'均线 4', def:60, min:10, max:250, step:1, unit:'日', hint:'最长那条。四条依次向上 = 满分。' },
+  ],
+  vol_20d_inv: [
+    { key:'window', label:'波动率窗口', def:20, min:5, max:120, step:1, unit:'日',
+      hint:'用多少天的收益率算标准差。窗口越长越平滑。' },
+  ],
+}
+
+/** 这个因子有没有可调参数 */
+function hasParams(key) { return (FACTOR_PARAMS[key] || []).length > 0 }
+
+/** 某因子当前生效的参数 = 默认值 覆盖上 draft 里存的 */
+function paramsOf(key, draftParams) {
+  const spec = FACTOR_PARAMS[key] || []
+  const saved = (draftParams || {})[key] || {}
+  const out = {}
+  spec.forEach(p => {
+    const v = Number(saved[p.key])
+    out[p.key] = Number.isFinite(v) ? Math.max(p.min, Math.min(p.max, v)) : p.def
+  })
+  return out
+}
+
+/** 是不是全都还是默认值(是的话不必往后端传,省一次实时计算) */
+function isDefaultParams(key, draftParams) {
+  const spec = FACTOR_PARAMS[key] || []
+  const cur = paramsOf(key, draftParams)
+  return spec.every(p => cur[p.key] === p.def)
+}
+
+/** 组装发给后端的 factors 数组 · 只有改过参数的才带 params */
+function factorsPayload(draft) {
+  return (draft.factors || [])
+    .map(k => {
+      const f = { key: k, weight_pct: draft.weights[k] || 0 }
+      if (hasParams(k) && !isDefaultParams(k, draft.params)) f.params = paramsOf(k, draft.params)
+      return f
+    })
+    .filter(f => f.weight_pct > 0)
+}
+
 function fmtPct(v, digits=1) { return (v>=0?'+':'') + (v*100).toFixed(digits) + '%' }
 function draftFactorNames(d) {
   return d.factors.map(k => (factorByKey(k) || {}).name || k).join(' · ')

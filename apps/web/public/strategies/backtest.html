@@ -831,8 +831,7 @@ if (isReal) loadTrades();
     btn.disabled = true; btn.textContent = '⏳ 提交...'
     status.textContent = '等 100 次窗口回测 · 需 60-120 秒'
     wrap.style.display = 'none'
-    const factors = draft.factors.map(k => ({key: k, weight_pct: draft.weights[k] || 0}))
-                                  .filter(f => f.weight_pct > 0)
+    const factors = factorsPayload(draft)
     try {
       const r = await fetch('/api/quant/backtest/bootstrap', {
         method: 'POST', headers: apiHeaders(),

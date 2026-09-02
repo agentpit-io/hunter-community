@@ -20,7 +20,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from app.services.database import get_conn
-from app.services.quant import factor_defs, strategy_engine, backtest_engine
+from app.services.quant import factor_defs, strategy_engine, backtest_engine, factor_engine
 
 try:
     from psycopg2.extras import execute_values
@@ -102,6 +102,10 @@ async def list_factors():
                 "rows": stats[f.key][1] if f.key in stats else 0,
                 "codes": stats[f.key][3] if f.key in stats else 0,
                 "latest": stats[f.key][2].isoformat() if f.key in stats else None,
+                # 可调参数(RSI 周期/超买超卖线之类)· 没有就是空数组。
+                # 评委问"你这个 RSI 实际参数是多少"要能在界面上直接指给他看,
+                # 光有权重滑块答不出这个问题。
+                "params": factor_engine.FACTOR_PARAMS.get(f.key, []),
             } for f in factor_defs.ALL_FACTORS
         ],
         "cat_order": factor_defs.CAT_ORDER,
