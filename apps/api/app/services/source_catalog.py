@@ -154,6 +154,15 @@ class DataSource:
     # 需要单独一个字段是因为 PATCH 允许把 key 清空而 requires_key 仍为真,
     # 那时它就该显示 need_key —— 光看 requires_key 判断不出来
     has_key: bool = True
+    # 用户自接的源:状态/统计直接来自 `user_data_sources` 表自己的计数器
+    # (source_resolver._mark 每次取数都在写),**不走 source_health**。
+    #
+    # 问题35 的根因就在这:source_health 是进程内的被动观测环,
+    # 只有官方源那条链路在往里写;用户源的真实调用记录在库里,
+    # 而 status_of() 一律去问 source_health —— 拿到空的,于是所有
+    # 用户源永远显示"未调用过",哪怕刚点过「测一次」并且通了。
+    status_override: str | None = None
+    stats_override: dict | None = None
 
 
 # ══════════════════════════════════════════════════════════════
@@ -427,6 +436,8 @@ def status_of(src: DataSource) -> str:
         return "unavailable"
     if not is_configured(src):
         return "need_key"
+    if src.status_override:
+        return src.status_override
     from app.services import source_health
     return source_health.health_of(src.key)
 
@@ -442,7 +453,7 @@ def to_dict(src: DataSource) -> dict:
     d["upstream_label"] = UPSTREAM_LABEL.get(src.upstream, src.upstream or "未核实")
     d["configured"] = is_configured(src)
     d["status"] = status_of(src)
-    d["health"] = source_health.stats(src.key)
+    d["health"] = src.stats_override or source_health.stats(src.key)
     return d
 
 
@@ -546,6 +557,41 @@ def _official_groups() -> list[dict]:
     return out
 
 
+def _user_status(call_count: int, error_count: int, last_ok_at, cooldown_until,
+                 last_err_of: str = "") -> tuple[str, dict | None]:
+    """用户源的状态与统计 —— 数据来自 `user_data_sources` 自己的计数器。
+
+    这些计数器由 `source_resolver._mark()` 在**每次真实取数**时写,
+    「测一次」也走它。所以点完测试再看详情,状态就该是"正常"而不是
+    "未调用过" —— 这正是问题35 的现象。
+
+    分档与 source_health.health_of 保持一致(0.9 / 0.5),
+    两处口径不同的话,同一个成功率在数据源页和概览页会显示成两种颜色。
+    """
+    # ⚠️ 字段名必须与 source_health.stats() 完全一致 —— 前端 DetailPane
+    # 读的是 samples / success_rate / avg_ms / last_error 这四个。
+    # 换个名字不会报错,只会让"采样""成功率"显示成 undefined
+    if not call_count:
+        return "unknown", None              # 真没调用过 —— 不假装健康
+    ok = max(0, call_count - (error_count or 0))
+    rate = ok / call_count
+    if cooldown_until:                      # 连错到熔断了 —— 比成功率更要紧
+        st = "down"
+    else:
+        st = "ok" if rate >= 0.9 else ("degraded" if rate >= 0.5 else "down")
+    return st, {
+        "samples": call_count,
+        "ok_count": ok,
+        "fail_count": error_count or 0,
+        "success_rate": round(rate, 3),
+        # 库里只有累计次数,没存耗时 —— 没有就是没有,不编一个
+        "avg_ms": None,
+        "last_ok_at": last_ok_at.isoformat() if last_ok_at else None,
+        "last_fail_at": None,
+        "last_error": last_err_of or "",
+    }
+
+
 def _user_sources(user_id: str) -> list[DataSource]:
     """用户自定义数据源 —— 读 `user_data_sources` 表(`_21` §7 步 2)。
 
@@ -567,8 +613,11 @@ def _user_sources(user_id: str) -> list[DataSource]:
         conn = get_conn()
         cur = conn.cursor()
         cur.execute(
+            # call_count / error_count / last_ok_at / cooldown_until 是问题35 的关键:
+            # 不读它们就只能去问 source_health,而那里没有用户源的任何记录
             "SELECT id, name, upstream, market, kind, endpoint, requires_key, "
-            "       enabled, api_key_enc, last_err "
+            "       enabled, api_key_enc, last_err, "
+            "       call_count, error_count, last_ok_at, cooldown_until "
             "FROM user_data_sources WHERE user_id=%s ORDER BY created_at DESC",
             (user_id,),
         )
@@ -586,7 +635,8 @@ def _user_sources(user_id: str) -> list[DataSource]:
 
     out: list[DataSource] = []
     for (sid, name, upstream, market, kind, endpoint,
-         requires_key, enabled, key_enc, last_err) in rows:
+         requires_key, enabled, key_enc, last_err,
+         call_count, error_count, last_ok_at, cooldown_until) in rows:
         try:
             mk, kd = Market(market), DataKind(kind)
         except ValueError:
@@ -609,6 +659,9 @@ def _user_sources(user_id: str) -> list[DataSource]:
             available=bool(enabled),
             unavailable_reason="" if enabled else "你把它停用了 · 可在详情里重新启用",
             has_key=bool(key_enc),
+            **dict(zip(("status_override", "stats_override"),
+                       _user_status(call_count or 0, error_count or 0,
+                                    last_ok_at, cooldown_until, last_err or ""))),
             note=(f"你自己接的 · 上游 {UPSTREAM_LABEL.get(upstream, upstream)}"
                   + (f" · 最近一次错误:{last_err[:80]}" if last_err else "")),
         ))

@@ -94,12 +94,17 @@ function UserSourceActions({ item, onChanged }: {
   const [busy, setBusy] = useState('')
   const [res, setRes] = useState<any>(null)
   const id = item.key.startsWith('user.') ? item.key.slice(5) : ''
+  // 用户源的 available 就是库里的 enabled(见 source_catalog._user_sources)
+  const on = item.available
 
-  async function call(method: string, path: string) {
+  async function call(method: string, path: string, body?: any) {
     const h: Record<string, string> = { 'Content-Type': 'application/json' }
     const t = typeof window !== 'undefined' ? localStorage.getItem('hunter_token') || '' : ''
     if (t) h['Authorization'] = `Bearer ${t}`
-    const r = await fetch(`/api/user_sources${path}`, { method, headers: h, cache: 'no-store' })
+    const r = await fetch(`/api/user_sources${path}`, {
+      method, headers: h, cache: 'no-store',
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
     const d = await r.json().catch(() => ({}))
     if (!r.ok) throw new Error(d?.detail || `HTTP ${r.status}`)
     return d
@@ -112,15 +117,26 @@ function UserSourceActions({ item, onChanged }: {
     finally { setBusy(''); onChanged?.() }
   }
 
-  // `_24` §3.1:左下角那个「一键用官方默认」已经删掉(撤架后它没有意义),
-  // 所以删除确认里不能再指向它
-  // "我想暂时不用自己的源"这个场景,而且是批量的。这里再放一个单条开关,
-  // 两处语义相近但作用范围不同,用户会分不清点哪个。真需要单条停用时再加。
+  // 停用开关。
+  //
+  // 删除确认里一直写着「只是想暂时停用的话,在详情里关掉开关即可」,
+  // 而**详情里根本没有这个开关** —— 产品经理照着找,自然找不到。
+  // 后端一直是齐的:`user_data_sources.enabled` + `PATCH /{id}`,
+  // 只是没人接上去。停用后源仍然列出来(标灰),地址和 key 都留着。
+  async function toggle() {
+    setBusy('toggle'); setRes(null)
+    try {
+      await call('PATCH', `/${id}`, { enabled: !on })
+      onChanged?.()
+    } catch (e: any) {
+      setRes({ ok: false, stage: 'error', reason: e.message })
+    } finally { setBusy('') }
+  }
 
   async function remove() {
     if (!window.confirm(`删除「${item.name}」?地址和 key 都会一并删掉,无法恢复。\n\n` +
                         `删掉之后要重新填一遍地址和 key —— key 我们只回显末 4 位,`
-                        + `等于你得去翻原始凭证。只是想暂时停用的话,在详情里关掉开关即可。`)) return
+                        + `等于你得去翻原始凭证。只是想暂时停用的话,点旁边的「停用」即可。`)) return
     setBusy('del')
     try { await call('DELETE', `/${id}`); onChanged?.() }
     catch (e: any) { setRes({ ok: false, stage: 'error', reason: e.message }) }
@@ -132,6 +148,10 @@ function UserSourceActions({ item, onChanged }: {
       <div style={{ display: 'flex', gap: 6, marginBottom: res ? 8 : 0 }}>
         <button onClick={test} disabled={!!busy} style={{ ...actBtn, flex: 1 }}>
           {busy === 'test' ? '测试中…' : '⚡ 测一次'}
+        </button>
+        <button onClick={toggle} disabled={!!busy} style={{ ...actBtn }}
+                title={on ? '停用后取数不再走它,地址和 key 都留着' : '重新启用'}>
+          {busy === 'toggle' ? '…' : on ? '停用' : '启用'}
         </button>
         <button onClick={remove} disabled={!!busy} style={{ ...actBtn, color: '#9B3A22' }}>
           删除
