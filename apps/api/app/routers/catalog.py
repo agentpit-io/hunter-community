@@ -262,7 +262,19 @@ async def list_capabilities(request: Request):
             "origin": s.get("origin", ""),
             "slow": False,
             "blocked_by": missing + not_ready,
-            "status": "broken" if missing else ("blocked" if not_ready else "ready"),
+            # 正文引用了、但没跟着装进来的附属文件(见 skill_files.missing_refs)。
+            #
+            # 这类 SKILL **装了也用不了**:模型读到"数据源规则见
+            # references/data-sources.md"就去找,找不到就空转,而且不报错。
+            # 用户看到的是"点了没反应",完全不知道为什么。
+            # 所以要在界面上明说缺什么,而不是让他自己试出来。
+            "missing_refs": s.get("missing_refs") or [],
+            "status": (
+                "broken" if missing
+                else "incomplete" if (s.get("missing_refs") and not s.get("builtin"))
+                else "blocked" if not_ready
+                else "ready"
+            ),
         })
 
     # ── 哪些工具已经被某个 SKILL "代表"了 ──

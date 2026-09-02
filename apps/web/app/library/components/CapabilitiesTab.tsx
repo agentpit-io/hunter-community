@@ -174,6 +174,10 @@ function Card({ item, selected, onSelect, onUse }: {
   onSelect: () => void; onUse: () => void
 }) {
   const blocked = item.status !== 'ready'
+  // 缺附属文件 —— 装了也用不了。和"依赖未就绪"分开:
+  // 那个是我们这边的工具没接好(等我们),这个是**这份 SKILL 本身不完整**
+  // (用户只能去装全或换一个)。用户能做的事不一样,不该混成一个提示。
+  const incomplete = (item.missing_refs?.length ?? 0) > 0
   return (
     <div
       onClick={onSelect}
@@ -185,7 +189,12 @@ function Card({ item, selected, onSelect, onUse }: {
       onKeyDown={(e) => { if (e.key === 'Enter') onUse() }}
       title={`${item.hint || ''}\n${item.kind === 'tool' ? '🔧 直接执行' : '📋 带方法论'}`
         + (item.slow ? ' · 耗时较长' : '')
-        + (blocked && item.blocked_by.length ? `\n⚠ 依赖未就绪: ${item.blocked_by.join(', ')}` : '')}
+        + (blocked && item.blocked_by.length ? `\n⚠ 依赖未就绪: ${item.blocked_by.join(', ')}` : '')
+        + (incomplete
+            ? `\n⚠ 这个 SKILL 装不全 —— 正文引用了 ${item.missing_refs!.length} 个附属文件,`
+              + `而我们只装了 SKILL.md。缺:\n  ${item.missing_refs!.slice(0, 4).join('\n  ')}`
+              + `\n模型读到「见 xxx.md」会去找,找不到就卡住。`
+            : '')}
       style={{ ...cardStyle, ...(selected ? cardSelected : null), opacity: blocked ? 0.55 : 1 }}
     >
       <span style={{ fontSize: 15, flexShrink: 0 }}>{item.icon}</span>
@@ -195,6 +204,13 @@ function Card({ item, selected, onSelect, onUse }: {
           <span style={kindTag(item.kind)}>{item.kind_label}</span>
           {item.slow && <span style={{ fontSize: 10.5, color: HUNTER.INK_F }}>⏱ 慢</span>}
           {!item.builtin && <span style={{ fontSize: 10.5, color: HUNTER.THEME }}>你加的</span>}
+          {/* 装不全的明确标出来 —— 否则用户点了没反应,只会以为是我们的 bug */}
+          {incomplete && (
+            <span style={{
+              fontSize: 10.5, padding: '1px 6px', borderRadius: 4,
+              background: '#FDF3DC', color: '#8A5A1B', border: '1px solid #E3C89A',
+            }}>⚠ 装不全</span>
+          )}
         </div>
         {/* 显示的是**提问模板**而不是功能描述 —— 用户要判断的是
             "点了它会发生什么",模板就是答案,而且他还能照着改 */}

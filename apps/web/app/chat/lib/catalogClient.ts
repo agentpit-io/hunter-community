@@ -188,7 +188,10 @@ export interface CapabilityItem {
   origin: string
   slow: boolean
   blocked_by: string[]
-  status: 'ready' | 'blocked' | 'broken'
+  /** 正文引用了、但没跟着装进来的附属文件。非空 = 这个 SKILL 装了也用不了 */
+  missing_refs?: string[]
+  /** incomplete = 缺附属文件,装了也用不了(见 missing_refs) */
+  status: 'ready' | 'blocked' | 'broken' | 'incomplete'
 }
 
 export interface CapabilityGroup {

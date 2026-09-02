@@ -216,6 +216,38 @@ function CapDetail({ item, onUse, onChanged }: {
                value={<span style={{ color: HUNTER.UP }}>{item.blocked_by.join(', ')}</span>} />
         </>
       )}
+      {/* 缺附属文件 —— 这类 SKILL 装了也用不了,必须在点「用它」之前说清楚。
+          和「依赖未就绪」分开写:那个是我们的工具没接好(等我们),
+          这个是这份 SKILL 本身不完整(用户只能去装全或换一个)。 */}
+      {(item.missing_refs?.length ?? 0) > 0 && (
+        <>
+          <Divider />
+          <div style={{
+            padding: '9px 11px', borderRadius: 7,
+            background: '#FDF3DC', border: '1px solid #E3C89A',
+            fontSize: 11.5, color: '#8A5A1B', lineHeight: 1.85,
+          }}>
+            <b>⚠ 这个能力装不全,现在用不了</b>
+            <div style={{ marginTop: 4 }}>
+              它的正文引用了 {item.missing_refs!.length} 个附属文件,
+              而我们只装了 <code>SKILL.md</code>:
+            </div>
+            <div style={{ marginTop: 5 }}>
+              {item.missing_refs!.map((f) => (
+                <code key={f} style={{
+                  display: 'inline-block', margin: '2px 4px 0 0', padding: '1px 5px',
+                  background: '#F4F1EC', borderRadius: 3, fontSize: 10.5,
+                }}>{f}</code>
+              ))}
+            </div>
+            <div style={{ marginTop: 6, color: HUNTER.INK_F }}>
+              模型读到「见 xxx.md」会去找,找不到就卡住 —— 表现是点了没反应。
+              作者把方法论拆在多个文件里的,只搬 SKILL.md 搬不动。
+            </div>
+          </div>
+        </>
+      )}
+
       <Divider />
       <button onClick={() => onUse?.(item)} disabled={!item.prompt_tpl}
               style={{ ...useBtnBig, opacity: item.prompt_tpl ? 1 : 0.4 }}>

@@ -135,6 +135,59 @@ def _parse_frontmatter(text: str) -> tuple[dict, str]:
     return data, body
 
 
+# SKILL 正文里"引用了一个文件"的写法。只认相对路径 —— 绝对路径和
+# http 链接不是我们该管的。
+_REF_PAT = re.compile(
+    r"[`\"']([\w][\w./-]*\.(?:md|py|json|ya?ml|sh|js|ts|csv|txt))[`\"']"
+)
+
+# 这些不是"作者仓库里的文件",是通用示例或占位,不该报缺失
+_REF_IGNORE = ("skill.md", "readme.md", "license", "package.json",
+               "requirements.txt", "example.md", "your_file.md")
+
+
+def missing_refs(skill_dir: Path, body: str, limit: int = 8) -> list[str]:
+    """正文引用了、但这个 SKILL 目录里**并不存在**的文件。
+
+    ## 为什么按"文件在不在"判断,而不是按正则模式
+
+    产品经理反馈「有些自行添加的 skill 用不了」。查下来是这样:
+
+        tigersking520/stock-analysis-skill 的 SKILL.md 里写着
+            数据源规则见 `references/data-sources.md`
+            排雷清单见 `references/financial-red-flags.md`
+
+    而我们**只装 SKILL.md** —— 那 5 个 references/*.md 一个都没有。
+    模型读到"见 xxx.md"就去找,找不到就空转,**而且不报错**,
+    用户看到的就是"这个 skill 点了没用"。
+
+    早先的 `skill_install.portability()` 用正则匹配模式来判定,
+    问题是它**只看写法、不看事实**:如果用户把整个仓库的附件都装了,
+    那些引用是有效的,却照样报警。
+
+    这里改成查磁盘:引用了 && 文件确实不在 → 才算缺失。
+    宁可漏报(误判成能用),也不要对一个装全了的 SKILL 乱挂红字。
+    """
+    if not body:
+        return []
+    out: list[str] = []
+    seen = set()
+    for m in _REF_PAT.finditer(body):
+        rel = m.group(1)
+        low = rel.lower()
+        if low in seen or any(low.endswith(x) for x in _REF_IGNORE):
+            continue
+        seen.add(low)
+        try:
+            if not (skill_dir / rel).exists():
+                out.append(rel)
+        except Exception:                     # noqa: BLE001 · 非法路径当缺失处理
+            out.append(rel)
+        if len(out) >= limit:
+            break
+    return out
+
+
 def _load_one(skill_dir: Path, builtin: bool) -> dict | None:
     f = skill_dir / "SKILL.md"
     if not f.is_file():
@@ -171,6 +224,9 @@ def _load_one(skill_dir: Path, builtin: bool) -> dict | None:
         "needs_tools": h.get("needs_tools") or [],
         "needs_data": h.get("needs_data") or [],
         "playbook": body.strip(),
+        # 正文引用了、但目录里没有的文件 —— 见 missing_refs 的说明。
+        # 内置 SKILL 不检查:它们随代码走,不会缺件。
+        "missing_refs": [] if builtin else missing_refs(skill_dir, body),
         "_path": str(f),
     }
 
