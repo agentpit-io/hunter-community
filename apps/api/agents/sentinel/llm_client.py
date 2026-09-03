@@ -22,7 +22,7 @@ from .prompts import parse_llm_json
 # 注:online_analysis/llm_client.py 里已做过同样的 fallback,这里补齐 agents/ 侧。
 _BASE_URL    = os.getenv("ONE_API_BASE_URL") or os.getenv("LLM_BASE_URL", "http://104.197.139.51:3000/v1")
 _API_KEY     = os.getenv("ONE_API_KEY")     or os.getenv("LLM_API_KEY", "")
-_MODEL       = os.getenv("ONE_API_MODEL")   or os.getenv("LLM_DEFAULT_MODEL", "gemini-3.8-flash")
+_MODEL       = os.getenv("ONE_API_MODEL")   or os.getenv("LLM_DEFAULT_MODEL", "gemini-3.5-flash")
 # Deep Think 用 · 综合判官 + 风控裁判走此模型 · 决策质量优先于速度/成本
 # 若未配 ONE_API_DEEP_MODEL 则依次回退:LLM_DEEP_MODEL → LLM_DEFAULT_MODEL → _MODEL。
 # 开源版用户只有一个 LLM_DEFAULT_MODEL 时,深浅走同模型也能跑通;不至于因为

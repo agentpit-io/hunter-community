@@ -33,7 +33,7 @@ from openai import OpenAI
 
 BASE_URL = os.environ.get("ONE_API_BASE_URL", "http://104.197.139.51:3000/v1")
 API_KEY  = os.environ.get("ONE_API_KEY", "")
-MODEL    = os.environ.get("ONE_API_MODEL", "gemini-3.8-flash")
+MODEL    = os.environ.get("ONE_API_MODEL", "gemini-3.5-flash")
 
 
 def banner(text: str):

@@ -38,9 +38,9 @@ MAX_HISTORY_MESSAGES = 8
 SUMMARY_TRIGGER_COUNT = 16
 
 # 模型配置（走 OneAPI，可通过环境变量切换）
-MODEL_ROUTE    = os.getenv("ASSISTANT_MODEL_ROUTE",    "gemini-3.8-flash")  # 意图分类主模型（快）
-MODEL_CHAT     = os.getenv("ASSISTANT_MODEL_CHAT",     "gemini-3.8-flash")        # 通用对话（更强推理）
-MODEL_COMPRESS = os.getenv("ASSISTANT_MODEL_COMPRESS", "gemini-3.8-flash")  # 摘要压缩（便宜）
+MODEL_ROUTE    = os.getenv("ASSISTANT_MODEL_ROUTE",    "gemini-3.5-flash")  # 意图分类主模型（快）
+MODEL_CHAT     = os.getenv("ASSISTANT_MODEL_CHAT",     "gemini-3.5-flash")        # 通用对话（更强推理）
+MODEL_COMPRESS = os.getenv("ASSISTANT_MODEL_COMPRESS", "gemini-3.5-flash")  # 摘要压缩（便宜）
 
 # chat reply 上限（字符），用户要求 1200 字以给出完整方案
 CHAT_REPLY_MAX_CHARS = 1200

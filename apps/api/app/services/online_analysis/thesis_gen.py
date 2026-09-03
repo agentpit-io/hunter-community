@@ -14,7 +14,7 @@ from .prompts import THESIS_GEN_SYSTEM, build_thesis_user_prompt
 
 _BASE_URL = os.getenv("ONE_API_BASE_URL", "http://104.197.139.51:3000/v1")
 _API_KEY  = os.getenv("ONE_API_KEY",      "")
-_MODEL    = os.getenv("ONE_API_MODEL",    "gemini-3.8-flash")
+_MODEL    = os.getenv("ONE_API_MODEL",    "gemini-3.5-flash")
 _TIMEOUT  = 30
 
 

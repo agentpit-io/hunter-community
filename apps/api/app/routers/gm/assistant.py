@@ -83,7 +83,7 @@ async def gm_assistant_chat(body: ChatIn, request: Request):
                         base_url=os.getenv("ONE_API_BASE_URL", "http://104.197.139.51:3000/v1"),
                         timeout=60)
         resp = client.chat.completions.create(
-            model=os.getenv("ONE_API_MODEL", "gemini-3.8-flash"),
+            model=os.getenv("ONE_API_MODEL", "gemini-3.5-flash"),
             messages=msgs, temperature=0.4, max_tokens=1200)
         reply = resp.choices[0].message.content or ""
     except Exception as e:

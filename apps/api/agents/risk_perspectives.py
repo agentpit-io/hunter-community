@@ -25,7 +25,7 @@ def _call_llm(system: str, user: str, max_tokens: int = 3500) -> str:
     # .env 里统一的 LLM_* 三件套。timeout 60 → 120 因为推理型模型 reasoning tokens 一多就 40-60s+。
     api_key   = os.getenv("ONE_API_KEY")      or os.getenv("LLM_API_KEY", "")
     base_url  = os.getenv("ONE_API_BASE_URL") or os.getenv("LLM_BASE_URL", "http://104.197.139.51:3000/v1")
-    model     = os.getenv("ONE_API_MODEL")    or os.getenv("LLM_DEFAULT_MODEL", "gemini-3.8-flash")
+    model     = os.getenv("ONE_API_MODEL")    or os.getenv("LLM_DEFAULT_MODEL", "gemini-3.5-flash")
     if not api_key:
         logger.warning("risk_perspective: 无可用 key · 请在 .env 里填 LLM_API_KEY(或 ONE_API_KEY)")
         return "（风控分析暂不可用）"

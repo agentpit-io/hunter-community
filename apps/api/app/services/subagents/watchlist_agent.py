@@ -45,7 +45,7 @@ def _get_a_quote_from_redis(code: str) -> dict | None:
         return None
 
 
-_MODEL = os.getenv("AGENT_SUB_WL_MODEL", "gemini-3.8-flash")
+_MODEL = os.getenv("AGENT_SUB_WL_MODEL", "gemini-3.5-flash")
 
 
 # ═════════════════════════════════════════════════════════════════

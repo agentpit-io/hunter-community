@@ -20,7 +20,7 @@ from .prompts import parse_llm_json
 # 深度分析也就跟着走通,不需要用户再单独维护一套 key。
 _BASE_URL = os.getenv("ONE_API_BASE_URL") or os.getenv("LLM_BASE_URL", "http://104.197.139.51:3000/v1")
 _API_KEY  = os.getenv("ONE_API_KEY")     or os.getenv("LLM_API_KEY", "")
-_MODEL    = os.getenv("ONE_API_MODEL")   or os.getenv("LLM_DEFAULT_MODEL", "gemini-3.8-flash")
+_MODEL    = os.getenv("ONE_API_MODEL")   or os.getenv("LLM_DEFAULT_MODEL", "gemini-3.5-flash")
 # 30s 对 DeepSeek/Kimi 等推理型模型 + 长上下文经常不够(reasoning tokens 一多就到 40-60s),
 # 抬到 120s 避免 APITimeoutError 把结果吞成 502。上游本身也有超时兜底,不会无限阻塞。
 _TIMEOUT  = 120
