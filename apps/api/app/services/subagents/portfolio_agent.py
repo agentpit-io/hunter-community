@@ -28,7 +28,7 @@ from app.services.database import (
 )
 
 
-_MODEL = os.getenv("AGENT_SUB_PORT_MODEL", "gemini-3-flash-preview")
+_MODEL = os.getenv("AGENT_SUB_PORT_MODEL", "gemini-3.8-flash")
 
 
 # ═════════════════════════════════════════════════════════════════

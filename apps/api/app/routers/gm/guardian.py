@@ -32,7 +32,7 @@ def _llm(client, prompt: str, max_tokens: int = 1500) -> dict | None:
     content = ""
     try:
         resp = client.chat.completions.create(
-            model=os.getenv("ONE_API_MODEL", "gemini-3-flash-preview"),
+            model=os.getenv("ONE_API_MODEL", "gemini-3.8-flash"),
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
             temperature=0.4, max_tokens=max_tokens)

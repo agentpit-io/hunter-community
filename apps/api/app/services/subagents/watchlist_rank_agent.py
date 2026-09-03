@@ -33,7 +33,7 @@ from app.services.subagents.watchlist_agent import (
 
 
 # 与 watchlist_agent 用同一个 sub-agent env(短评归因和排序同属自选股域)
-_MODEL = os.getenv("AGENT_SUB_WL_MODEL", "gemini-3-flash-preview")
+_MODEL = os.getenv("AGENT_SUB_WL_MODEL", "gemini-3.8-flash")
 
 _HORIZONS_ALL = ["3M", "6M", "1Y", "3Y"]
 

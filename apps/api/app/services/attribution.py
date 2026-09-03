@@ -250,7 +250,7 @@ def analyze(
 
     base_url = os.environ.get("ONE_API_BASE_URL", "http://104.197.139.51:3000/v1")
     api_key  = os.environ.get("ONE_API_KEY",  "")
-    model    = os.environ.get("ONE_API_MODEL", "gemini-3-flash-preview")
+    model    = os.environ.get("ONE_API_MODEL", "gemini-3.8-flash")
 
     if not api_key:
         logger.warning("attribution: ONE_API_KEY 未配置，跳过归因")

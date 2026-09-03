@@ -36,8 +36,8 @@ _STOCK_CODE_RE = _re.compile(r"(?<!\d)(\d{6}|\d{5})(?!\d)")
 
 
 # ─────────────────────────────── 常量 ───────────────────────────────
-MODEL_ROUTER = os.getenv("AGENT_MODEL_ROUTER", "gemini-3.5-flash")
-MODEL_ROUTE_LITE = os.getenv("AGENT_MODEL_ROUTE_LITE", "gemini-3-flash-preview")
+MODEL_ROUTER = os.getenv("AGENT_MODEL_ROUTER", "gemini-3.8-flash")
+MODEL_ROUTE_LITE = os.getenv("AGENT_MODEL_ROUTE_LITE", "gemini-3.8-flash")
 
 # 简易成本估算（¥/1k tokens，粗略；见 OneAPI 指南 v2026-08-02）
 _COST_PER_1K = 0.05
@@ -471,7 +471,7 @@ class ChatOrchestrator:
         注意：google_search 与 function calling tools 不能同用；此处专门为通识问题设计。
         """
         model = os.getenv("AGENT_MODEL_GENERAL_FINANCE",
-                           os.getenv("SIGNAL_ANALYSIS_MODEL", "gemini-3-flash-preview"))
+                           os.getenv("SIGNAL_ANALYSIS_MODEL", "gemini-3.8-flash"))
         sys_prompt = SYSTEM_PROMPT + (
             "\n\n# 【本轮工作模式 · 通识 + 联网检索】\n"
             "- 这是**金融通识 / 背景解读**问题（公司治理、年报解读、公司战略、行业结构、宏观）\n"

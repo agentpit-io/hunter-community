@@ -16,7 +16,7 @@ from app.services.agent.tool_registry import ToolCall, ToolRegistry, ToolResult
 from app.services.online_analysis.llm_client import get_client
 
 
-_MODEL = os.getenv("AGENT_SUB_RESEARCH_MODEL", "gemini-3-flash-preview")
+_MODEL = os.getenv("AGENT_SUB_RESEARCH_MODEL", "gemini-3.8-flash")
 
 _SYSTEM = """你是猎鹿人 Hunter 的"深度研究"专家。给定一只股票和用户问题，输出结构化 JSON：
 {

@@ -96,7 +96,7 @@ services:
       LLM_BASE_URL: ${LLM_BASE_URL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_DEFAULT_MODEL: ${LLM_DEFAULT_MODEL:-gpt-4o-mini}
-      # Sub-agent 独立 env · 代码里 20+ 处硬编码 fallback = gemini-3-flash-preview
+      # Sub-agent 独立 env · 代码里 20+ 处硬编码 fallback = gemini-3.8-flash
       # 换基座 LLM 时必须一并透传,否则 DeepSeek/Anthropic 会 400 拒绝 gemini 模型名
       # → tool 累计重试 > 45s → MCP ReadTimeout → 前端"hermes-api call failed"。
       ONE_API_MODEL: ${ONE_API_MODEL:-}

@@ -28,7 +28,7 @@ router = APIRouter(prefix="/internal", tags=["mcp-bridge"])
 _INTERNAL_KEY = os.getenv("HUNTER_INTERNAL_KEY", "")
 # AGENT_SUB_UZI_MODEL 是内部部署里指定 Gemini 变体用的,开源版跟随 .env 的 LLM_DEFAULT_MODEL,
 # 否则用户配了 DeepSeek 却在这里请求 gemini-3.5-flash 会直接 502 UnknownModel。
-_MODEL = os.getenv("AGENT_SUB_UZI_MODEL") or os.getenv("LLM_DEFAULT_MODEL", "gemini-3.5-flash")
+_MODEL = os.getenv("AGENT_SUB_UZI_MODEL") or os.getenv("LLM_DEFAULT_MODEL", "gemini-3.8-flash")
 
 
 # ── akshare A 股兜底 ─────────────────────────────────────────────

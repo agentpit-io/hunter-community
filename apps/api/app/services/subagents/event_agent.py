@@ -31,7 +31,7 @@ _DEF = {
 }
 
 
-_MODEL = os.getenv("AGENT_SUB_EVENT_MODEL", "gemini-3-flash-preview")
+_MODEL = os.getenv("AGENT_SUB_EVENT_MODEL", "gemini-3.8-flash")
 
 _EVENT_LLM_SYSTEM = """你是猎鹿人事件影响分析师。给你一条事件 + 一只股票，输出 JSON:
 {
