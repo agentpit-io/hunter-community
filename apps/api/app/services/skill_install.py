@@ -281,6 +281,36 @@ def _collect_assets(tf, root: str, base: str, body: str) -> dict:
     from app.services import skill_files
 
     out: dict[str, bytes] = {}
+
+    # ① SKILL.md 待在自己的子目录里 → **整个同级子树都搬**,不看正文怎么写。
+    #
+    # 光靠正文引用是不够的:`_REF_PAT` 只认反引号/引号包着的路径,而作者常写
+    #     - **configuration.md** - 配置文件详解
+    # 这种 markdown 粗体。实测 algoderiv/agent-skills 的 wtpy:13 个
+    # references/*.md **一个都没被识别**,而正则反倒把代码示例里的
+    # `engine.init('../common/', "configbt.yaml")` 当成了要装的附件。
+    # 子树全搬不依赖写法,是这一类(作者按 SKILL 规范建了独立目录)的可靠解。
+    #
+    # 仓库根那种(SKILL.md 直接躺在根目录)不能这么干 —— 同级=整个仓库,
+    # 会把 LICENSE、赞助码图片、.github/ 全拖进来。那种只能走 ②。
+    if base:
+        prefix = f"{root}/{base}/"
+        for name in tf.getnames():
+            if not name.startswith(prefix):
+                continue
+            rel = name[len(prefix):]
+            if not rel or rel == "SKILL.md" or rel.endswith("/"):
+                continue
+            if skill_files.is_exec_ref(rel) or not rel.lower().endswith(skill_files.DOC_EXTS):
+                continue
+            try:
+                f = tf.extractfile(name)
+                if f is not None:
+                    out[rel] = f.read()
+            except Exception:
+                continue
+
+    # ② 再顺着正文引用补 —— SKILL.md 在仓库根时,这是唯一手段
     pending = list(skill_files.iter_refs(body))
     for _ in range(_ASSET_DEPTH):
         nxt: list[str] = []

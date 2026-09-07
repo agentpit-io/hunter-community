@@ -159,6 +159,15 @@ def is_exec_ref(rel: str) -> bool:
     return rel.lower().endswith(EXEC_EXTS)
 
 
+# 围栏代码块。块里的字符串是**代码示例**,不是附件引用 ——
+# 实测 algoderiv/agent-skills 的 wtpy,正文里有
+#     engine.init('../common/', "configbt.yaml")
+# `configbt.yaml` 被当成了该随 SKILL 装的附件,而仓库里根本没有这个文件
+#(它是 wtpy 框架要用户自己准备的配置),于是这个 SKILL 永远显示"装不全",
+# 而且怎么重装都好不了。宁可漏报也不要这种永远修不好的误报。
+_FENCE_PAT = re.compile(r"^```.*?^```", re.M | re.S)
+
+
 def iter_refs(body: str):
     """正文里引用到的相对路径,去重后按出现顺序产出。
 
@@ -168,6 +177,7 @@ def iter_refs(body: str):
     """
     if not body:
         return
+    body = _FENCE_PAT.sub("", body)
     seen = set()
     for m in _REF_PAT.finditer(body):
         rel = m.group(1)
