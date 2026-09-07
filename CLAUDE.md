@@ -278,6 +278,40 @@ chat 回答不完整时,先分清是管道还是模型:
    挂 `.local` 之后 `state` 与 `share` 都在卷内,而**具名卷根目录属主持久**,
    `chown -R 1001:1001` 一次长期有效。
 
+### 挂了卷不等于状态都进卷了 · 用 df 逐个查
+
+首轮修复只把会话数据挪进卷,`HUNTER_AUDIT_PATH` 还指着 `/tmp/hunter-audit/`,
+**`/tmp` 同样是容器可写层**,所以审计日志在这次事故里跟会话正文一起没了 ——
+而审计日志的全部意义就是留痕,放在会被 recreate 清掉的地方等于没有审计,
+事后想查"到底谁跑了什么"时它正好不在。已改指卷内(`2cb19a4`)。
+
+**别只看 compose 的 volumes 段**(它只说明"挂了什么",不说明"进程往哪写"),
+直接去容器里问:
+
+```bash
+docker inspect <容器> --format '{{range .Mounts}}{{.Type}} {{.Destination}} {{if .RW}}rw{{else}}ro{{end}}
+{{end}}'
+docker exec <容器> sh -lc 'df <可疑路径>'     # overlay = 可写层,recreate 就没
+```
+
+本仓 6 个服务全量扫过,没有第三处:api 的两个 rw 挂载是 bind 到宿主机目录(重建不丢),
+web / llm-shim 全 `:ro` 无状态,postgres / redis 各有具名卷。
+
+### 读 opencode 的 sqlite 必须连 WAL 一起读
+
+`opencode-local.db` 是 WAL 模式,`-wal` 文件常有几 MB 未 checkpoint。
+**用 `readonly` 打开可能只读到主库、得出"表是空的"这种错误结论** ——
+排查这次事故时据此误判过一次"数据全空"。两种正确读法:
+
+```bash
+# A. 连 -wal / -shm 一起复制出来再读
+# B. 取一致性快照(自动合并 WAL),也是推荐的备份手法
+docker exec <opencode> bun -e "new (require('bun:sqlite').Database)(process.env.HOME+'/.local/share/opencode/opencode-local.db',{readonly:true}).exec(\"VACUUM INTO '/tmp/bk.db'\")"
+```
+
+同理:**看 postgres 的 `chat_session_owner` 完好,不等于会话还在**(见上面第 2 条),
+对话正文只在 opencode 那个 sqlite 里。
+
 ### 顺带两条操作纪律
 
 - **改生产前确认 `git pull` 真的成功**。有一次 pull 因网络抖动失败,后续步骤基于旧
