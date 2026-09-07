@@ -283,6 +283,21 @@ services:
       #   ~/.config/opencode/skills/   用户自己加的
       - ./skills:/opt/opencode-workspace/.opencode/skills:ro
       - ./user-skills:/home/hunter/.config/opencode/skills:ro
+      # ⚠️ 会话数据(opencode-local.db · 所有对话的正文)必须落在具名卷上。
+      #
+      # 2026-09-07 事故:这行不存在的时候,会话只活在容器可写层里。
+      # 一次 `docker compose up -d opencode`(改了挂载就会 Recreate)把容器换掉,
+      # 33 个用户会话全部消失,用户刷新后看到"暂无对话"。**不可恢复** ——
+      # 旧容器一删,可写层跟着删。
+      #
+      # 注意 postgres 的 chat_session_owner 表**不是**备份:它只存
+      # session_id ↔ user_id 的归属映射,对话正文一个字都不在里面。
+      # 那张表当时完好无损,前端照样是空的 —— 因为它要和 opencode 的
+      # 全量会话列表求交集,而交集那一侧没了。
+      #
+      # SaaS(hermes)一直是对的:宿主机 /opt/opencode-data 挂到容器的同一路径。
+      # 本仓漏了,补上。改这一行之前先想清楚卷里的数据怎么迁。
+      - hunter_opencode_data:/home/hunter/.local/share/opencode
     entrypoint: ["/bin/sh", "/opt/hunter-boot/entrypoint.sh"]
     ports:
       - "${OPENCODE_HOST_PORT:-3921}:3901"
@@ -290,3 +305,5 @@ services:
 volumes:
   hunter_pg_data:
   hunter_redis_data:
+  # opencode 会话正文(见 opencode 服务里那段注释)· 2026-09-07 补
+  hunter_opencode_data:
