@@ -319,6 +319,7 @@ function LibraryContent() {
               selected={selected?.kind === 'cap' ? selected.item : null}
               onSelect={onSelectCap}
               onUse={onUseCap}
+              onMoveCap={onMoveCap}
             />
           )}
           {query.tab === 'capabilities' && !caps && <Loading />}
@@ -385,6 +386,10 @@ const bodyStyle: React.CSSProperties = {
 
 const mainStyle: React.CSSProperties = {
   flex: 1,
+  // flex 子项默认 min-width:auto —— 内容撑得下不去时它不收缩,
+  // 右侧 320px 的详情面板就会被挤出 bodyStyle 的 overflow:hidden,
+  // 表现是"点了卡片,面板没弹出来"。显式归零是这个坑的标准解法。
+  minWidth: 0,
   overflowY: 'auto',
   background: HUNTER.BG,
 }

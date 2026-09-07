@@ -14,6 +14,7 @@
 import { useMemo, useState } from 'react'
 import { HUNTER } from '../../lib/hunter-theme'
 import type { CapabilityGroup, CapabilityItem } from '../../chat/lib/catalogClient'
+import GroupPicker from './GroupPicker'
 
 interface Props {
   groups: CapabilityGroup[]
@@ -23,12 +24,18 @@ interface Props {
   onSelect: (item: CapabilityItem) => void
   /** 双击 = 跳对话框并填好模板(老板要的那个动作) */
   onUse: (item: CapabilityItem) => void
+  /** 把一个能力移到某组 · 传空串 = 恢复默认分组。未传则卡片上不显示「移动」。
+   *
+   *  **为什么入口在卡片上**:第一版只做在右侧详情面板的「类目」行里,
+   *  用户压根没走到那一步 —— 他在列表里看卡片,不会为了改分类先点开详情。
+   *  详情面板那个保留(改完能立刻看到类目变了),但主入口挪到这里。 */
+  onMoveCap?: (itemKey: string, category: string) => Promise<void>
 }
 
 type KindFilter = '' | 'skill' | 'tool'
 
 export default function CapabilitiesTab({
-  groups, activeGroup, search, selected, onSelect, onUse,
+  groups, activeGroup, search, selected, onSelect, onUse, onMoveCap,
 }: Props) {
   // 类型筛选条 —— 平时不该用到,但当用户确实想问"哪些是直接执行的"时,
   // 得有地方回答。默认全部
@@ -134,7 +141,8 @@ export default function CapabilitiesTab({
                       <Card key={i.key} item={i}
                             selected={selected?.key === i.key}
                             onSelect={() => onSelect(i)}
-                            onUse={() => onUse(i)} />
+                            onUse={() => onUse(i)}
+                            groups={groups} onMove={onMoveCap} />
                     ))}
                   </div>
                 )}
@@ -174,9 +182,11 @@ function byOrigin(items: CapabilityItem[]) {
   }))
 }
 
-function Card({ item, selected, onSelect, onUse }: {
+function Card({ item, selected, onSelect, onUse, groups, onMove }: {
   item: CapabilityItem; selected: boolean
   onSelect: () => void; onUse: () => void
+  groups: CapabilityGroup[]
+  onMove?: (itemKey: string, category: string) => Promise<void>
 }) {
   const blocked = item.status !== 'ready'
   // 缺附属文件 —— 装了也用不了。和"依赖未就绪"分开:
@@ -221,6 +231,9 @@ function Card({ item, selected, onSelect, onUse }: {
             "点了它会发生什么",模板就是答案,而且他还能照着改 */}
         <div style={tplStyle}>{item.prompt_tpl || item.hint}</div>
       </div>
+      {/* 「移动」在「用它 →」左边、且更轻:后者是主操作,
+          前者是整理分类时才用的,不该抢它的视觉重量 */}
+      <GroupPicker item={item} groups={groups} onMove={onMove} compact />
       <button
         onClick={(e) => { e.stopPropagation(); onUse() }}
         style={useBtn} title="跳到对话框并填好这句话"
