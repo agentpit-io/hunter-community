@@ -297,7 +297,18 @@ services:
       #
       # SaaS(hermes)一直是对的:宿主机 /opt/opencode-data 挂到容器的同一路径。
       # 本仓漏了,补上。改这一行之前先想清楚卷里的数据怎么迁。
-      - hunter_opencode_data:/home/hunter/.local/share/opencode
+      #
+      # ⚠️ 挂的是 `.local` **整个目录**,不是更精确的 `.local/share/opencode` ——
+      # 后者试过,容器起不来,重启循环:
+      #   EACCES: permission denied, mkdir '/home/hunter/.local/state'
+      # 镜像里根本没有 /home/hunter/.local(实测 `docker run --rm ... ls -ld` 报
+      # No such file),docker 为了造挂载点会**以 root** 补建 `.local` 与 `.local/share`
+      # 两级父目录;容器以 hunter(1001) 跑,要在 `.local/` 下建 `state` 就被拒。
+      # 这两级父目录不属于卷,进临时容器 chown 也白搭 —— 每次 recreate 由 docker
+      # 重新以 root 造一遍,必现。
+      # 挂 `.local` 之后 state 和 share 都落在卷内,而**卷根目录的属主是持久的**
+      # (宿主机 /var/lib/docker/volumes/<卷>/_data),chown 一次 1001:1001 就一直有效。
+      - hunter_opencode_data:/home/hunter/.local
     entrypoint: ["/bin/sh", "/opt/hunter-boot/entrypoint.sh"]
     ports:
       - "${OPENCODE_HOST_PORT:-3921}:3901"
