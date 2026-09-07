@@ -254,6 +254,39 @@ chat 回答不完整时,先分清是管道还是模型:
 
 ---
 
+## 铁律:有状态容器必须挂卷 · opencode 的会话正文只活在卷里
+
+2026-09-07 事故(复盘:`agentpit/doc/服务器管理/2026-09-07_hunter-community_opencode会话数据全丢.md`):
+为了让新挂的 `uzi_mcp.py` 生效跑了一句 `docker compose up -d opencode`,
+挂载配置变了 → compose 判定 **Recreate** → 旧容器删除 → **30+ 条用户会话正文全部消失,不可恢复**。
+当时 opencode 服务的 volumes 全是 `:ro` 的配置文件,没有一个卷存数据。
+
+### 三条
+
+1. **动 `docker compose up -d <svc>` 之前,先问这个容器有没有状态**。
+   compose 只要发现镜像、环境变量或挂载有变化就会 Recreate,可写层跟着没。
+   `restart` 不换容器所以安全,`up -d` 不是。**有状态而没挂卷 = 一次 up -d 就清零。**
+2. **`chat_session_owner` 表不是备份**。它只存 `session_id ↔ user_id ↔ title` 归属映射,
+   对话正文一个字都不在里面。前端会话列表 = opencode 全量会话 ∩ owner 表,
+   opencode 那一侧没了,表再完整前端也是"暂无对话"。
+   看到 postgres 数据完好**不等于**数据没丢,要去数据真正所在的那一侧确认。
+3. **opencode 的卷必须挂 `/home/hunter/.local` 整个目录**,不要图精确挂
+   `.local/share/opencode`。镜像里根本没有 `.local`(实测 `docker run --rm ... ls -ld` 报
+   No such file),docker 会**以 root** 补建 `.local` 与 `.local/share` 两级父目录,
+   容器以 `hunter`(1001) 跑,启动时建 `.local/state` 直接 EACCES 重启循环。
+   父目录不在卷内,进临时容器 chown 没用 —— 每次 recreate 由 docker 重造,必现。
+   挂 `.local` 之后 `state` 与 `share` 都在卷内,而**具名卷根目录属主持久**,
+   `chown -R 1001:1001` 一次长期有效。
+
+### 顺带两条操作纪律
+
+- **改生产前确认 `git pull` 真的成功**。有一次 pull 因网络抖动失败,后续步骤基于旧
+  compose 执行,容器 `stop` 后停在那里,服务中断。停服务的操作必须有"无论如何都起回来"的收尾。
+- **`docker compose run --rm` 起的临时容器只共享卷**,可写层与目标容器无关。
+  在里面 chown 非卷路径是无效操作,看着成功其实没生效。
+
+---
+
 ## 详细文档
 
 完整问题清单与实施记录(在 agentpit repo 内,不在本仓):
