@@ -56,6 +56,75 @@ grep -rn "mock\|_mock\|Object.assign\|writeDefault\|\|\| 0" apps/web/public apps
 
 ---
 
+## 铁律:db/migrations 里的 .sql **对已有部署不生效**
+
+`docker-compose.yml` 把 `./db/migrations` 挂到 postgres 的
+`/docker-entrypoint-initdb.d` —— 那个目录**只在数据卷第一次初始化时执行**。
+线上库已经跑了几周,你新加一个 `00XX_xxx.sql` 它**永远不会被执行**。
+
+所以真正生效的 DDL 必须**随代码走**,写成幂等的 `CREATE TABLE IF NOT EXISTS` /
+`ADD COLUMN IF NOT EXISTS`,放在用到它的模块里,首次使用时 `_ensure_table()`。
+参考写法:`app/routers/settings.py` 的 `_DDL`、
+`app/services/cap_group_names.py`、`app/services/cap_item_groups.py`。
+
+`db/migrations/*.sql` 仍然要写,但它的作用是**给全新安装用 + 留档**。
+两处必须保持一致,且在 .sql 里注明"已有部署不会执行这个文件"。
+
+**这个坑不报错**:新表没建 → 首个用到它的请求 500,而你以为迁移已经跑过了。
+
+---
+
+## 铁律:`/api/catalog/*` 是**免登录前缀** · 写接口不能挂进去
+
+`app/middleware/auth.py` 的 `_PUBLIC_PREFIXES` 里有 `/api/catalog/`。
+它是故意公开的 —— 这个前缀只回答"这套部署能拿到什么数据",不含任何凭证。
+中间件对它做的是**可选身份识别**(有 token 就认,没有当匿名,都不拒绝)。
+
+**在这个前缀下加任何写操作 = 谁都能改别人的数据。**
+写接口另起一个前缀走默认硬鉴权,例:
+`/api/capability-groups`(能力库分组的改名与迁移)。
+
+加公开前缀之前先问自己:这条路径将来会不会长出写操作。
+
+---
+
+## 能力库的「用户自定义分类」· 两张表与三条约定
+
+能力库侧栏那些分组是**算出来的**,不是存下来的:
+`catalog.list_capabilities` 把每个 SKILL 的 `hunter.category` 和每个工具的
+`category` 聚合起来,组名就是那个字符串。三个来源都不由用户掌控
+(工具是 `tool_catalog.py` 里的 Python 字面量;内置 SKILL 写在
+`skills/*/SKILL.md`,改了下次 `git pull` 就被覆盖;自装 SKILL 的
+category 被无视,一律进「自定义安装」)。
+
+所以自定义分类是**加在上面的两层 per-user 覆盖**,不动上述任何一处:
+
+| 表 | 管什么 | 服务 |
+|---|---|---|
+| `user_cap_group_name` | 组**叫什么名字** | `services/cap_group_names.py` |
+| `user_cap_item_group` | 某个能力**归哪个组** | `services/cap_item_groups.py` |
+
+**三条约定,改这块之前必须知道:**
+
+1. **`category` 永远是稳定 key**。排序(`CATEGORY_ORDER`)、URL 的 `?group=`
+   参数、前端筛选全都用它,**不随改名变化**。改名只动 `display_name`。
+   这样用户改完名之后,他之前收藏的链接照样打得开。
+   前端渲染一律用 `display_name || category`,筛选与 key 一律用 `category`。
+
+2. **`item_key` 故意不做外键**。能力不是库里的行,是从 SKILL.md 与
+   `tool_catalog.py` 现算出来的。用户卸掉 SKILL 后留一条孤儿记录,
+   分组时查不到自然不生效 —— 无害,而且重新装回来时分类还在。
+
+3. **接口收到的组名可能是"改名后的显示名"**。用户手打一个组名时,
+   要先用 `cap_group_names.get_all()` 反查回原始 category,
+   否则会新建一个同名组,侧栏出现两行一模一样的字、计数却不同。
+
+改动这块时,`cap_group_names.current_categories(user_id)` 的口径必须和
+`catalog.list_capabilities` 的分组口径**逐字对齐** ——
+一旦漂了,表现是"改一个明明看得见的组,接口说它不存在"。
+
+---
+
 ## 详细文档
 
 完整问题清单与实施记录(在 agentpit repo 内,不在本仓):
