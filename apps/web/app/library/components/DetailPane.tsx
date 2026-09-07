@@ -3,9 +3,9 @@
 import { useState } from 'react'
 import { HUNTER } from '../../lib/hunter-theme'
 import type {
-  DataSourceItem, ToolItem, CatalogSkillItem, CapabilityItem,
+  DataSourceItem, ToolItem, CatalogSkillItem, CapabilityItem, CapabilityGroup,
 } from '../../chat/lib/catalogClient'
-import { statusDot } from '../../chat/lib/catalogClient'
+import { statusDot, canRenameGroup } from '../../chat/lib/catalogClient'
 
 interface Props {
   source?: DataSourceItem
@@ -19,9 +19,13 @@ interface Props {
   onPickSkillToChat?: (item: CatalogSkillItem) => void
   /** 用户源被测试/删除后回调 · 让列表重新拉一次(计数与状态会变) */
   onChanged?: () => void
+  /** 当前全部能力分组 · 给「移动到别的组」那个下拉用(要带 display_name) */
+  capGroups?: CapabilityGroup[]
+  /** 把一个能力移到某组 · 传空串 = 恢复默认分组。未传则不显示移动入口 */
+  onMoveCap?: (itemKey: string, category: string) => Promise<void>
 }
 
-export default function DetailPane({ source, cap, onUseCap, tool, skill, onClose, onPickSkillToChat, onChanged }: Props) {
+export default function DetailPane({ source, cap, onUseCap, tool, skill, onClose, onPickSkillToChat, onChanged, capGroups, onMoveCap }: Props) {
   const empty = !source && !cap && !tool && !skill
   return (
     <aside style={paneStyle}>
@@ -36,7 +40,8 @@ export default function DetailPane({ source, cap, onUseCap, tool, skill, onClose
       <div style={{ padding: '12px 16px', overflowY: 'auto', flex: 1 }}>
         {empty && <div style={{ color: HUNTER.INK_F, fontSize: 12 }}>点左侧任一卡片查看详情</div>}
         {source && <SourceDetail item={source} onChanged={onChanged} />}
-        {cap && <CapDetail item={cap} onUse={onUseCap} onChanged={onChanged} />}
+        {cap && <CapDetail item={cap} onUse={onUseCap} onChanged={onChanged}
+                           capGroups={capGroups} onMoveCap={onMoveCap} />}
         {tool && <ToolDetail item={tool} />}
         {skill && <SkillDetail item={skill} onPickToChat={onPickSkillToChat} />}
       </div>
@@ -211,15 +216,19 @@ const preStyle: React.CSSProperties = {
  *  两者展示的字段几乎一样(名字/类目/说明/提问模板/依赖),
  *  区别只在 kind_label 那一行。分成两个组件写会让"改一处忘另一处"
  *  变成常态 —— 这两天已经因为同一份知识散落多处吃过几次亏。 */
-function CapDetail({ item, onUse, onChanged }: {
+function CapDetail({ item, onUse, onChanged, capGroups, onMoveCap }: {
   item: CapabilityItem; onUse?: (i: CapabilityItem) => void; onChanged?: () => void
+  capGroups?: CapabilityGroup[]
+  onMoveCap?: (itemKey: string, category: string) => Promise<void>
 }) {
   const blocked = item.status !== 'ready'
   return (
     <div style={{ fontSize: 12, color: HUNTER.INK_S }}>
       <Row label="名称" value={<span>{item.icon} {item.name}</span>} />
       <Row label="类型" value={item.kind === 'tool' ? '🔧 直接执行' : '📋 带方法论'} />
-      <Row label="类目" value={item.category} />
+      <Row label="类目" value={
+        <GroupPicker item={item} groups={capGroups || []} onMove={onMoveCap} />
+      } />
       {item.brand && <Row label="出处" value={item.brand} />}
       <Row label="来源" value={item.builtin ? '内置' : '你自己加的'} />
       {item.slow && <Row label="耗时" value="⏱ 较长(30s+)" />}
@@ -421,6 +430,150 @@ function SkillDetail({ item, onPickToChat }: { item: CatalogSkillItem; onPickToC
       )}
     </div>
   )
+}
+
+/** 「类目」那一行的可编辑版 —— 把一个能力移到别的组,或就地建一个新组。
+ *
+ *  **为什么是下拉不是拖拽**:拖拽要处理拖到折叠区、拖出可视区、触屏没有
+ *  hover 这一堆情况,而这件事的使用节奏是"整理一次管很久",不是高频操作。
+ *  一个明确的下拉更稳,也更容易被发现。
+ *
+ *  **为什么放在详情面板**:这里本来就有「类目」这一行,用户想改分类时
+ *  第一眼会看的就是它。在别处新开一个"管理分类"的入口,等于让他先学会
+ *  我们的信息架构才能改一个名字。 */
+function GroupPicker({ item, groups, onMove }: {
+  item: CapabilityItem
+  groups: CapabilityGroup[]
+  onMove?: (itemKey: string, category: string) => Promise<void>
+}) {
+  const [open, setOpen] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  // 移动要登录(接口是硬鉴权的)· 没 token 就只显示组名,
+  // 不给一个点了必然 401 的入口
+  const editable = !!onMove && canRenameGroup()
+  const moved = item.category !== item.default_category
+  const nameOf = (c: string) =>
+    groups.find((g) => g.category === c)?.display_name || c
+
+  const run = async (category: string) => {
+    if (!onMove) return
+    setBusy(true); setErr('')
+    try {
+      await onMove(item.key, category)
+      setOpen(false); setCreating(false); setDraft('')
+    } catch (e: any) {
+      // 失败不收起面板 —— "这个组刚被删了""名字太长了"这类错误
+      // 恰恰是要他改一下再试的
+      setErr(e?.message || '移动失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div>
+      <span>{nameOf(item.category)}</span>
+      {moved && (
+        <span style={movedTagStyle} title={`默认分组是「${nameOf(item.default_category)}」`}>
+          已移动
+        </span>
+      )}
+      {editable && !open && (
+        <button style={linkBtnStyle} onClick={() => { setOpen(true); setErr('') }}>移动…</button>
+      )}
+
+      {editable && open && (
+        <div style={{ marginTop: 6 }}>
+          {!creating ? (
+            <select
+              value=""
+              disabled={busy}
+              style={pickerStyle}
+              onChange={(e) => {
+                const v = e.target.value
+                if (v === '__new__') { setCreating(true); setDraft(''); setErr('') }
+                else if (v) run(v)
+              }}
+            >
+              <option value="">移动到…</option>
+              {groups
+                .filter((g) => g.category !== item.category)
+                .map((g) => (
+                  <option key={g.category} value={g.category}>
+                    {g.display_name || g.category}
+                  </option>
+                ))}
+              {/* 新建分组是"自由分类"的关键 —— 不该被预设的那几个类目框住 */}
+              <option value="__new__">＋ 新建分组…</option>
+            </select>
+          ) : (
+            <input
+              autoFocus
+              value={draft}
+              disabled={busy}
+              placeholder="新分组的名字"
+              style={pickerStyle}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') { e.preventDefault(); if (draft.trim()) run(draft.trim()) }
+                if (e.key === 'Escape') { e.preventDefault(); setCreating(false); setErr('') }
+              }}
+            />
+          )}
+
+          <div style={{ marginTop: 5, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            {moved && (
+              <button style={linkBtnStyle} disabled={busy} onClick={() => run('')}>
+                恢复默认（{nameOf(item.default_category)}）
+              </button>
+            )}
+            <button
+              style={linkBtnStyle}
+              disabled={busy}
+              onClick={() => { setOpen(false); setCreating(false); setErr('') }}
+            >取消</button>
+          </div>
+
+          {creating && !err && (
+            <div style={pickerHintStyle}>回车建组并移进去 · Esc 返回列表</div>
+          )}
+          {err && <div style={pickerErrStyle}>{err}</div>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+const linkBtnStyle: React.CSSProperties = {
+  padding: 0, marginLeft: 8, fontSize: 11,
+  color: HUNTER.THEME, background: 'none', border: 'none',
+  cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline',
+}
+
+const movedTagStyle: React.CSSProperties = {
+  marginLeft: 6, padding: '1px 5px', fontSize: 10,
+  color: HUNTER.TAG_WARN_FG, background: HUNTER.TAG_WARN_BG,
+  borderRadius: 3, whiteSpace: 'nowrap',
+}
+
+const pickerStyle: React.CSSProperties = {
+  width: '100%', padding: '3px 6px', fontSize: 12,
+  color: HUNTER.INK, background: HUNTER.PAPER,
+  border: `1px solid ${HUNTER.LINE}`, borderRadius: 4,
+  fontFamily: 'inherit', boxSizing: 'border-box',
+}
+
+const pickerHintStyle: React.CSSProperties = {
+  marginTop: 3, fontSize: 10, lineHeight: 1.3, color: HUNTER.INK_F,
+}
+
+const pickerErrStyle: React.CSSProperties = {
+  // 与本文件「删除失败」同色 · 这一页报错文案统一用它
+  marginTop: 3, fontSize: 10, lineHeight: 1.3, color: '#9B3A22',
 }
 
 function Row({ label, value, small }: { label: string; value: React.ReactNode; small?: boolean }) {

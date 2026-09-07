@@ -179,7 +179,10 @@ export interface CapabilityItem {
   icon: string
   kind: 'skill' | 'tool'
   kind_label: string          // "带方法论" / "直接执行"
+  /** 它**当前实际所在**的组 · 用户移动过就是移动后的那个 */
   category: string
+  /** 没被移动过的话它该在哪组 · 用来判断"是否被移动过"与提示「恢复默认」会回到哪 */
+  default_category: string
   hint: string
   prompt_tpl: string
   brand: string
@@ -218,34 +221,45 @@ export function canRenameGroup(): boolean {
 }
 
 /**
- * 改一个分组的显示名。`displayName` 传空串 = 恢复默认名字。
+ * 带鉴权的 PUT · 能力库的两个写操作(改组名 / 移动能力)共用。
  *
- * 走 `/api/capability-groups` 而不是 `/api/catalog/*` —— 后者在后端是
+ * 走 `/api/capability-groups*` 而不是 `/api/catalog/*` —— 后者在后端是
  * 免登录前缀,写操作挂进去就是谁都能改。
  */
-export async function renameCapabilityGroup(category: string, displayName: string) {
+async function putAuthed<T>(path: string, body: unknown, whatFailed: string): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (typeof window !== 'undefined') {
     const t = localStorage.getItem('hunter_token') || ''
     if (t) headers['Authorization'] = `Bearer ${t}`
   }
-  const res = await fetch('/api/capability-groups', {
-    method: 'PUT',
-    headers,
-    body: JSON.stringify({ category, display_name: displayName }),
-  })
+  const res = await fetch(path, { method: 'PUT', headers, body: JSON.stringify(body) })
   if (!res.ok) {
     // 后端把"为什么不行"写在 detail 里(重名了 / 太长了 / 这个组刚被删了)。
     // 吞掉它只剩一个状态码的话,用户看到的是"改不了",不知道该怎么办。
-    let msg = `改组名失败(${res.status})`
+    let msg = `${whatFailed}(${res.status})`
     try {
-      const body = await res.json()
-      if (body?.detail) msg = String(body.detail)
+      const b = await res.json()
+      if (b?.detail) msg = String(b.detail)
       else if (res.status === 401) msg = '登录态失效 · 刷新页面重试'
     } catch {
       /* 响应不是 JSON(比如网关返的 HTML 错误页)· 用上面的兜底文案 */
     }
     throw new Error(msg)
   }
-  return res.json() as Promise<{ ok: boolean; category: string; display_name: string; reset: boolean }>
+  return res.json() as Promise<T>
 }
+
+/** 改一个分组的显示名。`displayName` 传空串 = 恢复默认名字。 */
+export const renameCapabilityGroup = (category: string, displayName: string) =>
+  putAuthed<{ ok: boolean; category: string; display_name: string; reset: boolean }>(
+    '/api/capability-groups', { category, display_name: displayName }, '改组名失败')
+
+/**
+ * 把一个能力移到 `category` 组。传空串 = 恢复它的默认分组。
+ *
+ * `category` **可以是一个还不存在的新名字** —— 打出来这个组就有了。
+ * 这是"自由分类"的关键:用户不该被预设的那 8 个类目框住。
+ */
+export const moveCapabilityToGroup = (itemKey: string, category: string) =>
+  putAuthed<{ ok: boolean; item_key: string; category: string; reset: boolean }>(
+    '/api/capability-groups/item', { item_key: itemKey, category }, '移动失败')

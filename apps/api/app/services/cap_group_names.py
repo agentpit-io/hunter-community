@@ -24,8 +24,8 @@
 
 ## 边界
 
-**只管改名,不管移组。**"把这个能力挪到别的组"是另一件事,需要按条目
-存映射,不在这次范围内 —— 没有需求就不先建表。
+**这里只管"组叫什么名字"。**"某个能力归哪个组"在 `cap_item_groups.py`,
+两个加起来才是完整的"我自己的分类方式"。
 """
 from loguru import logger
 
@@ -122,8 +122,8 @@ def set_name(user_id: str, category: str, display_name: str) -> None:
         conn.close()
 
 
-def current_categories() -> set[str]:
-    """当前这套部署会出现的**原始**组名全集 —— 给改名接口做存在性与重名校验。
+def current_categories(user_id: str | None = None) -> set[str]:
+    """当前**这个用户**看得见的组名全集 —— 给改名/迁移接口做存在性与重名校验。
 
     组名是算出来的,没有一张"组表"可以查,所以只能按
     `catalog.list_capabilities` 同样的口径再算一遍:
@@ -132,11 +132,15 @@ def current_categories() -> set[str]:
     两边口径一旦漂了,表现是"改一个明明看得见的组,接口说它不存在" ——
     所以 USER_GROUP 用的是本模块这一份常量,catalog 那边也 import 它,
     不各写各的字符串。
+
+    传了 `user_id` 还会并上**他自己造出来的组**(把某个能力移进一个新名字
+    就等于建了一个组)。不并的话会出现"自己建的组反而改不了名"。
     """
-    from app.services import skill_files, tool_catalog
+    from app.services import cap_item_groups, skill_files, tool_catalog
 
     cats = {s["category"] for s in skill_files.load_all() if s.get("builtin", True)}
     cats |= {t.category or "接入与自查" for t in tool_catalog.pickable()
              if t.origin is not tool_catalog.ToolOrigin.USER}
     cats.add(USER_GROUP)
+    cats |= cap_item_groups.user_categories(user_id)
     return {c for c in cats if c}

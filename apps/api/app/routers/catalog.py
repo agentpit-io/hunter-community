@@ -11,6 +11,7 @@
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from app.services import cap_group_names
+from app.services import cap_item_groups
 from app.services import source_catalog as catalog
 from app.services import source_health
 from app.services import tool_catalog
@@ -364,15 +365,29 @@ async def list_capabilities(request: Request):
     # 同数据源那边的「已接入数据」,分组名说清"这是什么",不说"这是谁的"。
     USER_GROUP = cap_group_names.USER_GROUP
     order = {c: i for i, c in enumerate(skill_files.CATEGORY_ORDER)}
+    user_id = getattr(request.state, "user_id", None)
+
+    # 用户把某个能力移到别的组的覆盖 —— 查得到就用它,查不到才走上面那两条
+    # 默认规则(内置项用自己的 category,自装项进「自定义安装」)。
+    moved = cap_item_groups.get_all(user_id)
+
     groups: dict[str, list] = {}
     for i in items:
-        groups.setdefault(USER_GROUP if not i["builtin"] else i["category"], []).append(i)
+        default_cat = USER_GROUP if not i["builtin"] else i["category"]
+        cat = moved.get(i["key"]) or default_cat
+        # 把生效后的组写回条目本身。detail 面板显示的「类目」读的是这个字段,
+        # 不改的话会出现"左边它已经在新组里了,点开详情却还写着旧类目"。
+        i["category"] = cat
+        # 默认该在哪 —— 前端的「恢复默认分组」要拿它做对比与提示,
+        # 否则用户不知道"恢复"之后会跑到哪一组去
+        i["default_category"] = default_cat
+        groups.setdefault(cat, []).append(i)
 
     # 用户改过的组名。`category` 仍是原始 key —— 排序、URL 的 ?group= 参数、
     # 前端筛选全都继续用它,只有 display_name 是给人看的。
     # 这样用户改完名之后,他之前收藏的 ?group=尽调风控 链接照样能打开。
     # 匿名访问拿到空 dict,显示默认名(这一页免登录可看)。
-    names = cap_group_names.get_all(getattr(request.state, "user_id", None))
+    names = cap_group_names.get_all(user_id)
 
     grouped = [
         {

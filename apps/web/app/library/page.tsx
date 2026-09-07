@@ -7,7 +7,8 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { HUNTER } from '../lib/hunter-theme'
 import AuthGuard from '../components/AuthGuard'
 import {
-  listSources, listToolbox, listCatalogSkills, listCapabilities, renameCapabilityGroup,
+  listSources, listToolbox, listCatalogSkills, listCapabilities,
+  renameCapabilityGroup, moveCapabilityToGroup,
   type SourceGroup, type ToolGroup, type SkillGroup, type Summary, type SourcesResponse,
   type DataSourceItem, type ToolItem, type CatalogSkillItem,
   type CapabilityGroup, type CapabilityItem,
@@ -115,6 +116,20 @@ function LibraryContent() {
     setNotice(r.reset
       ? `「${category}」已恢复默认名字`
       : `分组已改名为「${r.display_name}」· 原名 ${category} 仍然是它的固定标识`)
+  }, [])
+
+  /** 把一个能力移到别的组 · 传空串 = 恢复它的默认分组。
+   *
+   *  移完必须**同时刷新 selected** —— 右侧详情面板拿的是上一次列表里的
+   *  那个对象,只 setCaps 的话左边它已经跑到新组里了,右边面板还写着旧类目,
+   *  用户会以为没生效又点一次。 */
+  const onMoveCap = useCallback(async (itemKey: string, category: string) => {
+    const r = await moveCapabilityToGroup(itemKey, category)
+    const fresh = await listCapabilities()
+    setCaps(fresh)
+    const moved = fresh.groups.flatMap((g) => g.items).find((i) => i.key === itemKey)
+    if (moved) setSelected({ kind: 'cap', item: moved })
+    setNotice(r.reset ? '已恢复默认分组' : `已移动到「${r.category}」`)
   }, [])
 
   /** 「一键用官方默认」/「恢复初始」· 按 tab 分流。
@@ -321,6 +336,8 @@ function LibraryContent() {
             // 测试会改熔断状态、删除会改条数 —— 两者都要让列表重拉,
             // 否则右侧说"通了"左侧还挂着上一次的错误状态
             onChanged={reload}
+            capGroups={caps?.groups || []}
+            onMoveCap={onMoveCap}
           />
         )}
       </div>
