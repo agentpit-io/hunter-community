@@ -99,21 +99,40 @@ class ThinkStripper:
     会露出思考链。而 SSE 流式响应下 · tag 可能被切在两个 chunk 之间
     (`<th`|`ink>`),不能一见 `<` 就无脑截断。
 
-    实现:字符级状态机 · 保留最多 7 字符尾巴避免误伤未闭合的部分标签。
-    - OUTSIDE: 找 `<think>` 开始;找不到就 emit 除尾巴外的所有字符
-    - INSIDE: 找 `</think>` 结束;找不到就丢掉除尾巴外的所有字符
+    实现:字符级状态机 · **只在尾部真的像半个 tag 时**才扣留那几个字符。
+    - OUTSIDE: 找 `<think>` 开始;找不到就 emit 除"疑似半个 tag"外的所有字符
+    - INSIDE: 找 `</think>` 结束;找不到就丢掉除"疑似半个 tag"外的所有字符
     - flush(): SSE 结束时 · OUTSIDE 就 emit 剩余尾巴 · INSIDE 就丢掉
+
+    ⚠️ 2026-09-07 事故:原实现**无条件**保留最后 7 个字符(`buf[:-TAIL]`),
+    于是整条流稳定滞后 7 字符,全指望结束时 flush() 补回 —— 而下面
+    `_proxy()` 里那个 flush 分支写的是 `pass`。结果:**每条流式回答的
+    末尾都被吞掉 7 个字符**,表现是回答在句子中间断掉(实测断在
+    「…高分红/高壁垒资」),没有任何报错。gemini 全系走 shim,即全量命中。
+    现在改成按需扣留:正文里没有 `<` 时 keep=0,一个字都不滞留,
+    不再依赖 flush 兜底(flush 仍然写出去,见 _proxy,双保险)。
 
     非流式响应(整段 content)直接用 STRIP_ONCE 一次性 regex 剥更省。
     """
     OPEN = "<think>"
     CLOSE = "</think>"
-    # 保留尾巴长度 = 最长 tag - 1(闭合 </think> = 8 · 保留 7)
-    TAIL = 7
 
     def __init__(self):
         self.buf = ""
         self.in_think = False
+        self._template = None
+
+    @staticmethod
+    def _partial_tag_len(s: str, tag: str) -> int:
+        """s 的末尾有多少个字符可能是 `tag` 被切断的前半截。没有返回 0。
+
+        例:s 以 `<thi` 结尾 → 4(要等下一个 chunk 才知道是不是 `<think>`);
+            s 以 `资产?` 结尾 → 0(压根不像 tag,全部可以放行)。
+        """
+        for k in range(min(len(tag) - 1, len(s)), 0, -1):
+            if tag.startswith(s[-k:]):
+                return k
+        return 0
 
     def process(self, chunk: str) -> str:
         self.buf += chunk
@@ -122,18 +141,19 @@ class ThinkStripper:
             if self.in_think:
                 idx = self.buf.find(self.CLOSE)
                 if idx == -1:
-                    # 未闭合 · 保留尾巴 · 前面丢掉
-                    if len(self.buf) > self.TAIL:
-                        self.buf = self.buf[-self.TAIL:]
+                    # 未闭合 · 只留可能是半个 </think> 的尾巴 · 前面丢掉
+                    keep = self._partial_tag_len(self.buf, self.CLOSE)
+                    self.buf = self.buf[len(self.buf) - keep:] if keep else ""
                     return "".join(out)
                 self.buf = self.buf[idx + len(self.CLOSE):]
                 self.in_think = False
             else:
                 idx = self.buf.find(self.OPEN)
                 if idx == -1:
-                    if len(self.buf) > self.TAIL:
-                        out.append(self.buf[:-self.TAIL])
-                        self.buf = self.buf[-self.TAIL:]
+                    keep = self._partial_tag_len(self.buf, self.OPEN)
+                    if keep < len(self.buf):
+                        out.append(self.buf[:len(self.buf) - keep])
+                        self.buf = self.buf[len(self.buf) - keep:]
                     return "".join(out)
                 out.append(self.buf[:idx])
                 self.buf = self.buf[idx + len(self.OPEN):]
@@ -141,6 +161,27 @@ class ThinkStripper:
 
     def flush(self) -> str:
         return "" if self.in_think else self.buf
+
+    def remember_template(self, obj: dict):
+        """记住上游 chunk 的外层字段(id/model/created/object…),
+        供 tail_frame() 拼一条字段齐全、下游 SDK 一定认得的补发帧。"""
+        if self._template is None:
+            self._template = {k: v for k, v in obj.items() if k != "choices"}
+
+    def tail_frame(self) -> bytes | None:
+        """把 flush() 剩下的尾巴包成一条合法 SSE data 帧。
+
+        必须包成 `data: {...}` —— 直接写裸文本的话下游 SSE 解析器会当噪音丢掉,
+        等于没补。调用方还必须保证这一帧排在 `data: [DONE]` **之前**,
+        [DONE] 之后的内容 OpenAI 兼容 SDK 一律不再读。
+        """
+        tail = self.flush()
+        if not tail:
+            return None
+        self.buf = ""
+        obj = dict(self._template or {})
+        obj["choices"] = [{"index": 0, "delta": {"content": tail}, "finish_reason": None}]
+        return b"data: " + json.dumps(obj, ensure_ascii=False).encode() + b"\n\n"
 
 
 _STRIP_ONCE = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
@@ -179,6 +220,7 @@ def rewrite_sse_line(line: bytes, stripper: ThinkStripper) -> bytes:
     choices = obj.get("choices")
     if not isinstance(choices, list):
         return line
+    stripper.remember_template(obj)
     changed = False
     for ch in choices:
         delta = ch.get("delta") or {}
@@ -263,6 +305,9 @@ class Handler(BaseHTTPRequestHandler):
                     else:
                         stripper = ThinkStripper() if STRIP_THINK else None
                         buf = b""
+                        # `data: [DONE]` 必须延后写:补发帧要排在它前面,
+                        # 否则 OpenAI 兼容 SDK 读到 [DONE] 就收工,补发被无视。
+                        done_line = None
                         while True:
                             chunk = r.read(4096)
                             if not chunk:
@@ -274,17 +319,24 @@ class Handler(BaseHTTPRequestHandler):
                             # 按 \n 切 · 保留最后一段(可能不完整)· SSE 每行末尾都是 \n
                             while b"\n" in buf:
                                 line, buf = buf.split(b"\n", 1)
+                                if line.strip().replace(b" ", b"") == b"data:[DONE]":
+                                    done_line = line
+                                    continue
                                 self.wfile.write(rewrite_sse_line(line, stripper) + b"\n")
                             self.wfile.flush()
-                        # flush 剩余
+                        # 收尾:残帧 → 补发扣留的尾巴 → 最后才放行 [DONE]
                         if STRIP_THINK:
                             if buf:
-                                self.wfile.write(rewrite_sse_line(buf, stripper))
-                            tail = stripper.flush()
-                            if tail:
-                                # 追加成一条正常 data 行 · 避免最后一段被吞掉
-                                # 实际上 tail 只在切在 tag 末尾时非空 · 通常 0 字节
-                                pass
+                                self.wfile.write(rewrite_sse_line(buf, stripper) + b"\n")
+                            # 正常情况下 stripper 按需扣留 · 这里多半是空;
+                            # 只有流恰好断在半个 <think> 上才非空。**不能写 pass** ——
+                            # 2026-09-07 就是这行 pass 把每条回答的末尾吞了 7 个字符。
+                            frame = stripper.tail_frame()
+                            if frame:
+                                self.wfile.write(frame)
+                                print(f"[shim] 补发被扣留的尾巴 {len(frame)}B", flush=True)
+                            if done_line is not None:
+                                self.wfile.write(done_line + b"\n\n")
                             self.wfile.flush()
                 except Exception as se:
                     print(f"[shim] stream tail eof (ignored · data delivered): {type(se).__name__}",
