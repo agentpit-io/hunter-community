@@ -90,7 +90,12 @@ export default function CapabilitiesTab({
       {filtered.map((g) => (
         <div key={g.category} style={{ marginBottom: 20 }}>
           <div style={groupHeadStyle}>
-            <span>{g.category}</span>
+            {/* 用户改过名就显示改过的 —— 侧栏和这里必须一致,
+                否则点左边的「我的工具箱」右边标题却写「接入与自查」,
+                会让人以为点错了组。key 与筛选仍用原始 category */}
+            <span title={g.display_name !== g.category ? `原名「${g.category}」` : undefined}>
+              {g.display_name || g.category}
+            </span>
             <span style={{ color: HUNTER.INK_F, fontSize: 12 }}>{g.ready}/{g.total}</span>
           </div>
           {/* 「你装的」按**来源仓库**再折一层(用户反馈 2026-08-21,同数据源那次)。

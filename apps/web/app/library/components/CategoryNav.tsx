@@ -5,6 +5,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { HUNTER } from '../../lib/hunter-theme'
 import { TABS, type TabId, type LibraryQuery, buildQuery } from '../lib/nav'
+import { canRenameGroup } from '../../chat/lib/catalogClient'
 import type { SourceGroup, CapabilityGroup } from '../../chat/lib/catalogClient'
 
 interface Props {
@@ -17,9 +18,13 @@ interface Props {
   onAdd?: (presetGroup?: string) => void
   /** 点「↻ 恢复初始」· 删掉当前 tab 的全部用户自定义项 */
   onReset?: () => void
+  /** 改能力分组的显示名 · 传空串 = 恢复默认。
+   *  只给能力那一栏 —— 数据源的组是「来源」(东方财富 / AKShare),
+   *  那是客观事实不是分类,改名会让人对不上号。 */
+  onRenameGroup?: (category: string, name: string) => Promise<void>
 }
 
-export default function CategoryNav({ query, sources, caps, onAdd, onReset }: Props) {
+export default function CategoryNav({ query, sources, caps, onAdd, onReset, onRenameGroup }: Props) {
   // 概览页没有"当前在加什么"的上下文,所以这两个操作只在具体 tab 下可用
   const actionable = query.tab !== 'overview'
   return (
@@ -60,9 +65,13 @@ export default function CategoryNav({ query, sources, caps, onAdd, onReset }: Pr
                  能力这几行光秃秃 —— 同一个侧栏两套规矩,用户会以为能力不能加。
                  传上之后两边形式统一。 */
               <GroupList tabId={tab.id} groups={caps.map(g => ({
-                id: g.category, label: g.category, total: g.total, ready: g.ready,
+                // id 用**原始** category:URL 的 ?group=、内容区筛选都按它走,
+                // 所以用户改完名之后,他之前存的链接照样打得开。
+                // label 才是改过的那个显示名。
+                id: g.category, label: g.display_name || g.category,
+                total: g.total, ready: g.ready,
               }))} activeGroup={isActiveTab ? query.group : undefined}
-                onAddTo={onAdd} />
+                onAddTo={onAdd} onRename={onRenameGroup} />
             )}
           </div>
         )
@@ -97,18 +106,53 @@ const RESET_HINT: Record<string, string> = {
   capabilities: '删掉你自己加的全部 SKILL 与工具 · 内置的不受影响',
 }
 
-function GroupList({ tabId, groups, activeGroup, onAddTo }: {
+function GroupList({ tabId, groups, activeGroup, onAddTo, onRename }: {
   tabId: TabId
   groups: { id: string; label: string; total: number; ready: number; emphasis?: boolean }[]
   activeGroup?: string
   /** 给每组挂一个 ＋ · 传了才渲染。点它 = 「给这个来源加一个我自己的」 */
   onAddTo?: (group: string) => void
+  /** 传了才出现 ✎ · 点它就地改这一组的显示名。空串 = 恢复默认 */
+  onRename?: (category: string, name: string) => Promise<void>
 }) {
   // ＋ 只在**悬停或选中**时露出来。11 个来源每行都常驻一个 ＋,
   // 视觉上是 11 个同等重量的号召 —— 而用户进这个页面九成是来看有什么源的,
   // 不是来加源的。用 opacity 而不是条件渲染:留着占位,
   // 露出时行内元素不会横向跳一下。
   const [hover, setHover] = useState<string | null>(null)
+  // 正在改名的那一组(存原始 category)· 同时只允许改一个
+  const [editing, setEditing] = useState<string | null>(null)
+  const [draft, setDraft] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  // 改名要登录(接口是硬鉴权的)。没 token 就干脆不显示 ✎ ——
+  // 显示一个点了必然报 401 的按钮,比没有这个按钮更糟
+  const renamable = !!onRename && canRenameGroup()
+
+  const startEdit = (id: string, label: string) => {
+    setEditing(id); setDraft(label); setErr('')
+  }
+  const cancelEdit = () => { setEditing(null); setDraft(''); setErr('') }
+
+  const commit = async (g: { id: string; label: string }) => {
+    if (!onRename) return
+    const next = draft.trim()
+    // 没改动就直接收起来,不打无谓的请求
+    if (next === g.label) { cancelEdit(); return }
+    setBusy(true); setErr('')
+    try {
+      // 清空 = 恢复默认名字(后端收到空串就删掉这条覆盖)
+      await onRename(g.id, next)
+      cancelEdit()
+    } catch (e: any) {
+      // 失败**不收起输入框** —— 收起来的话用户刚打的字就没了,
+      // 而"重名了""太长了"这类错误恰恰是要他改一下再存的
+      setErr(e?.message || '改名失败')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   if (groups.length === 0) return null
   return (
@@ -117,6 +161,37 @@ function GroupList({ tabId, groups, activeGroup, onAddTo }: {
         const isActive = activeGroup === g.id
         const label = g.label || g.id
         const showAdd = hover === g.id || isActive
+        const isEditing = editing === g.id
+
+        if (isEditing) {
+          return (
+            <div key={g.id} style={{ padding: '2px 12px 4px 36px' }}>
+              <input
+                autoFocus
+                value={draft}
+                disabled={busy}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { e.preventDefault(); commit(g) }
+                  // Esc 明确放弃 —— 有它在,失焦保存才不会让人觉得"没法反悔"
+                  if (e.key === 'Escape') { e.preventDefault(); cancelEdit() }
+                }}
+                onBlur={() => { if (!busy && !err) commit(g) }}
+                style={renameInputStyle}
+                placeholder={g.id}
+                title={`原名「${g.id}」· 清空回车恢复默认`}
+              />
+              {/* 报错时**也要保留 Esc 那句** —— 出错后 onBlur 不再自动保存
+                  (免得把改坏的名字存进去),这时 Esc 是唯一的退出方式,
+                  提示要是被错误文案顶掉,用户就被卡在这个输入框里了 */}
+              {err && <div style={renameErrStyle}>{err}</div>}
+              <div style={renameHintStyle}>
+                {err ? 'Esc 取消 · 改完回车重试' : '回车保存 · Esc 取消 · 清空恢复默认'}
+              </div>
+            </div>
+          )
+        }
+
         return (
           <div
             key={g.id}
@@ -134,10 +209,19 @@ function GroupList({ tabId, groups, activeGroup, onAddTo }: {
                 {g.emphasis && g.total === 0 ? '—' : `${g.ready}/${g.total}`}
               </span>
             </Link>
+            {renamable && (
+              <button
+                onClick={(e) => { e.preventDefault(); startEdit(g.id, label) }}
+                style={groupIconBtnStyle(showAdd, 4)}
+                tabIndex={showAdd ? 0 : -1}
+                aria-hidden={!showAdd}
+                title={label === g.id ? `给「${g.id}」改个名字` : `改名 · 原名「${g.id}」`}
+              >✎</button>
+            )}
             {onAddTo && (
               <button
                 onClick={(e) => { e.preventDefault(); onAddTo(g.id) }}
-                style={groupAddStyle(showAdd)}
+                style={groupIconBtnStyle(showAdd, 12)}
                 tabIndex={showAdd ? 0 : -1}
                 aria-hidden={!showAdd}
                 title={g.emphasis ? '添加一个自己的数据源' : `接一个自己的${label}数据源`}
@@ -199,8 +283,9 @@ const groupLinkStyle = (active: boolean, emphasis?: boolean): React.CSSPropertie
   cursor: 'pointer',
 })
 
-const groupAddStyle = (visible: boolean): React.CSSProperties => ({
-  padding: '2px 12px 2px 4px',
+// ＋ 与 ✎ 共用。`padRight` 区分谁在最右边(＋ 靠边 12,✎ 挤在它左边 4)
+const groupIconBtnStyle = (visible: boolean, padRight: number): React.CSSProperties => ({
+  padding: `2px ${padRight}px 2px 4px`,
   fontSize: 13,
   lineHeight: 1,
   color: HUNTER.INK_F,
@@ -214,6 +299,37 @@ const groupAddStyle = (visible: boolean): React.CSSProperties => ({
   fontFamily: 'inherit',
   transition: 'opacity 0.12s',
 })
+
+// 改名输入框:左内边距对齐组名文字(40 - 4 的 border/padding),
+// 这样点 ✎ 之后字不会横向跳一下
+const renameInputStyle: React.CSSProperties = {
+  width: '100%',
+  padding: '3px 6px',
+  fontSize: 12,
+  color: HUNTER.INK,
+  background: HUNTER.PANEL,
+  border: `1px solid ${HUNTER.THEME}`,
+  borderRadius: HUNTER.R_SM,
+  outline: 'none',
+  fontFamily: 'inherit',
+  boxSizing: 'border-box',
+}
+
+const renameHintStyle: React.CSSProperties = {
+  marginTop: 2,
+  fontSize: 10,
+  lineHeight: 1.3,
+  color: HUNTER.INK_F,
+}
+
+const renameErrStyle: React.CSSProperties = {
+  marginTop: 2,
+  fontSize: 10,
+  lineHeight: 1.3,
+  // 与 DetailPane.tsx 的「删除失败」同色 —— 这一页的报错文案统一用它。
+  // 不用 HUNTER.UP:那个是"涨"的红,语义完全是另一回事
+  color: '#9B3A22',
+}
 
 const separatorStyle: React.CSSProperties = {
   margin: '16px 12px',

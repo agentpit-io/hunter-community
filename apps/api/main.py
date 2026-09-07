@@ -432,6 +432,12 @@ app.include_router(chat_kpred_router.router, prefix="/api")
 from app.routers import catalog as catalog_router
 app.include_router(catalog_router.router, prefix="/api")
 
+# ── 能力分组改名 · 写接口单独一个前缀 ──
+# 不能挂在 /api/catalog/ 下:那个前缀在 middleware 里是免登录的,
+# 写操作放进去会变成谁都能改。这里走默认的硬鉴权。
+from app.routers import capability_groups as capability_groups_router
+app.include_router(capability_groups_router.router, prefix="/api")
+
 @app.get("/api/health")
 async def health():
     # hunter_api_key 字段让 docker healthcheck 和运维一眼看出 SaaS 功能可不可用

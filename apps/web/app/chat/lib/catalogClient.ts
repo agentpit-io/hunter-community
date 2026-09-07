@@ -195,7 +195,10 @@ export interface CapabilityItem {
 }
 
 export interface CapabilityGroup {
+  /** 原始组名 · **稳定 key** · 排序、URL 的 ?group= 参数、筛选都用它,不随改名变化 */
   category: string
+  /** 显示出来的名字 · 用户没改过时等于 category */
+  display_name: string
   total: number
   ready: number
   items: CapabilityItem[]
@@ -203,3 +206,46 @@ export interface CapabilityGroup {
 
 export const listCapabilities = () =>
   get<{ groups: CapabilityGroup[]; summary: Summary }>('/capabilities')
+
+/** 有 token = 能改组名。单用户模式下 localSession 也会写这个 key,所以两种模式通用 */
+export function canRenameGroup(): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    return !!localStorage.getItem('hunter_token')
+  } catch {
+    return false        // 隐私模式下 localStorage 不可读 · 当作没登录
+  }
+}
+
+/**
+ * 改一个分组的显示名。`displayName` 传空串 = 恢复默认名字。
+ *
+ * 走 `/api/capability-groups` 而不是 `/api/catalog/*` —— 后者在后端是
+ * 免登录前缀,写操作挂进去就是谁都能改。
+ */
+export async function renameCapabilityGroup(category: string, displayName: string) {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (typeof window !== 'undefined') {
+    const t = localStorage.getItem('hunter_token') || ''
+    if (t) headers['Authorization'] = `Bearer ${t}`
+  }
+  const res = await fetch('/api/capability-groups', {
+    method: 'PUT',
+    headers,
+    body: JSON.stringify({ category, display_name: displayName }),
+  })
+  if (!res.ok) {
+    // 后端把"为什么不行"写在 detail 里(重名了 / 太长了 / 这个组刚被删了)。
+    // 吞掉它只剩一个状态码的话,用户看到的是"改不了",不知道该怎么办。
+    let msg = `改组名失败(${res.status})`
+    try {
+      const body = await res.json()
+      if (body?.detail) msg = String(body.detail)
+      else if (res.status === 401) msg = '登录态失效 · 刷新页面重试'
+    } catch {
+      /* 响应不是 JSON(比如网关返的 HTML 错误页)· 用上面的兜底文案 */
+    }
+    throw new Error(msg)
+  }
+  return res.json() as Promise<{ ok: boolean; category: string; display_name: string; reset: boolean }>
+}

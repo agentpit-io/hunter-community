@@ -7,7 +7,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { HUNTER } from '../lib/hunter-theme'
 import AuthGuard from '../components/AuthGuard'
 import {
-  listSources, listToolbox, listCatalogSkills, listCapabilities,
+  listSources, listToolbox, listCatalogSkills, listCapabilities, renameCapabilityGroup,
   type SourceGroup, type ToolGroup, type SkillGroup, type Summary, type SourcesResponse,
   type DataSourceItem, type ToolItem, type CatalogSkillItem,
   type CapabilityGroup, type CapabilityItem,
@@ -101,6 +101,21 @@ function LibraryContent() {
     listCatalogSkills().then(setSkills).catch(() => {})
     listCapabilities().then(setCaps).catch(() => {})
   }, [market])
+
+  /** 改能力分组的显示名 · 空串 = 恢复默认。
+   *
+   *  **失败往上抛**给侧栏就地显示("已经有一个组叫…""最多 40 个字符")——
+   *  这类错误要在输入框旁边说,用户才知道改什么;吞掉换成顶部一条 notice,
+   *  他得先找到那条提示、再回来重打一遍。
+   *
+   *  成功后只重取 caps:另外三个接口和组名无关,整页 reload 会让内容区白闪一下。 */
+  const onRenameGroup = useCallback(async (category: string, name: string) => {
+    const r = await renameCapabilityGroup(category, name)
+    setCaps(await listCapabilities())
+    setNotice(r.reset
+      ? `「${category}」已恢复默认名字`
+      : `分组已改名为「${r.display_name}」· 原名 ${category} 仍然是它的固定标识`)
+  }, [])
 
   /** 「一键用官方默认」/「恢复初始」· 按 tab 分流。
    *
@@ -228,6 +243,7 @@ function LibraryContent() {
           caps={caps?.groups || null}
           onAdd={(preset) => { setAddPreset(preset); setAddOpen(true); setDetailOpen(false) }}
           onReset={onReset}
+          onRenameGroup={onRenameGroup}
         />
 
         <main style={mainStyle}>

@@ -10,6 +10,7 @@
 """
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from app.services import cap_group_names
 from app.services import source_catalog as catalog
 from app.services import source_health
 from app.services import tool_catalog
@@ -361,14 +362,22 @@ async def list_capabilities(request: Request):
     # 最想立刻试一下的东西。分组也让"哪些是我加的"一眼可见,便于清理。
     # 「你装的」→「自定义安装」(产品经理反馈:原描述不专业)。
     # 同数据源那边的「已接入数据」,分组名说清"这是什么",不说"这是谁的"。
-    USER_GROUP = "自定义安装"
+    USER_GROUP = cap_group_names.USER_GROUP
     order = {c: i for i, c in enumerate(skill_files.CATEGORY_ORDER)}
     groups: dict[str, list] = {}
     for i in items:
         groups.setdefault(USER_GROUP if not i["builtin"] else i["category"], []).append(i)
+
+    # 用户改过的组名。`category` 仍是原始 key —— 排序、URL 的 ?group= 参数、
+    # 前端筛选全都继续用它,只有 display_name 是给人看的。
+    # 这样用户改完名之后,他之前收藏的 ?group=尽调风控 链接照样能打开。
+    # 匿名访问拿到空 dict,显示默认名(这一页免登录可看)。
+    names = cap_group_names.get_all(getattr(request.state, "user_id", None))
+
     grouped = [
         {
             "category": c,
+            "display_name": names.get(c) or c,
             "total": len(v),
             "ready": sum(1 for i in v if i["status"] == "ready"),
             # 同一类目里 SKILL 在前、工具在后:方法论是"怎么做",
