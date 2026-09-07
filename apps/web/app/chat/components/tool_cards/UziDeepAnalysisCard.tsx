@@ -1,8 +1,8 @@
 'use client'
 // SKILL · hunter-UZI-Skill 深度分析（Sprint 3 P2 · Phase 1 MVP）
 // 展示 stock_deep_analysis tool 的 markdown 结果 + 数据覆盖率 + LLM 元信息
-import { Radar, CheckCircle2, AlertCircle, Copy, Loader2 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { Radar, CheckCircle2, AlertCircle, Copy } from 'lucide-react'
+import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { HUNTER } from '../../../lib/hunter-theme'
@@ -18,6 +18,10 @@ interface UziData {
   duration_ms: number
   model?: string
   note?: string
+  /** uzi_mcp 在后端超时 / 5xx 时返回的是 {error, detail} 而不是报告 ——
+   *  这张卡是按 tool 名分发的,拿到的可能就是这份错误对象。 */
+  error?: string
+  detail?: string
 }
 
 // dim key → 中文标签
@@ -94,6 +98,9 @@ export default function UziDeepAnalysisCard(
   const coverage = dimsCovered.length + dimsMissing.length > 0
     ? Math.round((dimsCovered.length / (dimsCovered.length + dimsMissing.length)) * 100)
     : 0
+  // 工具失败时 duration_ms 根本不存在 · 原来直接 toFixed 会在头部显示 "NaNs"
+  const durationLabel = Number.isFinite(data.duration_ms) ? `${(data.duration_ms / 1000).toFixed(1)}s` : '—'
+  const failed = typeof data.error === 'string' && data.error.length > 0
 
   const copyMarkdown = async () => {
     try {
@@ -132,16 +139,16 @@ export default function UziDeepAnalysisCard(
         }}>
           {data.depth?.toUpperCase() || 'LITE'}
         </span>
-        <span style={{ marginLeft: 'auto', color: HUNTER.INK_F, fontSize: 11 }}>
-          {(data.duration_ms / 1000).toFixed(1)}s · 覆盖率 {coverage}%
+        <span style={{ marginLeft: 'auto', color: failed ? HUNTER.UP : HUNTER.INK_F, fontSize: 11 }}>
+          {failed ? '调用失败' : `${durationLabel} · 覆盖率 ${coverage}%`}
         </span>
         <span style={{ color: HUNTER.INK_F, fontSize: 11, marginLeft: 6 }}>
           {expanded ? '收起 ▲' : '展开 ▼'}
         </span>
       </div>
 
-      {/* 数据覆盖度 chips · 跟着折叠 */}
-      {expanded && <div style={{
+      {/* 数据覆盖度 chips · 跟着折叠 · 调用失败时没有覆盖度可言,不画 */}
+      {expanded && !failed && <div style={{
         padding: '10px 18px',
         display: 'flex',
         flexWrap: 'wrap',
@@ -203,14 +210,17 @@ export default function UziDeepAnalysisCard(
           >
             {data.markdown}
           </ReactMarkdown>
+        ) : failed ? (
+          <FailedNotice error={data.error!} detail={data.detail} />
         ) : (
-          <StalledAnalysisNotice durationMs={data.duration_ms || 0} coverage={coverage} />
+          <EmptyReportNotice durationLabel={durationLabel} coverage={coverage} />
         )}
       </div>}
 
       {/* footer · 复制按钮也跟着折叠 —— 正文都收起来了,
-          留一个"复制 markdown"在那儿会让人以为要复制的是别的东西 */}
-      {expanded && <div style={{
+          留一个"复制 markdown"在那儿会让人以为要复制的是别的东西;
+          调用失败时没有 markdown 可复制,整条 footer 都不画 */}
+      {expanded && !failed && <div style={{
         padding: '10px 18px',
         display: 'flex', alignItems: 'center', gap: 10,
         borderTop: `1px solid ${HUNTER.LINE}`,
@@ -257,46 +267,52 @@ const cardStyle: React.CSSProperties = {
 }
 
 
-// 分析长时间未出内容时的提示(§3.C 复赛演示 UX · 2026-08-29 用户报)
-// 逻辑:三档提醒
-//   0-15s   转圈 · 请稍候
-//   15-45s  转圈 · 稍慢 · 大概再等 20 秒(thinking 模型消耗大)
-//   45s+    警告 · 分析未出内容 · 建议重试(不再无声等待)
-function StalledAnalysisNotice({ durationMs, coverage }: { durationMs: number; coverage: number }) {
-  const [elapsed, setElapsed] = useState(Math.round(durationMs / 1000))
-  useEffect(() => {
-    const t = setInterval(() => setElapsed(e => e + 1), 1000)
-    return () => clearInterval(t)
-  }, [])
+/**
+ * 工具调用失败(uzi_mcp 返回 {error, detail})时的提示。
+ *
+ * 这张卡只在 tool state 为 completed 时才会被渲染(见 ToolCallCard.tryRenderRichCard),
+ * 也就是说**工具已经收工了,后面不会再有内容来**。原来这里放的是一个从 0 起跳、
+ * 每秒 +1 的计时器,文案写"分析已跑 N 秒仍未出内容" —— 那个 N 只是卡片挂在屏幕上的
+ * 秒数,跟分析毫无关系(2026-09-07 用户截图里的"2062 秒"就是这么来的),而且它让人
+ * 以为还在等。失败就明说失败、说清楚原因、给出下一步,不再假装在生成。
+ */
+function FailedNotice({ error, detail }: { error: string; detail?: string }) {
+  const isTimeout = /timeout|超时|未响应/i.test(error + (detail || ''))
+  return (
+    <div style={{
+      color: HUNTER.UP, padding: '16px 20px',
+      background: '#fde7e0', borderRadius: 6, lineHeight: 1.7,
+    }}>
+      <div style={{ fontWeight: 700, marginBottom: 6 }}>
+        <AlertCircle size={16} style={{ verticalAlign: 'middle', marginRight: 6 }} />
+        深度分析工具本次调用失败,没有拿到报告
+      </div>
+      <div style={{ fontSize: 12.5, fontFamily: 'monospace', wordBreak: 'break-all', opacity: .9 }}>
+        {error}{detail ? ` · ${detail}` : ''}
+      </div>
+      <div style={{ fontSize: 12.5, marginTop: 8, color: HUNTER.INK_S }}>
+        {isTimeout
+          ? '通常是上游数据源(finance-data / akshare)或 LLM 一时卡住。直接再发一次「深度分析 + 股票代码」即可;'
+          : '直接再发一次「深度分析 + 股票代码」即可;'}
+        若反复失败,请管理员在 api 容器日志里 grep <code>[uzi]</code> 看是哪一路超了预算。
+        下面正文里如果出现了分析内容,那是模型在没有数据的情况下自己写的,<b>其中的数字不可信</b>。
+      </div>
+    </div>
+  )
+}
 
-  if (elapsed < 15) {
-    return (
-      <div style={{ color: HUNTER.INK_F, fontStyle: 'italic', textAlign: 'center', padding: 20 }}>
-        <Loader2 size={16} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-        分析生成中 · 请稍候({elapsed}s / 覆盖率 {coverage}%)
-      </div>
-    )
-  }
-  if (elapsed < 45) {
-    return (
-      <div style={{
-        color: HUNTER.COPPER3, textAlign: 'center', padding: 20,
-        background: HUNTER.BRAND_PALE, borderRadius: 6,
-      }}>
-        <Loader2 size={16} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-        分析仍在生成 · 已 {elapsed} 秒 · Gemini 3.5 thinking 模型消耗较大 · 通常 30-45 秒内出结果
-      </div>
-    )
-  }
-  // 45s+ 明确异常
+/** 工具返回了 200,但 markdown 为空 —— 推理型模型把 max_tokens 全花在 reasoning 上、
+ *  或模型拒答。同样是终态,不再计时。 */
+function EmptyReportNotice({ durationLabel, coverage }: { durationLabel: string; coverage: number }) {
   return (
     <div style={{
       color: HUNTER.UP, textAlign: 'center', padding: 20,
-      background: '#fde7e0', borderRadius: 6,
+      background: '#fde7e0', borderRadius: 6, lineHeight: 1.7,
     }}>
       <AlertCircle size={16} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-      分析已跑 {elapsed} 秒仍未出内容 · 可能异常(LLM 超时 / max_tokens 全被 reasoning 占用)·
-      请<b>关闭本条对话重新发起</b>。若持续无法出结果 · 联系管理员查 opencode 日志。
+      工具已返回(耗时 {durationLabel} · 数据覆盖率 {coverage}%),但 LLM 没有产出报告正文 ·
+      多半是 max_tokens 被 reasoning 占满或模型拒答 · 请<b>重新发起一次</b>;
+      持续如此请管理员查 api 容器日志里的「LLM 返回空 markdown」。
     </div>
   )
 }

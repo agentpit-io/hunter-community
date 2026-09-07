@@ -13,8 +13,9 @@ Phase 2（Sprint 3 P2 后续）会加 /uzi/full_analysis 走 SG 完整 22 dim pi
 from __future__ import annotations
 import asyncio
 import os
+import time
 from datetime import datetime
-from typing import Any
+from typing import Any, Awaitable
 
 from fastapi import APIRouter, HTTPException, Request
 from loguru import logger
@@ -29,6 +30,64 @@ _INTERNAL_KEY = os.getenv("HUNTER_INTERNAL_KEY", "")
 # AGENT_SUB_UZI_MODEL 是内部部署里指定 Gemini 变体用的,开源版跟随 .env 的 LLM_DEFAULT_MODEL,
 # 否则用户配了 DeepSeek 却在这里请求 gemini-3.5-flash 会直接 502 UnknownModel。
 _MODEL = os.getenv("AGENT_SUB_UZI_MODEL") or os.getenv("LLM_DEFAULT_MODEL", "gemini-3.5-flash")
+
+# ── 三段时间预算 ───────────────────────────────────────────────
+# 2026-09-07 事故(茅台 600519):同一用户两次深度分析,第一次主拉数 47s 正常出报告;
+# 第二次主拉数卡了 **137 秒**(8 路里某一路 akshare / 用户源没有超时,上游抖一下就挂住),
+# 整个端点超过 uzi_mcp 的 120s → httpx ReadTimeout → 工具给模型的是 {"error": ...} →
+# 前端富卡片拿不到 markdown 显示"已跑 2062 秒仍未出内容",而 chat 模型转头凭记忆
+# 自己写了一篇"分析",里面的"营收增速放缓至 1.30%"是编的。
+#
+# 根因不是哪一路慢,是**没有总预算**:finance-data 每路各自 10s,但 akshare、用户源
+# 这些路一个超时都没有,gather 会陪最慢那路等到天荒地老。
+# 所以不追各路的超时,直接给每个阶段一个硬预算:到点收工,拿到多少算多少,
+# 没拿到的进 dims_missing(空的比假的好,也比永远等下去好)。
+# 三段加起来 40+30+60=130s,压在 uzi_mcp 的 170s 与 opencode MCP 的 180s 之下。
+_FETCH_BUDGET_S    = float(os.getenv("UZI_FETCH_BUDGET_S", "40"))
+_FALLBACK_BUDGET_S = float(os.getenv("UZI_FALLBACK_BUDGET_S", "30"))
+_LLM_TIMEOUT_S     = float(os.getenv("UZI_LLM_TIMEOUT_S", "60"))
+
+
+async def _timed(coro: Awaitable[Any]) -> tuple[Any, float]:
+    t = time.perf_counter()
+    return await coro, time.perf_counter() - t
+
+
+async def _gather_budget(named: dict[str, Awaitable[Any]], budget_s: float, tag: str) -> dict[str, Any]:
+    """并发跑一批取数协程,总时限 budget_s。返回 {name: result | None}。
+
+    超预算的路记 None 并打 warning(带每路耗时),下次出事一眼看出是哪路慢 ——
+    这次事故之所以只能推断"某一路卡了 137s",就是因为原来没有分路计时。
+    `asyncio.to_thread` 起的线程取消不了,放弃后它会在后台自己跑完然后被丢掉,可接受。
+    """
+    t0 = time.perf_counter()
+    tasks = {name: asyncio.ensure_future(_timed(coro)) for name, coro in named.items()}
+    _done, pending = await asyncio.wait(tasks.values(), timeout=budget_s)
+    out: dict[str, Any] = {}
+    cost: dict[str, str] = {}
+    slow: list[str] = []
+    for name, task in tasks.items():
+        if task in pending:
+            task.cancel()
+            out[name] = None
+            slow.append(name)
+            cost[name] = f">{budget_s:.0f}s"
+            continue
+        exc = task.exception()
+        if exc is not None:
+            logger.warning("[uzi] {} {} 失败: {}: {}", tag, name, type(exc).__name__, exc)
+            out[name] = None
+            cost[name] = "err"
+            continue
+        result, dt = task.result()
+        out[name] = result
+        cost[name] = f"{dt:.1f}s"
+    elapsed = time.perf_counter() - t0
+    if slow:
+        logger.warning("[uzi] {} 超过预算 {:.0f}s · 放弃 {} · 各路耗时 {}", tag, budget_s, slow, cost)
+    else:
+        logger.info("[uzi] {} 完成 {:.1f}s · 各路耗时 {}", tag, elapsed, cost)
+    return out
 
 
 # ── akshare A 股兜底 ─────────────────────────────────────────────
@@ -537,67 +596,53 @@ async def deep_analysis(body: DeepAnalysisIn, request: Request):
     # 同步 httpx 客户端 · 在 async endpoint 里必须走 to_thread 避免阻塞事件循环
     # （从 async 直接 sync 调 httpx.get 会遇到 connection pool 或事件循环冲突 · 表现为 None 返回）
     sym = fd.to_symbol(code)
+    timing: dict[str, int] = {}
     try:
-        results = await asyncio.gather(
-            asyncio.to_thread(fd.get_quote, code),
-            asyncio.to_thread(fd.get_kline, code, "daily", 30),
+        _t = time.perf_counter()
+        # 8 路并发 · 总预算 _FETCH_BUDGET_S · 各路含义见 bundle 的 key
+        bundle = await _gather_budget({
+            "quote":        asyncio.to_thread(fd.get_quote, code),
+            "kline":        asyncio.to_thread(fd.get_kline, code, "daily", 30),
             # 财报走 shared akshare(§9 铁律 3 · 独立部署时 fd._get 会打空)
             # · 主路径直接是 akshare · 不再作为 fd fallback 的备胎
-            asyncio.to_thread(_akshare_financials, code.split(".")[0]) if code.split(".")[0].isdigit() else asyncio.sleep(0, result=None),
-            asyncio.to_thread(fd.get_lhb, code, 30),
-            asyncio.to_thread(fd.get_fund_holders, code),
-            asyncio.to_thread(fd.get_governance, code),
-            asyncio.to_thread(fd.get_news, code, 8),
-            asyncio.to_thread(fd.get_research_reports, code, 10),
-            return_exceptions=True,
-        )
-        quote, kline, financials, lhb, fund_holders, governance, news, research = [
-            (None if isinstance(r, Exception) else r) for r in results
-        ]
+            "financials":   asyncio.to_thread(_akshare_financials, code.split(".")[0]) if code.split(".")[0].isdigit() else asyncio.sleep(0, result=None),
+            "lhb":          asyncio.to_thread(fd.get_lhb, code, 30),
+            "fund_holders": asyncio.to_thread(fd.get_fund_holders, code),
+            "governance":   asyncio.to_thread(fd.get_governance, code),
+            "news":         asyncio.to_thread(fd.get_news, code, 8),
+            "research":     asyncio.to_thread(fd.get_research_reports, code, 10),
+        }, _FETCH_BUDGET_S, f"主拉数 code={code}")
+        timing["fetch_ms"] = int((time.perf_counter() - _t) * 1000)
     except Exception as e:
         logger.exception("[uzi] 拉数失败 code=%s", code)
         raise HTTPException(502, f"拉取数据失败: {e}")
-
-    bundle = {
-        "quote": quote,
-        "kline": kline,
-        "financials": financials,
-        "lhb": lhb,
-        "fund_holders": fund_holders,
-        "governance": governance,
-        "news": news,
-        "research": research,
-    }
 
     # akshare 兜底 · 只针对 A 股 · finance-data 没订阅时 5/8 维度会空,
     # 用东财公开接口补 kline/financials/news/research/lhb。港股/美股无此路径。
     _bare = code.split(".")[0]
     _is_a_stock = _bare.isdigit() and len(_bare) == 6
     if _is_a_stock:
-        fb_tasks: list = []
-        fb_slots: list[str] = []
+        fb_tasks: dict[str, Awaitable[Any]] = {}
         if not bundle.get("kline"):
-            fb_tasks.append(asyncio.to_thread(_akshare_kline, _bare, 30))
-            fb_slots.append("kline")
+            fb_tasks["kline"] = asyncio.to_thread(_akshare_kline, _bare, 30)
         # financials 已在主 gather 里走 shared akshare · 这里不再重复补
         if not bundle.get("news"):
-            fb_tasks.append(asyncio.to_thread(_akshare_news, _bare, 8))
-            fb_slots.append("news")
+            fb_tasks["news"] = asyncio.to_thread(_akshare_news, _bare, 8)
         if not bundle.get("research"):
-            fb_tasks.append(asyncio.to_thread(_akshare_research, _bare, 10))
-            fb_slots.append("research")
+            fb_tasks["research"] = asyncio.to_thread(_akshare_research, _bare, 10)
         if not bundle.get("lhb"):
-            fb_tasks.append(asyncio.to_thread(_akshare_lhb, _bare, 30))
-            fb_slots.append("lhb")
+            fb_tasks["lhb"] = asyncio.to_thread(_akshare_lhb, _bare, 30)
         if fb_tasks:
-            fb_results = await asyncio.gather(*fb_tasks, return_exceptions=True)
+            _t = time.perf_counter()
+            fb_results = await _gather_budget(fb_tasks, _FALLBACK_BUDGET_S, f"akshare 兜底 code={code}")
+            timing["fallback_ms"] = int((time.perf_counter() - _t) * 1000)
             filled: list[str] = []
-            for slot, r in zip(fb_slots, fb_results):
-                if isinstance(r, Exception) or not r:
+            for slot, r in fb_results.items():
+                if not r:
                     continue
                 bundle[slot] = r
                 filled.append(slot)
-            logger.info("[uzi] akshare fallback code={} tried={} filled={}", code, fb_slots, filled)
+            logger.info("[uzi] akshare fallback code={} tried={} filled={}", code, list(fb_tasks), filled)
 
     # 走 OneAPI Gemini 合成
     client = get_client()
@@ -612,8 +657,11 @@ async def deep_analysis(body: DeepAnalysisIn, request: Request):
         "全程使用中文（除股票代码外）· 不做免责声明 · 不给'买入/卖出'评级。"
     )
     user_msg = _build_llm_context(code, bundle)
-    try:
-        resp = client.chat.completions.create(
+
+    def _llm_call():
+        # OpenAI 客户端是同步的 · 直接在 async 端点里调会把整个事件循环卡住 LLM 那么久
+        # (期间 /api/chat/sessions 等所有请求都排队)。挪进线程,并给这一次调用单独限时。
+        return client.with_options(timeout=_LLM_TIMEOUT_S).chat.completions.create(
             model=_MODEL,
             messages=[
                 {"role": "system", "content": system_msg},
@@ -626,6 +674,12 @@ async def deep_analysis(body: DeepAnalysisIn, request: Request):
             # 提到 4096 给正文留足空间,非推理模型也不会浪费(只按实际生成计费)。
             max_tokens=4096,
         )
+
+    try:
+        _t = time.perf_counter()
+        # 外层再套 5s 余量 · 防 SDK 自己的重试把 timeout 放大
+        resp = await asyncio.wait_for(asyncio.to_thread(_llm_call), timeout=_LLM_TIMEOUT_S + 5)
+        timing["llm_ms"] = int((time.perf_counter() - _t) * 1000)
         markdown = (resp.choices[0].message.content or "").strip()
         # 空返回时把 usage 打进日志,方便判断是"tokens 耗尽"还是"模型拒答"
         if not markdown:
@@ -638,6 +692,9 @@ async def deep_analysis(body: DeepAnalysisIn, request: Request):
                  "completion": getattr(usage, "completion_tokens", None)} if usage else None,
             )
         markdown = _clean_llm_markdown(markdown)
+    except asyncio.TimeoutError:
+        logger.error("[uzi] LLM 合成超时 code={} model={} 限时 {:.0f}s · timing={}", code, _MODEL, _LLM_TIMEOUT_S, timing)
+        raise HTTPException(504, f"LLM 合成超时(>{_LLM_TIMEOUT_S:.0f}s · model={_MODEL})")
     except Exception as e:
         logger.exception("[uzi] LLM 失败 code=%s", code)
         raise HTTPException(502, f"LLM 合成失败: {e}")
@@ -645,6 +702,8 @@ async def deep_analysis(body: DeepAnalysisIn, request: Request):
     duration_ms = int((datetime.now() - t0).total_seconds() * 1000)
     dims_covered = [k for k, v in bundle.items() if v not in (None, [], {})]
     dims_missing = [k for k in bundle if k not in dims_covered]
+    logger.info("[uzi] 完成 code={} total={}ms timing={} covered={} missing={}",
+                code, duration_ms, timing, dims_covered, dims_missing)
 
     return {
         "ok": True,
@@ -655,6 +714,7 @@ async def deep_analysis(body: DeepAnalysisIn, request: Request):
         "dims_covered": dims_covered,
         "dims_missing": dims_missing,
         "duration_ms": duration_ms,
+        "timing": timing,
         "model": _MODEL,
         "note": "Phase 1 MVP · 数据源 finance-data · LLM=OneAPI Gemini · 完整 22 dim 报告见 SG UZI worker（后续 phase）",
     }
