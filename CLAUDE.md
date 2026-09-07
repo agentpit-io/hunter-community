@@ -155,6 +155,51 @@ category 被无视,一律进「自定义安装」)。
 
 ---
 
+## 铁律:对上游的并发拉数必须有总预算 · 工具卡片 completed 后不许假装还在生成
+
+2026-09-07 茅台事故(复盘:`agentpit/doc/服务器管理/2026-09-07_hunter-community_深度分析超时卡片假计时.md`):
+深度分析主拉数 8 路 `asyncio.gather`,finance-data 那几路各自 10s,但 akshare / 用户源那几路
+**一个超时都没有**,某一路卡了 137s → uzi_mcp 120s ReadTimeout → 工具返回 `{error}` →
+前端卡片显示 `NaNs · 覆盖率 0%` 和一个从 0 起跳的假计时器「已跑 2062 秒仍未出内容」,
+而 chat 模型转头凭记忆写了一篇带「营收增速 1.30%」的"分析"。
+
+### 后端:三条
+
+1. **一批并发拉数必须有总预算**,不能指望每一路各自的超时——总有一路没配。
+   用 `internal_uzi._gather_budget(named, budget_s, tag)`:到点收工、没拿到的记 `None`
+   进 `dims_missing`(空的比假的好,也比永远等下去好)。预算走 env(`UZI_FETCH_BUDGET_S`
+   等),三段加起来必须压在 MCP 超时之下(当前 40+30+60=130s < uzi_mcp 170s < opencode 180s)。
+2. **分路计时进日志**。事故当时哪一路慢**无法确认**,就是因为没有分路耗时;`_gather_budget`
+   打 `各路耗时 {quote: 1.3s, ...}`,下次一眼看出。
+3. **同步 SDK 调用(OpenAI / httpx / psycopg2)在 async 端点里必须 `asyncio.to_thread`**,
+   并给单次调用设 timeout。原来的 `client.chat.completions.create` 直接在 async 里调,
+   LLM 跑多久事件循环就卡多久。
+
+### 前端:两条
+
+4. **富卡片必须认识工具的失败对象**。`ToolCallCard` 按 tool 名分发,工具失败返回的
+   `{error, detail}` 也会进同一张卡。每张卡都要有 `failed` 分支:头部写「调用失败」、正文写
+   原因和下一步、**不画覆盖率 / 复制按钮这些"有数据"才有意义的东西**;数字字段
+   `Number.isFinite` 兜底显示 `—`,不许出现 `NaN`。
+5. **卡片只在 tool `completed` 后渲染,所以卡片里不许有计时器、转圈或「仍在生成」的暗示**。
+   工具收工后不会再有内容来;计时器显示的只是卡片挂在屏幕上的秒数,与任务无关,
+   会让用户干等。失败就明说失败、空就明说空,都是终态。
+
+### MCP:一条
+
+6. **工具失败对象必须带 `type` / `code`,并写一句 `instruction` 明文告诉模型别编**
+   (「严禁凭记忆自行撰写分析或给出任何数字」)。`str(httpx.ReadTimeout)` 是空串,
+   报错文案要自己写清楚是多少秒未响应。这条挡不住所有情况——真正的硬约束仍是
+   §A7「LLM 严禁自由生成数字」:不给模型数据,它就没数字可抄。
+
+### 部署备注
+
+`scripts/opencode-mcp/uzi_mcp.py` 是 huntercode `mcp/uzi_mcp.py` 的**部署副本**,靠 compose
+bind mount 覆盖镜像文件(GHCR 拉取在服务器上 denied,机器上没有 gh)。改动先改 huntercode,
+再整个拷过来并更新文件头的提交号;不要在副本里单独改。
+
+---
+
 ## 详细文档
 
 完整问题清单与实施记录(在 agentpit repo 内,不在本仓):
