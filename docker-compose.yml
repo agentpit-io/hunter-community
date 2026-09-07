@@ -265,6 +265,10 @@ services:
       # 「加XX到自选」能直接落库,而不是回落到"点击左侧菜单"的文本兜底。
       # 详见 scripts/opencode-mcp/watchlist_mcp.py 文件头注释。
       - ./scripts/opencode-mcp/watchlist_mcp.py:/opt/opencode-workspace/mcp/watchlist_mcp.py:ro
+      # 覆盖镜像自带的 uzi_mcp.py · httpx 120s→170s 对齐后端三段预算,失败对象带
+      # type/code/instruction(2026-09-07 茅台事故)。镜像重建要等 GHCR 登录,挂文件立即生效。
+      # 文件头注释写了它是 huntercode 的副本,改动先改 huntercode。
+      - ./scripts/opencode-mcp/uzi_mcp.py:/opt/opencode-workspace/mcp/uzi_mcp.py:ro
       # 覆盖镜像自带的 hunter-mcp-context.ts · HUNTER_TOOLS Set 里加了 watchlist_add,
       # 不然 tool.execute.before hook 不注入 _hermes_user_id · api 收不到
       # X-Hunter-User-Id → 401 unauthorized · LLM 会告诉用户"请登录",很误导。
