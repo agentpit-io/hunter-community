@@ -193,6 +193,10 @@ function Card({ item, selected, onSelect, onUse, groups, onMove }: {
   // 那个是我们这边的工具没接好(等我们),这个是**这份 SKILL 本身不完整**
   // (用户只能去装全或换一个)。用户能做的事不一样,不该混成一个提示。
   const incomplete = (item.missing_refs?.length ?? 0) > 0
+  // 引用了脚本、我们有意不装的 —— **不是故障**,不加"装不全"角标也不置灰:
+  // 方法论正文照常能用,只有需要跑脚本的那几步做不了。只在 tooltip 里说明,
+  // 详情面板里有完整理由。混进 incomplete 会让用户以为坏了。
+  const hasBlockedScripts = (item.blocked_refs?.length ?? 0) > 0
   return (
     <div
       onClick={onSelect}
@@ -207,8 +211,12 @@ function Card({ item, selected, onSelect, onUse, groups, onMove }: {
         + (blocked && item.blocked_by.length ? `\n⚠ 依赖未就绪: ${item.blocked_by.join(', ')}` : '')
         + (incomplete
             ? `\n⚠ 这个 SKILL 装不全 —— 正文引用了 ${item.missing_refs!.length} 个附属文件,`
-              + `而我们只装了 SKILL.md。缺:\n  ${item.missing_refs!.slice(0, 4).join('\n  ')}`
-              + `\n模型读到「见 xxx.md」会去找,找不到就卡住。`
+              + `装的时候没取到。缺:\n  ${item.missing_refs!.slice(0, 4).join('\n  ')}`
+              + `\n模型读到「见 xxx.md」会去找,找不到就卡住。重装一次通常能解决。`
+            : '')
+        + (hasBlockedScripts
+            ? `\nⓘ 有 ${item.blocked_refs!.length} 个脚本步骤没装(出于安全只装文档),`
+              + `方法论部分照常可用。`
             : '')}
       style={{ ...cardStyle, ...(selected ? cardSelected : null), opacity: blocked ? 0.55 : 1 }}
     >

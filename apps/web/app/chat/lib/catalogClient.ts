@@ -191,8 +191,14 @@ export interface CapabilityItem {
   origin: string
   slow: boolean
   blocked_by: string[]
-  /** 正文引用了、但没跟着装进来的附属文件。非空 = 这个 SKILL 装了也用不了 */
+  /** 正文引用了、但没跟着装进来的附属文件。非空 = 这个 SKILL 装了也用不了。
+   *  安装时会顺着引用把文档类附件一并装好,所以这里非空属于异常(仓库里也没有
+   *  / 文件过大被跳过),要如实报出来,不能装一半假装装全了。 */
   missing_refs?: string[]
+  /** 引用了脚本(.py/.sh/.js/.ts),我们**有意不装**的那部分。
+   *  不是故障:方法论正文照样能用,只是脚本那几步跑不了。
+   *  跟 missing_refs 分开显示 —— 那个我们该修,这个永远不会修。 */
+  blocked_refs?: string[]
   /** incomplete = 缺附属文件,装了也用不了(见 missing_refs) */
   status: 'ready' | 'blocked' | 'broken' | 'incomplete'
 }

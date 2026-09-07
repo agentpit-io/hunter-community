@@ -271,6 +271,11 @@ async def list_capabilities(request: Request):
             # 用户看到的是"点了没反应",完全不知道为什么。
             # 所以要在界面上明说缺什么,而不是让他自己试出来。
             "missing_refs": s.get("missing_refs") or [],
+            # 引用了脚本、我们**有意没装**的部分(见 skill_files.blocked_refs)。
+            # 跟 missing_refs 分开,也**不进 status** —— 它不是故障:
+            # 方法论正文照样能用,只是脚本那几步跑不了。混进 incomplete 会让
+            # 用户一直等我们修一件永远不会修的事(修=拆掉不装可执行文件那条安全线)。
+            "blocked_refs": s.get("blocked_refs") or [],
             "status": (
                 "broken" if missing
                 else "incomplete" if (s.get("missing_refs") and not s.get("builtin"))

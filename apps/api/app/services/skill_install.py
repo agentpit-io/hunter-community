@@ -263,6 +263,48 @@ def _fallback_tpl(name: str, desc: str) -> str:
     return f"使用 {name} —— "
 
 
+# 附属文件最多顺着引用往下追几层。附属文件自己也可能再引用别的
+# (references/a.md 里写「详见 references/b.md」),但**必须有上限** ——
+# 两个文件互相引用就是死循环。
+_ASSET_DEPTH = 3
+
+
+def _collect_assets(tf, root: str, base: str, body: str) -> dict:
+    """按正文里的引用,从已下载的 tarball 里取出**文档类**附属文件。
+
+    `base` 是 SKILL.md 在仓库里所处的目录 —— 引用写的是相对它的路径。
+
+    只取文档,可执行文件跳过(模块开头那条安全线:脚本在容器里能读 .env、
+    发外网、删文件)。取不到的不报错,让它留在 missing_refs 里被如实标出来 ——
+    **装一半但假装装全了,比装不全更糟**。
+    """
+    from app.services import skill_files
+
+    out: dict[str, bytes] = {}
+    pending = list(skill_files.iter_refs(body))
+    for _ in range(_ASSET_DEPTH):
+        nxt: list[str] = []
+        for rel in pending:
+            if rel in out or skill_files.is_exec_ref(rel):
+                continue
+            member = f"{root}/{base}/{rel}" if base else f"{root}/{rel}"
+            try:
+                f = tf.extractfile(member)
+                data = f.read() if f is not None else None
+            except Exception:
+                data = None
+            if data is None:
+                logger.info("[skill_install] 引用的附属文件仓库里也没有: {}", rel)
+                continue
+            out[rel] = data
+            if rel.lower().endswith(".md"):
+                nxt.extend(skill_files.iter_refs(data.decode("utf-8", "replace")))
+        if not nxt:
+            break
+        pending = nxt
+    return out
+
+
 def install(text: str, paths: list[str]) -> list[str]:
     """下载 tarball 并**只解压选中 skill 的目录**。返回装好的 skill 名。
 
@@ -361,6 +403,26 @@ def install(text: str, paths: list[str]) -> list[str]:
             # 能一眼看出是**当初就没装**,而不是坏了(_18 §3.4)
             "origin": f"github:{owner}/{repo}@{ref}",
         }, body)
+
+        # ── 附属文件 ──────────────────────────────────────────
+        # 作者常把方法论拆成 references/*.md + templates/*.md,SKILL.md 里写
+        # 「数据源规则见 `references/data-sources.md`」。**只搬 SKILL.md 的话,
+        # 模型读到那句就去找,找不到就空转而且不报错** —— 用户看到的是
+        # "这个 skill 点了没反应"(skill_files.missing_refs 的注释记的就是
+        # 这件事,当时只做了检测提示,没做修复)。
+        #
+        # tarball 上面已经整包下载在内存里了,取这些文件**不用多发一个请求**。
+        base = sp.rsplit("/", 1)[0] if "/" in sp else ""
+        try:
+            assets = _collect_assets(tf, root, base, body)
+            if assets:
+                got = skill_files.save_assets(slug, assets)
+                logger.info("[skill_install] {} 附带装了 {} 个文档", slug, len(got))
+        except Exception as e:                # noqa: BLE001
+            # 附件失败不该让整个 SKILL 装不上 —— 少一个附件是这条引用失效,
+            # 而抛出去是连方法论正文都没了。缺的会由 missing_refs 如实标出。
+            logger.warning("[skill_install] {} 附属文件处理失败: {}", slug, e)
+
         installed.append(slug)
         logger.info("[skill_install] 装好 {} ← {}", slug, member)
 

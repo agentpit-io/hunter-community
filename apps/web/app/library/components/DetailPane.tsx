@@ -272,7 +272,37 @@ function CapDetail({ item, onUse, onChanged, capGroups, onMoveCap }: {
             </div>
             <div style={{ marginTop: 6, color: HUNTER.INK_F }}>
               模型读到「见 xxx.md」会去找,找不到就卡住 —— 表现是点了没反应。
-              作者把方法论拆在多个文件里的,只搬 SKILL.md 搬不动。
+              安装时本该顺着引用一并装好,这几个没装上说明仓库里也没有、
+              或者文件太大被跳过了。重装一次通常能解决。
+            </div>
+          </div>
+        </>
+      )}
+      {/* 引用了脚本 —— 跟上面那块**必须分开**。上面是缺件(我们的 bug,重装能好),
+          这块是安全策略的结果:脚本在容器里能读 .env、发外网、删文件,所以一律不装。
+          不写清楚理由的话,用户会当成同一个故障一直等我们修,而这个永远不会修。
+          注意措辞不能说"用不了" —— 方法论正文是能用的,只是脚本那几步跑不了。 */}
+      {(item.blocked_refs?.length ?? 0) > 0 && (
+        <>
+          <Divider />
+          <div style={{
+            padding: '9px 11px', borderRadius: 7,
+            background: '#F4F1EC', border: '1px solid #DDD6CC',
+            fontSize: 11.5, color: HUNTER.INK_F, lineHeight: 1.85,
+          }}>
+            <b>ⓘ 其中 {item.blocked_refs!.length} 个脚本步骤没有安装</b>
+            <div style={{ marginTop: 5 }}>
+              {item.blocked_refs!.map((f) => (
+                <code key={f} style={{
+                  display: 'inline-block', margin: '2px 4px 0 0', padding: '1px 5px',
+                  background: '#FFF', borderRadius: 3, fontSize: 10.5,
+                }}>{f}</code>
+              ))}
+            </div>
+            <div style={{ marginTop: 6 }}>
+              出于安全,我们只装文档、不装可执行文件 ——
+              脚本跑在容器里能读环境变量、发外网、删文件,装第三方仓库的脚本风险太大。
+              <b>方法论部分照常可用</b>,只有需要跑脚本的那几步做不了。
             </div>
           </div>
         </>

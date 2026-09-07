@@ -145,6 +145,38 @@ _REF_PAT = re.compile(
 _REF_IGNORE = ("skill.md", "readme.md", "license", "package.json",
                "requirements.txt", "example.md", "your_file.md")
 
+# 引用分两类,**待遇完全不同**:
+#   文档类 → 装(install 会从 tarball 里一并解出来),缺了就是我们的 bug
+#   可执行 → **有意不装**(模块 skill_install 开头那条安全线:脚本在容器里
+#            能读 .env、发外网、删文件)。缺了不是 bug,是产品决策,
+#            所以要跟"缺文档"分开报,并且告诉用户为什么。
+# 两个列表要覆盖 _REF_PAT 里的全部扩展名,否则新加的类型会静默漏掉。
+DOC_EXTS = (".md", ".json", ".yaml", ".yml", ".csv", ".txt")
+EXEC_EXTS = (".py", ".sh", ".js", ".ts")
+
+
+def is_exec_ref(rel: str) -> bool:
+    return rel.lower().endswith(EXEC_EXTS)
+
+
+def iter_refs(body: str):
+    """正文里引用到的相对路径,去重后按出现顺序产出。
+
+    只负责"找出引用",不判断在不在磁盘上、该不该装 —— 那是调用方的事。
+    missing_refs / blocked_refs / skill_install 三处共用它,
+    避免同一件事三处正则(交接稿 §9 铁律 3)。
+    """
+    if not body:
+        return
+    seen = set()
+    for m in _REF_PAT.finditer(body):
+        rel = m.group(1)
+        low = rel.lower()
+        if low in seen or any(low.endswith(x) for x in _REF_IGNORE):
+            continue
+        seen.add(low)
+        yield rel
+
 
 def missing_refs(skill_dir: Path, body: str, limit: int = 8) -> list[str]:
     """正文引用了、但这个 SKILL 目录里**并不存在**的文件。
@@ -167,17 +199,34 @@ def missing_refs(skill_dir: Path, body: str, limit: int = 8) -> list[str]:
 
     这里改成查磁盘:引用了 && 文件确实不在 → 才算缺失。
     宁可漏报(误判成能用),也不要对一个装全了的 SKILL 乱挂红字。
+
+    ## 只报文档类
+
+    可执行文件(.py/.sh/.js/.ts)是**有意不装**的,见 blocked_refs。
+    混在一起报会让用户以为是同一个 bug —— 一个我们该修好,
+    另一个修不了(修了就是把安全线拆了),必须分开说。
     """
-    if not body:
-        return []
+    return _refs_absent(skill_dir, body, limit, want_exec=False)
+
+
+def blocked_refs(skill_dir: Path, body: str, limit: int = 8) -> list[str]:
+    """正文引用了、但因为是可执行文件而**故意没装**的。
+
+    跟 missing_refs 是两回事:那个是缺件(bug,装的时候该一并拉下来),
+    这个是安全策略的结果(`skill_install` 开头那条:脚本在容器里能读 .env、
+    发外网、删文件,所以代码一律不装)。
+
+    单独报出来是为了让 UI 能写清楚**为什么**用不了 ——
+    否则用户看到"装不全"会一直等我们修,而这一条永远不会被修。
+    """
+    return _refs_absent(skill_dir, body, limit, want_exec=True)
+
+
+def _refs_absent(skill_dir: Path, body: str, limit: int, want_exec: bool) -> list[str]:
     out: list[str] = []
-    seen = set()
-    for m in _REF_PAT.finditer(body):
-        rel = m.group(1)
-        low = rel.lower()
-        if low in seen or any(low.endswith(x) for x in _REF_IGNORE):
+    for rel in iter_refs(body):
+        if is_exec_ref(rel) != want_exec:
             continue
-        seen.add(low)
         try:
             if not (skill_dir / rel).exists():
                 out.append(rel)
@@ -227,6 +276,9 @@ def _load_one(skill_dir: Path, builtin: bool) -> dict | None:
         # 正文引用了、但目录里没有的文件 —— 见 missing_refs 的说明。
         # 内置 SKILL 不检查:它们随代码走,不会缺件。
         "missing_refs": [] if builtin else missing_refs(skill_dir, body),
+        # 引用了脚本、而我们按安全策略没装的部分。跟 missing_refs 分开,
+        # 因为这一条是**有意为之、不会被修好**的,UI 要写明理由而不是报故障。
+        "blocked_refs": [] if builtin else blocked_refs(skill_dir, body),
         "_path": str(f),
     }
 
@@ -356,6 +408,61 @@ def save(fields: dict, body: str) -> Path:
     load_all(force=True)          # 让本进程立刻看到;opencode 那边另外 refresh
     logger.info("[skill_files] 写入用户 SKILL {}", d)
     return d / "SKILL.md"
+
+
+# 附属文件的护栏。作者把方法论拆成几个 md 是常态,但仓库里也可能塞着
+# 几百 KB 的赞助码图片、整套测试数据 —— 装进来只会拖慢 opencode 扫描。
+MAX_ASSET_BYTES = 256 * 1024          # 单文件
+MAX_ASSETS_TOTAL = 2 * 1024 * 1024    # 一个 SKILL 的附属文件总量
+MAX_ASSETS_COUNT = 40
+
+
+def save_assets(name: str, files: dict[str, bytes]) -> list[str]:
+    """把附属文件写进 user-skills/{name}/ 下,保持 SKILL.md 里写的相对路径。
+
+    返回真正写进去的相对路径。**调用方给什么写什么,这里只做安全兜底**:
+
+    - 路径穿越:`../../etc/passwd` 这类必须挡掉。tarball 里的路径来自
+      第三方仓库,不能假设它老实。用 resolve() 之后判断是不是还在目录内 ——
+      只检查字符串里有没有 `..` 是不够的(软链、绝对路径都能绕)。
+    - 体积:见上面三个上限,超了就跳过并记日志,不让整次安装失败 ——
+      少一个附件顶多是这条引用失效,而报错会让整个 SKILL 装不上。
+    """
+    n = validate_name(name)
+    root = (USER_SKILLS_DIR / n).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    written, total = [], 0
+    for rel, data in files.items():
+        if len(written) >= MAX_ASSETS_COUNT:
+            logger.warning("[skill_files] {} 附属文件超过 {} 个,其余跳过", n, MAX_ASSETS_COUNT)
+            break
+        if len(data) > MAX_ASSET_BYTES:
+            logger.warning("[skill_files] 跳过过大的附属文件 {}/{} ({} B)", n, rel, len(data))
+            continue
+        if total + len(data) > MAX_ASSETS_TOTAL:
+            logger.warning("[skill_files] {} 附属文件总量超限,其余跳过", n)
+            break
+        try:
+            dest = (root / rel).resolve()
+            # 必须在 skill 目录内 —— relative_to 抛异常就是越界
+            dest.relative_to(root)
+        except Exception:
+            logger.warning("[skill_files] 拒绝越界的附属文件路径 {!r}", rel)
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        # 文本按 LF 落盘,理由同 save():要挂进 Linux 容器给 opencode 解析
+        try:
+            text = data.decode("utf-8")
+            dest.write_text("\n".join(text.splitlines()),
+                            encoding="utf-8", newline="\n")
+        except UnicodeDecodeError:
+            dest.write_bytes(data)
+        written.append(rel)
+        total += len(data)
+    if written:
+        load_all(force=True)
+        logger.info("[skill_files] {} 写入 {} 个附属文件", n, len(written))
+    return written
 
 
 def delete(name: str) -> bool:
