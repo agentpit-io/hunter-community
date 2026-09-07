@@ -27,6 +27,7 @@ from .fallback import keyword_route_to_tool
 from .stream_bus import SSEEvent, StreamBus
 from .tool_registry import ToolCall, ToolRegistry, ToolResult, new_tool_call, load_all_tools
 
+from app.services.lang_guard import ZH_ONLY_RULE, has_english_prose, sanitize_llm_text
 from app.services.online_analysis.llm_client import get_client
 
 
@@ -378,6 +379,84 @@ class ChatOrchestrator:
         return valid, reason
 
     # ────── 汇总 ──────
+    # ── 流式语言守卫 ────────────────────────────────────────────
+    # 2026-09-07 事故：gemini-flash 偶发把 system prompt 用英文复述出来当正文
+    # （"let's analyze the user's request ... **Role:** ..."），因为里面夹着中文
+    # 股票名，旧的"含中文即放行"判据完全拦不住。
+    # 做法：首 _ZH_PROBE_CHARS 个字符先缓冲判语言 —— 跑成英文散文就整段丢弃、
+    # 以强化中文约束非流式重跑一次；首段是中文就全程放行，不牺牲流式体验。
+    # （模型一旦跑偏是整段跑偏，首段探测抓得住绝大多数；收尾再全量检一次留日志，
+    #   用来观察是否存在"中文开头、后半段转英文"的残余形态。）
+    _ZH_PROBE_CHARS = 100
+
+    async def _iter_guarded(self, stream, retry_call, tag: str) -> AsyncGenerator[str, None]:
+        loop = asyncio.get_event_loop()
+
+        def _next(it):
+            try:
+                return next(it)
+            except StopIteration:
+                return None
+
+        async def _fallback_zh() -> str:
+            try:
+                raw = await asyncio.to_thread(retry_call)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[orch] {} 中文重跑失败: {}", tag, e)
+                return ""
+            return sanitize_llm_text(raw or "")
+
+        it = iter(stream)
+        buf = ""
+        probing = True
+        full: list[str] = []
+        while True:
+            chunk = await loop.run_in_executor(None, _next, it)
+            if chunk is None:
+                break
+            usage = getattr(chunk, "usage", None)
+            if usage:
+                self._tokens_in += usage.prompt_tokens or 0
+                self._tokens_out += usage.completion_tokens or 0
+            if not (chunk.choices and chunk.choices[0].delta
+                    and chunk.choices[0].delta.content):
+                continue
+            piece = chunk.choices[0].delta.content
+            if probing:
+                buf += piece
+                if len(buf) < self._ZH_PROBE_CHARS:
+                    continue
+                if has_english_prose(buf):
+                    logger.warning("[orch] {} 首段跑成英文 · 丢弃并中文重跑 · raw={}",
+                                   tag, buf[:120])
+                    fixed = await _fallback_zh()
+                    yield fixed or "（本次汇总生成异常，请再问一次。）"
+                    return
+                probing = False
+                full.append(buf)
+                yield buf
+                continue
+            full.append(piece)
+            yield piece
+
+        # 整段都没到探测阈值（短回答）· 收尾时补判一次
+        if probing and buf:
+            if has_english_prose(buf):
+                logger.warning("[orch] {} 短回答跑成英文 · 丢弃并中文重跑 · raw={}",
+                               tag, buf[:120])
+                fixed = await _fallback_zh()
+                yield fixed or "（本次汇总生成异常，请再问一次。）"
+                return
+            yield buf
+            full.append(buf)
+
+        tail = "".join(full)
+        if tail and has_english_prose(tail):
+            # 首段是中文、后半段转英文 —— 已经流给用户了收不回，只能记账观察。
+            # 若日志里这条频繁出现，说明首段探测不够，要改成逐行守卫。
+            logger.warning("[orch] {} 正文含英文散文（首段守卫已放行）· sample={}",
+                           tag, tail[:200])
+
     async def _stream_summary(self, query: str, history: list[dict],
                                 tool_calls: list[ToolCall]) -> AsyncGenerator[str, None]:
         # 需要选股场景：不走 LLM，直接吐固定提示
@@ -408,7 +487,7 @@ class ChatOrchestrator:
                           "「我是猎鹿人投研助手，主要陪你研究股票和市场，"
                           "这个话题我不太擅长，换个投资问题吧～」")
 
-        messages = [{"role": "system", "content": SYSTEM_PROMPT + extra_hint}]
+        messages = [{"role": "system", "content": SYSTEM_PROMPT + extra_hint + ZH_ONLY_RULE}]
         messages.extend(history)
         messages.append({"role": "user", "content": self._enrich_query(query)})
 
@@ -441,26 +520,20 @@ class ChatOrchestrator:
                 temperature=0.4, max_tokens=4096, stream=True,
             )
         stream = await asyncio.to_thread(_stream)
-        # openai v1 sdk 返回 sync iterator；用线程转异步
-        loop = asyncio.get_event_loop()
+        # 首段跑成英文时的中文重跑（非流式 · 更低温度 + 更硬的语言约束）
+        def _retry_zh() -> str:
+            msgs = [dict(m) for m in messages]
+            msgs[0] = {"role": "system",
+                       "content": str(messages[0].get("content", "")) + ZH_ONLY_RULE
+                       + "上一次回答跑成了英文，本次必须整段简体中文重写。"}
+            r = self._client.chat.completions.create(
+                model=MODEL_ROUTER, messages=msgs,
+                temperature=0.2, max_tokens=4096,
+            )
+            return r.choices[0].message.content or ""
 
-        def _next(it):
-            try:
-                return next(it)
-            except StopIteration:
-                return None
-
-        it = iter(stream)
-        while True:
-            chunk = await loop.run_in_executor(None, _next, it)
-            if chunk is None:
-                break
-            usage = getattr(chunk, "usage", None)
-            if usage:
-                self._tokens_in += usage.prompt_tokens or 0
-                self._tokens_out += usage.completion_tokens or 0
-            if chunk.choices and chunk.choices[0].delta and chunk.choices[0].delta.content:
-                yield chunk.choices[0].delta.content
+        async for piece in self._iter_guarded(stream, _retry_zh, "summary"):
+            yield piece
 
     # ────── general_finance 分支 · Gemini google_search 直答 ──────
     async def _stream_google_answer(self, query: str, history: list[dict]) -> AsyncGenerator[str, None]:
@@ -479,6 +552,7 @@ class ChatOrchestrator:
             "- 回答 300-800 字，先给结论后给依据，用小圆点列出关键事实\n"
             "- 若搜索结果中有数字/日期，请标注来源（如：据 xxx 财报）\n"
             "- 结尾**必须**加一行：以上为通识分析，非投资建议，请以最新公告为准。"
+            + ZH_ONLY_RULE
         )
         messages: list[dict] = [{"role": "system", "content": sys_prompt}]
         messages.extend(history)
@@ -502,25 +576,20 @@ class ChatOrchestrator:
                 )
             stream = await asyncio.to_thread(_stream_fallback)
 
-        loop = asyncio.get_event_loop()
+        # 同上 · 通识分支的中文重跑（重跑不带 google_search，只要中文正文）
+        def _retry_zh() -> str:
+            msgs = [dict(m) for m in messages]
+            msgs[0] = {"role": "system",
+                       "content": str(messages[0].get("content", "")) + ZH_ONLY_RULE
+                       + "上一次回答跑成了英文，本次必须整段简体中文重写。"}
+            r = self._client.chat.completions.create(
+                model=model, messages=msgs,
+                temperature=0.2, max_tokens=8192,
+            )
+            return r.choices[0].message.content or ""
 
-        def _next(it):
-            try:
-                return next(it)
-            except StopIteration:
-                return None
-
-        it = iter(stream)
-        while True:
-            chunk = await loop.run_in_executor(None, _next, it)
-            if chunk is None:
-                break
-            usage = getattr(chunk, "usage", None)
-            if usage:
-                self._tokens_in += usage.prompt_tokens or 0
-                self._tokens_out += usage.completion_tokens or 0
-            if chunk.choices and chunk.choices[0].delta and chunk.choices[0].delta.content:
-                yield chunk.choices[0].delta.content
+        async for piece in self._iter_guarded(stream, _retry_zh, "general_finance"):
+            yield piece
 
     def _template_summary(self, tool_calls: list[ToolCall]) -> str:
         """LLM 汇总失败时的模板兜底 —— 至少让用户看到工具原始结论"""

@@ -10,6 +10,8 @@ import os
 from typing import Optional
 
 from loguru import logger
+
+from agents.text_sanitizer import ZH_ONLY_RULE
 from openai import OpenAI
 
 from .prompts import parse_llm_json
@@ -79,7 +81,7 @@ def llm_json_call(system: str, user: str, *,
         completion = client.chat.completions.create(
             model=use_model,
             messages=[
-                {"role": "system", "content": system},
+                {"role": "system", "content": system + ZH_ONLY_RULE},
                 {"role": "user",   "content": user},
             ],
             max_tokens=max_tokens,
@@ -118,7 +120,7 @@ def llm_json_call(system: str, user: str, *,
             "llm_json_call parse failed, retrying · finish={} tokens_out={} raw_head={!r}",
             finish, meta["tokens_out"], raw[:120],
         )
-        strict_system = system + (
+        strict_system = system + ZH_ONLY_RULE + (
             "\n\n严格要求："
             "你的整个回答必须是合法 JSON。第一个字符必须是 {，最后一个字符必须是 }。"
             "不要输出 <think>...</think>、reasoning 前言、markdown 包装、解释。"
@@ -147,6 +149,20 @@ def llm_json_call(system: str, user: str, *,
     if parsed is None:
         meta["error"] = "json_parse_failed"
         logger.warning("llm_json_call: parse failed after retry, raw={}", meta["raw_text"][:300])
+
+    if parsed is not None:
+        # 语言守卫（2026-09-07 事故）：gemini-flash 偶发用英文写正文字段。
+        # 只净化自然语言字段，结构键（decision/impact/code 等）与 meta 原样保留。
+        try:
+            from agents.text_sanitizer import sanitize_json_values
+
+            def _hit(key, raw):
+                logger.warning("llm_json_call: 字段 {} 含英文散文 · 已净化 · raw={}",
+                               key, raw[:120])
+
+            parsed = sanitize_json_values(parsed, on_hit=_hit)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("llm_json_call: 语言守卫失败 · 原样透传: {}", e)
 
     return parsed, meta
 

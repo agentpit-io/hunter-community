@@ -4,6 +4,8 @@ Sentinel 已验证事实注入辩论 prompt，禁止引用被过滤内容。
 """
 import os
 from loguru import logger
+
+from agents.translation import ensure_chinese
 from openai import OpenAI
 
 from agents.state import EnhancedAgentState, DebateState
@@ -106,7 +108,8 @@ def _call_llm(user: str) -> str:
                 model,
             )
             return "（多头分析暂不可用）"
-        return content
+        # 语言守卫：跑成英文就净化/翻译，拿不到中文再落占位（见 agents/translation.py）
+        return ensure_chinese(content) or "（多头分析暂不可用）"
     except Exception as e:
         logger.warning("bull_researcher LLM call failed: {}", e)
         return "（多头分析暂不可用）"

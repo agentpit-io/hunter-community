@@ -19,6 +19,7 @@ from app.services.agent.tool_registry import ToolCall, ToolRegistry, ToolResult
 from app.services.online_analysis.llm_client import get_client
 from app.services import finance_data_client as fd
 from app.services.database import get_stocks_by_user, get_all_stocks_by_user
+from app.services.lang_guard import ZH_ONLY_RULE, sanitize_llm_text, has_english_prose
 
 # Redis 直连 · A 股优先读 collector 每 30s 写入的最新 quote:{code}
 # fd.get_quote 走 finance-data.agentpit.io HTTP · 上游可能陈旧（详见 2026-08 排查）
@@ -53,7 +54,13 @@ _MODEL = os.getenv("AGENT_SUB_WL_MODEL", "gemini-3.5-flash")
 # ═════════════════════════════════════════════════════════════════
 
 def _llm_short(system: str, user: str, max_tokens: int = 80) -> str:
-    """调 LLM 生成短评 · 失败时静默返回空串。"""
+    """调 LLM 生成短评 · 失败或输出跑成英文时返回空串（由调用方兜规则文案）。
+
+    2026-09-07：gemini-flash 会把 system prompt 用英文复述出来当短评
+    （"let's analyze the user's request ... **Role:** ..."），且因为里面夹了
+    中文股票名，旧的"含中文即放行"守卫拦不住。这里改成 prompt 硬约束 +
+    出口 sanitize_llm_text 双保险，净化不出中文就重跑一次，再不行返回 ""。
+    """
     client = get_client()
     if client is None:
         return ""
@@ -61,7 +68,7 @@ def _llm_short(system: str, user: str, max_tokens: int = 80) -> str:
         resp = client.chat.completions.create(
             model=_MODEL,
             messages=[
-                {"role": "system", "content": system},
+                {"role": "system", "content": system + ZH_ONLY_RULE},
                 {"role": "user", "content": user},
             ],
             max_tokens=max_tokens,
@@ -72,10 +79,40 @@ def _llm_short(system: str, user: str, max_tokens: int = 80) -> str:
         for prefix in ("短评：", "评价：", "点评："):
             if text.startswith(prefix):
                 text = text[len(prefix):].strip()
-        return text[:200]
+        cleaned = sanitize_llm_text(text)
+        if cleaned:
+            return cleaned[:200]
+
+        # 跑成英文 · 降温 + 点名上次的问题，重跑一次再说
+        # （实测 gemini-flash 的英文前言会把 max_tokens 吃光，正文根本没生成，
+        #   直接落兜底文案太可惜，一次重跑的成本很低）
+        logger.warning("[wl_agent] LLM 输出非中文 · 重跑一次 · raw={}", text[:120])
+        resp2 = client.chat.completions.create(
+            model=_MODEL,
+            messages=[
+                {"role": "system", "content": system + ZH_ONLY_RULE
+                 + "上一次回答跑成了英文，本次直接输出中文正文，不要任何前言。"},
+                {"role": "user", "content": user},
+            ],
+            max_tokens=max_tokens,
+            temperature=0.2,
+        )
+        cleaned2 = sanitize_llm_text((resp2.choices[0].message.content or "").strip())
+        if not cleaned2:
+            logger.warning("[wl_agent] 重跑仍非中文 · 丢弃 · 由调用方落规则文案")
+            return ""
+        return cleaned2[:200]
     except Exception as e:
         logger.warning("[wl_agent] LLM 短评失败: {}", e)
         return ""
+
+
+def _rule_comment(price: float, chg_pct: float, pos_in_range: str = "") -> str:
+    """LLM 短评不可用时的规则兜底 · 只复述后端算好的真实数字，不下结论。"""
+    parts = [f"当前 {price:.2f} 元 · 涨跌 {chg_pct:+.2f}%"]
+    if pos_in_range:
+        parts.append(pos_in_range)
+    return " · ".join(parts) + "（AI 短评本次不可用）"
 
 
 # ═════════════════════════════════════════════════════════════════
@@ -190,7 +227,9 @@ async def _quickview(code: str, user_id: Optional[str] = None) -> dict:
                        "dv_ttm", "total_mv", "circ_mv", "turnover_rate",
                        "valuation_date")
                       if q.get(k) is not None},
-        "ai_comment": ai_comment or "行情正常，暂无特别信号。",
+        # LLM 兜底文案只陈述真实数据，不编造定性判断
+        # （"行情正常，暂无特别信号"是个结论，数据算不出来就不该说 —— 空的比假的好）
+        "ai_comment": ai_comment or _rule_comment(price, chg_pct, pos_in_range),
         "in_watchlist": in_wl,
         "actions": [
             {"key": "deep_analysis", "label": "🔬 深度分析", "workflow": "debate",
@@ -268,7 +307,7 @@ def _classify_news(stock_name: str, code: str, title: str, content: str = "") ->
         resp = client.chat.completions.create(
             model=_MODEL,
             messages=[
-                {"role": "system", "content": _NEWS_SYS},
+                {"role": "system", "content": _NEWS_SYS + ZH_ONLY_RULE},
                 {"role": "user", "content": prompt},
             ],
             max_tokens=120,
@@ -280,7 +319,9 @@ def _classify_news(stock_name: str, code: str, title: str, content: str = "") ->
         impact = d.get("impact", "neutral")
         if impact not in ("positive", "negative", "neutral", "high_impact"):
             impact = "neutral"
-        return {"impact": impact, "note": (d.get("note") or "")[:120]}
+        # note 是用户可见文案 · 跑成英文就丢掉（前端只显 tag 也比显英文强）
+        note = sanitize_llm_text(str(d.get("note") or ""))[:120]
+        return {"impact": impact, "note": note}
     except Exception as e:
         logger.warning("[wl_agent] news 影响标注失败: {}", e)
         return {"impact": "neutral", "note": ""}
@@ -382,34 +423,29 @@ _ATTRIB_SYS = (
 
 
 def _clean_attribution(text: str) -> str:
-    """剥 Gemini 常见 prompt echo · 输出纯净归因文案。"""
+    """剥 Gemini 常见 prompt echo · 输出纯净归因文案。
+
+    text 已被 _llm_short 的 sanitize_llm_text 净化过（英文散文已丢），
+    这里只负责去中文前缀、取第一行、限长。取不到中文就返回 ""，
+    由 _attribute_stock 落回规则文案。
+    """
     if not text:
         return ""
-    t = text.strip()
-    # 逐行找第一个"看起来像归因"的中文行
-    for line in t.splitlines():
+    for line in text.splitlines():
         line = line.strip()
         if not line:
             continue
-        # 去常见 role-play 前缀
-        for prefix in (
-            "I understand", "Sure", "Here is", "Here's", "OK,", "Okay,",
-            "好的，", "好的,", "明白，", "明白,",
-            "归因：", "归因:", "点评：", "点评:", "短评：", "短评:",
-            "我将", "让我", "Let me", "I will",
-        ):
-            if line.lower().startswith(prefix.lower()):
-                line = ""
-                break
-        if not line:
+        for prefix in ("好的，", "好的,", "明白，", "明白,",
+                       "归因：", "归因:", "点评：", "点评:", "短评：", "短评:"):
+            if line.startswith(prefix):
+                line = line[len(prefix):].strip()
+        # 净化后仍是英文散文 / 仍无中文 → 这行不要
+        if not line or has_english_prose(line):
             continue
-        # 如果行里有 . / , 后面接的都是英文 · 认为是 role-play 段
-        if any(c.isascii() and c.isalpha() for c in line[:20]):
-            has_cn = any("一" <= c <= "鿿" for c in line)
-            if not has_cn:
-                continue
+        if not any("一" <= c <= "鿿" for c in line):
+            continue
         return line[:80]
-    return t.split("\n")[0][:80] if t else ""
+    return ""
 
 
 def _attribute_stock(name: str, code: str, quote: dict) -> tuple[str, list[str]]:

@@ -14,6 +14,7 @@ from loguru import logger
 
 from app.services.agent.tool_registry import ToolCall, ToolRegistry, ToolResult
 from app.services.online_analysis.llm_client import get_client
+from app.services.lang_guard import ZH_ONLY_RULE
 
 
 _MODEL = os.getenv("AGENT_SUB_RESEARCH_MODEL", "gemini-3.5-flash")
@@ -65,7 +66,7 @@ async def invoke_research(code: str, question: str = "") -> tuple[dict, Optional
         resp = client.chat.completions.create(
             model=_MODEL,
             messages=[
-                {"role": "system", "content": _SYSTEM},
+                {"role": "system", "content": _SYSTEM + ZH_ONLY_RULE},
                 {"role": "user", "content": user},
             ],
             response_format={"type": "json_object"},

@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Optional
 
+from loguru import logger
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -130,6 +132,32 @@ class ToolResult:
         )
 
 
+# ─────────────────── 语言守卫 · tool 输出统一过英文散文 ───────────────────
+# 2026-09-07：gemini-flash 会把 system prompt 用英文复述出来当分析文案，
+# 且里面夹着中文股票名，旧的"含中文即放行"判据拦不住（详见 agents/text_sanitizer.py）。
+# 所有 sub-agent 的用户可见文本都从 ToolResult.summary 走，这里做统一出口守卫，
+# 单个 agent 内部忘了接守卫也能兜住；缓存写入/读取两条路径都过一遍。
+
+def _guard_result(result: "ToolResult") -> "ToolResult":
+    """对 ok 结果的 summary 做语言守卫 · 任何异常都不许影响主链路。"""
+    if result.status != "ok":
+        return result
+    try:
+        from app.services.lang_guard import sanitize_json_values
+
+        def _hit(key, raw):
+            logger.warning("[tool_guard] {} 字段 {} 含英文散文 · 已净化 · raw={}",
+                           result.tool_call.name, key, raw[:120])
+
+        # 只净化 summary —— 它才是前端卡片渲染 + 喂回 LLM 汇总的那份。
+        # detail_ref 里放的是原始 payload（可能含大段英文原文/外部数据），
+        # 按正文标准去剪会把真数据剪没，得不偿失。
+        result.summary = sanitize_json_values(result.summary, on_hit=_hit)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[tool_guard] 净化失败 · 原样透传: {}", e)
+    return result
+
+
 # ─────────────────────────────── registry ───────────────────────────────
 HandlerFn = Callable[[ToolCall, Any], Awaitable[ToolResult]]
 
@@ -183,11 +211,12 @@ class ToolRegistry:
             except Exception:
                 cached = None
             if cached and "summary" in cached:
-                return ToolResult(
+                # 旧缓存可能是加守卫之前写进去的 · 出口再过一遍
+                return _guard_result(ToolResult(
                     tool_call=tc, status="ok", duration_ms=0,
                     summary=cached["summary"],
                     detail_ref=cached.get("detail_ref"),
-                )
+                ))
 
         timeout = cls._timeouts.get(tc.name, 30)
         t0 = time.time()
@@ -206,6 +235,9 @@ class ToolRegistry:
                 tc, "INTERNAL", f"{type(e).__name__}: {e}",
                 duration_ms=int((time.time() - t0) * 1000),
             )
+
+        # 先过语言守卫，再写缓存（缓存里存的必须是已净化文本）
+        result = _guard_result(result)
 
         # 成功结果写缓存
         if use_cache and result.status == "ok":

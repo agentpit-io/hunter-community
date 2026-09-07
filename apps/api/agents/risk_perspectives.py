@@ -14,6 +14,8 @@
 """
 import os
 from loguru import logger
+
+from agents.translation import ensure_chinese
 from openai import OpenAI
 
 from agents.state import EnhancedAgentState
@@ -54,7 +56,8 @@ def _call_llm(system: str, user: str, max_tokens: int = 3500) -> str:
                 model,
             )
             return "（风控分析暂不可用）"
-        return content
+        # 语言守卫：跑成英文就净化/翻译，拿不到中文再落占位（见 agents/translation.py）
+        return ensure_chinese(content) or "（风控分析暂不可用）"
     except Exception as e:
         logger.warning("risk_perspective LLM call failed: {}", e)
         return "（风控分析暂不可用）"
