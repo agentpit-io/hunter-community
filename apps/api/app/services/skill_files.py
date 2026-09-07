@@ -422,9 +422,18 @@ def save(fields: dict, body: str) -> Path:
 
 # 附属文件的护栏。作者把方法论拆成几个 md 是常态,但仓库里也可能塞着
 # 几百 KB 的赞助码图片、整套测试数据 —— 装进来只会拖慢 opencode 扫描。
-MAX_ASSET_BYTES = 256 * 1024          # 单文件
-MAX_ASSETS_TOTAL = 2 * 1024 * 1024    # 一个 SKILL 的附属文件总量
-MAX_ASSETS_COUNT = 40
+#
+# 上限按**实测**定,不要凭感觉往小了设:API 文档型 SKILL 动辄几十个 md。
+# algoderiv/agent-skills 实测(2026-09-07):
+#     tqsdk    48 文件 612 KB      wtpy      14 文件 474 KB
+#     ctp-api  53 文件 1120 KB     rice-quant 10 文件 77 KB
+# 最初设的 40 个 / 2 MB 会把 tqsdk(47)和 ctp-api(53)截断 ——
+# **截断出来的 SKILL 是残的,正是这次要修的毛病**,所以宁可放宽。
+# 都是纯文本,8 MB 对 opencode 没有压力(它只在启动时扫 SKILL.md,
+# 附属文件是模型按需读的)。
+MAX_ASSET_BYTES = 256 * 1024          # 单文件 · 上面最大的 .md 也远在这之下
+MAX_ASSETS_TOTAL = 8 * 1024 * 1024    # 一个 SKILL 的附属文件总量
+MAX_ASSETS_COUNT = 100
 
 
 def save_assets(name: str, files: dict[str, bytes]) -> list[str]:

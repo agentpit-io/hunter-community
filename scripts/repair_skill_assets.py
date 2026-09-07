@@ -150,65 +150,77 @@ def main() -> int:
         return 1
 
     fixed = skipped = 0
+    tar_cache: dict = {}          # 多个 skill 常来自同一个仓库,别重复下载
+
     for sub in sorted(p for p in d.iterdir() if p.is_dir()):
         f = sub / "SKILL.md"
         if not f.is_file():
             continue
         fm, body = skill_files._parse_frontmatter(f.read_text(encoding="utf-8"))
         miss = skill_files.missing_refs(sub, body, limit=99)
-        if not miss:
-            continue
 
+        # ⚠️ **不能只处理 missing_refs 非空的**。
+        #
+        # missing_refs 靠正则找引用,而作者写 markdown 粗体
+        # (`- **configuration.md** - 配置详解`)抓不到 —— algoderiv 的 wtpy
+        # 就是这样:仓库里 13 个 references/*.md 一个都没装,而 missing_refs
+        # 显示"没缺东西"。**缺得最狠的那个,恰恰是报不出来的那个。**
+        # 所以只要有 github origin 就下来比一遍子树,拿差集说话。
         h = fm.get("hunter") or {}
         origin = str(fm.get("origin")
                      or (h.get("origin") if isinstance(h, dict) else "") or "")
         parsed = _parse_origin(origin)
-        print(f"\n[{sub.name}] 缺 {len(miss)} 个: {', '.join(miss[:6])}"
-              + (" …" if len(miss) > 6 else ""))
         if not parsed:
-            print(f"    补不了 —— origin 不是 github({origin or '空'})")
-            skipped += 1
+            if miss:
+                print(f"\n[{sub.name}] 缺 {len(miss)} 个,但补不了 —— "
+                      f"origin 不是 github({origin or '空'})")
+                skipped += 1
             continue
 
         owner, repo, ref = parsed
-        print(f"    来源 {owner}/{repo}@{ref}")
-        if dry:
-            continue
-        tf = _fetch_tar(owner, repo, ref)
+        key = (owner, repo, ref)
+        if key not in tar_cache:
+            tar_cache[key] = _fetch_tar(owner, repo, ref)
+        tf = tar_cache[key]
         if tf is None:
-            print("    下载失败,跳过")
+            print(f"\n[{sub.name}] 下载失败,跳过 ({owner}/{repo}@{ref})")
             skipped += 1
             continue
 
-        got: dict[str, bytes] = {}
+        got: dict = {}
 
-        # 先按 SKILL.md 在仓库里的位置整个子树搬 —— 和 skill_install._collect_assets
-        # 的 ① 一个道理:正则只认反引号包着的引用,作者写 markdown 粗体
-        # (`- **configuration.md** - 配置详解`)就抓不到,那些文件不会出现在
-        # missing_refs 里,只补 missing_refs 会漏掉一大半。
+        # ① SKILL.md 在自己的子目录里 → 整个同级子树,与 skill_install 同策略
         base = _locate_skill_dir(tf, sub.name)
         if base:
-            print(f"    SKILL.md 在仓库的 {base}/ 下,整个子树一起补")
-            got.update(_subtree_docs(tf, base))
+            for rel, data in _subtree_docs(tf, base).items():
+                if not (sub / rel).exists():        # 只补本地没有的,不覆盖
+                    got[rel] = data
 
+        # ② 正文点名要、但上面没覆盖到的
         for rel in miss:
-            if rel in got:
+            if rel in got or (sub / rel).exists():
                 continue
             data = _find_member(tf, rel)
             if data is None:
                 # 仓库里确实没有 —— 多半是正文代码示例里的文件名
                 # (wtpy 的 configbt.yaml 就是 engine.init() 的参数),
                 # 不是该随 SKILL 附带的东西。如实说明,别让人以为是我们漏装。
-                print(f"    仓库里也没有: {rel} (可能是正文提到的外部文件,不是附件)")
+                print(f"\n[{sub.name}] 仓库里也没有: {rel} "
+                      f"(正文提到的外部文件,不是附件)")
                 continue
             got[rel] = data
+
         if not got:
-            skipped += 1
+            continue
+        print(f"\n[{sub.name}] {owner}/{repo}@{ref}"
+              + (f" · 子目录 {base}/" if base else " · 仓库根"))
+        print(f"    要补 {len(got)} 个: {', '.join(sorted(got)[:6])}"
+              + (" …" if len(got) > 6 else ""))
+        if dry:
             continue
         written = skill_files.save_assets(sub.name, got)
         print(f"    补上 {len(written)} 个")
         fixed += 1
-
         left = skill_files.missing_refs(sub, body, limit=99)
         print(f"    剩余缺失: {left or '无 ✅'}")
 
