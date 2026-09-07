@@ -321,6 +321,41 @@ docker exec <opencode> bun -e "new (require('bun:sqlite').Database)(process.env.
 
 ---
 
+## 铁律:面向用户的 LLM 文本必须过语言守卫（判据是"有没有英文散文"）
+
+猎鹿人对用户可见的文本里，英文**只能**是专业名词（股票代码、PE/ROE/TTM、
+MACD/KDJ、NASDAQ），不能是短语、句子、段落。
+
+2026-09-07 事故：AI 短评整段输出
+`let's analyze the user's request ... **Role:** Hunter-gatherer Short Review Assistant (猎鹿人短评助手)`
+—— 模型把 system prompt 复述出来了。
+
+**根因是判据错了，不是没守卫。** 旧触发条件是 `contains_chinese(text)`
+（整段有没有中文），而跑偏的英文里几乎必然夹着中文股票名，守卫全程放行。
+
+### 怎么做
+
+- 判据用 `has_english_prose(text)`（`apps/api/agents/text_sanitizer.py`），**不要**再写
+  "有没有中文"这种判断。规则：连续英文词 run ≥ 3 且含 ≥ 2 个英文功能词 /
+  run ≥ 12 词 / 整段无中文且 ≥ 4 词。功能词表是封闭集，金融术语
+  （Free Cash Flow、MACD）和电报体英文新闻标题不会误伤；markdown 代码围栏跳过。
+- **新写的 sub-agent 不需要自己接守卫**：`ToolResult.summary` 在
+  `tool_registry.dispatch` 出口统一净化，`llm_json_call` 的 parsed 也统一净化。
+  但**新写的直接 `client.chat.completions.create` 调用**要自己
+  `system + ZH_ONLY_RULE`，输出过 `sanitize_llm_text`。
+- app 侧一律 `from app.services.lang_guard import ...`（它负责把 `apps/api` 插进
+  sys.path 再 re-export；`agents/` 不在 api 进程的 sys.path 里）。
+- **结构键与外部原始数据不许净化**：`type/code/market/impact/decision/rating/
+  trend/label` 是枚举，`title/url/source/date/author` 是外部数据（英文新闻标题
+  合法）。加新字段时想清楚它属于哪类，必要时加进 `NO_SANITIZE_KEYS`。
+- 净化不出中文 → 返回 `""`，由调用方落**只陈述真实数字**的规则文案。
+  兜底文案不许下结论（"行情正常，暂无特别信号"这种编出来的判断已经删掉了）。
+- prompt 里的 `ZH_ONLY_RULE` **单独用无效**（`_QUICKVIEW_SYS` 写着"用中文写"
+  照样跑英文），必须配出口强校验。同"LLM 严禁自由生成数字"那条的思路。
+
+改判据前先跑 `apps/api/tests/agent/test_lang_guard.py`，里面有 8 条反误伤用例
+（含 PE/ROE/Sharpe/Kronos/AH 溢价等真实文案），收紧规则时别把它们误伤了。
+
 ## 详细文档
 
 完整问题清单与实施记录(在 agentpit repo 内,不在本仓):
