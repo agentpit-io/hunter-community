@@ -665,9 +665,31 @@ def _build_llm_context(code: str, bundle: dict, outline: str = "") -> str:
                 first_heading = _ln
                 break
         first_heading = first_heading or "### 一、"
+        # ⚠️ **必须把 outline 渲染成"带占位符的完整模板",不能只给光秃秃的标题行。**
+        #
+        # 2026-09-08 实测(community · gemini-3.5-flash · 大佬评审团 SKILL):
+        # 只给标题列表时模型**完全不产出正文**,只回一句英文前言就收工 ——
+        #     ", let's write the analysis report based on the provided data."
+        #     "Here is the structured markdown report:"
+        # 用户看到的就是这两句英文(community 侧当时还没有兜底模板,直接透出去了)。
+        #
+        # 默认六段之所以一直好使,是因为它每节下面都有内容占位
+        # (`- **多头**：...` / `（结合 K 线趋势…）`),模型照着填空即可;
+        # 光秃秃的标题要它自己决定每节写什么,它选择先"确认理解"然后收工。
+        # (同步 SaaS 3564eb7 · 那条 commit 里就写了"community 侧同样要补")
+        _ol_lines = [l.rstrip() for l in outline.split(NL)]
+        _rendered: list[str] = []
+        for _i, _ln in enumerate(_ol_lines):
+            _rendered.append(_ln)
+            if _ln.strip().startswith("###"):
+                _nxt = _ol_lines[_i + 1].strip() if _i + 1 < len(_ol_lines) else ""
+                # 作者自己写了内容说明就别插了,只在"标题后面直接又是标题/空"时补
+                if not _nxt or _nxt.startswith("###"):
+                    _rendered.append("（1 段 · 2-3 句 · 只用上面数据段给出的事实）")
+                    _rendered.append("")
         structure_block = (
             "严格按以下 markdown 结构（这是本次分析要用的方法论框架）：" + NL2
-            + outline
+            + NL.join(_rendered).strip()
             + NL2
             + "⚠️ 结构照上面走,但**上面「合规硬约束」优先于这个结构**：" + NL
             + "   即使框架里要求给评级 / 目标价 / 买卖建议,也一律改写成"
@@ -765,11 +787,21 @@ def _outline_anchor(outline: str) -> str:
     传了 outline 之后正文就不再以 "### 一、" 开头了,原来那个写死的锚点会失配。
     只取前 8 个字符:模型复述标题时常改标点(顿号→点、全角→半角),
     整行比对反而更容易失配。取不到就返回空,让调用方退回默认锚点。
+
+    ⚠️ **必须先砍掉括号里的说明**。outline 常写成
+        ### 一、大佬评审团投票分布 (牛/熊/中性比例及综合评分)
+    而模型输出时只写「### 一、大佬评审团投票分布」—— 括号里那句是给它的
+    指示,不是标题的一部分。不砍的话 anchor 变成「一、大佬评审团投」后面
+    还带半个括号,直接失配,正文起点找不到 → 整篇被当成元话唠。
+    (同步 SaaS c056549)
     """
     for line in (outline or "").split(NL):
         line = line.strip()
         if line.startswith("###"):
             head = line.lstrip("#").strip()
+            for br in ("(", "（"):
+                if br in head:
+                    head = head.split(br)[0].strip()
             if head:
                 return head[:8]
     return ""
@@ -823,6 +855,50 @@ def _clean_llm_markdown(md: str, anchor: str = "一、") -> str:
             break
 
     return "\n".join(lines[start_idx:end_idx]).strip()
+
+
+def _has_report_body(markdown: str, anchor: str) -> bool:
+    """判断 LLM 到底写没写正文 —— 有一行 ### 标题命中锚点才算。"""
+    return any(ln.startswith("###") and anchor in ln for ln in (markdown or "").split(NL))
+
+
+def _fallback_markdown(code: str, name: str, market: str, bundle: dict) -> str:
+    """LLM 没产出正文时的兜底 —— 只复述**已经取到的真实数据**,不替它下判断。
+
+    ⚠️ 两条硬约束,都是从 SaaS 那份老兜底的教训来的:
+    1. **不许把取到的数据说成没取到**。老版写死一句「龙虎榜/十大股东/新闻/
+       研报维度均未采集」,news 明明有 8 条也照说,美股还被硬塞了 A 股术语。
+    2. **不许下判断**。老版会写「暂时旁观为宜」——那是分析结论,不是数据。
+       本地拼的模板没有分析能力,冒充分析就是在编。
+    只列真实数字 + 一句"本次 AI 正文未生成",让用户知道发生了什么。
+    """
+    quote = bundle.get("quote") or {}
+    kline = bundle.get("kline") or []
+    fin = bundle.get("financials")
+    filings = bundle.get("filings") or []
+    news = bundle.get("news") or []
+
+    parts = [f"### {name}（{code}）· 本次数据摘要", ""]
+    parts.append("> 本次 AI 正文未能生成（模型只回了开场白）。以下是本次实际取到的"
+                 "原始数据，未经任何推断，可直接重试一次。")
+    parts.append("")
+
+    if quote:
+        parts.append("**行情**：" + _fmt_price_block(quote, market))
+    if kline:
+        parts.append("**K 线**：" + _fmt_kline_summary(kline))
+    if fin:
+        parts.append("**财务**：" + (_fmt_financials(fin) if market == "A"
+                                     else _fmt_overseas_financials(fin)))
+    if filings:
+        parts.append("")
+        parts.append("**近期公告**：")
+        parts.append(_fmt_filings(filings))
+    if news:
+        parts.append("")
+        parts.append("**近期新闻**：")
+        parts.append(_fmt_news(news, 5))
+    return NL.join(parts).strip()
 
 
 def _stock_name(code: str) -> str:
@@ -944,9 +1020,11 @@ async def deep_analysis(body: DeepAnalysisIn, request: Request):
     # 后果不是不生效,是两套指令打架。
     _outline = _sanitize_outline(body.outline)
     if _outline:
-        _struct_line = "严格按用户消息里给出的小标题结构输出 · 中间只保留正文。"
+        _struct_line = ("**第一个字符必须是 `#`** · 严格按用户消息里给出的"
+                        "小标题结构输出 · 中间只保留正文。")
     else:
-        _struct_line = "从 '### 一、多空核心观点' 开头 · 到 '### 六、结论' 结束 · 中间只保留正文。"
+        _struct_line = ("**第一个字符必须是 `#`(即以 `### 一、多空核心观点` 开头)**"
+                        " · 到 '### 六、结论' 结束 · 中间只保留正文。")
     system_msg = (
         "你是一位专业的 A 股 / 港股 / 美股深度分析师。"
         "**只输出最终 markdown 报告本体**，不做任何思考过程 / 草稿 / 数据罗列 / 分析步骤说明。"
@@ -956,16 +1034,16 @@ async def deep_analysis(body: DeepAnalysisIn, request: Request):
     )
     user_msg = _build_llm_context(code, bundle, _outline)
 
-    def _llm_call():
+    def _llm_call(sys_msg: str = "", temperature: float = 0.35):
         # OpenAI 客户端是同步的 · 直接在 async 端点里调会把整个事件循环卡住 LLM 那么久
         # (期间 /api/chat/sessions 等所有请求都排队)。挪进线程,并给这一次调用单独限时。
         return client.with_options(timeout=_LLM_TIMEOUT_S).chat.completions.create(
             model=_MODEL,
             messages=[
-                {"role": "system", "content": system_msg},
+                {"role": "system", "content": sys_msg or system_msg},
                 {"role": "user", "content": user_msg},
             ],
-            temperature=0.35,
+            temperature=temperature,
             # 原来是 1200 · 但社区版常用 deepseek-v4-pro 这类**推理型模型**,
             # 内部会先跑一大段 reasoning 再输出正文,1200 全被 reasoning 吃掉,
             # message.content 返回空串,前端就看到"深度分析报告仍为空"。
@@ -989,7 +1067,24 @@ async def deep_analysis(body: DeepAnalysisIn, request: Request):
                 {"prompt": getattr(usage, "prompt_tokens", None),
                  "completion": getattr(usage, "completion_tokens", None)} if usage else None,
             )
-        markdown = _clean_llm_markdown(markdown, _outline_anchor(_outline) or "一、")
+        _anchor = _outline_anchor(_outline) or "一、"
+        markdown = _clean_llm_markdown(markdown, _anchor)
+
+        # 模型只回一句开场白就收工时(实测 llm_ms 才 1.1s、正文 0 个标题),
+        # 降温 + 点名上次的问题重跑一次。摆烂时那次调用本来就很快,重试很便宜,
+        # 比直接给用户一份数据摘要划算。
+        if not _has_report_body(markdown, _anchor):
+            logger.warning("[uzi] LLM 未产出正文 · 重跑一次 · code={} raw_head={!r}",
+                           code, markdown[:120])
+            _retry_sys = system_msg + (
+                "上一次你只回了一句开场白就结束了。本次**直接从 ### 开始输出正文**,"
+                "每个小标题下面都要有 2-3 句正文,不要任何开场白、确认语、结束语。")
+            _t = time.perf_counter()
+            resp2 = await asyncio.wait_for(
+                asyncio.to_thread(_llm_call, _retry_sys, 0.2), timeout=_LLM_TIMEOUT_S + 5)
+            timing["llm_retry_ms"] = int((time.perf_counter() - _t) * 1000)
+            markdown = _clean_llm_markdown(
+                (resp2.choices[0].message.content or "").strip(), _anchor)
     except asyncio.TimeoutError:
         logger.error("[uzi] LLM 合成超时 code={} model={} 限时 {:.0f}s · timing={}", code, _MODEL, _LLM_TIMEOUT_S, timing)
         raise HTTPException(504, f"LLM 合成超时(>{_LLM_TIMEOUT_S:.0f}s · model={_MODEL})")
@@ -997,15 +1092,22 @@ async def deep_analysis(body: DeepAnalysisIn, request: Request):
         logger.exception("[uzi] LLM 失败 code=%s", code)
         raise HTTPException(502, f"LLM 合成失败: {e}")
 
-    duration_ms = int((datetime.now() - t0).total_seconds() * 1000)
     dims_covered = [k for k, v in bundle.items() if v not in (None, [], {})]
     dims_missing = [k for k in bundle if k not in dims_covered]
-    logger.info("[uzi] 完成 code={} market={} total={}ms timing={} covered={} missing={}",
-                code, market, duration_ms, timing, dims_covered, dims_missing)
 
-    # 港美股的中文名来自行情源(腾讯返 "谷歌-C"),STOCK_MAP / watchlist 里通常没有,
-    # _stock_name 会退化成原样吐 "GOOG"。有真名就用真名。
-    _quote_name = (bundle.get("quote") or {}).get("name")
+    # 重试之后仍然没有正文 —— 给一份"只有真实数据"的摘要,别把英文残句
+    # (", let's write the analysis report ...")当报告透给用户。
+    _quote_name_for_fb = (bundle.get("quote") or {}).get("name") or _stock_name(code)
+    used_fallback = False
+    if not _has_report_body(markdown, _outline_anchor(_outline) or "一、") or len(markdown) < 100:
+        logger.warning("[uzi] 兜底数据摘要 code={} clean_len={} head={!r}",
+                       code, len(markdown), markdown[:120])
+        markdown = _fallback_markdown(code, _quote_name_for_fb, market, bundle)
+        used_fallback = True
+
+    duration_ms = int((datetime.now() - t0).total_seconds() * 1000)
+    logger.info("[uzi] 完成 code={} market={} total={}ms timing={} covered={} missing={} fallback={}",
+                code, market, duration_ms, timing, dims_covered, dims_missing, used_fallback)
 
     return {
         "ok": True,
@@ -1013,11 +1115,17 @@ async def deep_analysis(body: DeepAnalysisIn, request: Request):
         # 调用方(chat 模型 / 前端卡片 / 排查的人)得知道这份报告是按哪个市场取的数,
         # 否则"为什么没有龙虎榜"这种问题只能靠猜。
         "market": market,
-        "name": _quote_name or _stock_name(code),
+        # 港美股的中文名来自行情源(腾讯返 "谷歌-C"),STOCK_MAP / watchlist 里通常
+        # 没有,_stock_name 会退化成原样吐 "GOOG"。有真名就用真名。
+        "name": _quote_name_for_fb,
         "depth": body.depth,
         "markdown": markdown,
         "dims_covered": dims_covered,
         "dims_missing": dims_missing,
+        # ⚠️ **兜底状态必须暴露给调用方**(同步 SaaS f0f88bd)。
+        # 调用方(chat 模型、前端卡片、以及排查的人)拿到一份报告,得能分清
+        # 它是 LLM 真写的还是本地拼的数据摘要 —— 否则排查时会误判两轮。
+        "used_fallback": used_fallback,
         "duration_ms": duration_ms,
         "timing": timing,
         "model": _MODEL,
