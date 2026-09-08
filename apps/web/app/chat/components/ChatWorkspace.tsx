@@ -43,6 +43,8 @@ interface Props {
   onDraftConsumed?: () => void
   /** autoText 已发出 · 请 page 清掉,别在输入框重新挂载时再发一遍 */
   onAutoTextConsumed?: () => void
+  /** 换会话信号 · 每 +1 清一次输入框里没发出去的内容(见 InputBox 的 clearSeq) */
+  inputClearSeq?: number
   /** 点空态提示 chip 或深入追问建议 · 走 draft 机制填输入 */
   onPickSuggestion?: (text: string) => void
   /** 空态 quick-card 点击 · 同 sidebar onPickSkill(含辩论 depth 选择) */
@@ -166,6 +168,7 @@ export default function ChatWorkspace({
   draft,
   onDraftConsumed,
   onAutoTextConsumed,
+  inputClearSeq,
   pendingSkillKey,
   onSkillConsumed,
   debateDepth,
@@ -961,6 +964,7 @@ export default function ChatWorkspace({
       draft={draft}
       onDraftConsumed={onDraftConsumed}
       onAutoTextConsumed={onAutoTextConsumed}
+      clearSeq={inputClearSeq}
       mode={isEmpty ? 'hero' : 'follow'}
     />
   )

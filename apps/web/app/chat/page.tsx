@@ -38,6 +38,14 @@ function ChatPageInner() {
   const [autoText, setAutoText] = useState<string | undefined>(undefined)
   const [autoSend, setAutoSend] = useState(false)
   const [draft, setDraft] = useState<{ text: string; seq: number } | undefined>(undefined)
+  /**
+   * 换会话信号 · 每 +1 一次就把输入框里没发出去的内容清掉。
+   *
+   * 只在**明确知道用户在换会话**的两个入口递增(点侧栏会话 / 点新建对话)。
+   * 不能改成监听 sessionId 变化 —— 那区分不了"换会话"和"会话刚建好"
+   * (能力库跳转正是先建会话再填模板,一清就把刚填的模板抹掉了)。
+   */
+  const [inputClearSeq, setInputClearSeq] = useState(0)
   /** 记录用户上一次点的 SKILL key · 供 ChatWorkspace 判断"下条 send 要走特殊 handler"
    *  只有 debate 需要特殊处理 · 其他 SKILL 走普通对话 */
   const [pendingSkillKey, setPendingSkillKey] = useState<string | null>(null)
@@ -109,6 +117,7 @@ function ChatPageInner() {
 
   const handleSelectSession = useCallback((id: string) => {
     setSessionId(id)
+    setInputClearSeq((n) => n + 1)   // 输入框里那句是写给上一个会话的
     setArtifactPart(null)
     setReportContent(null)
     setSidebarCollapsed(false)  // 切 session · Sidebar 恢复展开
@@ -117,6 +126,7 @@ function ChatPageInner() {
 
   const handleNewSession = useCallback((id: string) => {
     setSessionId(id)
+    setInputClearSeq((n) => n + 1)   // 同上 · 侧栏「新建对话」走这里
     setArtifactPart(null)
     setReportContent(null)
     setSidebarCollapsed(false)
@@ -368,6 +378,7 @@ function ChatPageInner() {
         // 详见 InputBox 里 onDraftConsumed 的说明。
         onDraftConsumed={() => setDraft(undefined)}
         onAutoTextConsumed={() => { setAutoText(undefined); setAutoSend(false) }}
+        inputClearSeq={inputClearSeq}
         onPickSuggestion={handlePickSuggestion}
         onPickSkill={handlePickSkill}
         pendingSkillKey={pendingSkillKey}

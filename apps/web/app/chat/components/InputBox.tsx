@@ -45,6 +45,28 @@ interface InputBoxProps {
   onDraftConsumed?: () => void
   /** autoText 已经**发出去**了 —— 请父层清掉,别在重新挂载时再发一遍 */
   onAutoTextConsumed?: () => void
+  /**
+   * 换会话信号:这个数每 +1 一次,就把输入框里没发出去的内容清掉。
+   *
+   * ## 为什么不能靠"重新挂载"顺带清
+   *
+   * 输入框的 `text` 是本组件自己的 state,ChatWorkspace 那个「换会话清瞬时状态」
+   * 的 effect 够不着它。而**两个空会话之间切换时本组件根本不会重新挂载** ——
+   * hero / follow 的位置没变(都是 hero),React 复用同一个实例,text 原样留着。
+   *
+   * 2026-09-08 用户报的就是这个:在空会话点了快捷卡片把模板填进输入框、没发送,
+   * 直接点「新建对话」,新会话里那句模板还杵在输入框里。
+   *
+   * ## 为什么用信号而不是监听 sessionId
+   *
+   * 光看 sessionId 变化区分不了两件事:
+   *   · 用户**换会话**(该清)
+   *   · 会话**刚建好**(null → 新 id,不该清 —— 能力库跳转正是先建会话再填模板,
+   *     一清就把刚填进来的模板抹掉,等于把上一个 bug 修回去)
+   * 所以由 page 层在**明确知道用户在换会话**的那两个入口(点侧栏会话 /
+   * 点新建对话)递增这个数,不去猜 sessionId 变化的语义。
+   */
+  clearSeq?: number
   /** hero: 首屏居中内联 · follow: 有消息时贴底悬浮 */
   mode?: 'hero' | 'follow'
 }
@@ -77,6 +99,7 @@ export default function InputBox({
   draft,
   onDraftConsumed,
   onAutoTextConsumed,
+  clearSeq,
   mode = 'follow',
 }: InputBoxProps) {
   const [text, setText] = useState('')
@@ -86,6 +109,19 @@ export default function InputBox({
   const taRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const autoSentRef = useRef(false)
+
+  // 换会话:把没发出去的内容丢掉 —— 它是写给上一个会话的(见 clearSeq 的说明)。
+  //
+  // ⚠️ 这个 effect 必须**声明在下面两个填入 effect 之前**。同一批更新里
+  // effect 按声明顺序跑,清空排在填入后面的话,会把刚填进来的模板又抹掉。
+  const clearSeqRef = useRef(clearSeq)
+  useEffect(() => {
+    // 首次挂载不清:此时输入框本来就是空的,而 draft 可能正要往里填
+    if (clearSeqRef.current === clearSeq) return
+    clearSeqRef.current = clearSeq
+    setText('')
+    setAttachments([])   // 附件同理,也是给上一个会话准备的
+  }, [clearSeq])
 
   // 处理 URL ?q= 首条 · autoText 变化时填入
   useEffect(() => {
