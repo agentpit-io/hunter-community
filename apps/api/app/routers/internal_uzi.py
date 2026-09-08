@@ -683,9 +683,12 @@ def _build_llm_context(code: str, bundle: dict, outline: str = "") -> str:
             _rendered.append(_ln)
             if _ln.strip().startswith("###"):
                 _nxt = _ol_lines[_i + 1].strip() if _i + 1 < len(_ol_lines) else ""
-                # 作者自己写了内容说明就别插了,只在"标题后面直接又是标题/空"时补
+                # 作者自己写了内容说明就别插了,只在"标题后面直接又是标题/空"时补。
+                # ⚠️ 占位符里**不要写死"1 段 2-3 句"**:2026-09-08 用户反馈
+                # 「回答越来越简单」,一部分原因就是这句把每节都框成了两三句。
+                # 占位符的作用是"告诉模型这节该写什么",不是"限制它写多少"。
                 if not _nxt or _nxt.startswith("###"):
-                    _rendered.append("（1 段 · 2-3 句 · 只用上面数据段给出的事实）")
+                    _rendered.append("（结合上面数据段给出的事实充分展开 · 有几个要点写几个 · 不编数字）")
                     _rendered.append("")
         structure_block = (
             "严格按以下 markdown 结构（这是本次分析要用的方法论框架）：" + NL2

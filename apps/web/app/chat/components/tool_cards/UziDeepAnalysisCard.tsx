@@ -34,6 +34,10 @@ const DIM_LABEL: Record<string, string> = {
   governance:   '治理',
   news:         '新闻',
   research:     '研报',
+  // 港美股专属维度(2026-09-08 接入)。缺映射时会 fallback 成英文 key,
+  // 用户在标签栏里看到的就是 "filings" —— 用户可见文案不许出现英文。
+  filings:      '公告',
+  analysts:     '分析师',
 }
 
 /**
@@ -166,7 +170,7 @@ export default function UziDeepAnalysisCard(
           </span>
         ))}
         {dimsMissing.map(d => (
-          <span key={d} title="数据未 seed（akshare backfill 中）" style={{
+          <span key={d} title="该维度本次未取到数据" style={{
             display: 'inline-flex', alignItems: 'center', gap: 3,
             padding: '2px 7px', borderRadius: 4, fontSize: 10.5,
             background: HUNTER.PAPER, color: HUNTER.INK_F, fontWeight: 500,
