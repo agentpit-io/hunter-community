@@ -39,6 +39,10 @@ interface Props {
   autoSend?: boolean
   /** 点能力卡填入输入框(seq 递增以支持连点同一个能力) */
   draft?: { text: string; seq: number }
+  /** draft 已填进输入框 · 请 page 清掉(为什么必须由父层记账见 InputBox 的同名 prop) */
+  onDraftConsumed?: () => void
+  /** autoText 已发出 · 请 page 清掉,别在输入框重新挂载时再发一遍 */
+  onAutoTextConsumed?: () => void
   /** 点空态提示 chip 或深入追问建议 · 走 draft 机制填输入 */
   onPickSuggestion?: (text: string) => void
   /** 空态 quick-card 点击 · 同 sidebar onPickSkill(含辩论 depth 选择) */
@@ -160,6 +164,8 @@ export default function ChatWorkspace({
   autoText,
   autoSend,
   draft,
+  onDraftConsumed,
+  onAutoTextConsumed,
   pendingSkillKey,
   onSkillConsumed,
   debateDepth,
@@ -953,6 +959,8 @@ export default function ChatWorkspace({
       autoText={autoText}
       autoSend={autoSend}
       draft={draft}
+      onDraftConsumed={onDraftConsumed}
+      onAutoTextConsumed={onAutoTextConsumed}
       mode={isEmpty ? 'hero' : 'follow'}
     />
   )

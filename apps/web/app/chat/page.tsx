@@ -362,6 +362,12 @@ function ChatPageInner() {
         autoText={autoText}
         autoSend={autoSend}
         draft={draft}
+        // draft / autoText 都是**一次性**的:送进输入框(或发出去)就该消失。
+        // 不清的话,输入框因 isEmpty 翻转而重新挂载时会把它们再应用一遍 ——
+        // 表现是"发完消息输入框里还杵着模板"和"同一句话被发两次"。
+        // 详见 InputBox 里 onDraftConsumed 的说明。
+        onDraftConsumed={() => setDraft(undefined)}
+        onAutoTextConsumed={() => { setAutoText(undefined); setAutoSend(false) }}
         onPickSuggestion={handlePickSuggestion}
         onPickSkill={handlePickSkill}
         pendingSkillKey={pendingSkillKey}

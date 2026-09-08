@@ -24,6 +24,27 @@ interface InputBoxProps {
   autoSend?: boolean
   /** 点能力卡填入的模板;seq 递增,连点同一个能力也能重复填入 */
   draft?: { text: string; seq: number }
+  /**
+   * draft 已经填进输入框了 —— 请父层清掉它。
+   *
+   * ## 为什么"消费"这件事必须由父层记账
+   *
+   * 本组件在树里有**两个位置**:会话空的时候作为 `heroInput` 渲染在 MessageList
+   * 中央,有消息之后渲染在 ChatWorkspace 底部(见那边的 `isEmpty ? inputEl : null`
+   * 与 `{!isEmpty && inputEl}`)。发出第一条消息后 `isEmpty` 翻转,React 把这个
+   * 组件**卸载再挂载** —— `text` 归零、`autoSentRef` 也归零。
+   *
+   * 而 effect 在挂载时必定跑一次,于是:
+   *   · draft 还在 → 把模板原文又填回输入框(用户刚发完就看到一句没填占位符的模板)
+   *   · autoText + autoSend 还在 → **再发一次**,聊天里出现两条一模一样的用户消息
+   *
+   * 2026-09-08 用户两次报的就是这两个症状。记在组件自己的 ref 里救不了 ——
+   * ref 跟着组件一起没。所以填入/发出之后回调父层,把 draft / autoText 清掉,
+   * 重新挂载时它们是空的,effect 自然早返回。
+   */
+  onDraftConsumed?: () => void
+  /** autoText 已经**发出去**了 —— 请父层清掉,别在重新挂载时再发一遍 */
+  onAutoTextConsumed?: () => void
   /** hero: 首屏居中内联 · follow: 有消息时贴底悬浮 */
   mode?: 'hero' | 'follow'
 }
@@ -54,6 +75,8 @@ export default function InputBox({
   autoText,
   autoSend,
   draft,
+  onDraftConsumed,
+  onAutoTextConsumed,
   mode = 'follow',
 }: InputBoxProps) {
   const [text, setText] = useState('')
@@ -73,8 +96,13 @@ export default function InputBox({
         setTimeout(() => {
           onSend(autoText)
           setText('')
+          // 发出去了就请父层清掉 —— autoSentRef 挡不住重新挂载(见 onAutoTextConsumed
+          // 的说明),不清的话第一条消息发出、输入框换位置重挂之后会**再发一遍**
+          onAutoTextConsumed?.()
         }, 200)
       }
+      // 只填入没发送(autoSend=false 或此刻 disabled)时**不消费** ——
+      // 还要等 disabled 变回 false 时由这个 effect 再跑一次把它发出去
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoText, autoSend, disabled])
@@ -83,6 +111,11 @@ export default function InputBox({
   useEffect(() => {
     if (!draft?.text) return
     setText(draft.text)
+    // **填进来就算用掉了**,立刻请父层清掉 draft。
+    // draft 的职责只是"把这段文字送进输入框"一次;留着它,等这个组件因为
+    // isEmpty 翻转而重新挂载时会被再填一遍(见 onDraftConsumed 的说明),
+    // 表现就是"消息已经发出去了,输入框里却还杵着那句没填占位符的模板"。
+    onDraftConsumed?.()
     const ta = taRef.current
     if (!ta) return
     const m = /\{[^}]*\}/.exec(draft.text)
