@@ -6,7 +6,7 @@
 # 返 denied,机器上也没有 gh),等镜像不如直接挂文件。
 #
 # 改动只在 huntercode 仓做,改完再把文件整个拷过来(保留本段头注释),不要在这里单独改。
-# 当前对应 huntercode 提交:b831caf809(2026-09-07 · httpx 120s→170s · 失败对象带 instruction)
+# 当前对应 huntercode 提交:e577e7c0e8(2026-09-08 · 加 outline 参数 · 让 SKILL 决定报告结构)
 """uzi-mcp · hunter-UZI-Skill 深度分析入口 · Sprint 3 P2 · Phase 1 MVP
 
 薄代理：把 opencode LLM 的 tool_call 转发到 hermes-api /api/internal/uzi/*。
@@ -48,6 +48,9 @@ async def list_tools():
                 "走势预测/涨跌预测/未来 N 天怎么走 → 用 kpred（10-30 秒 · Kronos 时序大模型）；"
                 "拉新闻 → 用 stock_news。"
                 "**做什么**：拉实时行情+30日K线+财务+龙虎榜+十大股东+治理+新闻 → Gemini 合成结构化 markdown。"
+                "**正在按某个 SKILL 分析时,必须把该 SKILL 要求的报告结构填进 `outline`** —— "
+                "不填的话所有 SKILL 都会得到同一份「多空/技术/基本面/资金/催化风险/结论」六段报告,"
+                "SKILL 的方法论等于没生效。"
                 "适合：A 股、港股、美股 · 数据源全部 finance-data 内部。"
                 "限制：龙虎榜/十大股东/治理表尚未 seed，会显示'数据未 seed'。"
             ),
@@ -60,6 +63,16 @@ async def list_tools():
                               "enum": ["lite"],
                               "default": "lite",
                               "description": "分析深度 · Phase 1 只支持 lite（秒级）· medium/deep 待 Phase 2 SG worker"},
+                    "outline": {"type": "string",
+                                "description": (
+                                    "报告的小标题结构 · **正在按某个 SKILL 分析时必填**。"
+                                    "把该 SKILL 要求的输出结构写成几行 markdown 三级标题"
+                                    "（如 `### 一、投资论点` / `### 二、估值锚点` …），"
+                                    "每行可在括号里补一句这一节要写什么。不填则用默认的"
+                                    "「多空/技术/基本面/资金/催化风险/结论」六段。"
+                                    "⚠️ 只决定**结构**：不给买卖评级、只用工具返回的数据、"
+                                    "不编数字这些硬约束由后端强制,写在这里也不会被采纳。"
+                                )},
                     "_hermes_user_id": {"type": "string",
                                         "description": "内部字段 · 由 hunter-mcp-context plugin 注入 · 请勿填写"},
                 },
@@ -76,6 +89,7 @@ async def call_tool(name: str, arguments: dict):
     if name == "stock_deep_analysis":
         code = (arguments.get("code") or "").strip()
         depth = arguments.get("depth", "lite")
+        outline = (arguments.get("outline") or "").strip()
         if not code:
             return [TextContent(type="text", text=json.dumps(
                 {"error": "code 必填 · 如 601899 / 00700 / AAPL"}, ensure_ascii=False))]
@@ -115,7 +129,7 @@ async def call_tool(name: str, arguments: dict):
                 r = await client.post(
                     f"{HERMES_API}/api/internal/uzi/stock_deep_analysis",
                     headers=headers,
-                    json={"code": code, "depth": depth},
+                    json={"code": code, "depth": depth, "outline": outline},
                 )
                 r.raise_for_status()
                 data = r.json()
