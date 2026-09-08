@@ -661,6 +661,61 @@ SaaS 侧结构完全同构(`hunter` 862/895 两处渲染),同一个 bug,已一�
 
 ---
 
+## 铁律:深度分析取数必须先判市场 · prefill 才能让模型稳定写正文
+
+2026-09-08 事故：问「66 位大佬对 GOOG 的投票结果」，报告前三节全是「暂无数据」。
+
+### 取数按市场分派
+
+`internal_uzi.deep_analysis` 原来**无条件走 A 股八路**（quote / kline /
+financials / lhb / fund_holders / governance / news / research）。给美股这么拉：
+龙虎榜、十大股东、治理、研报四路必空（白等 0.4s），而美股真正有的源一路没接。
+
+文件里明明有 `_SECTIONS_BY_MARKET`（认真地不给美股渲染龙虎榜），但**取数那段
+完全没看它** —— 裁剪逻辑和取数逻辑各走各的。
+
+- 入口先判市场：用 `market_source.market_of`，**不要再写第二套**
+  （它多处理了 `.HK/.US` 后缀和 BRK.B 这类本身带点的 ticker）
+- **"拉哪几路"和"哪几段进提示词"必须同一处决定**，加维度时两边一起改
+- 港美股可用的源（都在仓里 · 国内 IP 实测）：
+  `gm.filings.us_filings`（SEC 官方 178ms/10 条）·
+  `gm.filings.hk_filings`（披露易 5.3s）·
+  akshare `stock_financial_us_report_em` / `stock_financial_hk_report_em`
+  （东财年报 0.3-0.7s）· `market_source.quote/daily`（腾讯/新浪）
+- **不合格的源就别接**：`gm.news_src.hk_news` 实测返回与标的无关的 Yahoo
+  英文新闻，接了等于给模型喂噪声
+- 港美股财务 dict 结构与 A 股口径不同，**渲染函数不能共用** ——
+  混用的表现是"有数据却整段显示关键字段缺失"
+
+### assistant prefill
+
+数据补齐后模型仍然出不来正文，只回一句英文开场白
+（`, let's write the analysis report ...`，9-13 秒才吐 60 个字符）。
+同一 prompt 连打 5 次**只有 2 次产出正文** —— 它在服务端跑了一大段 thinking，
+网关要么把 thinking 混进 content，要么只回最后一句。
+
+改 system 措辞、去掉否定句、调温度、max_tokens 2000→4096 **全都无效**。
+
+有效的是把正文第一行作为 assistant 的最后一条消息塞进 messages：
+
+```python
+messages = [system, user, {"role": "assistant", "content": "### 一、xxx" + NL}]
+raw = prefill + resp.choices[0].message.content   # 记得拼回去
+```
+
+实测 4/4 全出正文，耗时从 9-13s 降到 4-5s。
+⚠️ gemini-3.6/3.8-flash 对「以 model turn 结尾」的请求返 400，
+必须留一条退回普通调用的兜底路径。
+⚠️ 网关的 `usage.completion_tokens` 不可信（实测 12-13，与真实输出差一个
+数量级），排查时看 raw 长度和耗时，别拿它当证据。
+
+### 兜底与文案
+
+- 兜底模板**只复述已经取到的真实数字**，不许把取到的说成没取到，
+  也不许下判断（"暂时旁观为宜"是分析结论，本地模板没有分析能力）
+- `used_fallback` 必须在返回体里明示，降级不能伪装成正常结果
+- **内部黑话（未 seed / subscribe）不许进 prompt** —— 模型会照着写给用户看
+
 ## 详细文档
 
 完整问题清单与实施记录(在 agentpit repo 内,不在本仓):
