@@ -198,6 +198,119 @@ def _akshare_lhb(bare: str, days: int = 30) -> list[dict]:
     } for r in rows]
 
 
+# ═══════════════════════════════════════════════════════════════
+# 港美股专属取数 —— A 股那套通道对它们基本全是空
+# ═══════════════════════════════════════════════════════════════
+# 2026-09-08:GOOG 的「66 位大佬评审团」前三节全是「暂无数据」。查下来
+# **不是数据源没有,是这个 endpoint 从来只走 A 股八路**:
+#   · lhb / fund_holders / governance / research 是 A 股专属,给美股白拉 0.4s,
+#     还会在提示词里渲染成"缺失",模型照实写成"暂无数据"
+#   · 美股 SEC 公告、东财美股财报、港股披露易公告 —— 仓里都有现成的源,一路都没接
+#
+# 实测(community 服务器 · 国内 IP · 2026-09-08):
+#   gm.filings.us_filings(GOOG)     178ms  10 条 SEC 公告
+#   gm.filings.hk_filings(00700)    5.3s   10 条披露易公告
+#   东财美股财报(GOOG)               699ms  2025 年报 营收 4028 亿美元
+#   东财港股财报(00700)              347ms  2025 年报 营业额 7437 亿港元
+# 数据一直都在,只是没人去取。
+#
+# 反过来,以下源实测**不合格,故意不接**(空的比假的好):
+#   · gm.news_src.hk_news(00700) → 8 条 Yahoo 英文新闻,内容与腾讯毫无关系
+#   · findata_db.* → 开源部署的库里没有 us_*/hk_* 表,全部报 relation does not exist
+
+# 东财财报的科目名两边不一样(美股 ITEM_NAME / 港股 STD_ITEM_NAME),
+# 而且同一个概念有多种叫法,用别名表匹配。
+_FIN_ITEM_ALIASES = {
+    "revenue":      ("营业收入", "主营收入", "营业额", "营运收入", "总收入"),
+    "gross_profit": ("毛利", "毛利润"),
+    "net_profit":   ("归属于母公司股东净利润", "归属于普通股股东净利润", "净利润",
+                     "股东应占溢利", "本公司拥有人应占溢利", "持续经营净利润"),
+    "eps":          ("基本每股收益-普通股", "基本每股收益", "每股基本盈利"),
+}
+
+
+def _pick_fin_item(name_to_amount: dict, key: str):
+    for alias in _FIN_ITEM_ALIASES[key]:
+        v = name_to_amount.get(alias)
+        if v is not None:
+            return v
+    return None
+
+
+def _em_financials(bare: str, market: str) -> dict | None:
+    """港美股财务摘要 · 东财年报(akshare)。取最近两期算同比。
+
+    取不到就返 None —— 不许拿空 dict 或 0 冒充(§铁律:空的比假的好)。
+    """
+    try:
+        import akshare as ak
+        if market == "US":
+            df = ak.stock_financial_us_report_em(
+                stock=bare.upper(), symbol="综合损益表", indicator="年报")
+        else:
+            df = ak.stock_financial_hk_report_em(
+                stock=bare.zfill(5), symbol="利润表", indicator="年度")
+    except Exception as e:
+        logger.warning("[uzi] 东财财报失败 code={} market={} err={}", bare, market, e)
+        return None
+    if df is None or getattr(df, "empty", True):
+        return None
+    name_col = "ITEM_NAME" if "ITEM_NAME" in df.columns else "STD_ITEM_NAME"
+    if name_col not in df.columns or "REPORT_DATE" not in df.columns:
+        logger.warning("[uzi] 东财财报字段异常 code={} cols={}", bare, list(df.columns))
+        return None
+
+    periods = sorted({str(x) for x in df["REPORT_DATE"].dropna().unique()})
+    if not periods:
+        return None
+
+    def _snapshot(period: str) -> dict:
+        sub = df[df["REPORT_DATE"].astype(str) == period]
+        m = {}
+        for _, row in sub.iterrows():
+            nm = str(row.get(name_col) or "").strip()
+            if nm and nm not in m:
+                try:
+                    m[nm] = float(row.get("AMOUNT"))
+                except (TypeError, ValueError):
+                    continue
+        return m
+
+    cur = _snapshot(periods[-1])
+    prev = _snapshot(periods[-2]) if len(periods) > 1 else {}
+
+    out = {"period": periods[-1][:10], "market": market}
+    for key in ("revenue", "gross_profit", "net_profit", "eps"):
+        out[key] = _pick_fin_item(cur, key)
+
+    for key, yoy_key in (("revenue", "revenue_yoy"), ("net_profit", "net_profit_yoy")):
+        now, was = out.get(key), _pick_fin_item(prev, key)
+        if now is not None and was:
+            out[yoy_key] = round((now - was) / abs(was) * 100, 2)
+
+    if out.get("revenue") and out.get("gross_profit"):
+        out["gross_margin"] = round(out["gross_profit"] / out["revenue"] * 100, 2)
+
+    # 一个关键科目都没匹配上 = 这份表对我们没用,别拿一个只有 period 的壳去糊模型
+    if not any(out.get(k) is not None for k in ("revenue", "net_profit", "eps")):
+        logger.warning("[uzi] 东财财报科目未匹配 code={} 期={} 科目样例={}",
+                       bare, out["period"], list(cur)[:6])
+        return None
+    return out
+
+
+def _overseas_filings(bare: str, market: str) -> list[dict]:
+    """美股 SEC / 港股披露易公告 · 统一 [{form,title,date,url}]。"""
+    try:
+        from app.services.gm import filings as _filings
+        if market == "US":
+            return _filings.us_filings(bare.upper(), 10) or []
+        return _filings.hk_filings(bare.zfill(5), 10) or []
+    except Exception as e:
+        logger.warning("[uzi] 公告拉取失败 code={} market={} err={}", bare, market, e)
+        return []
+
+
 def _auth(request: Request) -> str:
     key = request.headers.get("X-Hunter-Internal-Key", "")
     if key != _INTERNAL_KEY:
@@ -223,15 +336,57 @@ class DeepAnalysisIn(BaseModel):
     outline: str = ""
 
 
-def _fmt_price_block(quote: dict | None) -> str:
+# 币种跟着市场走 —— 美股写"元"会被模型当人民币,进而拿去和 A 股比估值。
+_CURRENCY_UNIT = {"A": "元", "HK": "港元", "US": "美元"}
+
+
+def _fmt_price_block(quote: dict | None, market: str = "A") -> str:
     if not quote:
         return "行情：数据缺失"
-    return (
-        f"现价 {quote.get('price')} 元 · "
-        f"涨跌 {quote.get('change_pct')}% · "
-        f"成交额 {quote.get('amount', 0) / 1e8:.2f} 亿 · "
-        f"截止 {quote.get('ts', '?')}"
-    )
+    unit = _CURRENCY_UNIT.get(market, "元")
+    parts = [f"现价 {quote.get('price')} {unit}"]
+    if quote.get("change_pct") is not None:
+        parts.append(f"涨跌 {quote.get('change_pct')}%")
+    amount = quote.get("amount")
+    # 成交额缺失就不写这一项。写成 "0.00 亿" 的话模型会照着推理
+    # 「成交额为 0 → 资金停滞」—— 缺数据被读成了一个信号。
+    if amount:
+        parts.append(f"成交额 {amount / 1e8:.2f} 亿{unit}")
+    parts.append(f"截止 {quote.get('ts', '?')}")
+    return " · ".join(parts)
+
+
+def _fmt_overseas_financials(fin: dict | None) -> str:
+    """港美股财务(东财年报)渲染 · 金额统一换算成亿。"""
+    if not fin:
+        return "财务：数据缺失"
+    unit = _CURRENCY_UNIT.get(fin.get("market", "US"), "元")
+    parts = [f"报告期={fin.get('period')}（年报）"]
+    for key, label in (("revenue", "营业收入"), ("gross_profit", "毛利"),
+                       ("net_profit", "净利润")):
+        v = fin.get(key)
+        if v is not None:
+            parts.append(f"{label}={v / 1e8:.2f} 亿{unit}")
+    if fin.get("gross_margin") is not None:
+        parts.append(f"毛利率={fin['gross_margin']}%")
+    if fin.get("revenue_yoy") is not None:
+        parts.append(f"营收同比={fin['revenue_yoy']}%")
+    if fin.get("net_profit_yoy") is not None:
+        parts.append(f"净利同比={fin['net_profit_yoy']}%")
+    if fin.get("eps") is not None:
+        parts.append(f"每股收益={fin['eps']} {unit}")
+    return "、".join(parts)
+
+
+def _fmt_filings(items: list[dict]) -> str:
+    """SEC / 披露易公告列表。"""
+    if not items:
+        return "公告：数据缺失"
+    lines = []
+    for it in items[:8]:
+        title = (it.get("title") or it.get("form") or "").strip()
+        lines.append(f"- {it.get('date', '?')} [{it.get('form', '?')}] {title}")
+    return NL.join(lines)
 
 
 def _fmt_kline_summary(kline: list[dict]) -> str:
@@ -373,13 +528,17 @@ def _market_of(code: str) -> str:
 
     用户看到的是"这个系统连英伟达的基本面都拿不到",而真相是
     "我们拿 A 股的龙虎榜去查美股,当然查不到"。
+
+    ## 判定本身不在这里实现
+
+    2026-09-08:这里原来自己写了一套(6 位→A / 5 位→HK / 其余→US),
+    而 `market_source.market_of` 早就有一套带实测论证的(还处理了 .HK/.US
+    后缀和 BRK.B 这类**本身带点**的 ticker)。同一件事两处实现,迟早打架
+    —— 仓里已经吃过一次亏(见 CLAUDE.md「多处写死会打架」)。
+    这里只负责把小写结果转成本文件用的大写键。
     """
-    bare = (code or "").split(".")[0].strip()
-    if bare.isdigit() and len(bare) == 6:
-        return "A"
-    if bare.isdigit() and len(bare) == 5:
-        return "HK"
-    return "US"
+    from app.services.market_source import market_of as _market_source_of
+    return _market_source_of(code).upper()
 
 
 # 每个市场**有意义**的数据段。不在表里的直接不拼进提示词 ——
@@ -387,8 +546,11 @@ def _market_of(code: str) -> str:
 _SECTIONS_BY_MARKET = {
     "A":  ["quote", "kline", "financials", "lhb", "fund_holders",
            "governance", "news", "research"],
-    "HK": ["quote", "kline", "financials", "news"],
-    "US": ["quote", "kline", "financials", "news"],
+    # 港美股的"公告"是 SEC filings / 披露易,和 A 股的东财新闻不是一回事,
+    # 单开一段。2026-09-08 之前这两个市场只有 4 段,其中 financials 还没人去取,
+    # 于是实际只剩行情+K线+新闻 —— 大佬评审团里凡是要看基本面的流派全写"暂无数据"。
+    "HK": ["quote", "kline", "financials", "news", "filings"],
+    "US": ["quote", "kline", "financials", "news", "filings"],
 }
 
 
@@ -437,15 +599,24 @@ def _build_llm_context(code: str, bundle: dict, outline: str = "") -> str:
         n += 1
         blocks.append(f"## {n}. {title}\n{body}")
 
-    _add("quote", "实时行情", _fmt_price_block(bundle.get("quote")))
+    _add("quote", "实时行情", _fmt_price_block(bundle.get("quote"), mk))
     _add("kline", "K 线（近 30 日）", _fmt_kline_summary(bundle.get("kline") or []))
-    _add("financials", "财务（TTM · 最新季）", _fmt_financials(bundle.get("financials")))
+    # 财务的来源和口径按市场分：A 股是 finance-data / 东财 A 股季报（TTM 口径），
+    # 港美股是东财年报（营收/毛利/净利/EPS + 同比）。两种 dict 结构不一样，
+    # 渲染函数不能共用 —— 混用的表现是财务段整段变成"关键字段缺失"。
+    if mk == "A":
+        _add("financials", "财务（TTM · 最新季）", _fmt_financials(bundle.get("financials")))
+    else:
+        _add("financials", "财务（最新年报）",
+             _fmt_overseas_financials(bundle.get("financials")))
     _add("lhb", "龙虎榜（近 30 日）", _fmt_lhb(bundle.get("lhb") or []))
     _add("fund_holders", "十大流通股东（最新季度）",
          _fmt_fund_holders(bundle.get("fund_holders") or []))
     _add("governance", "治理指标", _fmt_governance(bundle.get("governance")))
     _add("news", "近期公告 / 新闻", _fmt_news(bundle.get("news") or []))
     _add("research", "近期研报（券商一致预期）", _fmt_research(bundle.get("research") or []))
+    _add("filings", "近期公告（美股 SEC / 港股披露易 · 官方源）",
+         _fmt_filings(bundle.get("filings") or []))
 
     market_label = {"A": "A 股", "HK": "港股", "US": "美股"}[mk]
 
@@ -466,7 +637,9 @@ def _build_llm_context(code: str, bundle: dict, outline: str = "") -> str:
         # 用户看到的还是一句莫名其妙的 A 股术语。
         # 正确做法是只说该看什么,不说不该看什么。
         senti_hint = "（结合新闻主线与成交量变化 · 只用上面给出的数据段）"
-        fund_hint = "（结合财务 · ROE · 增速）"
+        # 港美股财务走的是东财年报,里面没有 ROE —— 提示词里点名一个数据段里
+        # 根本没有的指标,模型要么写"缺失",要么自己算一个出来。
+        fund_hint = "（结合营收 / 净利同比 · 毛利率 · 每股收益 · 公告披露的事项）"
         extra_rule = ""
 
     # ── 报告结构 ──────────────────────────────────────────────
@@ -686,33 +859,52 @@ async def deep_analysis(body: DeepAnalysisIn, request: Request):
     t0 = datetime.now()
     # 同步 httpx 客户端 · 在 async endpoint 里必须走 to_thread 避免阻塞事件循环
     # （从 async 直接 sync 调 httpx.get 会遇到 connection pool 或事件循环冲突 · 表现为 None 返回）
-    sym = fd.to_symbol(code)
+    #
+    # ⚠️ **先判市场,再决定拉哪几路。** 2026-09-08 之前这里无条件走 A 股八路:
+    # 给 GOOG 也去拉龙虎榜/十大股东/治理/研报(白等 0.4s,四路必空),
+    # 而美股真正有的 SEC 公告和东财美股财报一路都没拉 —— 结果就是
+    # 「66 位大佬评审团」里凡要看基本面的流派全写"暂无数据"。
+    # 拉哪几路必须和 _SECTIONS_BY_MARKET(哪几段进提示词)对齐,否则要么白拉,
+    # 要么拉了不用。
+    market = _market_of(code)
+    _bare = code.split(".")[0].strip()
     timing: dict[str, int] = {}
     try:
         _t = time.perf_counter()
-        # 8 路并发 · 总预算 _FETCH_BUDGET_S · 各路含义见 bundle 的 key
-        bundle = await _gather_budget({
-            "quote":        asyncio.to_thread(fd.get_quote, code),
-            "kline":        asyncio.to_thread(fd.get_kline, code, "daily", 30),
-            # 财报走 shared akshare(§9 铁律 3 · 独立部署时 fd._get 会打空)
-            # · 主路径直接是 akshare · 不再作为 fd fallback 的备胎
-            "financials":   asyncio.to_thread(_akshare_financials, code.split(".")[0]) if code.split(".")[0].isdigit() else asyncio.sleep(0, result=None),
-            "lhb":          asyncio.to_thread(fd.get_lhb, code, 30),
-            "fund_holders": asyncio.to_thread(fd.get_fund_holders, code),
-            "governance":   asyncio.to_thread(fd.get_governance, code),
-            "news":         asyncio.to_thread(fd.get_news, code, 8),
-            "research":     asyncio.to_thread(fd.get_research_reports, code, 10),
-        }, _FETCH_BUDGET_S, f"主拉数 code={code}")
+        if market == "A":
+            # A 股八路并发 · 总预算 _FETCH_BUDGET_S · 各路含义见 bundle 的 key
+            bundle = await _gather_budget({
+                "quote":        asyncio.to_thread(fd.get_quote, code),
+                "kline":        asyncio.to_thread(fd.get_kline, code, "daily", 30),
+                # 财报走 shared akshare(§9 铁律 3 · 独立部署时 fd._get 会打空)
+                # · 主路径直接是 akshare · 不再作为 fd fallback 的备胎
+                "financials":   asyncio.to_thread(_akshare_financials, _bare),
+                "lhb":          asyncio.to_thread(fd.get_lhb, code, 30),
+                "fund_holders": asyncio.to_thread(fd.get_fund_holders, code),
+                "governance":   asyncio.to_thread(fd.get_governance, code),
+                "news":         asyncio.to_thread(fd.get_news, code, 8),
+                "research":     asyncio.to_thread(fd.get_research_reports, code, 10),
+            }, _FETCH_BUDGET_S, f"主拉数 A code={code}")
+        else:
+            # 港美股五路 · quote/kline/news 走 finance_data_client(它内部对港美股
+            # 已经会回落到 market_source 的腾讯/新浪通道,实测 GOOG 报价 192ms、
+            # 日线 30 根),financials/filings 是本次新接的东财财报 + SEC/披露易。
+            bundle = await _gather_budget({
+                "quote":      asyncio.to_thread(fd.get_quote, code),
+                "kline":      asyncio.to_thread(fd.get_kline, code, "daily", 30),
+                "news":       asyncio.to_thread(fd.get_news, code, 8),
+                "financials": asyncio.to_thread(_em_financials, _bare, market),
+                "filings":    asyncio.to_thread(_overseas_filings, _bare, market),
+            }, _FETCH_BUDGET_S, f"主拉数 {market} code={code}")
         timing["fetch_ms"] = int((time.perf_counter() - _t) * 1000)
     except Exception as e:
-        logger.exception("[uzi] 拉数失败 code=%s", code)
+        logger.exception("[uzi] 拉数失败 code=%s market=%s", code, market)
         raise HTTPException(502, f"拉取数据失败: {e}")
 
     # akshare 兜底 · 只针对 A 股 · finance-data 没订阅时 5/8 维度会空,
-    # 用东财公开接口补 kline/financials/news/research/lhb。港股/美股无此路径。
-    _bare = code.split(".")[0]
-    _is_a_stock = _bare.isdigit() and len(_bare) == 6
-    if _is_a_stock:
+    # 用东财公开接口补 kline/financials/news/research/lhb。港股/美股无此路径
+    # (它们的兜底在上面那条分支里就已经是主路径了)。
+    if market == "A":
         fb_tasks: dict[str, Awaitable[Any]] = {}
         if not bundle.get("kline"):
             fb_tasks["kline"] = asyncio.to_thread(_akshare_kline, _bare, 30)
@@ -808,13 +1000,20 @@ async def deep_analysis(body: DeepAnalysisIn, request: Request):
     duration_ms = int((datetime.now() - t0).total_seconds() * 1000)
     dims_covered = [k for k, v in bundle.items() if v not in (None, [], {})]
     dims_missing = [k for k in bundle if k not in dims_covered]
-    logger.info("[uzi] 完成 code={} total={}ms timing={} covered={} missing={}",
-                code, duration_ms, timing, dims_covered, dims_missing)
+    logger.info("[uzi] 完成 code={} market={} total={}ms timing={} covered={} missing={}",
+                code, market, duration_ms, timing, dims_covered, dims_missing)
+
+    # 港美股的中文名来自行情源(腾讯返 "谷歌-C"),STOCK_MAP / watchlist 里通常没有,
+    # _stock_name 会退化成原样吐 "GOOG"。有真名就用真名。
+    _quote_name = (bundle.get("quote") or {}).get("name")
 
     return {
         "ok": True,
         "code": code,
-        "name": _stock_name(code),
+        # 调用方(chat 模型 / 前端卡片 / 排查的人)得知道这份报告是按哪个市场取的数,
+        # 否则"为什么没有龙虎榜"这种问题只能靠猜。
+        "market": market,
+        "name": _quote_name or _stock_name(code),
         "depth": body.depth,
         "markdown": markdown,
         "dims_covered": dims_covered,
