@@ -807,6 +807,18 @@ def _outline_anchor(outline: str) -> str:
     return ""
 
 
+def _outline_first_heading(outline: str) -> str:
+    """取 outline 的第一个小标题,作为 assistant prefill 的开头。
+
+    没传 outline 就是默认六段模板的第一个标题。
+    """
+    for line in (outline or "").split(NL):
+        line = line.strip()
+        if line.startswith("###"):
+            return line
+    return "### 一、多空核心观点"
+
+
 def _clean_llm_markdown(md: str, anchor: str = "一、") -> str:
     """剥 Gemini 的 draft / review 元话唠 · 保守策略：
     1. 找**最后一次** '### 一、多空核心观点' 出现的行作为正文起点（跳过前面的 outline plan）
@@ -1034,15 +1046,15 @@ async def deep_analysis(body: DeepAnalysisIn, request: Request):
     )
     user_msg = _build_llm_context(code, bundle, _outline)
 
-    def _llm_call(sys_msg: str = "", temperature: float = 0.35):
+    def _llm_call(sys_msg: str = "", temperature: float = 0.35, prefill: str = ""):
         # OpenAI 客户端是同步的 · 直接在 async 端点里调会把整个事件循环卡住 LLM 那么久
         # (期间 /api/chat/sessions 等所有请求都排队)。挪进线程,并给这一次调用单独限时。
         return client.with_options(timeout=_LLM_TIMEOUT_S).chat.completions.create(
             model=_MODEL,
-            messages=[
+            messages=([
                 {"role": "system", "content": sys_msg or system_msg},
                 {"role": "user", "content": user_msg},
-            ],
+            ] + ([{"role": "assistant", "content": prefill}] if prefill else [])),
             temperature=temperature,
             # 原来是 1200 · 但社区版常用 deepseek-v4-pro 这类**推理型模型**,
             # 内部会先跑一大段 reasoning 再输出正文,1200 全被 reasoning 吃掉,
@@ -1051,22 +1063,47 @@ async def deep_analysis(body: DeepAnalysisIn, request: Request):
             max_tokens=4096,
         )
 
+    # ⚠️ **prefill：把 `### 一、xxx` 作为 assistant 的最后一条消息塞进 messages。**
+    #
+    # 2026-09-08 实测(gemini-3.5-flash · 同一 prompt 连打 5 次):不用 prefill 时
+    # **只有 2/5 产出正文**,其余三次模型回一句英文就收工 ——
+    #     ", here's the analysis." / ", let's write the analysis report ..."
+    # (9-13 秒才吐这 60 个字符)。模型在服务端跑了一大段 thinking,网关要么把
+    # thinking 混进 content,要么只回最后一句,正文根本没生成。
+    # 这跟 prompt 怎么写关系不大:改措辞、去掉否定句、调温度、max_tokens
+    # 2000→4096 全试过,成功率没变化。
+    # 让 assistant 的最后一条消息就是标题行,模型只能续写 —— 实测 4/4 全出正文,
+    # 耗时还从 9-13s 降到 4-5s(不再空跑 thinking)。
+    _prefill = _outline_first_heading(_outline) + NL
+
+    async def _call_with_prefill(sys_msg: str = "", temperature: float = 0.35) -> str:
+        """带 prefill 调一次 · 返回拼回 prefill 的完整 markdown。
+
+        gemini-3.6/3.8-flash 对"以 model turn 结尾"的请求返 400,所以留一条
+        退回普通调用的路径,换模型时不会整条链路挂掉。
+        """
+        try:
+            r = await asyncio.wait_for(
+                asyncio.to_thread(_llm_call, sys_msg, temperature, _prefill),
+                timeout=_LLM_TIMEOUT_S + 5)
+            return (_prefill + (r.choices[0].message.content or "")).strip()
+        except asyncio.TimeoutError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[uzi] prefill 调用失败(网关可能不支持以 assistant 结尾)"
+                           " · 退回普通调用: {}", e)
+            r = await asyncio.wait_for(
+                asyncio.to_thread(_llm_call, sys_msg, temperature),
+                timeout=_LLM_TIMEOUT_S + 5)
+            return (r.choices[0].message.content or "").strip()
+
     try:
         _t = time.perf_counter()
         # 外层再套 5s 余量 · 防 SDK 自己的重试把 timeout 放大
-        resp = await asyncio.wait_for(asyncio.to_thread(_llm_call), timeout=_LLM_TIMEOUT_S + 5)
+        markdown = await _call_with_prefill()
         timing["llm_ms"] = int((time.perf_counter() - _t) * 1000)
-        markdown = (resp.choices[0].message.content or "").strip()
-        # 空返回时把 usage 打进日志,方便判断是"tokens 耗尽"还是"模型拒答"
         if not markdown:
-            usage = getattr(resp, "usage", None)
-            finish = resp.choices[0].finish_reason if resp.choices else "?"
-            logger.warning(
-                "[uzi] LLM 返回空 markdown · code={} finish={} usage={}",
-                code, finish,
-                {"prompt": getattr(usage, "prompt_tokens", None),
-                 "completion": getattr(usage, "completion_tokens", None)} if usage else None,
-            )
+            logger.warning("[uzi] LLM 返回空 markdown · code={} model={}", code, _MODEL)
         _anchor = _outline_anchor(_outline) or "一、"
         markdown = _clean_llm_markdown(markdown, _anchor)
 
@@ -1080,11 +1117,9 @@ async def deep_analysis(body: DeepAnalysisIn, request: Request):
                 "上一次你只回了一句开场白就结束了。本次**直接从 ### 开始输出正文**,"
                 "每个小标题下面都要有 2-3 句正文,不要任何开场白、确认语、结束语。")
             _t = time.perf_counter()
-            resp2 = await asyncio.wait_for(
-                asyncio.to_thread(_llm_call, _retry_sys, 0.2), timeout=_LLM_TIMEOUT_S + 5)
-            timing["llm_retry_ms"] = int((time.perf_counter() - _t) * 1000)
             markdown = _clean_llm_markdown(
-                (resp2.choices[0].message.content or "").strip(), _anchor)
+                await _call_with_prefill(_retry_sys, 0.2), _anchor)
+            timing["llm_retry_ms"] = int((time.perf_counter() - _t) * 1000)
     except asyncio.TimeoutError:
         logger.error("[uzi] LLM 合成超时 code={} model={} 限时 {:.0f}s · timing={}", code, _MODEL, _LLM_TIMEOUT_S, timing)
         raise HTTPException(504, f"LLM 合成超时(>{_LLM_TIMEOUT_S:.0f}s · model={_MODEL})")
