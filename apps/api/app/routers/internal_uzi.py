@@ -740,14 +740,29 @@ async def deep_analysis(body: DeepAnalysisIn, request: Request):
     if client is None:
         raise HTTPException(503, "LLM 客户端不可用 · 检查 .env 里 LLM_API_KEY / LLM_BASE_URL / LLM_DEFAULT_MODEL")
 
+    # ⚠️ system 里的结构描述**必须跟着 outline 走**。
+    #
+    # 这里原本写死"从 '### 一、多空核心观点' 开头 · 到 '### 六、结论' 结束"。
+    # 加了 outline 之后忘了改这一处,于是 system 和 user 各说一套结构,
+    # 模型当场困惑并把内心戏打印了出来(实测原文):
+    #     Wait, is there more to the structure? ...
+    #     If I only output these two, it might be too short or violate
+    #     the developer prompt's "从 '### 一、多空核心观点' 开头..."
+    # 用户看到的就是一段英文推理。**同一件事写在两处、只改一处**,
+    # 后果不是不生效,是两套指令打架。
+    _outline = _sanitize_outline(body.outline)
+    if _outline:
+        _struct_line = "严格按用户消息里给出的小标题结构输出 · 中间只保留正文。"
+    else:
+        _struct_line = "从 '### 一、多空核心观点' 开头 · 到 '### 六、结论' 结束 · 中间只保留正文。"
     system_msg = (
         "你是一位专业的 A 股 / 港股 / 美股深度分析师。"
         "**只输出最终 markdown 报告本体**，不做任何思考过程 / 草稿 / 数据罗列 / 分析步骤说明。"
         "不写 'Let me analyze' / 'I will analyze' / 'Analysis of' / 'Draft Structure' / '### Draft' 等元描述。"
-        "从 '### 一、多空核心观点' 开头 · 到 '### 六、结论' 结束 · 中间只保留正文。"
-        "全程使用中文（除股票代码外）· 不做免责声明 · 不给'买入/卖出'评级。"
+        + _struct_line +
+        "全程使用中文（除股票代码外）· 不做免责声明 · 不给'买入/卖出'评级 · 不给目标价。"
     )
-    user_msg = _build_llm_context(code, bundle, _sanitize_outline(body.outline))
+    user_msg = _build_llm_context(code, bundle, _outline)
 
     def _llm_call():
         # OpenAI 客户端是同步的 · 直接在 async 端点里调会把整个事件循环卡住 LLM 那么久
@@ -782,8 +797,7 @@ async def deep_analysis(body: DeepAnalysisIn, request: Request):
                 {"prompt": getattr(usage, "prompt_tokens", None),
                  "completion": getattr(usage, "completion_tokens", None)} if usage else None,
             )
-        markdown = _clean_llm_markdown(
-            markdown, _outline_anchor(_sanitize_outline(body.outline)) or "一、")
+        markdown = _clean_llm_markdown(markdown, _outline_anchor(_outline) or "一、")
     except asyncio.TimeoutError:
         logger.error("[uzi] LLM 合成超时 code={} model={} 限时 {:.0f}s · timing={}", code, _MODEL, _LLM_TIMEOUT_S, timing)
         raise HTTPException(504, f"LLM 合成超时(>{_LLM_TIMEOUT_S:.0f}s · model={_MODEL})")
