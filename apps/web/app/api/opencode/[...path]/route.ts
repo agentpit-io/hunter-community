@@ -530,6 +530,22 @@ async function handle(req: Request, segs: string[]): Promise<Response> {
 - **禁止输出思考过程** · 不写"让我..." · "首先..." · "Let's..." · "First..." · "OK, let's..."
 - 用户只想看结果 · 直接给分析和结论 · 不要暴露内部推理
 - 若 tool 返回英文 · 必须**翻译成中文**呈现
+- **SKILL 是什么语言,不决定你回答的语言。** 用户装的第三方 SKILL(GitHub 导入的那些)
+  正文往往整篇是英文,里面有 Company Research / Financial Modeling / Valuation Analysis /
+  Thesis Invalidation / INVESTMENT SIGNAL 这类英文标题和说明。
+  **读了英文 SKILL 就用英文回答是错的** —— 用户用中文问,却收到满屏英文。
+  真实事故(2026-09-08):用户问「用 initiating-coverage 分析 GOOG」,你回了
+  "I can help you create an equity research initiation report for Alphabet Inc. (GOOG).
+   This involves 5 separate tasks..." 整段英文。
+  正确做法:按 SKILL 的**结构和方法**走,但标题和内容一律翻成中文 ——
+      Company Research     → 公司研究
+      Financial Modeling   → 财务建模
+      Valuation Analysis   → 估值分析
+      Thesis Invalidation  → 论点失效条件
+      INVESTMENT SIGNAL    → 投资信号
+  专有名词(DCF、ROIC、WACC、Piotroski F-Score)保留原文,后面括号给中文。
+- **SKILL 里的英文流程说明也不要照抄给用户看。** 它是写给你执行的,不是给用户读的。
+  用户要的是分析结果,不是"这个流程分 5 步,你想先做哪一步"的英文清单。
 
 【工具 · 硬性 · 允许下列 11 个 · 其他一律禁用】
 

@@ -390,3 +390,52 @@ async def _api_session_user(session_id: str, request: Request):
     logger.info("[internal] session-lookup OK · session={} · user={}",
                 session_id[:12], (user_id or "")[:8])
     return {"session_id": session_id, "user_id": user_id}
+
+
+# ─────────────────────────────────────────────────────────────────────
+# 语言守卫 · 给 opencode 侧的 hunter-lang plugin 反调
+# ─────────────────────────────────────────────────────────────────────
+#
+# 为什么要开这个端点(而不是在 plugin 里用 TS 重写一遍判据):
+#
+# 铁律 A10 说守卫要放"出口",而且判据必须是 `has_english_prose`
+# (连续英文词 run + 功能词命中),不是"整段有没有中文"。这套判据连同
+# 功能词封闭集、NO_SANITIZE_KEYS 白名单、翻译兜底,已经在
+# `agents/text_sanitizer.py` + `agents/translation.py` 里实现并有反误伤用例。
+# 在 plugin 里用 TypeScript 再写一遍 = 同一件事两处实现,改一处漏一处
+# (交接稿 §9 铁律 3;2026-09-08 改 uzi 报告结构时刚因为同类问题
+#  让模型把英文内心戏打印给了用户)。
+#
+# 所以 plugin 只做"把文本发过来、拿中文回去",判据和翻译都留在这一处。
+class LangGuardIn(BaseModel):
+    text: str
+
+
+@router.post("/lang/guard")
+async def _api_lang_guard(body: LangGuardIn, request: Request):
+    """净化面向用户的文本:剥英文思考前言 / 丢英文散文 / 必要时整段翻译。
+
+    返回 `changed=False` 时调用方原样放行(绝大多数情况,零开销)。
+    `text` 为空串表示净化后没有可用中文且翻译也失败 —— 调用方**不要**
+    把原文透出去,按铁律 A10 第 5 条落兜底文案。
+    """
+    _auth(request)
+    raw = body.text or ""
+    if not raw.strip():
+        return {"changed": False, "text": raw}
+
+    # 走 app.services.lang_guard 这层薄封装,不要直接 import agents.* ——
+    # 它负责把仓库根插进 sys.path(两仓布局不同,见该模块头注释)。
+    from app.services.lang_guard import has_english_prose
+    if not has_english_prose(raw):
+        return {"changed": False, "text": raw}
+
+    # 同步 SDK(翻译要调 LLM)在 async 端点里必须挪线程,否则事件循环被卡住
+    # 整个翻译时长 —— 2026-09-07 茅台事故的教训之一。
+    import asyncio
+    # 上面 import lang_guard 时已经把仓库根插进 sys.path 了,这里才 import 得到 agents.*
+    from agents.translation import ensure_chinese
+    fixed = await asyncio.to_thread(ensure_chinese, raw)
+    logger.warning("[lang_guard] 命中英文散文 · len={}→{} · raw={}",
+                   len(raw), len(fixed or ""), raw[:120])
+    return {"changed": True, "text": fixed or ""}

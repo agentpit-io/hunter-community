@@ -277,6 +277,14 @@ services:
       # 不然 tool.execute.before hook 不注入 _hermes_user_id · api 收不到
       # X-Hunter-User-Id → 401 unauthorized · LLM 会告诉用户"请登录",很误导。
       - ./scripts/opencode-mcp/plugins/hunter-mcp-context.ts:/opt/opencode-workspace/plugins/hunter-mcp-context.ts:ro
+      # 语言守卫(2026-09-08)· 挂 experimental.text.complete hook,把整段回复
+      # 发给 api 的 /api/internal/lang/guard 判断有没有英文散文,有就换成中文。
+      # 镜像里没有这个文件 —— 它是新加的,而服务器拉不动 GHCR 私镜像,
+      # 所以跟 hunter-mcp-context.ts 一样靠 bind mount 送进去。
+      # 为什么必须有:铁律 A10 说 prompt 里的中文约束单独用无效,要 prompt +
+      # 出口强校验两道。而 /chat 主回复由 opencode 直接产出,不经过 hunter-api
+      # 的 ToolResult / llm_json_call 出口 —— 那两道守卫从来没覆盖到它。
+      - ./scripts/opencode-mcp/plugins/hunter-lang.ts:/opt/opencode-workspace/plugins/hunter-lang.ts:ro
       # 平台自有能力的 MCP(_12 Step 3)· 镜像里没有,整目录挂进来由
       # gen-config.py 注册。放 /opt/hunter-mcp 而不是覆盖 mcp/ 目录 ——
       # 覆盖会把镜像自带的 4 个脚本一起遮掉。

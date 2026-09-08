@@ -44,6 +44,9 @@ const KNOWN_STOCKS = new Map<string, string>([
   ['NVDA', 'NVIDIA'],
   ['MSFT', 'Microsoft'],
   ['GOOGL', 'Google'],
+  ['GOOG', 'Google'],
+  ['AMZN', 'Amazon'],
+  ['META', 'Meta'],
   ['BABA', '阿里 (美股)'],
   ['PDD', '拼多多'],
 ])
@@ -56,12 +59,24 @@ interface Detected {
 
 function extractSymbol(text: string): { code?: string; name?: string } {
   if (!text) return {}
-  // 优先匹配代码
-  const codeMatch = text.match(/(\d{6}(?:\.SH|\.SZ)?|\d{5}\.HK|[A-Z]{2,5}(?![a-z]))/i)
-  if (codeMatch) {
-    const raw = codeMatch[1].toUpperCase().replace(/\.SH$|\.SZ$/i, '')
-    const key = KNOWN_STOCKS.has(raw) ? raw : codeMatch[1].toUpperCase()
-    return { code: key, name: KNOWN_STOCKS.get(key) }
+  // ① 数字代码(A股 6 位 / 港股 4-5 位 .HK)—— 数字不会跟英文单词混淆,放心匹配
+  const numMatch = text.match(/(\d{6})(?:\.SH|\.SZ)?|(\d{4,5}\.HK)/i)
+  if (numMatch) {
+    const raw = (numMatch[1] || numMatch[2] || '').toUpperCase()
+    if (raw) return { code: raw, name: KNOWN_STOCKS.get(raw) }
+  }
+  // ② 美股代码:必须**全大写 + 词边界**,而且**必须是已知标的**。
+  //
+  // 2026-09-08 事故:原来是 `/…|[A-Z]{2,5}(?![a-z])/i` —— 带了 `i` 标志,
+  // `[A-Z]` 就等于 `[A-Za-z]`,于是把 "initiating_coverage" 里的 `ating`
+  // 当成了股票代码,追问建议整排显示「ATING 的估值水平」「ATING 最近的北向资金流向」。
+  // 回答一旦跑成英文,DCF / EPS / ROIC / Excel 这些也会照样被认成代码。
+  //
+  // 只认白名单,是因为这里没有真正的代码校验能力(不查 stocks_catalog)。
+  // **宁可退回通用追问,也不要问用户一个不存在的标的** —— 后者会让人以为
+  // 系统在分析别的股票。
+  for (const tok of text.match(/\b[A-Z]{2,5}\b/g) || []) {
+    if (KNOWN_STOCKS.has(tok)) return { code: tok, name: KNOWN_STOCKS.get(tok) }
   }
   // 匹配中文股票名
   for (const [code, name] of KNOWN_STOCKS) {
