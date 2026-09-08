@@ -565,6 +565,65 @@ grep -n "多空核心观点\|六、结论" apps/api/app/routers/internal_uzi.py
 
 ---
 
+## 铁律:输入框在树里有两个位置 · 一次性的 prop 必须由父层记账
+
+2026-09-08 用户报:从能力库点「用它」跳到会话,把模板里的 `{股票}` 填成 GOOG 发出去,
+**输入框里又冒出那句没填占位符的模板原文**。
+
+### 先记住这个事实
+
+`InputBox` 在 `ChatWorkspace` 里被渲染在**两个位置**:
+
+```tsx
+heroInput={isEmpty ? inputEl : null}   // 会话空 → 渲染在 MessageList 中央
+{!isEmpty && inputEl}                  // 有消息 → 渲染在底部
+```
+
+发出第一条消息后 `isEmpty` 翻转,React 认为这是两个不同位置的节点,
+把 InputBox **卸载再挂载**。于是:
+
+- `const [text] = useState('')` 归零
+- `const autoSentRef = useRef(false)` 也归零
+- **所有 effect 在挂载时必定各跑一次**(依赖值没变也跑)
+
+### 症状与判据
+
+| 症状 | 谁没清 |
+|---|---|
+| 发完消息,输入框里还杵着**模板原文**(不是用户输入的那版) | `draft` |
+| 同一句话在对话里出现**两条一模一样的用户消息** | `autoText` + `autoSend`(`autoSentRef` 归零挡不住) |
+
+判据:**留下来的内容是"模板"还是"用户当时输入的"**。是模板 → 来自 prop 被重新应用,
+不是残留;去查是谁在挂载时又填了一次。上一轮 NVDA 辩论截图里那两条重复消息,
+当时没深究,其实就是这个。
+
+### 规则
+
+**一次性的 prop(`draft` / `autoText` 这种"送一次进来就该消失"的),
+消费记录必须放在父层,不能放组件内的 ref —— ref 跟着组件一起没。**
+
+做法:`onDraftConsumed` / `onAutoTextConsumed` 回调,page 层 `setDraft(undefined)`。
+重新挂载时 prop 已是 undefined,effect 早返回。
+
+两者消费时机不同,别抄错:
+- `draft` **填进输入框就算用掉**(它的职责就是"送一次文字进来")
+- `autoText` **要等真正发出去之后**才清 —— 只填入没发送时(此刻 `disabled`)得留着,
+  等 `disabled` 变 false 由同一个 effect 再跑一次把它发出去
+
+连点同一个能力仍然有效:清空后 `d?.seq ?? 0` 回到 0、seq 又是 1,
+但依赖是从 `undefined` 变 1,仍算变化,effect 照跑。
+
+### 更一般地
+
+看到"发了两次""清空的东西又回来了""ref 里的标记莫名失效",
+**先问这个组件是不是被卸载重挂了**,而不是去加 `if` 补丁。
+React 里"同一个元素挂在两处"是重挂的经典原因;
+`key` 变化、父组件条件渲染换分支也是。
+
+SaaS 侧结构完全同构(`hunter` 862/895 两处渲染),同一个 bug,已一并修(`c53d9df`)。
+
+---
+
 ## 详细文档
 
 完整问题清单与实施记录(在 agentpit repo 内,不在本仓):
