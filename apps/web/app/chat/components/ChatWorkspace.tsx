@@ -291,6 +291,43 @@ export default function ChatWorkspace({
     return () => { cancelled = true }
   }, [sessionId, forceNew, onSessionCreated, onForceNewConsumed])
 
+  /**
+   * 换会话 = 清掉上一轮留下的瞬时 UI 状态。
+   *
+   * ## 为什么要有这个 effect
+   *
+   * 2026-09-07 用户报:一次多空辩论失败(NVDA 走的是只认 A 股的接口,返 400)之后,
+   * **切到任何别的会话、甚至新建会话,看到的都还是那张报错界面**,完全没法用。
+   *
+   * 原因是下面这些 state 都挂在组件上、又只在"发下一条消息"时才清:
+   * 顶部红色错误条读 `error`,消息列表底部那张"多专家辩论 · 失败"卡读 `debate`
+   * (见 extraBottom)。换会话只会重新拉 messages,这两个从头到尾没人动 ——
+   * 于是它们跟着组件一直挂在屏幕上,换哪个会话都长一个样。
+   *
+   * 失败卡本身是**故意保留**的(见 handleDebateSend 的 catch:"让用户看清失败原因"),
+   * 那个意图在同一个会话里没问题,错在它跨会话泄漏了。所以不是不保留,
+   * 而是**边界收在会话上**:留在出事的那个会话里,换走就清。
+   *
+   * ## 为什么这几个都要清
+   *
+   * 它们的共同点是"属于刚才那一轮对话",不是属于用户:
+   * - `busy` 泄漏会让新会话的输入框一直是禁用态(旧任务还没 finally)
+   * - `stagedOpen` 是上一轮模型往暂存区写 SKILL 才弹的,换会话后没有上下文
+   * - `htmlArtifacts` 的声明注释本来就写着"只在当前 session 有效",但从没清过
+   *
+   * 代价:辩论跑到一半切走再切回来,进度卡不恢复(state 没了)。可以接受 ——
+   * 用户已经看不到它了,而且成功路径本来 3 秒后也会自己隐藏。
+   * 真要跨会话续看,得把进度按 sessionId 存,那是另一件事,别在修阻断 bug 时顺手做。
+   */
+  useEffect(() => {
+    setError(null)
+    setDebate(null)
+    setKpred(null)
+    setBusy(false)
+    setStagedOpen(false)
+    setHtmlArtifacts({})
+  }, [sessionId])
+
   useEffect(() => {
     if (!sessionId) {
       setMessages([])
@@ -400,6 +437,22 @@ export default function ChatWorkspace({
     if (prevSid && prevSid !== sessionId) condenseSession(prevSid, msgRef.current)
     sidRef.current = sessionId
   }, [sessionId, condenseSession])
+
+  /**
+   * 这个异步任务的结果还该不该往界面上写。
+   *
+   * 辩论和 Kronos 预测都是几十秒的长任务,用户完全可能中途切到别的会话。
+   * 上面那个 effect 会在切换时清场,但**清场救不了慢回调** —— 任务是在
+   * 旧会话发起的,它 45 秒后失败,照样会 setError/setDebate 把报错写到
+   * 用户当前看着的新会话上,于是"切走了又冒出来",和没修一样。
+   *
+   * 所以每次往界面写之前都问一句:我发起时那个会话,还是现在这个吗?
+   * `sidRef.current` 由 [sessionId] 的 effect 维护,永远是当前会话。
+   *
+   * 丢掉的结果不会真丢:辩论/预测的产物后端都有(切回来时 listSessionDebates
+   * 和 kpred 的恢复逻辑会重新拉到),这里只是不往错误的会话上画。
+   */
+  const stillOn = (sid: string) => sidRef.current === sid
 
   useEffect(() => {
     // 关标签 / 刷新时补一次
@@ -517,9 +570,10 @@ export default function ChatWorkspace({
         void autoTitleIfNeeded(sessionId, text)
       }
     } catch (e: any) {
-      setError(`发送失败: ${e?.message || e}`)
+      // 切走了就别把这条错误画到别的会话上(同 handleDebateSend)
+      if (stillOn(sessionId)) setError(`发送失败: ${e?.message || e}`)
     } finally {
-      setBusy(false)
+      if (stillOn(sessionId)) setBusy(false)
       // 这一轮里模型可能暂存了 SKILL · 查一次
       void checkStaged()
       // 收尾时用服务端的版本对一次账 —— 见 reconcileMessages 的说明
@@ -565,6 +619,10 @@ export default function ChatWorkspace({
     try {
       const server = await listMessages(sid)
       if (!server || server.length === 0) return
+      // 拉的这段时间用户可能已经切走了。这份是 sid 的消息,再 setMessages
+      // 就是把上一个会话的内容整个覆盖到用户正看着的会话上 —— 比错误提示残留
+      // 更糟,是实打实的串会话。校验放在这里,所有调用点一起受保护。
+      if (sidRef.current !== sid) return
       setMessages((prev) => {
         // 只补 opencode 的消息;debate / kpred 是我们本地注入的,
         // 服务端没有,不能被这次覆盖冲掉
@@ -590,6 +648,8 @@ export default function ChatWorkspace({
       const r = await fetch('/api/chat/skills/staged', { headers: h, cache: 'no-store' })
       if (!r.ok) return
       const d = await r.json()
+      // 暂存区是上一轮对话产生的 · 用户切走后就别在新会话里弹卡片了
+      if (sidRef.current !== sessionId) return
       if (d?.total > 0) { setStagedOpen(true); setStagedTick((n) => n + 1) }
     } catch { /* 静默 */ }
   }, [sessionId])
@@ -637,6 +697,7 @@ export default function ChatWorkspace({
       const final = await runDebate(
         { stockQuery, question: text, sessionId: sid, depth: debateDepth || 'normal' },
         (ev: DebateProgressEvent) => {
+          if (!stillOn(sid)) return
           setDebate((prev) => ({
             phase: ev.phase as DebatePhase,
             pct: ev.pct,
@@ -646,6 +707,7 @@ export default function ChatWorkspace({
           }))
         },
         ({ stockCode, stockName }) => {
+          if (!stillOn(sid)) return
           setDebate((prev) => ({
             phase: prev?.phase || 'technical',
             pct: prev?.pct || 0,
@@ -655,6 +717,18 @@ export default function ChatWorkspace({
           }))
         },
       )
+
+      // 自动生成 session 标题 · 用股票名。
+      // 放在下面那道"切走就 return"**之前**:标题是 sid 那个会话的服务端数据,
+      // 用户切没切走都该设上,否则他切回来看到的还是"新对话";
+      // onSessionUpdated 刷的是侧栏全量列表,在哪个会话下刷都对。
+      if (isFirstUserMsg && final.stockName) {
+        void autoTitleIfNeeded(sid, `⚖️ ${final.stockName} 多空辩论`)
+      }
+
+      // 以下都是往**当前界面**上画 —— 用户已经切到别的会话就打住。
+      // 报告后端有存,切回来 listSessionDebates 会重新拉到,不会丢。
+      if (!stillOn(sid)) return
 
       // 注入 assistant 消息 · markdown 报告
       const assistantId = `debate_${final.taskId}`
@@ -674,25 +748,27 @@ export default function ChatWorkspace({
         onOpenReport(final.markdown, assistantId)
       }
 
-      // 自动生成 session 标题 · 用股票名
-      if (isFirstUserMsg && final.stockName) {
-        void autoTitleIfNeeded(sid, `⚖️ ${final.stockName} 多空辩论`)
-      }
-
       // 3 秒后隐藏进度卡 · 让报告完全展示
-      setTimeout(() => setDebate(null), 3000)
+      // 校验一次:这 3 秒里用户可能切走了,那时 debate 已经是新会话的进度,别替它清
+      setTimeout(() => { if (stillOn(sid)) setDebate(null) }, 3000)
     } catch (e: any) {
       const msg = e?.message || String(e)
-      setDebate({
-        phase: 'error',
-        pct: 0,
-        text: '',
-        errorMsg: msg,
-      })
-      setError(`多专家辩论失败: ${msg}`)
-      // 错误卡保留 · 让用户看清失败原因 · 手动关
+      if (stillOn(sid)) {
+        setDebate({
+          phase: 'error',
+          pct: 0,
+          text: '',
+          errorMsg: msg,
+        })
+        setError(`多专家辩论失败: ${msg}`)
+        // 错误卡保留 · 让用户看清失败原因 · 手动关。
+        // 只保留在**出事的这个会话**里 —— 换会话时上面那个 effect 会清掉,
+        // 否则它会跟着组件挂在屏幕上,切哪个会话都是这张报错脸(2026-09-07 用户报)。
+      }
     } finally {
-      setBusy(false)
+      // 切走了就别动 busy —— 新会话可能正在发自己的消息,
+      // 这里一句 setBusy(false) 会把它的输入框提前解锁
+      if (stillOn(sid)) setBusy(false)
     }
   }
 
@@ -790,6 +866,7 @@ export default function ChatWorkspace({
       const final = await runKpred(
         { stockQuery, days, question, sessionId: sid },
         (ev: KpredProgressEvent) => {
+          if (!stillOn(sid)) return
           setKpred((prev) => ({
             phase: ev.phase as any,
             pct: ev.pct,
@@ -799,6 +876,14 @@ export default function ChatWorkspace({
           }))
         },
       )
+
+      // 标题同 handleDebateSend:属于 sid 会话的服务端数据,切走了也该设上
+      if (isFirstUserMsg && final.stockName) {
+        void autoTitleIfNeeded(sid, `📈 ${final.stockName} Kronos 预测`)
+      }
+
+      // 用户已切走 —— 预测结果后端有存,切回来会重新拉到(见 kpredHtmlRestore)
+      if (!stillOn(sid)) return
 
       // 注入 assistant 消息 · text = markdown 摘要
       const assistantId = `kpred_${final.taskId}`
@@ -825,18 +910,17 @@ export default function ChatWorkspace({
         onOpenReport(final.htmlContent, assistantId, 'html', artifactTitle)
       }
 
-      if (isFirstUserMsg && final.stockName) {
-        void autoTitleIfNeeded(sid, `📈 ${final.stockName} Kronos 预测`)
-      }
-
-      // 3 秒后隐藏进度卡 · 让报告完全展示
-      setTimeout(() => setKpred(null), 3000)
+      // 3 秒后隐藏进度卡 · 让报告完全展示(切走了就别清,同 handleDebateSend)
+      setTimeout(() => { if (stillOn(sid)) setKpred(null) }, 3000)
     } catch (e: any) {
       const msg = e?.message || String(e)
-      setKpred({ phase: 'error', pct: 0, text: '', errorMsg: msg })
-      setError(`Kronos 预测失败: ${msg}`)
+      // 同 handleDebateSend:错误只留在出事的那个会话里,换会话由 effect 清掉
+      if (stillOn(sid)) {
+        setKpred({ phase: 'error', pct: 0, text: '', errorMsg: msg })
+        setError(`Kronos 预测失败: ${msg}`)
+      }
     } finally {
-      setBusy(false)
+      if (stillOn(sid)) setBusy(false)
     }
   }
 
