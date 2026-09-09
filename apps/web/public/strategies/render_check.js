@@ -371,6 +371,11 @@ try {
   else { failed++; console.log('FAIL 智能体 · 骨架凭空写了买卖方向') }
   if (!/亏损教训|验证通过/.test(S)) console.log('PASS 智能体 · 骨架不猜教训类型')
   else { failed++; console.log('FAIL 智能体 · 骨架凭空写了教训类型') }
+  // 护栏尤其不能猜:用户会据此判断风险敞口
+  if (!/只做多|可做空/.test(S)) console.log('PASS 智能体 · 骨架不猜交易方向')
+  else { failed++; console.log('FAIL 智能体 · 骨架凭空写了交易方向') }
+  if (/只做多 · 不加杠杆/.test(H)) console.log('PASS 智能体 · 有数据时如实写交易方向')
+  else { failed++; console.log('FAIL 智能体 · long_only=true 没渲染出来') }
   if (/ag-banner dev/.test(S)) console.log('PASS 智能体 · 骨架顶上说明了为什么全是 —')
   else { failed++; console.log('FAIL 智能体 · 骨架没有提示条,用户不知道为什么全是 —') }
 } catch (e) {

@@ -328,7 +328,10 @@ function vGuard(d) {
     ['单日亏损熔断', pct(g.daily_loss_halt_pct, 0)],
     ['连亏停机', Number.isFinite(g.consecutive_loss_pause) ? int(g.consecutive_loss_pause) + ' 笔停一天' : NA],
   ].map(function (it) { return '<span class="g">' + it[0] + ' <b>' + it[1] + '</b></span>' }).join('')
-  const dirn = g.long_only === false ? '' : '<span class="g">只做多 · 不加杠杆</span>'
+  // long_only 缺失时不能默认「只做多 · 不加杠杆」—— 那是把没配置的东西当成事实在说,
+  // 用户会据此判断风险敞口。同交易方向、教训类型那两处。
+  const dirn = '<span class="g">交易方向 <b>' +
+    (g.long_only === true ? '只做多 · 不加杠杆' : g.long_only === false ? '可做空' : NA) + '</b></span>'
   let st = '<span class="st">今日护栏状态 ' + NA + '</span>'
   if (g.triggered_today === false) st = '<span class="st ok"><span class="hi hi-check"></span> 今日未触发</span>'
   else if (g.triggered_today === true) st = '<span class="st hit"><span class="hi hi-bell"></span> ' +
