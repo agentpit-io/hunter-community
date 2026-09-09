@@ -226,12 +226,20 @@ def translate_desc(text: str, *, model: str | None = None) -> str:
 
     out = _extract_translation(out)
 
-    # ⚠️ 校验必须看**开头**,不能只问"有没有中文"。
-    # 第一版只判 contains_chinese,而内心戏后面跟着真译文,照样含中文 ——
-    # 七个 SKILL 全被写进了 ", I need to translate the provided text into..." 这种垃圾。
-    # 判据同 has_english_prose 那条铁律:看的是"有没有英文散文",不是"有没有中文"。
-    if not out or not contains_chinese(out) or has_english_prose(out):
-        logger.warning("translate_desc: 译文不合格 · 保留原文 · sample={}", out[:100])
+    # ⚠️ 校验只看**开头是不是中文**,不看"有没有英文散文"。
+    #
+    # 第一版只判 contains_chinese —— 内心戏后面跟着真译文,整段照样含中文,
+    # 于是七个 SKILL 全被写进了 ", I need to translate the provided text into..."。
+    # 内心戏的特征是**英文开头**,所以看开头才拦得住。
+    #
+    # 但**不能再加 has_english_prose**:那条判据是给"整段英文回答"设计的,
+    # 而这里的译文按我们自己的 prompt 要求**保留专业术语与 skill 名**,
+    # 于是 "…机构级品质的 equity research initiation 报告…"、
+    # "…请使用 swing-trade-scanner、longterm-quality-investor…" 这种
+    # 完全合格的译文会被判成英文散文 —— 2026-09-09 实测误伤 4 个,
+    # 全都是好译文被退回英文原文。守卫的判据要跟着场景走,不能照搬。
+    if not out or not contains_chinese(out):
+        logger.warning("translate_desc: 译文里没有中文 · 保留原文 · sample={}", out[:100])
         return raw
     if not starts_with_chinese(out):
         logger.warning("translate_desc: 译文没以中文开头 · 保留原文 · sample={}", out[:100])
