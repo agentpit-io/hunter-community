@@ -243,8 +243,33 @@ export default function ChatWorkspace({
   // 再等两秒就好了。第一次用就看到红条,观感极差。
   //
   // 重试期间不显示错误,退避约 12 秒后仍失败才报 —— 那时候确实是真出问题了。
+  /**
+   * 最新的回调 —— page 传下来的是**内联箭头函数**
+   * (`onForceNewConsumed={() => setForceNew(false)}`),每次 page 渲染都是新引用。
+   * 直接放进下面那个建会话 effect 的依赖数组,page 一重渲染 effect 就重跑,
+   * 而重跑 = 又发一次 createSession(2026-09-09 用户报"发一条消息多出两个新对话")。
+   */
+  const cbRef = useRef({ onSessionCreated, onForceNewConsumed })
   useEffect(() => {
-    if (sessionId) return
+    cbRef.current = { onSessionCreated, onForceNewConsumed }
+  })
+
+  /**
+   * 已经有一次建会话在飞了。
+   *
+   * `createSession` 是**不可撤销的副作用**:请求一发出去,服务端就多一条会话,
+   * effect 里那个 `cancelled` 只能让我们**不去用**结果,删不掉它。
+   * 所以去重必须在**发请求之前**做。
+   */
+  const creatingRef = useRef(false)
+
+  useEffect(() => {
+    if (sessionId) {
+      creatingRef.current = false   // 已经有会话了 · 释放闸门
+      return
+    }
+    if (creatingRef.current) return
+    creatingRef.current = true
     let cancelled = false
     const RETRY_MS = [600, 1200, 2000, 3000, 5000]
 
@@ -268,9 +293,11 @@ export default function ChatWorkspace({
           // forceNew 时直接建新会话,不看已有列表。
           if (forceNew) {
             const s = await createSession('新对话')
-            if (cancelled) return
-            onSessionCreated(s.id)
-            onForceNewConsumed?.()
+            // ⚠️ 这里**故意不判 `cancelled`**。会话已经在服务端建好了,
+            // 丢弃结果只会留下一条孤儿"新对话",不会让它消失 ——
+            // 既然撤不掉,就用它。(用户看到的那两条空对话就是这么来的)
+            cbRef.current.onSessionCreated(s.id)
+            cbRef.current.onForceNewConsumed?.()
             setError('')
             return
           }
@@ -279,17 +306,18 @@ export default function ChatWorkspace({
           const latest = list.sort(
             (a, b) => (b.time?.updated || b.time?.created || 0) - (a.time?.updated || a.time?.created || 0),
           )[0]
-          if (latest) onSessionCreated(latest.id)
+          if (latest) cbRef.current.onSessionCreated(latest.id)
           else {
             const s = await createSession('新对话')
-            if (cancelled) return
-            onSessionCreated(s.id)
+            // 同上:建都建了,就用它
+            cbRef.current.onSessionCreated(s.id)
           }
           setError('')
           return
         } catch (e: any) {
           if (cancelled) return
           if (attempt >= RETRY_MS.length) {
+            creatingRef.current = false   // 彻底失败 · 释放闸门让下次能重来
             setError(`初始化 session 失败: ${e?.message || e}`)
             return
           }
@@ -299,7 +327,10 @@ export default function ChatWorkspace({
     })()
 
     return () => { cancelled = true }
-  }, [sessionId, forceNew, onSessionCreated, onForceNewConsumed])
+    // 依赖只留这两个 —— 回调走 cbRef(见上面的说明),
+    // 进了依赖就会因为 page 重渲染而重跑、重复建会话
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, forceNew])
 
   /**
    * 换会话 = 清掉上一轮留下的瞬时 UI 状态。

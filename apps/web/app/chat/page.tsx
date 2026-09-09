@@ -115,6 +115,25 @@ function ChatPageInner() {
     return () => mq.removeEventListener('change', onChange)
   }, [])
 
+  /**
+   * 下面三个回调必须用 useCallback 包稳。
+   *
+   * 它们会被传给 ChatWorkspace,而那边建会话的 effect 曾经把
+   * `onForceNewConsumed` 放在依赖数组里 —— 写成内联箭头函数的话,
+   * **page 每重渲染一次,那个 effect 就重跑一次,也就又建一条会话**。
+   * 2026-09-09 用户报"从能力库发一条消息,侧栏多出两个空新对话"就是这么来的
+   * (实测三条会话在 178ms 内连着建出来)。
+   *
+   * ChatWorkspace 那边已经改成用 ref 持回调 + 建会话闸门了,不再依赖这一点;
+   * 但稳住引用本身也能减少一堆无谓重渲染,两边都做。
+   */
+  const handleForceNewConsumed = useCallback(() => setForceNew(false), [])
+  const handleDraftConsumed = useCallback(() => setDraft(undefined), [])
+  const handleAutoTextConsumed = useCallback(() => {
+    setAutoText(undefined)
+    setAutoSend(false)
+  }, [])
+
   const handleSelectSession = useCallback((id: string) => {
     setSessionId(id)
     setInputClearSeq((n) => n + 1)   // 输入框里那句是写给上一个会话的
@@ -363,7 +382,7 @@ function ChatPageInner() {
       <ChatWorkspace
         sessionId={sessionId}
         forceNew={forceNew}
-        onForceNewConsumed={() => setForceNew(false)}
+        onForceNewConsumed={handleForceNewConsumed}
         onSessionCreated={setSessionId}
         onSessionUpdated={handleSessionUpdated}
         onSessionDeleted={handleSessionDeleted}
@@ -376,8 +395,8 @@ function ChatPageInner() {
         // 不清的话,输入框因 isEmpty 翻转而重新挂载时会把它们再应用一遍 ——
         // 表现是"发完消息输入框里还杵着模板"和"同一句话被发两次"。
         // 详见 InputBox 里 onDraftConsumed 的说明。
-        onDraftConsumed={() => setDraft(undefined)}
-        onAutoTextConsumed={() => { setAutoText(undefined); setAutoSend(false) }}
+        onDraftConsumed={handleDraftConsumed}
+        onAutoTextConsumed={handleAutoTextConsumed}
         inputClearSeq={inputClearSeq}
         onPickSuggestion={handlePickSuggestion}
         onPickSkill={handlePickSkill}
