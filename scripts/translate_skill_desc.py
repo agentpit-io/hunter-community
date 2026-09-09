@@ -31,6 +31,19 @@ SKILL 绝大多数是英文原文(实测 17 个存量里 14 个是英文)。用�
     · 已经有 `description_zh`(除非 --force)
 - 专业缩写与人名(ROIC / F-Score / SEC 10-K / Buffett)保留英文,
   数字和年限原样不动 —— 由 `translate_desc` 的 system prompt 约束。
+- **只管 `user-skills/`,不碰内置的 `skills/`。** 内置 SKILL 随代码走,
+  用脚本改了下次 `git pull` 就被覆盖 —— 那种要直接改源文件并提交
+  (2026-09-09 就这么改了 `skills/uzi/SKILL.md` 的英文 description)。
+  判断方法:`skills/` 下的是我们自己写的,英文说明属于我们自己的疏忽,
+  该在仓库里改对,而不是靠运行时补丁盖住。
+
+## 用法补充
+
+容器里要带 PYTHONPATH,否则 `import app` 会失败:
+
+    docker compose exec -T -e PYTHONPATH=/app -w /app api python /tmp/translate_skill_desc.py
+
+⚠️ **容器 recreate 之后 `/tmp` 会清空**,要重新 `docker cp` 一次。
 """
 from __future__ import annotations
 

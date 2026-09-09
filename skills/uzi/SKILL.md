@@ -1,6 +1,6 @@
 ---
 name: uzi
-description: A-share, Hong Kong, and US stock analysis skill for deep research, quick scans, investor panel review, hot-money/LHB analysis, trap detection, valuation, IC memos, and Bloomberg-style HTML reports.
+description: A 股、港股与美股的投研总调度技能，覆盖深度研究、快速扫描、投委会评审、游资/龙虎榜(LHB)分析、杀猪盘识别、估值测算、IC 投资备忘录，以及 Bloomberg 风格的 HTML 报告。
 version: 3.9.4
 author: FloatFu-true
 license: MIT
