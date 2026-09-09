@@ -53,6 +53,22 @@ function getToken(): string {
   return localStorage.getItem('hunter_token') || ''
 }
 
+/**
+ * 用户主动停止时抛这个 —— 沿用浏览器 AbortController 的语义
+ * (`name === 'AbortError'`),调用方拿同一个条件就能同时认出
+ * fetch 被中断和 SSE 被中断,不用再发明一套错误类型。
+ * —— 停止是用户要的结果,不是故障,界面上不能报错。
+ */
+export function abortedError(): Error {
+  const e = new Error('已停止')
+  e.name = 'AbortError'
+  return e
+}
+
+export function isAbortError(e: any): boolean {
+  return e?.name === 'AbortError'
+}
+
 export async function startKpred(args: KpredStartArgs): Promise<KpredStartResp> {
   const token = getToken()
   const res = await fetch('/api/chat/kpred/start', {
@@ -102,12 +118,27 @@ export async function startKpred(args: KpredStartArgs): Promise<KpredStartResp> 
  * 与 streamDebate 同构 · 只是 phase 集合不同
  */
 export function streamKpred(
+  signal: AbortSignal | undefined,
   taskId: string,
   onProgress: (ev: KpredProgressEvent) => void,
 ): Promise<KpredFinalResult> {
   return new Promise((resolve, reject) => {
     const url = `/api/public/chat_kpred/stream/${encodeURIComponent(taskId)}`
     const es = new EventSource(url, { withCredentials: false })
+    // 用户点停止:把 SSE 断掉并 reject,外层 catch 靠 isAbortError 识别。
+    // ⚠️ **后端任务不会因此停下来** —— 它是后台跑的,没有取消接口。
+    // 这里做到的是"不再等、结果丢掉",对用户而言就是停了;
+    // 代价是后端白跑一趟(浪费算力,但不影响正确性)。
+    if (signal?.aborted) {
+      es.close()
+      reject(abortedError())
+      return
+    }
+    const onUserAbort = () => {
+      es.close()
+      reject(abortedError())
+    }
+    signal?.addEventListener('abort', onUserAbort, { once: true })
     let final: KpredFinalResult | null = null
     let errored = false
 
@@ -170,10 +201,11 @@ export function streamKpred(
 /** 一步式:启动 + 订阅 · 全流程 5-10s */
 export async function runKpred(
   args: KpredStartArgs,
+  signal: AbortSignal | undefined,
   onProgress: (ev: KpredProgressEvent) => void,
 ): Promise<KpredFinalResult> {
   const started = await startKpred(args)
-  return streamKpred(started.task_id, onProgress)
+  return streamKpred(signal, started.task_id, onProgress)
 }
 
 /**

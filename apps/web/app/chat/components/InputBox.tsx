@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useRef, useState, useCallback, KeyboardEvent, DragEvent, ClipboardEvent } from 'react'
-import { Send, Paperclip, X, Image as ImageIcon } from 'lucide-react'
+import { Send, Paperclip, X, Image as ImageIcon, Square } from 'lucide-react'
 import { HUNTER } from '../../lib/hunter-theme'
 import { ModelPicker } from './AgentModelPicker'
 
@@ -16,6 +16,17 @@ export interface Attachment {
 interface InputBoxProps {
   onSend: (text: string, attachments?: Attachment[]) => void
   disabled?: boolean
+  /**
+   * 正在生成回答 —— 发送按钮变成方块的「停止」按钮。
+   *
+   * 和 `disabled` 分开传是因为这两件事只是碰巧都让输入框不可用,含义完全不同:
+   *   · `!sessionId` → 真的没法操作,按钮该是死的
+   *   · 正在生成    → 用户**恰恰需要**能点(把这一轮掐掉),按钮不能是死的
+   * 原来两者被揉进一个 `disabled`,所以生成中按钮是灰的、点不动。
+   */
+  generating?: boolean
+  /** 点方块按钮 · 掐掉这一轮生成 */
+  onAbort?: () => void
   currentAgent: string
   currentModelKey: string // "providerID/modelID"
   onChangeAgent: (name: string) => void
@@ -92,6 +103,8 @@ function readAsDataUrl(file: File): Promise<string> {
 export default function InputBox({
   onSend,
   disabled,
+  generating,
+  onAbort,
   currentModelKey,
   onChangeModel,
   autoText,
@@ -265,6 +278,10 @@ export default function InputBox({
   }
 
   const canSend = (!!text.trim() || attachments.length > 0) && !disabled
+  // 正在生成 → 同一个位置换成方块的停止按钮(用户要求两者重叠)。
+  // 没给 onAbort 就不显示 —— 宁可按钮是灰的,也不要给一个点下去没反应的停止键
+  const showStop = !!generating && !!onAbort
+  const btnActive = showStop || canSend
   const isHero = mode === 'hero'
   const placeholder = isHero
     ? '向猎鹿人提问，或粘贴分析需求...'
@@ -474,18 +491,18 @@ export default function InputBox({
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               <button
                 type="button"
-                onClick={handleSend}
-                disabled={!canSend}
-                title="发送 (Enter)"
-                aria-label="发送"
+                onClick={showStop ? onAbort : handleSend}
+                disabled={!btnActive}
+                title={showStop ? '停止生成' : '发送 (Enter)'}
+                aria-label={showStop ? '停止生成' : '发送'}
                 style={{
                   width: 38,
                   height: 38,
                   borderRadius: 11,
-                  background: canSend ? HUNTER.THEME : '#e5e0d3',
+                  background: btnActive ? HUNTER.THEME : '#e5e0d3',
                   color: '#fff',
                   border: 'none',
-                  cursor: canSend ? 'pointer' : 'not-allowed',
+                  cursor: btnActive ? 'pointer' : 'not-allowed',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -493,13 +510,14 @@ export default function InputBox({
                   transition: 'background 0.1s',
                 }}
                 onMouseEnter={(e) => {
-                  if (canSend) e.currentTarget.style.background = HUNTER.COPPER2
+                  if (btnActive) e.currentTarget.style.background = HUNTER.COPPER2
                 }}
                 onMouseLeave={(e) => {
-                  if (canSend) e.currentTarget.style.background = HUNTER.THEME
+                  if (btnActive) e.currentTarget.style.background = HUNTER.THEME
                 }}
               >
-                <Send size={16} />
+                {/* 实心方块 · fill 要跟着字色,否则只有一圈描边,看着像空心的"停止"不够明确 */}
+                {showStop ? <Square size={13} fill="currentColor" /> : <Send size={16} />}
               </button>
             </div>
           </div>

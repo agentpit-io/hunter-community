@@ -54,6 +54,22 @@ function getToken(): string {
  * 400 = 股票解析失败(HTTPException from resolve_stock)
  * 429 = rate limit(30 min 3 次已用满)
  */
+/**
+ * 用户主动停止时抛这个 —— 沿用浏览器 AbortController 的语义
+ * (`name === 'AbortError'`),调用方拿同一个条件就能同时认出
+ * fetch 被中断和 SSE 被中断,不用再发明一套错误类型。
+ * —— 停止是用户要的结果,不是故障,界面上不能报错。
+ */
+export function abortedError(): Error {
+  const e = new Error('已停止')
+  e.name = 'AbortError'
+  return e
+}
+
+export function isAbortError(e: any): boolean {
+  return e?.name === 'AbortError'
+}
+
 export async function startDebate(args: DebateStartArgs): Promise<DebateStartResp> {
   const token = getToken()
   const res = await fetch('/api/chat/debate/start', {
@@ -95,6 +111,7 @@ export async function startDebate(args: DebateStartArgs): Promise<DebateStartRes
  * done 阶段的 text 字段就是完整 markdown 报告
  */
 export function streamDebate(
+  signal: AbortSignal | undefined,
   taskId: string,
   onProgress: (ev: DebateProgressEvent) => void,
 ): Promise<DebateFinalResult> {
@@ -102,6 +119,20 @@ export function streamDebate(
     // hermes-api /api/public/chat_debate/stream/{task_id} · 走 middleware 白名单 · 无需 token
     const url = `/api/public/chat_debate/stream/${encodeURIComponent(taskId)}`
     const es = new EventSource(url, { withCredentials: false })
+    // 用户点停止:把 SSE 断掉并 reject,外层 catch 靠 isAbortError 识别。
+    // ⚠️ **后端任务不会因此停下来** —— 它是后台跑的,没有取消接口。
+    // 这里做到的是"不再等、结果丢掉",对用户而言就是停了;
+    // 代价是后端白跑一趟(浪费算力,但不影响正确性)。
+    if (signal?.aborted) {
+      es.close()
+      reject(abortedError())
+      return
+    }
+    const onUserAbort = () => {
+      es.close()
+      reject(abortedError())
+    }
+    signal?.addEventListener('abort', onUserAbort, { once: true })
     let final: DebateFinalResult | null = null
     let errored = false
 
@@ -167,6 +198,7 @@ export function streamDebate(
  */
 export async function runDebate(
   args: DebateStartArgs,
+  signal: AbortSignal | undefined,
   onProgress: (ev: DebateProgressEvent) => void,
   onMeta?: (meta: { stockCode: string; stockName: string; taskId: string }) => void,
 ): Promise<DebateFinalResult> {
@@ -176,7 +208,7 @@ export async function runDebate(
     stockName: started.stock_name,
     taskId: started.task_id,
   })
-  return streamDebate(started.task_id, onProgress)
+  return streamDebate(signal, started.task_id, onProgress)
 }
 
 // ── B2 · 报告持久化 · session 加载时拉回历史辩论 ─────────

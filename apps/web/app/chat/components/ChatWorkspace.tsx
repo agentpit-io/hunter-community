@@ -10,6 +10,7 @@ import {
   renameSession,
   resolveModelKey,
   sendMessage,
+  abortSession,
   switchSessionAgent,
   switchSessionModel,
 } from '../lib/opencodeClient'
@@ -22,7 +23,7 @@ import SessionHeader from './SessionHeader'
 import DebateProgressCard, { type DebatePhase } from './DebateProgressCard'
 import KpredProgressCard from './KpredProgressCard'
 import SkillStagedCard from './SkillStagedCard'
-import { runDebate, listSessionDebates, type DebateProgressEvent, type DebateDepth } from '../lib/debateClient'
+import { runDebate, listSessionDebates, isAbortError, type DebateProgressEvent, type DebateDepth } from '../lib/debateClient'
 import { runKpred, listSessionKpreds, extractDays, type KpredProgressEvent } from '../lib/kpredClient'
 
 interface Props {
@@ -463,6 +464,36 @@ export default function ChatWorkspace({
    */
   const stillOn = (sid: string) => sidRef.current === sid
 
+  /**
+   * 当前这一轮生成的「提早提断」手柄。
+   *
+   * 三条生成路径各自的停法不一样,所以**谁开始生成谁负责往这里放一个函数**,
+   * 停止按钮只管调它,不用知道当前跑的是哪一种:
+   *   · 普通对话 → 调 opencode 的 abort 端点,**后端真的会停**
+   *   · 辩论 / 预测 → 切断 SSE 不再等(见 streamDebate 里的说明),
+   *     后端那边没有取消接口,任务会自己跑完然后结果被丢掉
+   */
+  const abortRef = useRef<(() => void) | null>(null)
+
+  /**
+   * 停止生成。
+   *
+   * **先解锁界面再发请求** —— 用户要的是"点下去立刻停",
+   * 不该等一个网络往返;而且 abort 请求本身失败也不应该把用户卡在生成态里。
+   */
+  const handleAbort = useCallback(() => {
+    const fn = abortRef.current
+    abortRef.current = null
+    setBusy(false)
+    setDebate(null)
+    setKpred(null)
+    try {
+      fn?.()
+    } catch (e) {
+      console.warn('[chat] 停止生成失败:', e)
+    }
+  }, [])
+
   useEffect(() => {
     // 关标签 / 刷新时补一次
     const onLeave = () => condenseSession(sidRef.current, msgRef.current)
@@ -542,6 +573,11 @@ export default function ChatWorkspace({
 
     setBusy(true)
     setError(null)
+    // 普通对话的停法:调 opencode 的 abort 端点 —— 这一条是**后端真停**。
+    // 失败只记日志:按钮那边已经把界面解锁了,再弹一个错误条只会添乱
+    abortRef.current = () => {
+      void abortSession(sessionId).catch((e) => console.warn('[chat] abort 请求失败:', e))
+    }
     // 判断是否第一条 user message · 用于后面自动生成标题
     const isFirstUserMsg = !messages.some((m) => m.role === 'user')
 
@@ -675,6 +711,9 @@ export default function ChatWorkspace({
   const handleDebateSend = async (text: string, sid: string) => {
     setBusy(true)
     setError(null)
+    // 辩论的停法:切断 SSE 不再等(后端没取消接口 · 见 abortRef 的说明)
+    const debateAbort = new AbortController()
+    abortRef.current = () => debateAbort.abort()
 
     // 抽股票查询 · SKILL 默认模板是 "对 {股票} 做多空辩论 · 给出买卖决策"
     // 匹配 "对 xxx 做多空" 之间的部分 · 抽不出兜底整条
@@ -705,6 +744,7 @@ export default function ChatWorkspace({
     try {
       const final = await runDebate(
         { stockQuery, question: text, sessionId: sid, depth: debateDepth || 'normal' },
+        debateAbort.signal,
         (ev: DebateProgressEvent) => {
           if (!stillOn(sid)) return
           setDebate((prev) => ({
@@ -761,6 +801,8 @@ export default function ChatWorkspace({
       // 校验一次:这 3 秒里用户可能切走了,那时 debate 已经是新会话的进度,别替它清
       setTimeout(() => { if (stillOn(sid)) setDebate(null) }, 3000)
     } catch (e: any) {
+      // 用户主动停的 —— 不是故障,不画错误卡(handleAbort 已经清干净了)
+      if (isAbortError(e)) return
       const msg = e?.message || String(e)
       if (stillOn(sid)) {
         setDebate({
@@ -792,6 +834,9 @@ export default function ChatWorkspace({
   const handleKpredSend = async (text: string, sid: string) => {
     setBusy(true)
     setError(null)
+    // 同辩论:切断 SSE 不再等
+    const kpredAbort = new AbortController()
+    abortRef.current = () => kpredAbort.abort()
 
     // 抽股票查询: SKILL 模板 "用 Kronos 预测 {股票} 未来 N 天走势"
     //
@@ -874,6 +919,7 @@ export default function ChatWorkspace({
     try {
       const final = await runKpred(
         { stockQuery, days, question, sessionId: sid },
+        kpredAbort.signal,
         (ev: KpredProgressEvent) => {
           if (!stillOn(sid)) return
           setKpred((prev) => ({
@@ -922,6 +968,7 @@ export default function ChatWorkspace({
       // 3 秒后隐藏进度卡 · 让报告完全展示(切走了就别清,同 handleDebateSend)
       setTimeout(() => { if (stillOn(sid)) setKpred(null) }, 3000)
     } catch (e: any) {
+      if (isAbortError(e)) return   // 用户主动停的
       const msg = e?.message || String(e)
       // 同 handleDebateSend:错误只留在出事的那个会话里,换会话由 effect 清掉
       if (stillOn(sid)) {
@@ -955,6 +1002,8 @@ export default function ChatWorkspace({
     <InputBox
       onSend={handleSend}
       disabled={busy || !sessionId}
+      generating={busy}
+      onAbort={handleAbort}
       currentAgent={currentAgent}
       currentModelKey={currentModelKey}
       onChangeAgent={handleChangeAgent}
