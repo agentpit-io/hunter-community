@@ -188,8 +188,41 @@ def _extract_translation(out: str) -> str:
     for i, ln in enumerate(lines):
         if starts_with_chinese(ln):
             body = " ".join(x.strip() for x in lines[i:] if x.strip())
-            return " ".join(body.split())
+            return _cut_at_english_prose(" ".join(body.split()))
     return ""
+
+
+def _cut_at_english_prose(text: str) -> str:
+    """砍掉译文**后面**跟着的英文尾巴。
+
+    内心戏不只出现在前面。实测还有这一种(2026-09-09,同一天):
+
+        针对美国股票的系统性动量筛选器。…始终使用此技能。
+        Let's double check the rules: - "12-month" -> "12 个月" … Looks perfect.
+        针对美国股票的系统性动量筛选器。…            ← 又重复了一遍
+
+    模型把**自检过程**写在了译文后面,再抄一遍译文。从第一个中文取到结尾
+    会把这一整坨都收进去。
+
+    判据:遇到**连续 4 个及以上纯英文单词**就截断。阈值不能再低 ——
+    `equity research initiation`、`Piotroski F-Score` 这类**要保留的术语**
+    正好是 2-3 个连续英文词,设成 3 就会把它们砍掉(上一版 has_english_prose
+    误伤 4 个译文就是这个教训)。而内心戏("Let's double check the rules"、
+    "I will translate the provided text")都在 5 个词以上。
+    """
+    words = text.split()
+    run = 0
+    for idx, w in enumerate(words):
+        # 纯 ASCII 且含字母 = 英文词;中文、数字、标点都不算
+        if w.isascii() and any(c.isalpha() for c in w):
+            run += 1
+            if run >= 4:
+                cut = " ".join(words[: idx - run + 1]).strip()
+                # 砍完得还剩中文,否则说明整段本来就是英文,交给调用方判失败
+                return cut if any("一" <= c <= "鿿" for c in cut) else ""
+        else:
+            run = 0
+    return text
 
 
 def translate_desc(text: str, *, model: str | None = None) -> str:
