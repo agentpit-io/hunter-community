@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 
-Cat = Literal["价值", "质量", "成长", "动量", "ML", "技术", "资金", "波动"]
+Cat = Literal["价值", "质量", "成长", "动量", "ML", "技术", "资金", "波动", "流动性", "规模"]
 
 
 @dataclass
@@ -76,6 +76,21 @@ ALL_FACTORS: list[FactorDef] = [
     # ── 波动 / 其他 ──
     FactorDef("vol_20d_inv", "波动", "低波动",       "🛡", "1 / 20 日收益标准差"),
     FactorDef("candle_5d",   "技术", "近 5 日 K 线", "📉", "近 5 日阳线比例"),
+
+    # ── F-1 · 纯日线 7 因子(2026-09-09 · 点名:量比 / 52 周高点 / 换手与 Amihud / 规模 / 贝塔 / 偏度)──
+    #
+    # 全部只读本地表(klines + financial_metric),不联网,归 factor_engine.LOCAL_ONLY。
+    # 两处口径是**近似**,写进 desc 让界面上看得到(CLAUDE.md:算不出就说清楚,不假装精确):
+    #   · klines 没有成交额,Amihud 的"成交额"= 成交量 × 100 × 收盘价(腾讯源 volume 单位是手)
+    #   · 没有股本字段,总股本 = 总资产 × (1 − 负债率) / 每股净资产(三项都在 financial_metric)
+    #     任一项缺 → 该股票不打分,不用默认值凑
+    FactorDef("vol_ratio_20", "技术",   "量比",           "📊", "今日成交量 / 前 20 日均量 · 放量确认趋势或反转 · 方向待 IC 验证"),
+    FactorDef("high52_prox",  "动量",   "52 周高点距离",  "📈", "close / 过去 250 日最高价 · 越接近 1 越强势(临近新高)"),
+    FactorDef("turnover_20",  "流动性", "20 日换手率",    "🔄", "20 日均成交股数 / 估算总股本(净资产 ÷ 每股净资产)· 多作过滤条件"),
+    FactorDef("amihud_20",    "流动性", "Amihud 非流动性", "🔄", "mean(|日收益| / 成交额) · 成交额用 量×100×收盘 近似 · 值大 = 难成交", reverse=True),
+    FactorDef("size_inv",     "规模",   "小市值",         "📏", "−ln(总市值) · 市值 = close × 估算总股本 · A 股小盘效应 · 注意幸存者偏差"),
+    FactorDef("beta_60",      "波动",   "市场贝塔",       "🛡", "60 日个股收益对沪深 300 的回归斜率 · 指数历史不足 60 日时不产出"),
+    FactorDef("ret_skew_60",  "波动",   "收益偏度",       "🛡", "60 日日收益分布偏度 · 负偏 = 暴跌尾部风险 · 方向待 IC 验证"),
 ]
 
 
@@ -91,4 +106,4 @@ def enabled_factors() -> list[FactorDef]:
 
 
 # 分类展示顺序
-CAT_ORDER: list[Cat] = ["价值", "质量", "成长", "动量", "ML", "技术", "资金", "波动"]
+CAT_ORDER: list[Cat] = ["价值", "质量", "成长", "动量", "ML", "技术", "资金", "波动", "流动性", "规模"]

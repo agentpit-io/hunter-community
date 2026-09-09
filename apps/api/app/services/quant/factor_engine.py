@@ -263,6 +263,37 @@ FACTOR_PARAMS: dict[str, list[dict]] = {
          "min": 5, "max": 120, "step": 1, "unit": "日",
          "hint": "用多少天的收益率算标准差。窗口越长越平滑。"},
     ],
+    # F-1 · 纯日线 7 因子(size_inv 没有可调参数)
+    "vol_ratio_20": [
+        {"key": "window", "label": "均量窗口", "default": 20,
+         "min": 5, "max": 120, "step": 1, "unit": "日",
+         "hint": "今日成交量除以之前多少天的平均成交量。"},
+    ],
+    "high52_prox": [
+        {"key": "window", "label": "回看窗口", "default": 250,
+         "min": 60, "max": 500, "step": 5, "unit": "日",
+         "hint": "在多少天里找最高价。250 日 ≈ 52 周。"},
+    ],
+    "turnover_20": [
+        {"key": "window", "label": "换手窗口", "default": 20,
+         "min": 5, "max": 120, "step": 1, "unit": "日",
+         "hint": "平均多少天的成交股数再除以总股本。"},
+    ],
+    "amihud_20": [
+        {"key": "window", "label": "窗口", "default": 20,
+         "min": 5, "max": 120, "step": 1, "unit": "日",
+         "hint": "平均多少天的 |日收益| / 成交额。"},
+    ],
+    "beta_60": [
+        {"key": "window", "label": "回归窗口", "default": 60,
+         "min": 20, "max": 250, "step": 5, "unit": "日",
+         "hint": "用多少天的日收益对沪深 300 做回归。短了噪音大,长了滞后。"},
+    ],
+    "ret_skew_60": [
+        {"key": "window", "label": "窗口", "default": 60,
+         "min": 20, "max": 250, "step": 5, "unit": "日",
+         "hint": "用多少天的日收益算偏度。少于 60 天的偏度很不稳定。"},
+    ],
 }
 
 
@@ -484,6 +515,211 @@ def _compute_candle_5d(codes, trade_date):
     return out
 
 
+# ═══════════════════════════════════════════════════════════════
+# F-1 · 纯日线 7 因子(2026-09-09 · 点名:量比 / 52 周高点 / 换手与 Amihud / 规模 / 贝塔 / 偏度)
+# ═══════════════════════════════════════════════════════════════
+#
+# 全部只读本地表(klines + financial_metric),不联网,归 LOCAL_ONLY。
+# 两条口径说明 —— 写在这里,也写在 factor_defs 的 desc 里让界面看得到:
+#
+#   · klines 没有成交额字段。Amihud 里的"成交额"用 volume × 100 × close 近似
+#     (腾讯源 volume 单位是**手**,1 手 = 100 股;实测 600519 日 volume 约 2 万,
+#     对应 200 万股,量级吻合)。这是近似不是编造,且只影响绝对值,截面排序不变;
+#     但因子 desc 必须说清楚,不能叫"成交额"。
+#   · klines / financial_metric 都没有股本。总股本 ≈ 总资产 × (1 − 负债率) / 每股净资产
+#     (= 净资产 / BPS),三项都在 financial_metric,取各自 trade_date 之前最近一期。
+#     任一项缺或非正 → 该股票**不在返回里**(不打分),不用默认值凑。
+#     对比 _compute_ev_ebitda_inv 里"5 亿股近似"那种做法 —— 那个会让所有股票市值
+#     同比例失真,这里宁可少算几只。CLAUDE.md:空的比假的好。
+#   · beta_60 依赖 klines 里的沪深 300(code='000300',由 index_kline 落库)。
+#     指数历史不足窗口时**整个因子返回空**(界面标灰),不拿别的东西凑。
+
+_LOT = 100.0   # 腾讯源 volume 单位为「手」· 1 手 = 100 股
+
+
+def _fetch_klines_ohlcv(codes, trade_date, back_days):
+    """klines 取 (ts, high, close, volume) · 按 code 分组 · ts 升序"""
+    conn = get_conn(); cur = conn.cursor()
+    cur.execute(
+        """SELECT code, ts, high, close, volume FROM klines
+           WHERE code = ANY(%s) AND period='daily' AND ts <= %s AND ts >= %s
+           ORDER BY code, ts""",
+        (codes, trade_date, trade_date - timedelta(days=back_days + 30)))
+    out = {}
+    for code, ts, hi, cl, vol in cur.fetchall():
+        out.setdefault(code, []).append((
+            ts,
+            float(hi) if hi is not None else None,
+            float(cl) if cl is not None else None,
+            float(vol) if vol is not None else None,
+        ))
+    cur.close(); conn.close()
+    return out
+
+
+def _estimate_shares(codes, trade_date):
+    """总股本(股)≈ 总资产 × (1 − 负债率%) / 每股净资产 · 三项来自 financial_metric
+
+    任一项缺或非正 → 该股票不在返回里。三项各取 trade_date 之前最近一期,
+    绝大多数情况是同一份财报;偶尔错期(某项那期为 nan)误差在个位数百分比,
+    对 −ln(市值) 和换手率的截面排序影响可忽略。
+    """
+    from app.services.quant import financial_store as fs
+    ta = fs.read_metric(codes, "total_asset", trade_date)
+    dr = fs.read_metric(codes, "debt_ratio", trade_date)
+    bps = fs.read_metric(codes, "bps", trade_date)
+    out = {}
+    for c in codes:
+        a, d, b = ta.get(c), dr.get(c), bps.get(c)
+        if a is None or d is None or b is None:
+            continue
+        if a <= 0 or b <= 0 or not (0 <= d < 100):
+            continue
+        equity = a * (1 - d / 100.0)
+        if equity <= 0:
+            continue
+        out[c] = equity / b
+    return out
+
+
+def _compute_vol_ratio_20(codes, trade_date, params=None):
+    """量比 · 最近 1 日成交量 / 之前 N 日平均成交量(默认 20)"""
+    n = int(params_of("vol_ratio_20", params)["window"])
+    kl = _fetch_klines_ohlcv(codes, trade_date, back_days=max(45, n * 2))
+    out = {}
+    for code, series in kl.items():
+        vols = [v for _, _, _, v in series if v is not None and v > 0]
+        if len(vols) < n + 1: continue
+        base = sum(vols[-(n + 1):-1]) / n
+        if base > 0:
+            out[code] = vols[-1] / base
+    return out
+
+
+def _compute_high52_prox(codes, trade_date, params=None):
+    """52 周高点距离 · close / 过去 N 日最高价(默认 250 ≈ 52 周)· 越接近 1 越强势
+
+    历史不足 N 日但 ≥ 120 日时用现有全部(降级,同 momentum_12m_1m 的做法)。
+    """
+    n = int(params_of("high52_prox", params)["window"])
+    kl = _fetch_klines_ohlcv(codes, trade_date, back_days=int(n * 1.6))
+    out = {}
+    for code, series in kl.items():
+        rows = [(h, c) for _, h, c, _ in series
+                if h is not None and c is not None and h > 0 and c > 0]
+        if len(rows) < 120: continue
+        window = rows[-n:]
+        hi = max(h for h, _ in window)
+        if hi > 0:
+            out[code] = window[-1][1] / hi
+    return out
+
+
+def _compute_turnover_20(codes, trade_date, params=None):
+    """N 日平均换手率 · mean(成交量 × 100) / 估算总股本(见 _estimate_shares)"""
+    n = int(params_of("turnover_20", params)["window"])
+    shares = _estimate_shares(codes, trade_date)
+    if not shares:
+        return {}
+    kl = _fetch_klines_ohlcv(list(shares), trade_date, back_days=max(45, n * 2))
+    out = {}
+    for code, series in kl.items():
+        vols = [v for _, _, _, v in series if v is not None and v > 0]
+        if len(vols) < n: continue
+        traded = sum(vols[-n:]) / n * _LOT
+        out[code] = traded / shares[code]
+    return out
+
+
+def _compute_amihud_20(codes, trade_date, params=None):
+    """Amihud 非流动性 · mean(|日收益| / 日成交额) · 成交额 ≈ volume × 100 × close(见块头说明)
+
+    × 1e9 只是让数字可读(每十亿元成交推动的收益),z-score 后没有影响。
+    值越大越难成交 → factor_defs 里 reverse=True(流动性好的分高)。
+    """
+    n = int(params_of("amihud_20", params)["window"])
+    kl = _fetch_klines_ohlcv(codes, trade_date, back_days=max(45, n * 2))
+    out = {}
+    for code, series in kl.items():
+        rows = [(c, v) for _, _, c, v in series
+                if c is not None and v is not None and c > 0 and v > 0]
+        if len(rows) < n + 1: continue
+        rows = rows[-(n + 1):]
+        vals = []
+        for (c0, _v0), (c1, v1) in zip(rows[:-1], rows[1:]):
+            amt = v1 * _LOT * c1
+            if amt > 0:
+                vals.append(abs(c1 / c0 - 1) / amt)
+        if len(vals) >= n // 2:
+            out[code] = sum(vals) / len(vals) * 1e9
+    return out
+
+
+def _compute_size_inv(codes, trade_date):
+    """规模(反向)· −ln(总市值) · 市值 = close × 估算总股本 · 小市值分高"""
+    import math
+    shares = _estimate_shares(codes, trade_date)
+    if not shares:
+        return {}
+    kl = _fetch_klines_ohlcv(list(shares), trade_date, back_days=15)
+    out = {}
+    for code, series in kl.items():
+        closes = [c for _, _, c, _ in series if c is not None and c > 0]
+        if not closes: continue
+        mcap = closes[-1] * shares[code]
+        if mcap > 0:
+            out[code] = -math.log(mcap)
+    return out
+
+
+def _compute_beta_60(codes, trade_date, params=None):
+    """市场贝塔 · 个股日收益对沪深 300(klines code='000300')日收益的回归斜率 · N 日窗口
+
+    指数历史不足 N+1 日 → 整个因子返回空(界面标灰),不用别的指数凑。
+    个股与指数按 ts 对齐,只用两边都有的交易日。
+    """
+    import numpy as np
+    n = int(params_of("beta_60", params)["window"])
+    idx = _fetch_klines_ohlcv(["000300"], trade_date, back_days=int(n * 1.6)).get("000300", [])
+    idx_close = {ts: c for ts, _, c, _ in idx if c is not None and c > 0}
+    if len(idx_close) < n + 1:
+        log.warning("[factor_engine] beta_60: 沪深 300 只有 %d 日 K 线(需 ≥ %d)· 本次不产出"
+                    " · 跑 index_kline.backfill('000300', ...) 补指数历史", len(idx_close), n + 1)
+        return {}
+    kl = _fetch_klines_ohlcv(codes, trade_date, back_days=int(n * 1.6))
+    out = {}
+    for code, series in kl.items():
+        pairs = [(ts, c) for ts, _, c, _ in series if c is not None and c > 0 and ts in idx_close]
+        if len(pairs) < n + 1: continue
+        pairs = pairs[-(n + 1):]
+        ci = np.array([c for _, c in pairs])
+        cm = np.array([idx_close[ts] for ts, _ in pairs])
+        r_i = np.diff(ci) / ci[:-1]
+        r_m = np.diff(cm) / cm[:-1]
+        var = r_m.var()
+        # 指数日收益方差正常在 1e-5 ~ 1e-3 量级;小于 1e-10 说明指数序列几乎不动
+        # (数据异常或被填充),此时 cov/var 是噪音放大器,不产出
+        if var > 1e-10:
+            out[code] = float(np.cov(r_i, r_m, bias=True)[0, 1] / var)
+    return out
+
+
+def _compute_ret_skew_60(codes, trade_date, params=None):
+    """收益偏度 · N 日日收益分布的三阶标准化矩 · 负偏 = 暴跌尾部风险"""
+    import numpy as np
+    n = int(params_of("ret_skew_60", params)["window"])
+    kl = _fetch_klines_ohlcv(codes, trade_date, back_days=int(n * 1.6))
+    out = {}
+    for code, series in kl.items():
+        closes = np.array([c for _, _, c, _ in series if c is not None and c > 0])
+        if len(closes) < n + 1: continue
+        rets = np.diff(closes[-(n + 1):]) / closes[-(n + 1):-1]
+        sd = rets.std()
+        if sd > 0:
+            out[code] = float(((rets - rets.mean()) ** 3).mean() / sd ** 3)
+    return out
+
+
 # 只靠本地 klines 就能算的因子 —— **不碰网络,不需要任何 key**。
 #
 # 这个名单决定了开源实例"不填 key 能用到什么程度":这 8 个因子
@@ -496,6 +732,9 @@ def _compute_candle_5d(codes, trade_date):
 LOCAL_ONLY = [
     "momentum_1m", "momentum_6m", "momentum_12m_1m",
     "ma_align", "macd", "rsi", "vol_20d_inv", "candle_5d",
+    # F-1 · 纯日线 7 因子(turnover_20 / size_inv 还读本地 financial_metric,仍不联网)
+    "vol_ratio_20", "high52_prox", "turnover_20", "amihud_20",
+    "size_inv", "beta_60", "ret_skew_60",
 ]
 
 
@@ -542,6 +781,14 @@ COMPUTERS = {
     "main_flow": _compute_main_flow,
     # D-6 · 补齐 20/20
     "ev_ebitda_inv": _compute_ev_ebitda_inv,
+    # F-1 · 纯日线 7 因子
+    "vol_ratio_20": _compute_vol_ratio_20,
+    "high52_prox": _compute_high52_prox,
+    "turnover_20": _compute_turnover_20,
+    "amihud_20": _compute_amihud_20,
+    "size_inv": _compute_size_inv,
+    "beta_60": _compute_beta_60,
+    "ret_skew_60": _compute_ret_skew_60,
 }
 
 
