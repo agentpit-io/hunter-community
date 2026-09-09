@@ -23,6 +23,11 @@ for _ in range(6):
             sys.path.insert(0, _d)
         break
 
+from agents.translation import (  # noqa: E402
+    ensure_chinese,
+    looks_like_slug,
+    translate_desc,
+)
 from agents.text_sanitizer import (  # noqa: E402
     ZH_ONLY_RULE,
     NO_SANITIZE_KEYS,
@@ -39,4 +44,6 @@ __all__ = [
     "ZH_ONLY_RULE", "NO_SANITIZE_KEYS", "chinese_char_count", "contains_chinese",
     "has_english_prose", "sanitize_json_values", "sanitize_llm_text",
     "strip_english_prose", "strip_thinking_preamble",
+    # 翻译 —— 同样走这层中转,理由和上面一样:agents/ 不在 api 进程的 sys.path 里
+    "ensure_chinese", "translate_desc", "looks_like_slug",
 ]

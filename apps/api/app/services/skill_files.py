@@ -270,7 +270,12 @@ def _load_one(skill_dir: Path, builtin: bool) -> dict | None:
         "icon": h.get("icon") or "⭐",
         "name": h.get("display_name") or name,
         "prompt_tpl": h.get("prompt_tpl") or "",
-        "hint": fm.get("description") or "",
+        # 说明优先用中文译文 —— 第三方 SKILL 的 description 大多是英文,
+        # 装进来时由 `translate_desc` 翻一份存进 `hunter.description_zh`(见 skill_install)。
+        # 没译文就回落原文,**绝不留空**:说明栏空白等于零信息,比留着英文还糟。
+        "hint": h.get("description_zh") or fm.get("description") or "",
+        # 原文留一份 —— 存量补译脚本靠它判断该不该翻,详情面板将来要对照也有得取
+        "hint_raw": fm.get("description") or "",
         "brand": h.get("brand") or "",
         "source_url": h.get("source_url") or "",
         # 从哪个仓库装来的 —— `install()` 写的是顶层 `origin: github:owner/repo@ref`,
@@ -365,6 +370,56 @@ def _yaml_str(v: str) -> str:
     return '"' + str(v or "").replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+def set_hunter_field(path: Path, key: str, value: str) -> bool:
+    """往 SKILL.md 的 `hunter:` 段里写一个字段 · **只动那一行,其余原样保留**。
+
+    为什么不用下面的 `render()` 重写整个文件:`render` 是给「UI 新建的 SKILL」用的,
+    它按我们的模板重排 frontmatter。拿它去改**第三方装进来的** SKILL,
+    会把作者原有的字段、注释、块标量格式全抹平 —— 那是别人的文件。
+
+    所以这里做最小文本插入:
+      · 有 `hunter:` 段 → 在段内插入 / 替换这一行
+      · 没有 → 在 frontmatter 末尾补一个 `hunter:` 段
+    解析不出 frontmatter 就**什么都不做**并返回 False(宁可不译,也不能写坏文件)。
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except Exception as e:
+        logger.warning("[skill_files] 读失败 {}: {}", path, e)
+        return False
+
+    m = re.match(r"^(---\s*\n)(.*?)(\n---\s*\n?)(.*)$", text, re.S)
+    if not m:
+        logger.warning("[skill_files] 没有 frontmatter · 跳过写入 {}", path)
+        return False
+    head, raw, close, body = m.groups()
+
+    line = f"  {key}: {_yaml_str(value)}"
+    lines = raw.split("\n")
+
+    # 段内已有同名字段 → 就地替换
+    for i, ln in enumerate(lines):
+        if re.match(rf"^\s+{re.escape(key)}\s*:", ln):
+            lines[i] = line
+            break
+    else:
+        # 找 `hunter:` 段;没有就补一个
+        for i, ln in enumerate(lines):
+            if re.match(r"^hunter\s*:\s*$", ln):
+                lines.insert(i + 1, line)
+                break
+        else:
+            lines.append("hunter:")
+            lines.append(line)
+
+    try:
+        path.write_text(head + "\n".join(lines) + close + body, encoding="utf-8")
+    except Exception as e:
+        logger.warning("[skill_files] 写失败 {}: {}", path, e)
+        return False
+    return True
+
+
 def render(fields: dict, body: str) -> str:
     """把表单字段渲染成标准 SKILL.md。
 
@@ -379,6 +434,12 @@ def render(fields: dict, body: str) -> str:
              f"  display_name: {_yaml_str(fields.get('display_name') or name)}",
              f"  icon: {_yaml_str(fields.get('icon') or '⭐')}",
              f"  category: {_yaml_str(fields.get('category') or '其他')}"]
+    # 中文说明 —— 第三方 SKILL 的 description 多是英文,装进来时翻一份存这儿,
+    # UI 的「说明」栏优先读它(见 _load_one 的 hint)。原文保留在标准的
+    # `description:` 里不动,这样文件丢给别的 Claude Code / opencode 仍然是标准格式。
+    # 只在**确实翻出了不同的中文**时才写,和原文一样就没必要多这一行。
+    if fields.get("description_zh") and fields["description_zh"] != fields.get("description"):
+        lines.append(f"  description_zh: {_yaml_str(fields['description_zh'])}")
     if fields.get("brand"):
         lines.append(f"  brand: {_yaml_str(fields['brand'])}")
     if fields.get("source_url"):

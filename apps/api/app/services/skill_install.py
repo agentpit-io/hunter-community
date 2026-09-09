@@ -342,6 +342,9 @@ def install(text: str, paths: list[str]) -> list[str]:
     **只装提示词与文档资源** —— 可执行文件一律跳过,理由见模块开头。
     """
     from app.services import skill_files
+    # 走 lang_guard 中转 —— `agents/` 不在 api 进程的 sys.path 里,
+    # 直接 `from agents.translation import ...` 会 ImportError(见 lang_guard 文件头)
+    from app.services.lang_guard import translate_desc
 
     owner, repo, ref = parse_repo(text)
     if not paths:
@@ -408,10 +411,23 @@ def install(text: str, paths: list[str]) -> list[str]:
         except skill_files.SkillWriteError:
             slug = "imported_" + re.sub(r"[^a-z0-9]", "", name.lower())[:20] or "skill"
 
+        # 说明翻成中文 —— 第三方 SKILL 的 description 绝大多数是英文,
+        # 而能力库那一栏是**给用户看的**。原文保留在标准的 `description:` 里,
+        # 译文写进 `hunter.description_zh`,UI 优先读译文(见 skill_files._load_one)。
+        #
+        # `translate_desc` 内部保证:已是中文 / 只是个 slug / 翻译失败 → **原样返回**,
+        # 不抛异常。所以这里不会因为 LLM 不可用而装不上 SKILL —— 大不了还是英文。
+        try:
+            desc_zh = translate_desc(desc)
+        except Exception as e:                # noqa: BLE001
+            logger.warning("[skill_install] {} 说明翻译失败 · 保留原文: {}", slug, e)
+            desc_zh = desc
+
         skill_files.save({
             "name": slug,
             "display_name": name,
             "description": desc,
+            "description_zh": desc_zh,
             "icon": "📦",
             "category": "其他",
             # ⚠️ **提问模板不能拿描述凑数。**
