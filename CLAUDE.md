@@ -868,6 +868,78 @@ SaaS 侧结构同构,已一并实现(`hunter` 5422a51)。
 所以只加了闸门(`43723cc`),**没有动它已经稳定的依赖数组** ——
 为对齐而对齐地改结构,反而容易引入新差异。
 
+---
+
+## SKILL 说明中文化 · 以及 gemini 内心戏的三种形态
+
+2026-09-09 需求:能力库那栏「说明」要中文,专业缩写保留英文,以后新装的自动翻。
+实测 17 个用户 SKILL 里 14 个是英文说明。
+
+### 存哪 · 不动原文
+
+译文写进 frontmatter 的 `hunter.description_zh`,标准的 `description:` **原文不动**
+(`hunter:` 段本来就是我们的扩展位)。UI 那栏(`_load_one` 的 hint)优先读译文,
+没有就回落原文 —— **绝不留空**,说明栏空白等于零信息,比英文还糟。
+
+写入走 `skill_files.set_hunter_field`(最小文本插入,只动一行)。
+**不要用 `render()` 重写整个文件** —— 那是给"UI 新建的 SKILL"用的,
+拿它改第三方装进来的文件会把作者的字段、注释、块标量格式全抹平。
+
+**内置 `skills/` 不归脚本管**:那是我们自己写的,英文说明是自己的疏忽,
+直接改源文件并提交(uzi 就这么改的);脚本改了下次 `git pull` 就被覆盖。
+
+### translate_desc 与 ensure_chinese 不是一回事
+
+| | ensure_chinese | translate_desc |
+|---|---|---|
+| 治什么 | 我们自己的 agent 跑出了英文 | 第三方 SKILL 自带的英文说明 |
+| 先 sanitize? | 是(**丢掉**英文散文) | **否** —— 一丢只剩碎片 |
+| 失败返回 | `""`,调用方落中文占位 | **原文** |
+
+「空的比假的好」针对的是**编造的数字/指标**,不适用于说明文字。
+第三方写的元数据不是我们编的内容,留英文原文 = 维持现状,留空 = 倒退。
+
+### gemini 的内心戏有三种形态,prompt 治不住
+
+同一天连踩三次,每次都是"改 prompt 无效"(交接稿 A15 早写过这条):
+
+1. **前置**:`, I need to translate the provided text into Simplified Chinese...`
+   然后才给译文,有的还自己加 `**Translation:**` 标题。
+2. **后置**:译文写完接一段自检 `Let's double check the rules: - "12-month" -> ...
+   Looks perfect.`,**再把译文抄一遍**。
+3. 两者同时出现。
+
+A15 的解法是 assistant prefill(把正文第一行塞进 messages 让模型只能续写),
+但**翻译没有固定的第一行**,prefill 用不上。改成后处理:
+
+- **从第一个以中文开头的行取起**(砍掉前置内心戏);
+- **遇到连续 ≥4 个纯英文单词就截断**(砍掉后置尾巴)。
+
+### 阈值 4 是有讲究的 · 守卫判据不能照搬
+
+先试过用 `has_english_prose` 兜底,**误伤 4 个完全合格的译文**:
+
+    …机构级品质的 equity research initiation 报告…
+    …请使用 swing-trade-scanner、longterm-quality-investor…
+
+这些英文**正是我们自己的 prompt 要求保留的**(术语、skill 名),
+却被判成"英文散文"退回英文原文。`has_english_prose` 是给「整段英文回答」
+设计的判据,搬到「中文为主、夹带术语」的译文上就是误伤。
+
+所以截断阈值定在 **4 个连续英文词**:
+`equity research initiation`、`Piotroski F-Score` 这类要保留的术语是 2-3 个词,
+而内心戏(`Let's double check the rules` / `I will translate the provided text`)
+都在 5 个词以上。**设 3 就会砍掉术语。**
+
+最终校验只留一条:`starts_with_chinese` —— 内心戏的特征就是英文开头。
+**守卫的判据要跟着场景走,别因为在别处用得好就照搬。**
+
+### 三种情况不翻,省 token
+
+已是中文 / 已有译文 / **说明其实只是个 slug**。
+最后一种实测有 7 个(`morning-note`、`catalyst-calendar` 这类,
+作者根本没写说明,description 就等于目录名),翻了只会得到奇怪的中文词。
+
 ## 详细文档
 
 完整问题清单与实施记录(在 agentpit repo 内,不在本仓):
