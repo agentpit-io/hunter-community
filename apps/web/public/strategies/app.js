@@ -336,65 +336,132 @@ async function migrateLocalToServer() {
 function factorByKey(key) { return FACTORS.find(f => f.key === key) }
 
 // ═════════════════════════════════════════════════════════════════
-// 因子参数 · 界面镜像
+// 因子参数 · 由后端下发,前端不再手抄
 // ═════════════════════════════════════════════════════════════════
 //
 // 产品经理:「这些因子大部分需要进一步设置参数,比如 RSI 超买卖多少
 // 才算超,让客户自己设置。现在这种只拖动滚动条调节没有意义。」
 //
-// 这份表只管**怎么画**(范围、步长、说明文字)。真正算的时候以后端
-// `FACTOR_PARAMS` 为准 —— 后端会夹取越界值、丢弃没登记的字段,
-// 所以就算这里和后端偶尔对不上,也不会算出脏结果。
-// 后端接口 `/api/quant/factors` 也返回同一份表,可用于比对。
+// **这里原来是一份手抄的副本,一个提交之后就过期了。**
+// 2026-09-09 加 7 个纯日线因子(量比 / 52 周高点 / 换手 / Amihud /
+// 贝塔 / 偏度)时后端登记了参数,前端这份表没跟着改 —— 于是用户在
+// 工作台上看到「52 周高点距离」连一个「参数」入口都没有,而后端
+// 明明支持。功能做了但没人能发现,等于没做。
 //
-// 不在表里的因子 = 没有可调参数(pe_inv 就是 1/PE,没什么好调)。
-const FACTOR_PARAMS = {
-  rsi: [
-    { key:'period',     label:'RSI 周期',  def:14, min:2,  max:60, step:1, unit:'日',
-      hint:'算 RSI 用最近多少天。短了灵敏也更吵,长了稳但滞后。' },
-    { key:'oversold',   label:'超卖线',    def:30, min:5,  max:45, step:1, unit:'',
-      hint:'RSI 低于这条线算超卖(打高分)。越低越苛刻。' },
-    { key:'overbought', label:'超买线',    def:70, min:55, max:95, step:1, unit:'',
-      hint:'RSI 高于这条线算超买(打低分)。这是个反向因子。' },
-  ],
-  macd: [
-    { key:'fast',      label:'快线 EMA',   def:12, min:3,  max:50,  step:1, unit:'日', hint:'短周期均线。' },
-    { key:'slow',      label:'慢线 EMA',   def:26, min:10, max:120, step:1, unit:'日', hint:'长周期均线,要大于快线。' },
-    { key:'signal',    label:'信号线',     def:9,  min:2,  max:40,  step:1, unit:'日', hint:'对 MACD 再平滑一次,差值就是柱子。' },
-    { key:'atr_period',label:'ATR 归一',   def:14, min:5,  max:60,  step:1, unit:'日', hint:'用 ATR 归一,不同价位的票才能比。' },
-  ],
-  ma_align: [
-    { key:'ma1', label:'均线 1', def:5,  min:2,  max:20,  step:1, unit:'日', hint:'多头排列最短的那条。' },
-    { key:'ma2', label:'均线 2', def:10, min:3,  max:60,  step:1, unit:'日', hint:'' },
-    { key:'ma3', label:'均线 3', def:20, min:5,  max:120, step:1, unit:'日', hint:'' },
-    { key:'ma4', label:'均线 4', def:60, min:10, max:250, step:1, unit:'日', hint:'最长那条。四条依次向上 = 满分。' },
-  ],
-  vol_20d_inv: [
-    { key:'window', label:'波动率窗口', def:20, min:5, max:120, step:1, unit:'日',
-      hint:'用多少天的收益率算标准差。窗口越长越平滑。' },
-  ],
+// 现在改成从 `/api/quant/factors` 拉(那个接口本来就返回同一份表),
+// **前端一份都不存**:后端加参数,界面自动就有。
+// 拉不到就在参数区显示"参数没加载出来"并给个重试,**不用旧副本兜底** ——
+// 拿一份可能过期的范围去画输入框,用户会以为自己调的是真的。
+//
+// 字段名两边不同(后端 `default`,界面历史上用 `def`),
+// `normalizeParamSpec` 统一成 `def`;类型 `type` 缺省按默认值推断,
+// 支持 int / float / select(select 用 `options: [{value,label}]`)。
+let FACTOR_PARAM_SPECS = null      // null = 还没拉到 · {} = 拉到了但没有任何可调参数
+let FACTOR_PARAM_ERROR = ''
+
+function normalizeParamSpec(list) {
+  return (list || []).map(p => ({
+    key: p.key,
+    label: p.label || p.key,
+    def: p.default !== undefined ? p.default : p.def,
+    type: p.type || (Number.isInteger(p.default !== undefined ? p.default : p.def) ? 'int' : 'float'),
+    min: p.min, max: p.max, step: p.step,
+    options: p.options || null,
+    unit: p.unit || '',
+    hint: p.hint || '',
+  }))
 }
 
+/** 拉一次因子清单,把可调参数收进 FACTOR_PARAM_SPECS · 返回是否成功 */
+async function loadFactorParams() {
+  try {
+    const d = await fetch('/api/quant/factors', { cache: 'no-store' }).then(r => r.json())
+    const out = {}
+    for (const f of (d.factors || [])) {
+      if (f.params && f.params.length) out[f.key] = normalizeParamSpec(f.params)
+    }
+    FACTOR_PARAM_SPECS = out
+    FACTOR_PARAM_ERROR = ''
+    return true
+  } catch (e) {
+    FACTOR_PARAM_SPECS = null
+    FACTOR_PARAM_ERROR = (e && e.message) || String(e)
+    return false
+  }
+}
+
+/** 某因子的参数定义 · 还没拉到就是空数组(界面据此显示"加载中") */
+function paramSpecOf(key) { return (FACTOR_PARAM_SPECS || {})[key] || [] }
+
+/** 参数定义拉到了吗(没拉到时界面不能说"这个因子没有参数") */
+function paramSpecsReady() { return FACTOR_PARAM_SPECS !== null }
+
 /** 这个因子有没有可调参数 */
-function hasParams(key) { return (FACTOR_PARAMS[key] || []).length > 0 }
+function hasParams(key) { return paramSpecOf(key).length > 0 }
+
+/** 把一个值收进它自己的合法范围 · select 认选项,数值夹 [min,max] 并对齐 step */
+function clampParam(p, raw) {
+  if (p.type === 'select') {
+    const ok = (p.options || []).some(o => o.value === raw)
+    return ok ? raw : p.def
+  }
+  let v = Number(raw)
+  if (!Number.isFinite(v)) return p.def
+  if (p.step) v = Math.round(v / p.step) * p.step
+  v = Math.max(p.min, Math.min(p.max, v))
+  // step 是 0.5 这类小数时会算出 7.000000000000001,显示出来很难看
+  return p.type === 'int' ? Math.round(v) : Math.round(v * 1e6) / 1e6
+}
 
 /** 某因子当前生效的参数 = 默认值 覆盖上 draft 里存的 */
 function paramsOf(key, draftParams) {
-  const spec = FACTOR_PARAMS[key] || []
+  const spec = paramSpecOf(key)
   const saved = (draftParams || {})[key] || {}
+  // 参数定义还没拉到时,原样返回存着的那份 —— 这时不知道范围,
+  // 但**绝不能返回空**:下面 factorsPayload 要靠它把用户调过的参数发给后端,
+  // 返回空等于用户存好的参数在打分时悄悄变回默认值
+  if (!spec.length) return { ...saved }
   const out = {}
   spec.forEach(p => {
-    const v = Number(saved[p.key])
-    out[p.key] = Number.isFinite(v) ? Math.max(p.min, Math.min(p.max, v)) : p.def
+    out[p.key] = (saved[p.key] === undefined || saved[p.key] === null)
+      ? p.def : clampParam(p, saved[p.key])
   })
   return out
 }
 
 /** 是不是全都还是默认值(是的话不必往后端传,省一次实时计算) */
 function isDefaultParams(key, draftParams) {
-  const spec = FACTOR_PARAMS[key] || []
+  const spec = paramSpecOf(key)
+  if (!spec.length) {
+    // 定义还没拉到:只要 draft 里存了东西,就当成"用户调过",照发后端。
+    // 后端会夹取越界值、丢掉没登记的键,发多了不会算脏,发少了才会。
+    const saved = (draftParams || {})[key] || {}
+    return Object.keys(saved).length === 0
+  }
   const cur = paramsOf(key, draftParams)
   return spec.every(p => cur[p.key] === p.def)
+}
+
+/** 参数摘要 · 折叠状态下显示 「RSI 周期 14 · 超卖线 30」这样一行 */
+function paramSummary(key, draftParams) {
+  const spec = paramSpecOf(key)
+  if (!spec.length) {
+    // 定义没拉到但 draft 里存着值:直接把键值列出来。
+    // 显示 `near_pct 5` 不好看,但比什么都不显示强 —— 用户至少知道
+    // 这次算的确实带了自定义参数,而不是以为回测走的是默认口径
+    const saved = (draftParams || {})[key] || {}
+    return Object.keys(saved).map(kk => `${kk} ${saved[kk]}`).join(' · ')
+  }
+  const cur = paramsOf(key, draftParams)
+  const label = p => {
+    if (p.type === 'select') {
+      const o = (p.options || []).find(x => x.value === cur[p.key])
+      return `${p.label} ${o ? o.label : cur[p.key]}`
+    }
+    return `${p.label} ${cur[p.key]}${p.unit || ''}`
+  }
+  const head = spec.slice(0, 2).map(label).join(' · ')
+  return spec.length > 2 ? `${head} 等 ${spec.length} 项` : head
 }
 
 /** 组装发给后端的 factors 数组 · 只有改过参数的才带 params */
@@ -402,7 +469,7 @@ function factorsPayload(draft) {
   return (draft.factors || [])
     .map(k => {
       const f = { key: k, weight_pct: draft.weights[k] || 0 }
-      if (hasParams(k) && !isDefaultParams(k, draft.params)) f.params = paramsOf(k, draft.params)
+      if (!isDefaultParams(k, draft.params)) f.params = paramsOf(k, draft.params)
       return f
     })
     .filter(f => f.weight_pct > 0)

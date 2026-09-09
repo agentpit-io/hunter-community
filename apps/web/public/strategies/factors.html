@@ -74,6 +74,18 @@ const container = document.getElementById('page-content')
         card.style.opacity = '.55'
       }
       card.appendChild(flag)
+
+      // 可调参数在这里也标一下 —— 因子广场是用户挑因子的地方,
+      // 「这个因子能不能按我的口径调」是挑的时候就要知道的事,
+      // 不该等他加进工作台再发现。参数本身在工作台改。
+      if (f.params && f.params.length) {
+        const tip = document.createElement('div')
+        tip.style.cssText = 'margin-top:6px;font-size:10.5px;color:var(--brand)'
+        tip.textContent = `⚙ ${f.params.length} 项可调参数 · ${f.params.map(p => p.label).join(' / ')}`
+        tip.title = f.params.map(p => `${p.label}(默认 ${p.default}${p.unit || ''}):${p.hint}`).join(String.fromCharCode(10))
+        const desc = card.querySelector('.desc')
+        if (desc) desc.appendChild(tip); else card.appendChild(tip)
+      }
     })
   } catch (e) { /* 后端未起时静默 */ }
 })()

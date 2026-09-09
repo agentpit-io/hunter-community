@@ -67,19 +67,30 @@ def _fetch_klines_close(codes: list[str], trade_date: date, back_days: int) -> d
 # 单因子计算 · Phase A · 3 个
 # ═══════════════════════════════════════════════════════════════
 
-def _compute_momentum_12m_1m(codes: list[str], trade_date: date) -> dict[str, float]:
+def _compute_momentum_12m_1m(codes: list[str], trade_date: date, params=None) -> dict[str, float]:
     """12M-1M 动量 · 剔除最近 1 月的 11 月涨幅
-    历史充足时用 close[-22]/close[-243] · 不足 243 时降级为 close[-22]/close[-min(120,len-22)]
-    (Phase A · 数据回填有限 · 降级保证有数据 · v2 全 243 严格)
+    历史充足时用 close[-(skip+1)]/close[-window] · 不足时降级(数据回填有限 · 降级保证有数据)
+    回看窗口与剔除天数可配(默认 243 / 21)。
     """
-    kl = _fetch_klines_close(codes, trade_date, back_days=400)
+    p = params_of("momentum_12m_1m", params)
+    win, skip = int(p["window"]), int(p["skip"])
+    kl = _fetch_klines_close(codes, trade_date, back_days=max(400, int(win * 1.6)))
     out: dict[str, float] = {}
     for code, series in kl.items():
         closes = [c for _, c in series if c is not None and c > 0]
         if len(closes) < 60:
             continue
-        recent_idx = min(-22, -(len(closes) // 3))
-        past_idx = -min(len(closes) - abs(recent_idx) - 1, 243)
+        # 降级只在**历史真的不够**时发生。
+        #
+        # 原来这里写的是 `min(-22, -(len//3))` —— min 取的是更负的那个,
+        # 所以只要有 66 根以上 K 线,它永远选 -(len//3):270 根历史时
+        # "剔除最近 1 月"变成了"剔除最近 90 个交易日",算出来的是
+        # 「90 天前往前推 89 天的涨幅」,和因子名写的完全不是一回事。
+        # 更糟的是 skip 参数在这个式子下几乎永远不生效 —— 用户把
+        # 「剔除近期」从 21 调到 0,结果一个数都不变,又是一个假参数。
+        skip_eff = skip if len(closes) > skip + 30 else max(1, len(closes) // 3)
+        recent_idx = -(skip_eff + 1)
+        past_idx = -min(len(closes) - abs(recent_idx) - 1, win)
         recent = closes[recent_idx]
         past = closes[past_idx]
         if past > 0:
@@ -190,26 +201,30 @@ def _compute_debt_ratio_inv(codes, trade_date):
 # B2 · 7 K 线因子(纯 numpy · 用现有 klines)
 # ═══════════════════════════════════════════════════════════════
 
-def _compute_momentum_1m(codes, trade_date):
-    """1 月动量 · 反向(短期均值回归 · 反向 IC · factor_defs 里 reverse=True)"""
-    kl = _fetch_klines_close(codes, trade_date, back_days=45)
+def _compute_momentum_1m(codes, trade_date, params=None):
+    """1 月动量 · 反向(短期均值回归 · 反向 IC · factor_defs 里 reverse=True)
+    回看窗口可配(默认 21 个交易日 ≈ 1 个月)。
+    """
+    n = int(params_of("momentum_1m", params)["window"])
+    kl = _fetch_klines_close(codes, trade_date, back_days=max(45, n * 2))
     out = {}
     for code, series in kl.items():
         closes = [c for _, c in series if c is not None and c > 0]
-        if len(closes) < 22: continue
-        out[code] = closes[-1] / closes[-22] - 1
+        if len(closes) < n + 1: continue
+        out[code] = closes[-1] / closes[-(n + 1)] - 1
     return out
 
 
-def _compute_momentum_6m(codes, trade_date):
-    """6 月动量 · 近 120 交易日涨幅"""
-    kl = _fetch_klines_close(codes, trade_date, back_days=180)
+def _compute_momentum_6m(codes, trade_date, params=None):
+    """6 月动量 · 近 N 交易日涨幅(默认 120)· 历史不足时用现有全部(降级)"""
+    n0 = int(params_of("momentum_6m", params)["window"])
+    kl = _fetch_klines_close(codes, trade_date, back_days=max(180, int(n0 * 1.6)))
     out = {}
     for code, series in kl.items():
         closes = [c for _, c in series if c is not None and c > 0]
         if len(closes) < 60: continue
-        n = min(120, len(closes)-1)
-        out[code] = closes[-1] / closes[-n-1] - 1
+        n = min(n0, len(closes) - 1)
+        out[code] = closes[-1] / closes[-n - 1] - 1
     return out
 
 
@@ -226,7 +241,29 @@ def _compute_momentum_6m(codes, trade_date):
 # 用户怎么自定义」的时候,得能指着界面回答。
 #
 # 每项给出:默认值、范围、一句人话解释(界面直接显示)。
-# 没登记的因子 = 没有可调参数(pe_inv 就是 1/PE,没什么可调的)。
+#
+# ── 加参数之前必须知道的三条(2026-09-09 补)────────────────────────
+#
+# 1. **线性变换的参数是假参数。** 打分链路最后要过 `_winsorize_zscore`,
+#    而 z-score 会把 `a·x + b`(a>0)重新归一成和 x 完全一样的分布 ——
+#    截面排名一个位置都不变。所以「把 RSI 超卖线从 30 调到 20」如果只是
+#    改了归一化的分母,用户调完选出来的还是同一批票,回测数字一模一样。
+#    参数要真的生效,必须**非线性**:截断(clip)、门槛(剔除/并档)、
+#    改窗口长度、改取数口径。新增参数时先问自己"它改的是排序还是刻度",
+#    只改刻度的不要放进来 —— 那是假功能,比没有更糟。
+#
+# 2. **只给 LOCAL_ONLY 的因子加参数。** 调参会走 `compute_z_live` 实时重算,
+#    基本面因子(AKSHARE_ONLY)每只票要打一次 AKShare、300 只是分钟级,
+#    用户在工作台拖一下参数就把 /scan 拖到超时。启动自检 `_check_params()`
+#    会拦这种情况。
+#
+# 3. **默认值必须与"没有这个参数时"的老口径完全等价。** 定时任务用默认参数
+#    算完落 `factor_value` 表,默认值一变,库里的历史值就和新口径对不上了
+#    (回测跨着这条线会出现无法解释的断层)。要变口径就明说,并重算该因子。
+#
+# 没登记的因子 = 没有可调参数(比如 dividend_yield 就是分红除以股价,
+# 没什么可调的;pe_inv / pb_inv 这些能调的其实是异常值上限,但它们是
+# AKSHARE_ONLY,受第 2 条约束不放进来)。
 FACTOR_PARAMS: dict[str, list[dict]] = {
     "rsi": [
         {"key": "period", "label": "RSI 周期", "default": 14,
@@ -263,7 +300,32 @@ FACTOR_PARAMS: dict[str, list[dict]] = {
          "min": 5, "max": 120, "step": 1, "unit": "日",
          "hint": "用多少天的收益率算标准差。窗口越长越平滑。"},
     ],
-    # F-1 · 纯日线 7 因子(size_inv 没有可调参数)
+    # 动量三兄弟 · 「回看多少天」本来写死在函数里,界面上看不见也改不了
+    "momentum_1m": [
+        {"key": "window", "label": "回看窗口", "default": 21,
+         "min": 5, "max": 60, "step": 1, "unit": "交易日",
+         "hint": "拿今天的收盘价和多少个交易日前比。21 ≈ 1 个月。这是反向因子,涨多了反而扣分。"},
+    ],
+    "momentum_6m": [
+        {"key": "window", "label": "回看窗口", "default": 120,
+         "min": 20, "max": 250, "step": 5, "unit": "交易日",
+         "hint": "拿今天的收盘价和多少个交易日前比。120 ≈ 6 个月。历史不足时自动用现有全部。"},
+    ],
+    "momentum_12m_1m": [
+        {"key": "window", "label": "回看窗口", "default": 243,
+         "min": 120, "max": 500, "step": 1, "unit": "交易日",
+         "hint": "总共回看多少个交易日。243 ≈ 12 个月。"},
+        {"key": "skip", "label": "剔除近期", "default": 21,
+         "min": 0, "max": 60, "step": 1, "unit": "交易日",
+         "hint": "掐掉最近多少个交易日不算 —— 学术上这一段是短期反转,"
+                 "留着会把动量效应抵消掉。设 0 就退化成普通 12 月动量。"},
+    ],
+    "candle_5d": [
+        {"key": "window", "label": "统计窗口", "default": 5,
+         "min": 2, "max": 30, "step": 1, "unit": "日",
+         "hint": "数最近多少天里有几根阳线。窗口越短越像「这两天的情绪」。"},
+    ],
+    # F-1 · 纯日线 7 因子
     "vol_ratio_20": [
         {"key": "window", "label": "均量窗口", "default": 20,
          "min": 5, "max": 120, "step": 1, "unit": "日",
@@ -272,12 +334,36 @@ FACTOR_PARAMS: dict[str, list[dict]] = {
     "high52_prox": [
         {"key": "window", "label": "回看窗口", "default": 250,
          "min": 60, "max": 500, "step": 5, "unit": "日",
-         "hint": "在多少天里找最高价。250 日 ≈ 52 周。"},
+         "hint": "在多少天里找最高价。250 日 ≈ 52 周,120 日 ≈ 半年。"},
+        {"key": "near_pct", "label": "贴近阈值", "type": "float", "default": 100.0,
+         "min": 1.0, "max": 100.0, "step": 0.5, "unit": "%",
+         "hint": "只在「距高点 X% 以内」这一段里区分强弱。设 10 = 距高点 10% 以内的才算"
+                 "临近新高,再远的按下面那项处理。默认 100 = 不设阈值,"
+                 "退化成直接比 收盘/最高(和以前完全一样)。"},
+        {"key": "outside", "label": "超出阈值的", "type": "select", "default": "floor",
+         "options": [{"value": "floor", "label": "并到最低分"},
+                     {"value": "drop", "label": "不打分(当筛选条件用)"}],
+         "unit": "",
+         "hint": "「并到最低分」= 距高点太远的一律 0 分,仍参与排名,只是分不出高下;"
+                 "「不打分」= 这只票在本因子上视同没有数据 —— 相当于把因子当筛选条件,"
+                 "但注意有数据的因子不足一半的股票会被整体剔除,阈值卡太紧可能一只都选不出来。"},
     ],
     "turnover_20": [
         {"key": "window", "label": "换手窗口", "default": 20,
          "min": 5, "max": 120, "step": 1, "unit": "日",
          "hint": "平均多少天的成交股数再除以总股本。"},
+        {"key": "max_turnover_pct", "label": "换手率上限", "type": "float", "default": 20.0,
+         "min": 1.0, "max": 50.0, "step": 0.5, "unit": "%",
+         "hint": "日均换手率超过这个数的直接丢掉(不打分)。它挡的是上游财务字段算错股本"
+                 "导致的离谱值 —— 沪深 300 / 中证 500 成分股真实日均换手极少超过 15%。"},
+    ],
+    "size_inv": [
+        {"key": "mcap_min_yi", "label": "市值下限", "default": 20,
+         "min": 1, "max": 2000, "step": 1, "unit": "亿元",
+         "hint": "总市值低于这个数的不打分。既是小盘的下界,也挡掉股本估错的异常值。"},
+        {"key": "mcap_max_yi", "label": "市值上限", "default": 50000,
+         "min": 100, "max": 200000, "step": 100, "unit": "亿元",
+         "hint": "总市值高于这个数的不打分。想只在中小盘里选,把它调到 500 这一档。"},
     ],
     "amihud_20": [
         {"key": "window", "label": "窗口", "default": 20,
@@ -297,12 +383,24 @@ FACTOR_PARAMS: dict[str, list[dict]] = {
 }
 
 
+def param_type(p: dict) -> str:
+    """一项参数是什么类型 · 老条目没写 type 就按默认值推断(int / float)"""
+    t = p.get("type")
+    if t:
+        return t
+    return "int" if isinstance(p["default"], int) else "float"
+
+
 def params_of(key: str, override: dict | None = None) -> dict:
     """默认参数 + 用户覆盖。
 
     **只认注册表里登记过的键** —— 野字段直接忽略,不让它穿进计算。
     越界的值夹到 [min, max] 而不是报错:参数是给人调的,
     调过头给他一个最接近的合法值,比弹错误框好。
+
+    select 型(如 high52_prox 的「超出阈值的怎么办」)不在选项里的值
+    **回落到默认**,不夹取 —— 枚举没有"最接近"这回事,猜错了会让
+    用户以为自己选的那种行为生效了。
     """
     spec = FACTOR_PARAMS.get(key) or []
     out = {p["key"]: p["default"] for p in spec}
@@ -312,8 +410,14 @@ def params_of(key: str, override: dict | None = None) -> dict:
         v = override.get(p["key"])
         if v is None:
             continue
+        t = param_type(p)
+        if t == "select":
+            allowed = {o["value"] for o in p.get("options", [])}
+            if v in allowed:
+                out[p["key"]] = v
+            continue
         try:
-            v = int(v) if isinstance(p["default"], int) else float(v)
+            v = int(v) if t == "int" else float(v)
         except (TypeError, ValueError):
             continue
         out[p["key"]] = max(p["min"], min(p["max"], v))
@@ -374,9 +478,19 @@ def _compute_rsi(codes, trade_date, params=None):
 
     产品经理点名的那个:「RSI 超买卖多少才算超,让客户自己设置」。
 
-    打分:以中位线为 0,越超卖分越高、越超买分越低,
-    并按用户设的超买超卖区间归一 —— 把线收窄(如 20/80)会让
-    同一个 RSI 拿到更低的绝对分,因为"够极端"的门槛提高了。
+    打分:以中位线为 0,越超卖分越高、越超买分越低,**在超买/超卖线处封顶**
+    (分段映射,与 factor_defs 里写的「RSI14 分段映射」一致)。
+
+    ⚠ 封顶这一步不是美化,是让参数真的生效。
+    原来只写 `(mid - rsi) / half`,那是个线性变换 —— 后面 `_winsorize_zscore`
+    会把线性变换重新归一成同一个分布,**截面排名一个位置都不变**。
+    也就是说用户把超卖线从 30 调到 20,选出来的还是同一批票、
+    回测数字一模一样,而界面告诉他"已自定义"。
+    截断之后,超卖线以下的股票一律 +1 并列、超买线以上一律 −1 并列,
+    区分只发生在两线之间 —— 线一动,谁进谁出就真的变了。
+
+    这也意味着默认参数下的 rsi 值与 2026-09-09 之前落库的口径不同
+    (以前不封顶)。历史 factor_value 要重算才能和新值对齐。
     """
     import numpy as np
     p = params_of("rsi", params)
@@ -397,8 +511,8 @@ def _compute_rsi(codes, trade_date, params=None):
         gain = diff[diff > 0].sum() or 0.01
         loss = -diff[diff < 0].sum() or 0.01
         rsi = 100 - 100 / (1 + gain / loss)
-        # 中位 → 0 · 到超卖线 → +1 · 到超买线 → -1(再外推不封顶,z-score 会处理)
-        out[code] = float((mid - rsi) / half)
+        # 中位 → 0 · 到超卖线 → +1 · 到超买线 → −1 · 两线之外封顶并列
+        out[code] = float(max(-1.0, min(1.0, (mid - rsi) / half)))
     return out
 
 
@@ -494,8 +608,9 @@ def _compute_ev_ebitda_inv(codes, trade_date):
     return out
 
 
-def _compute_candle_5d(codes, trade_date):
-    """近 5 日阳线数 / 5"""
+def _compute_candle_5d(codes, trade_date, params=None):
+    """近 N 日阳线数 / N(默认 5)"""
+    n = int(params_of("candle_5d", params)["window"])
     conn = get_conn(); cur = conn.cursor()
     cur.execute(
         """SELECT code, open, close FROM klines
@@ -508,10 +623,10 @@ def _compute_candle_5d(codes, trade_date):
     cur.close(); conn.close()
     out = {}
     for code, series in by_code.items():
-        recent = series[:5]
-        if len(recent) < 5: continue
+        recent = series[:n]
+        if len(recent) < n: continue
         up = sum(1 for o, cl in recent if cl > o)
-        out[code] = up / 5.0
+        out[code] = up / float(n)
     return out
 
 
@@ -553,6 +668,10 @@ def _shares_traded(code: str, volume: float) -> float:
 # 估算股本 / 市值 / 换手的合理性边界 —— 越界说明上游财务字段错了(实测 600941 的 bps 给成 3.02,
 # 真值约 65;688981 的 bps 给成 659),按 CLAUDE.md「空的比假的好」丢掉该股票,而不是让它进截面排名
 _BPS_RANGE = (0.3, 300.0)          # 每股净资产(元)
+# ⚠ 下面两个现在是 FACTOR_PARAMS 里 size_inv / turnover_20 那几项的**默认值来源**
+#   (用户可以在工作台改,但改的是他自己那次计算;定时任务落库仍走这里的默认)。
+#   两处必须一致,`_check_params()` 会在启动时比对 —— 不一致意味着默认口径
+#   悄悄变了,而 factor_value 表里的历史值还是按老常量算的。
 _MCAP_RANGE = (2e9, 5e12)          # 总市值(元):20 亿 ~ 5 万亿(工商银行约 2.9 万亿)
 _TURNOVER_MAX = 0.2                # 日均换手率上限 20%(hs300/zz500 成分股真实值极少超 15%;
                                    # 实测 002027 因 bps 错成 42.6 算出 44.8%,0.5 挡不住,收到 0.2)
@@ -620,11 +739,29 @@ def _compute_vol_ratio_20(codes, trade_date, params=None):
 
 
 def _compute_high52_prox(codes, trade_date, params=None):
-    """52 周高点距离 · close / 过去 N 日最高价(默认 250 ≈ 52 周)· 越接近 1 越强势
+    """52 周高点距离 · 越接近高点越强势。三个参数(回看窗口 / 贴近阈值 / 超阈处理)。
+
+    距离用「差多少个百分点」表示:gap = 1 − 收盘 / 窗口内最高价,
+    gap=0 就是站在新高上,gap=0.08 就是离高点还差 8%。
+
+    打分(near = 贴近阈值 / 100):
+
+        gap ≤ near → 1 − gap / near      # 站在高点 = 1 · 正好在阈值上 = 0
+        gap > near → 并到 0 分,或者不打分(看 outside)
+
+    near = 1(默认 100%)时 gap 恒 ≤ near,式子化简成 1 − gap = 收盘/最高 ——
+    **和 2026-09-09 之前完全一样**,所以默认口径没变、库里的历史值仍然对得上。
+
+    把阈值调小才是用户真正要的那件事:比如设 5%,那么"离高点 6%"和
+    "离高点 40%"一样都是 0 分,排名只在距高点 5% 以内的股票之间发生。
+    这是个截断(非线性),z-score 吃不掉它 —— 阈值一动,选出来的票真的会变。
 
     历史不足 N 日但 ≥ 120 日时用现有全部(降级,同 momentum_12m_1m 的做法)。
     """
-    n = int(params_of("high52_prox", params)["window"])
+    p = params_of("high52_prox", params)
+    n = int(p["window"])
+    near = float(p["near_pct"]) / 100.0
+    outside = p["outside"]
     kl = _fetch_klines_ohlcv(codes, trade_date, back_days=int(n * 1.6))
     out = {}
     for code, series in kl.items():
@@ -633,14 +770,26 @@ def _compute_high52_prox(codes, trade_date, params=None):
         if len(rows) < 120: continue
         window = rows[-n:]
         hi = max(h for h, _ in window)
-        if hi > 0:
-            out[code] = window[-1][1] / hi
+        if hi <= 0:
+            continue
+        gap = 1.0 - window[-1][1] / hi        # 距高点几个百分点(0 = 就在高点上)
+        # 1e-9 是给浮点留的余量:用户设 5%、某只票算出来 0.050000000000000004,
+        # 落在阈值外会让"距高点正好 5%"这只票凭空消失,而界面上完全解释不了
+        if gap <= near + 1e-9:
+            out[code] = 1.0 - gap / near
+        elif outside == "floor":
+            out[code] = 0.0
+        # outside == "drop":这只票在本因子上视同没有数据,不进 out
     return out
 
 
 def _compute_turnover_20(codes, trade_date, params=None):
-    """N 日平均换手率 · mean(成交量 × 100) / 估算总股本(见 _estimate_shares)"""
-    n = int(params_of("turnover_20", params)["window"])
+    """N 日平均换手率 · mean(成交量 × 100) / 估算总股本(见 _estimate_shares)
+    上限可配(默认 20%,即 _TURNOVER_MAX)· 越界丢该股票,不截断到边界。
+    """
+    p = params_of("turnover_20", params)
+    n = int(p["window"])
+    t_max = float(p["max_turnover_pct"]) / 100.0
     shares = _estimate_shares(codes, trade_date)
     if not shares:
         return {}
@@ -651,7 +800,7 @@ def _compute_turnover_20(codes, trade_date, params=None):
         if len(vols) < n: continue
         traded = _shares_traded(code, sum(vols[-n:]) / n)
         t = traded / shares[code]
-        if 0 < t <= _TURNOVER_MAX:
+        if 0 < t <= t_max:
             out[code] = t
     return out
 
@@ -680,9 +829,15 @@ def _compute_amihud_20(codes, trade_date, params=None):
     return out
 
 
-def _compute_size_inv(codes, trade_date):
-    """规模(反向)· −ln(总市值) · 市值 = close × 估算总股本 · 小市值分高"""
+def _compute_size_inv(codes, trade_date, params=None):
+    """规模(反向)· −ln(总市值) · 市值 = close × 估算总股本 · 小市值分高
+    市值上下限可配(默认 20 亿 ~ 5 万亿,即 _MCAP_RANGE)· 越界不打分。
+    把上限调到 500 亿就是"只在中小盘里选"。
+    """
     import math
+    p = params_of("size_inv", params)
+    lo = float(p["mcap_min_yi"]) * 1e8
+    hi = float(p["mcap_max_yi"]) * 1e8
     shares = _estimate_shares(codes, trade_date)
     if not shares:
         return {}
@@ -692,7 +847,7 @@ def _compute_size_inv(codes, trade_date):
         closes = [c for _, _, c, _ in series if c is not None and c > 0]
         if not closes: continue
         mcap = closes[-1] * shares[code]
-        if _MCAP_RANGE[0] <= mcap <= _MCAP_RANGE[1]:
+        if lo <= mcap <= hi:
             out[code] = -math.log(mcap)
     return out
 
@@ -840,7 +995,66 @@ def _check_coverage() -> list[str]:
     return orphans
 
 
+def _check_params() -> list[str]:
+    """参数注册表的三条硬约束 —— 违反了就是**假参数**,启动时直接 ERROR。
+
+    界面上「已自定义」四个字是一句承诺:用户调了,选股就该跟着变。
+    下面每一条不满足,这句承诺就是假的,而且从界面上完全看不出来:
+
+      1. computer 不接 `params` → `compute_z_live` 捕到 TypeError 静默回退查表,
+         调了等于没调。
+      2. 因子不在 `LOCAL_ONLY` → 调参会触发实时重算,基本面因子每只票打一次
+         AKShare,300 只是分钟级,/scan 直接超时。
+      3. spec 字段不全(数值型缺 min/max/step、select 缺 options)→ 前端画不出
+         输入框,或者画出一个夹不住的框。
+
+    注意:**"参数是线性变换"这一条查不出来**(见 FACTOR_PARAMS 头注第 1 条),
+    那个只能靠 review 和 selfcheck_factor_params.py 里的排序断言。
+    """
+    import inspect
+    problems: list[str] = []
+    for key, spec in FACTOR_PARAMS.items():
+        fn = COMPUTERS.get(key)
+        if not fn:
+            problems.append(f"{key}: 注册了参数但没有 computer")
+        elif "params" not in inspect.signature(fn).parameters:
+            problems.append(f"{key}: computer 不接 params —— 用户调了不生效(假参数)")
+        if key not in LOCAL_ONLY:
+            problems.append(f"{key}: 不在 LOCAL_ONLY,调参会走实时重算打爆上游")
+        for p in spec:
+            t = param_type(p)
+            miss = [f for f in ("key", "label", "default", "hint") if f not in p]
+            if t == "select":
+                if not p.get("options"):
+                    miss.append("options")
+                elif p["default"] not in {o["value"] for o in p["options"]}:
+                    problems.append(f"{key}.{p.get('key')}: 默认值不在 options 里")
+            else:
+                miss += [f for f in ("min", "max", "step") if f not in p]
+                if "min" in p and "max" in p and not (p["min"] <= p["default"] <= p["max"]):
+                    problems.append(f"{key}.{p.get('key')}: 默认值不在 [min, max] 内")
+            if miss:
+                problems.append(f"{key}.{p.get('key')}: 缺字段 {miss}")
+
+    # 参数默认值必须等于原来写死的常量 —— 不然默认口径悄悄变了,
+    # 而 factor_value 表里的历史值是按老常量算的,回测跨这条线会出现断层
+    for pkey, want, got in (
+        ("turnover_20.max_turnover_pct", _TURNOVER_MAX * 100,
+         params_of("turnover_20")["max_turnover_pct"]),
+        ("size_inv.mcap_min_yi", _MCAP_RANGE[0] / 1e8, params_of("size_inv")["mcap_min_yi"]),
+        ("size_inv.mcap_max_yi", _MCAP_RANGE[1] / 1e8, params_of("size_inv")["mcap_max_yi"]),
+    ):
+        if abs(float(want) - float(got)) > 1e-9:
+            problems.append(f"{pkey}: 默认值 {got} 与常量 {want} 不一致")
+
+    if problems:
+        log.error("[factor_engine] 因子参数注册表有问题(界面会显示可调但实际不生效):%s",
+                  problems)
+    return problems
+
+
 _check_coverage()
+_check_params()
 
 def _bulk_upsert(trade_date: date, factor_key: str,
                  raw: dict[str, float], z: dict[str, float], rank: dict[str, float]) -> int:
@@ -955,8 +1169,11 @@ def compute_z_live(factor_key: str, codes: list[str], trade_date: date,
     try:
         raw = computer(codes, trade_date, eff)
     except TypeError:
-        # 该因子还没接参数 —— 不假装成功,交回查表
-        log.warning("[factor_engine] %s 尚不支持自定义参数 · 回退默认口径", factor_key)
+        # 该因子还没接参数 —— 不假装成功,交回查表。
+        # 这条只该在开发期出现:`_check_params()` 启动时就会把它报成 ERROR。
+        # 走到这里说明界面显示"已自定义"而结果用的是默认口径 —— 假参数。
+        log.error("[factor_engine] %s 的 computer 不接 params · 回退默认口径"
+                  " —— 用户以为调了,实际没调,去修 COMPUTERS 签名", factor_key)
         return {}
     if not raw:
         return {}
