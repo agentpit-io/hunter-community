@@ -554,7 +554,8 @@ def _shares_traded(code: str, volume: float) -> float:
 # 真值约 65;688981 的 bps 给成 659),按 CLAUDE.md「空的比假的好」丢掉该股票,而不是让它进截面排名
 _BPS_RANGE = (0.3, 300.0)          # 每股净资产(元)
 _MCAP_RANGE = (2e9, 5e12)          # 总市值(元):20 亿 ~ 5 万亿(工商银行约 2.9 万亿)
-_TURNOVER_MAX = 0.5                # 日均换手率上限 50%
+_TURNOVER_MAX = 0.2                # 日均换手率上限 20%(hs300/zz500 成分股真实值极少超 15%;
+                                   # 实测 002027 因 bps 错成 42.6 算出 44.8%,0.5 挡不住,收到 0.2)
 
 
 def _fetch_klines_ohlcv(codes, trade_date, back_days):
