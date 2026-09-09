@@ -179,6 +179,7 @@
     .ag-d{border:1px solid var(--line);border-left:3px solid var(--danger);border-radius:11px;
       padding:13px 15px;background:#fff}
     .ag-d.win{border-left-color:var(--success)}
+    .ag-d.unk{border-left-color:var(--line-strong)}
     .ag-d .hd{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}
     .ag-d .hd .dt{font-family:ui-monospace,menlo,monospace;font-size:11px;color:var(--muted)}
     .ag-d .hd .ti{font-family:var(--serif);font-size:14px;font-weight:650;flex:1}
@@ -194,6 +195,21 @@
     .ag-note{font-size:11.5px;color:var(--muted);line-height:1.75}
     .ag-note code{background:var(--panel);padding:1px 5px;border-radius:4px;font-size:11px}
     .ag-miss{padding:26px 20px;text-align:center;color:var(--muted);font-size:12.5px;line-height:1.8}
+
+    /* 顶部提示条 —— 说明「为什么整页都是 —」。
+       不整页替换:替换掉的话用户根本看不出这一页长什么样。 */
+    .ag-banner{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:11px;
+      font-size:12.5px;line-height:1.7;border:1px solid}
+    .ag-banner .hi{font-size:16px;flex-shrink:0}
+    .ag-banner code{padding:1px 5px;border-radius:4px;font-size:11.5px;background:rgba(255,255,255,.6)}
+    .ag-banner .btn{margin-left:auto;flex-shrink:0}
+    .ag-banner.dev{background:#f6eee7;border-color:#e3d2bd;color:#8a5a1b}
+    .ag-banner.err{background:#fbeceb;border-color:#e6b9b4;color:#9c3a32}
+    .ag-banner.idle{background:#eef1f7;border-color:#ccd6e6;color:#3b558a}
+    /* 净值图没数据时的占位:保留图的位置和高度,不让页面塌下去 */
+    .ag-chart-empty{height:250px;display:grid;place-items:center;color:var(--soft);
+      font-size:22px;font-family:var(--serif);
+      background:repeating-linear-gradient(180deg,transparent,transparent 47px,#f2f0ea 47px,#f2f0ea 48px)}
   </style>
 </head>
 <body>
@@ -260,7 +276,7 @@ function panel(title, cnt, body) {
 // ═══ ① 状态条 ═════════════════════════════════════════════════════
 const STATE_TEXT = { running: ['on', '运行中'], paused: ['off', '已暂停'], never_started: ['never', '尚未启动'] }
 function vStatus(d) {
-  const st = STATE_TEXT[d.state] || ['off', txt(d.state, '状态未知')]
+  const st = STATE_TEXT[d.state] || ['off', txt(d.state)]
   const paper = d.paper === false
     ? '<span class="ag-paper live"><span class="hi hi-bell"></span>真实下单</span>'
     : '<span class="ag-paper"><span class="hi hi-hand"></span>纸上交易 · 未接券商</span>'
@@ -284,8 +300,9 @@ function vStatus(d) {
 
 // ═══ ② 当前策略 ═══════════════════════════════════════════════════
 function vStrategy(d) {
-  const s = d.strategy
-  if (!s) return '<div class="ag-strat">' + missing('当前策略未接入', '后端 dashboard.strategy 为空') + '</div>'
+  // 后端没给 strategy 时不整块消失,照常渲染骨架、字段落 `—` ——
+  // 结构本身就是信息:看得出这一页会展示什么,才知道后端要补什么。
+  const s = d.strategy || {}
   const meta = [
     ['市场', txt(s.market_label, NA) + (s.market_note ? ' <span class="dim">· ' + esc(s.market_note) + '</span>' : '')],
     ['股票池', txt(s.universe, NA) + (Number.isFinite(s.universe_size) ? ' · <b>' + int(s.universe_size) + '</b> 只' : '')],
@@ -293,18 +310,17 @@ function vStrategy(d) {
     ['数据源', txt(s.data_source, NA)],
   ].map(function (m) { return '<span><span class="k">' + m[0] + '</span>' + m[1] + '</span>' }).join('')
   return '<div class="ag-strat">' +
-    '<div class="hd"><span class="lb">当前基于</span><span class="nm">' + txt(s.name, '未命名策略') + '</span>' +
+    '<div class="hd"><span class="lb">当前基于</span><span class="nm">' + txt(s.name) + '</span>' +
       (s.version ? '<span class="chip solid">' + esc(s.version) + '</span>' : '') +
       '<button class="btn small" style="margin-left:auto" id="ag-goto-rules"><span class="hi hi-book"></span> 看规则</button>' +
     '</div>' +
-    '<div class="ds">' + txt(s.summary, '<span class="ag-na">策略说明未填写</span>') + '</div>' +
+    '<div class="ds">' + txt(s.summary) + '</div>' +
     '<div class="mt">' + meta + '</div></div>'
 }
 
 // ═══ ③ 护栏 ═══════════════════════════════════════════════════════
 function vGuard(d) {
-  const g = d.guardrails
-  if (!g) return ''
+  const g = d.guardrails || {}
   const items = [
     ['起始资金', money(g.initial_capital)],
     ['单票上限', pct(g.max_position_pct, 0)],
@@ -322,32 +338,33 @@ function vGuard(d) {
 
 // ═══ ④ 今日流水线 ═════════════════════════════════════════════════
 const STEP_ICON = { collect: 'hi-download', backtest: 'hi-refresh', review: 'hi-book', adjust: 'hi-edit' }
+// 四步是设计固定的,后端没给运行记录时照这个骨架渲染,状态和产出落 `—`。
+// 骨架里的步骤名不是业务数据,是这个智能体的定义。
+const STEP_SKELETON = [
+  { key: 'collect', name: '收集数据' }, { key: 'backtest', name: '滚动回测' },
+  { key: 'review', name: '复盘总结' }, { key: 'adjust', name: '调整策略' },
+]
 function vPipeline(d) {
-  const p = d.pipeline
-  if (!p || !Array.isArray(p.steps) || !p.steps.length) {
-    return '<div class="ag-pipe" style="grid-template-columns:1fr">' +
-      missing('今日还没有运行记录', '智能体每个交易日跑一次:收集数据 → 滚动回测 → 复盘总结 → 调整策略') + '</div>'
-  }
-  const cells = p.steps.map(function (s, i) {
+  const p = d.pipeline || {}
+  const steps = (Array.isArray(p.steps) && p.steps.length) ? p.steps : STEP_SKELETON
+  const cells = steps.map(function (s, i) {
     const cls = ['ok', 'warn', 'fail', 'pending'].indexOf(s.status) >= 0 ? s.status : 'pending'
     const dur = Number.isFinite(s.duration_ms)
       ? (s.duration_ms >= 1000 ? (s.duration_ms / 1000).toFixed(1) + 's' : Math.round(s.duration_ms) + 'ms')
       : null
     return '<div class="ag-step ' + cls + '">' +
       '<div class="n">' + txt(s.at, '') + ' · 步骤 ' + (i + 1) + '</div>' +
-      '<div class="t"><span class="hi ' + (STEP_ICON[s.key] || 'hi-check') + '"></span>' + txt(s.name, '未命名步骤') + '</div>' +
-      '<div class="d">' + txt(s.summary, '<span class="ag-na">无产出说明</span>') +
-        (dur ? '<br>耗时 ' + dur : '') + '</div></div>'
+      '<div class="t"><span class="hi ' + (STEP_ICON[s.key] || 'hi-check') + '"></span>' + txt(s.name) + '</div>' +
+      '<div class="d">' + txt(s.summary) + (dur ? '<br>耗时 ' + dur : '') + '</div></div>'
   }).join('')
-  return '<div class="ag-pipe"' + (p.steps.length !== 4 ? ' style="grid-template-columns:repeat(' +
-    Math.min(p.steps.length, 4) + ',1fr)"' : '') + '>' + cells + '</div>'
+  return '<div class="ag-pipe"' + (steps.length !== 4 ? ' style="grid-template-columns:repeat(' +
+    Math.min(steps.length, 4) + ',1fr)"' : '') + '>' + cells + '</div>'
 }
 
 // ═══ ⑤ 量化总览 ═══════════════════════════════════════════════════
 function vKpi(d) {
-  const o = d.overview
-  if (!o) return '<div class="panel">' + missing('量化总览未接入', 'dashboard.overview 为空') + '</div>'
-  const bench = txt(o.benchmark_symbol, 'S&P 500')
+  const o = d.overview || {}
+  const bench = o.benchmark_symbol ? esc(o.benchmark_symbol) : '基准'
   const cards = [
     { hero: 1, k: '总损益', v: money(o.pnl_abs, true), c: dir(o.pnl_abs),
       s: pct(o.pnl_pct, 1, true) + ' · 账面 ' + money(o.equity) },
@@ -377,7 +394,8 @@ function svgNav(nav) {
   const pts = (nav && Array.isArray(nav.points)) ? nav.points.filter(function (p) {
     return Number.isFinite(p && p.agent_pct)
   }) : []
-  if (pts.length < 2) return missing('净值序列为空', '至少要 2 个交易日才画得出曲线')
+  // 少于 2 个点画不出线,但保留图的位置和高度,不让页面塌下去
+  if (pts.length < 2) return '<div class="ag-chart-empty" title="至少要 2 个交易日才画得出曲线">—</div>'
 
   const A = pts.map(function (p) { return p.agent_pct })
   const Bm = pts.map(function (p) { return Number.isFinite(p.benchmark_pct) ? p.benchmark_pct : null })
@@ -477,27 +495,33 @@ function vNav(d) {
 
 // ═══ ⑦ 规则手册(按用户要求排在净值曲线下方) ═══════════════════════
 const RULE_KIND = { buy: ['', '买入'], sell: ['cool', '卖出'], risk: ['warn', '风控'] }
+// 列表类区块的两种「没内容」是两件不同的事,必须分开:
+//   字段缺失(后端没给)  → 渲染一行占位、内容全 `—`,让人看出这里会有什么
+//   空数组(后端说没有)  → 写出业务结论(「今天没有成交」「当前空仓」)
+// 用 `—` 表示后者是丢信息:「今天没成交」本身就是一条有用的结论。
+const SKELETON_ROW = [{}]
 function vRules(d) {
-  const rs = d.rules
-  if (!Array.isArray(rs) || !rs.length) {
+  const has = Array.isArray(d.rules)
+  if (has && !d.rules.length) {
     return panel('当前生效的规则', '', missing('还没有规则',
       '智能体的买卖规则由它每晚复盘后自己增删改;交易记录里的 R-xx 都指向这里'))
   }
+  const rs = has ? d.rules : [{ stats: [{ label: '触发' }, { label: '触发后胜率' }, { label: '平均持有' }] }]
   const cards = rs.map(function (r) {
-    const kind = RULE_KIND[r.kind] || ['', txt(r.kind, '规则')]
+    const kind = RULE_KIND[r.kind] || ['', txt(r.kind)]
     const obs = r.status === 'observing'
     const stats = (Array.isArray(r.stats) ? r.stats : []).map(function (st) {
       const v = st.value == null ? NA : esc(String(st.value))
       return '<span>' + esc(st.label || '') + '<b' + (st.dim ? ' class="dim"' : '') + '>' + v + '</b></span>'
     }).join('')
     return '<div class="ag-r">' +
-      '<div class="hd"><span class="id">' + txt(r.id, 'R-??') + '</span>' +
+      '<div class="hd"><span class="id">' + txt(r.id) + '</span>' +
         '<span class="chip ' + kind[0] + '">' + kind[1] + '</span>' +
         '<span class="since' + (obs ? ' obs' : '') + '">' + txt(obs ? (r.since_text || '观察期') : r.since_text, '') + '</span></div>' +
-      '<div class="cond">' + txt(r.condition, '<span class="ag-na">条件未填写</span>') + '</div>' +
+      '<div class="cond">' + txt(r.condition) + '</div>' +
       (stats ? '<div class="ft">' + stats + '</div>' : '') + '</div>'
   }).join('')
-  return panel('当前生效的规则', esc(rs.length + ' 条 · 交易记录里的 R-xx 都指向这里'),
+  return panel('当前生效的规则', (has ? esc(rs.length + ' 条') : NA) + ' · 交易记录里的 R-xx 都指向这里',
     '<div class="ag-rules" id="ag-rules">' + cards + '</div>' +
     '<div class="ag-note" style="margin-top:12px">每条规则都带<b>触发次数与触发后胜率</b> —— ' +
     '没有这两个数,就分不清一条规则是「有效」还是「只是没怎么触发」。</div>')
@@ -509,18 +533,19 @@ function ruleChip(id, title) {
   return '<button class="ag-rule" title="' + esc(title || id) + '">' + esc(id) + '</button>'
 }
 function vHoldings(d) {
-  const h = d.holdings
-  if (!h || !Array.isArray(h.items) || !h.items.length) {
-    return panel('持仓明细', '', missing('当前空仓', '没有持仓时这里是空的,不是出错'))
+  const h = d.holdings || {}
+  const has = Array.isArray(h.items)
+  if (has && !h.items.length) {
+    return panel('持仓明细', '0 只', missing('当前空仓', '没有持仓时这里是空的,不是出错'))
   }
-  const rows = h.items.map(function (it) {
+  const rows = (has ? h.items : SKELETON_ROW).map(function (it) {
     // Sharpe 样本不足时显示 `—` 并说明原因:四五天的日收益样本算出来的夏普
     // 会在 0.2~3.0 之间乱跳,写出来只会误导。组合级夏普在上面的总览里。
     const sh = Number.isFinite(it.sharpe)
       ? '<td class="n">' + fixed(it.sharpe, 2) + '</td>'
       : '<td class="n ag-na" title="' + esc(it.sharpe_na_reason || '样本不足,未计算') + '">—</td>'
     return '<tr>' +
-      '<td class="ag-sym">' + txt(it.symbol, '?') + '<s>' + txt(it.name, '') + '</s></td>' +
+      '<td class="ag-sym">' + txt(it.symbol) + '<s>' + txt(it.name, '') + '</s></td>' +
       '<td class="n">' + num(it.cost, 2) + '</td>' +
       '<td class="n">' + num(it.price, 2) + '</td>' +
       '<td class="n ' + dir(it.pnl_pct) + '">' + pct(it.pnl_pct, 1, true) + '</td>' +
@@ -528,7 +553,7 @@ function vHoldings(d) {
       '<td class="n">' + pct(it.bench_pct, 1, true) + '</td>' + sh +
       '<td>' + ruleChip(it.entry_rule, it.entry_rule_text) + '</td></tr>'
   }).join('')
-  const cnt = esc(h.items.length + ' 只') +
+  const cnt = (has ? esc(h.items.length + ' 只') : NA) +
     (Number.isFinite(h.quote_delay_min) ? ' · 报价延迟 ' + int(h.quote_delay_min) + ' 分钟' : '') +
     (h.as_of ? ' · ' + esc(h.as_of) : '')
   return panel('持仓明细', cnt,
@@ -542,28 +567,30 @@ function vHoldings(d) {
     '组合级夏普在上面的总览里。</div>')
 }
 function vWatch(d) {
-  const w = d.watchlist
-  if (!w || !Array.isArray(w.items) || !w.items.length) {
-    return panel('今日观察列表', '', missing('今日没有候选', '所有标的都不满足当前规则的预备条件'))
+  const w = d.watchlist || {}
+  const has = Array.isArray(w.items)
+  if (has && !w.items.length) {
+    return panel('今日观察列表', '0 只', missing('今日没有候选', '所有标的都不满足当前规则的预备条件'))
   }
-  const cards = w.items.map(function (it) {
+  const cards = (has ? w.items : SKELETON_ROW).map(function (it) {
     if (it.blocked) {
-      return '<div class="ag-w blocked"><div class="r1"><span class="sy">' + txt(it.symbol, '?') + '</span>' +
+      return '<div class="ag-w blocked"><div class="r1"><span class="sy">' + txt(it.symbol) + '</span>' +
         '<span class="chip warn">已否决</span><span class="px">' + num(it.price, 2) + '</span></div>' +
-        '<div class="r2">' + txt(it.blocked_reason, '被护栏挡下,未说明原因') + '</div></div>'
+        '<div class="r2">' + txt(it.blocked_reason) + '</div></div>'
     }
     const p = Number.isFinite(it.progress_pct) ? Math.max(0, Math.min(100, it.progress_pct)) : null
-    return '<div class="ag-w"><div class="r1"><span class="sy">' + txt(it.symbol, '?') + '</span>' +
+    return '<div class="ag-w"><div class="r1"><span class="sy">' + txt(it.symbol) + '</span>' +
       (Number.isFinite(it.score) ? '<span class="chip brand">评分 ' + int(it.score) + '</span>' : '') +
       '<span class="px">' + num(it.price, 2) + '</span></div>' +
       // gap 写的是「还差什么才买」,不是一串代码 —— 否则用户看不出智能体在等什么
-      '<div class="r2">' + txt(it.gap, '<span class="ag-na">未说明触发条件</span>') + '</div>' +
+      '<div class="r2">' + txt(it.gap) + '</div>' +
       (p == null ? '' : '<div class="ag-gap"><i style="width:' + p.toFixed(0) + '%"></i></div>') +
       '<div class="r2" style="margin-top:5px">距 ' + ruleChip(it.rule_id, it.rule_text) + ' 触发 ' +
         (p == null ? NA : '<b>' + p.toFixed(0) + '%</b>') + '</div></div>'
   }).join('')
   return panel('今日观察列表',
-    esc(w.items.length + ' 只') + (d.strategy && d.strategy.version ? ' · 按 ' + esc(d.strategy.version) + ' 规则筛' : ''),
+    (has ? esc(w.items.length + ' 只') : NA) +
+    (d.strategy && d.strategy.version ? ' · 按 ' + esc(d.strategy.version) + ' 规则筛' : ''),
     '<div class="ag-wl">' + cards + '</div>' +
     '<div class="ag-note" style="margin-top:11px">观察列表写的是<b>还差什么才买</b>,不是一串代码 —— ' +
     '否则用户看不出智能体在等什么、也无法判断它等得对不对。</div>')
@@ -571,13 +598,20 @@ function vWatch(d) {
 
 // ═══ ⑨ 今日操作报告 ═══════════════════════════════════════════════
 function vTrades(d) {
-  const t = d.trades
-  if (!t || !Array.isArray(t.items) || !t.items.length) {
-    return panel('今日操作报告', t && t.date ? esc(t.date) : '',
+  const t = d.trades || {}
+  const has = Array.isArray(t.items)
+  if (has && !t.items.length) {
+    return panel('今日操作报告', t.date ? esc(t.date) : '0 笔',
       missing('今天没有成交', '没有标的触发买卖规则。空仓不动也是一种执行结果,不是故障'))
   }
-  const rows = t.items.map(function (it) {
-    const isBuy = it.side === 'buy'
+  const rows = (has ? t.items : SKELETON_ROW).map(function (it) {
+    // side 缺失时不能默认「卖出」—— 买卖方向是这一行最关键的一个字,猜错比留空严重
+    const side = it.side === 'buy' ? '<span class="buy">买入</span>'
+      : it.side === 'sell' ? '<span class="sell">卖出</span>' : NA
+    const qty = (Number.isFinite(it.shares) || Number.isFinite(it.price))
+      ? (Number.isFinite(it.shares) ? int(it.shares) + ' 股' : '') +
+        (Number.isFinite(it.price) ? ' @ ' + fixed(it.price, 2) : '')
+      : NA
     const pnl = Number.isFinite(it.pnl_abs)
       ? '<span class="qty ' + dir(it.pnl_abs) + '" style="font-weight:650">' + money(it.pnl_abs, true) +
         (Number.isFinite(it.pnl_pct) ? ' · ' + pct(it.pnl_pct, 1, true) : '') + '</span>'
@@ -589,21 +623,18 @@ function vTrades(d) {
       '<div class="tm">' + txt(it.ts_market, '') + '<s>' + txt(it.ts_market_tz, '') + '</s>' +
         '<s style="margin-top:3px">' + txt(it.ts_local, '') + '</s></div>' +
       '<div><div class="ag-act">' +
-        '<span class="' + (isBuy ? 'buy' : 'sell') + '">' + (isBuy ? '买入' : '卖出') + '</span>' +
-        '<b>' + txt(it.symbol, '?') + '</b>' +
-        '<span class="qty">' + (Number.isFinite(it.shares) ? int(it.shares) + ' 股' : '') +
-          (Number.isFinite(it.price) ? ' @ ' + fixed(it.price, 2) : '') + '</span>' + pnl +
+        side + '<b>' + txt(it.symbol) + '</b><span class="qty">' + qty + '</span>' + pnl +
         '<span style="margin-left:auto">' + ruleChip(it.rule_id, it.rule_text) +
           (it.rule_name ? ' <span style="font-size:11.5px;color:var(--muted)">' + esc(it.rule_name) + '</span>' : '') +
         '</span></div>' +
       // rationale 由后端组织,数字必须来自成交与行情表(见文件末尾的说明)
-      '<div class="ag-why">' + txt(it.rationale, '<span class="ag-na">本笔没有归因说明</span>') + '</div>' +
+      '<div class="ag-why">' + txt(it.rationale) + '</div>' +
       (it.followup ? '<div class="ag-post"><span class="hi hi-lightbulb"></span> ' + esc(it.followup) + '</div>' : '') +
       (it.adjustment ? '<div class="ag-post act"><span class="hi hi-edit"></span> ' + esc(it.adjustment) + '</div>' : '') +
       '</div></div>'
   }).join('')
   return panel('今日操作报告',
-    esc(t.items.length + ' 笔') + (t.date ? ' · ' + esc(t.date) : '') + ' · 每笔注明触发了哪条规则',
+    (has ? esc(t.items.length + ' 笔') : NA) + (t.date ? ' · ' + esc(t.date) : '') + ' · 每笔注明触发了哪条规则',
     '<div class="ag-tl">' + rows + '</div>' +
     '<div class="ag-note" style="margin-top:12px;padding-top:11px;border-top:1px solid var(--line)">' +
     '<b>归因里的数字必须来自成交记录与行情表</b>,模型只负责把它们组织成人话、不参与计算 —— ' +
@@ -612,53 +643,55 @@ function vTrades(d) {
 
 // ═══ ⑩ 策略演进 ═══════════════════════════════════════════════════
 function vVersions(d) {
-  const vs = d.versions
-  if (!Array.isArray(vs) || !vs.length) {
-    return panel('策略演进', '', missing('还没有版本记录', '每次改规则都会在这里留一格:改了什么、因哪条教训而改、改后效果'))
+  const has = Array.isArray(d.versions)
+  if (has && !d.versions.length) {
+    return panel('策略演进', '0 版', missing('还没有版本记录', '每次改规则都会在这里留一格:改了什么、因哪条教训而改、改后效果'))
   }
-  const cells = vs.map(function (v) {
+  const cells = (has ? d.versions : SKELETON_ROW).map(function (v) {
     const cls = v.status === 'current' ? ' now' : (v.status === 'observing' ? ' next' : '')
     return '<div class="ag-v' + cls + '">' +
-      '<div class="vn">' + txt(v.label, '?') + '</div>' +
+      '<div class="vn">' + txt(v.label) + '</div>' +
       '<div class="vd">' + txt(v.date, '') + (v.status === 'current' ? ' · 当前' : '') + '</div>' +
-      '<div class="vc">' + txt(v.change, '<span class="ag-na">未记录改动</span>') + '</div>' +
-      '<div class="vr">' + (v.reason ? '起因:' + esc(v.reason) : '') +
-        (v.effect ? '<br>' + esc(v.effect) : '') + '</div></div>'
+      '<div class="vc">' + txt(v.change) + '</div>' +
+      '<div class="vr">起因:' + txt(v.reason) + '<br>' + txt(v.effect) + '</div></div>'
   }).join('')
-  return panel('策略演进', esc(vs.length + ' 版 · 每版都能追到是哪条教训促成的'),
+  return panel('策略演进', (has ? esc(d.versions.length + ' 版') : NA) + ' · 每版都能追到是哪条教训促成的',
     '<div class="ag-vers">' + cells + '</div>')
 }
 
 // ═══ ⑪ 每日成长总结(按用户要求放最下方) ═══════════════════════════
 function vLessons(d) {
-  const ls = d.lessons
-  if (!Array.isArray(ls) || !ls.length) {
-    return panel('每日成长总结', '', missing('还没有复盘记录',
+  const has = Array.isArray(d.lessons)
+  if (has && !d.lessons.length) {
+    return panel('每日成长总结', '0 条', missing('还没有复盘记录',
       '每个交易日收工后,智能体把当天的亏损拆开归因,写成一条「学到了什么」,并标明有没有落到规则上'))
   }
+  const ls = has ? d.lessons : SKELETON_ROW
   const landed = ls.filter(function (l) { return l.landed && l.landed.status === 'landed' }).length
   const cards = ls.map(function (l) {
+    // kind 缺失时不默认「亏损教训」—— 和交易的买卖方向同理,猜错比留空严重
+    const kindChip = l.kind === 'validated' ? '<span class="chip">验证通过</span>'
+      : l.kind === 'loss' ? '<span class="chip warn">亏损教训</span>'
+      : '<span class="chip">' + NA + '</span>'
     const isWin = l.kind === 'validated'
     const rows = [['发生了什么', l.what], ['为什么', l.why], ['学到了', l.learned]]
-      .filter(function (r) { return r[1] })
-      .map(function (r) { return '<dt>' + r[0] + '</dt><dd>' + esc(r[1]) + '</dd>' }).join('')
+      .map(function (r) { return '<dt>' + r[0] + '</dt><dd>' + txt(r[1]) + '</dd>' }).join('')
     // 落地状态是判断它「真在迭代」还是「在写日记」的唯一凭据 —— 缺了也要显式说缺
     let land = '<div class="ag-land no"><span class="hi hi-hand"></span><span>落地状态未记录</span></div>'
     if (l.landed && l.landed.status === 'landed') {
       land = '<div class="ag-land yes"><span class="hi hi-check"></span><span>已落地 · ' +
-        txt(l.landed.text, '未说明改了什么') + '</span></div>'
+        txt(l.landed.text) + '</span></div>'
     } else if (l.landed && l.landed.status === 'pending') {
       land = '<div class="ag-land no"><span class="hi hi-hand"></span><span>暂不落地 · ' +
-        txt(l.landed.text, '未说明原因') + '</span></div>'
+        txt(l.landed.text) + '</span></div>'
     }
-    return '<div class="ag-d' + (isWin ? ' win' : '') + '">' +
+    return '<div class="ag-d' + (isWin ? ' win' : (l.kind === 'loss' ? '' : ' unk')) + '">' +
       '<div class="hd"><span class="dt">' + txt(l.date, '') + '</span>' +
-        '<span class="ti">' + txt(l.title, '未命名复盘') + '</span>' +
-        '<span class="chip' + (isWin ? '' : ' warn') + '">' + (isWin ? '验证通过' : '亏损教训') + '</span></div>' +
-      (rows ? '<dl>' + rows + '</dl>' : '<div class="ag-note" style="margin-top:8px">正文为空</div>') +
-      land + '</div>'
+        '<span class="ti">' + txt(l.title) + '</span>' + kindChip + '</div>' +
+      '<dl>' + rows + '</dl>' + land + '</div>'
   }).join('')
-  return panel('每日成长总结', esc(ls.length + ' 条 · ' + landed + ' 条已落地为规则改动'),
+  return panel('每日成长总结',
+    has ? esc(ls.length + ' 条 · ' + landed + ' 条已落地为规则改动') : NA + ' 条 · 已落地 ' + NA + ' 条',
     '<div class="ag-diary">' + cards + '</div>' +
     '<div class="ag-note" style="margin-top:12px;padding-top:11px;border-top:1px solid var(--line)">' +
     '每条教训都必须标<b>落地状态</b>。只写「学到了什么」而不落到规则上,下周会一字不差地再写一遍 —— ' +
@@ -668,9 +701,15 @@ function vLessons(d) {
 // ═══ 组装 · 顺序即产品叙事 ════════════════════════════════════════
 // 它是谁 → 按什么做 → 今天跑了吗 → 成绩 → 曲线 → 规则 →
 // 持仓与候选 → 今天做了什么 → 怎么演进过来的 → 学到了什么
-function render(d) {
+function vBanner(n) {
+  if (!n) return ''
+  return '<div class="ag-banner ' + n.kind + '"><span class="hi ' + (n.icon || 'hi-lightbulb') + '"></span>' +
+    '<span>' + n.html + '</span>' +
+    (n.action ? '<button class="btn small" id="' + n.action.id + '">' + n.action.label + '</button>' : '') + '</div>'
+}
+function render(d, notice) {
   // 返回 html 而不只是写进 container:render_check.js 靠这个返回值断言区块顺序
-  const html = '<div class="ag-wrap">' +
+  const html = '<div class="ag-wrap">' + vBanner(notice) +
     vStatus(d) + vStrategy(d) + vGuard(d) + vPipeline(d) + vKpi(d) + vNav(d) + vRules(d) +
     '<div class="ag-two">' + vHoldings(d) + vWatch(d) + '</div>' +
     vTrades(d) + vVersions(d) + vLessons(d) +
@@ -683,50 +722,35 @@ function render(d) {
   return html
 }
 
-// ─── 三种「没内容」是三件不同的事,必须分开说 ──────────────────────
-// 1. 后端还没这个接口(404)      → 开发期状态,给出契约位置
-// 2. 接口有、但从没启动过        → 产品状态,给出启动入口
-// 3. 启动了但某块为空            → 各渲染函数自己显示 `—`(上面已处理)
-function renderNotImplemented() {
-  container.innerHTML = '<div class="ag-wrap"><div class="panel"><div class="empty">' +
-    '<div class="ic"><span class="hi hi-puzzle"></span></div>' +
-    '<div class="msg">后端还没有 <code>' + API + '</code></div>' +
-    '<div class="ag-note" style="max-width:56ch;margin:0 auto">' +
-    '这个页面不放任何样例数字(仓内铁律「空的比假的好」),所以接口通之前它就是空的。<br>' +
-    '字段契约见 <code>docs/agent-dashboard-contract.md</code>。</div>' +
-    '</div></div></div>'
+// ─── 拿不到数据时:骨架照常渲染,数据位一律 `—`,顶上加一条说明为什么 ──
+// 不做整页说明卡 —— 整页替换掉之后,用户连这一页长什么样都看不见,
+// 而「这一页会展示什么」本身就是信息(尤其在后端还没开工的时候)。
+// 三种情况说的是三件不同的事,文案要分开:
+//   1. 接口 404          → 后端还没写
+//   2. 请求失败 / 非 200  → 环境或服务出问题,给重试
+//   3. 从没启动过         → 产品状态,给启动入口
+const NOTICE = {
+  dev: { kind: 'dev', icon: 'hi-puzzle',
+    html: '后端还没有 <code>' + API + '</code> —— 下面是页面骨架,所有数据位显示 —。字段契约见 ' +
+      '<code>docs/agent-dashboard-contract.md</code>。' },
+  idle: { kind: 'idle', icon: 'hi-sprout',
+    html: '小鹿智能体还没开始跑。启动后它每个交易日自动做四件事:收集数据 → 滚动回测 → 复盘总结 → 调整规则。',
+    action: { id: 'ag-start', label: '启动智能体' } },
 }
-function renderNeverStarted(d) {
-  container.innerHTML = '<div class="ag-wrap">' + vStatus(d) + vStrategy(d) +
-    '<div class="panel"><div class="empty">' +
-    '<div class="ic"><span class="hi hi-sprout"></span></div>' +
-    '<div class="msg">小鹿智能体还没开始跑</div>' +
-    '<div class="ag-note" style="max-width:56ch;margin:0 auto 14px">' +
-    '启动后它每个交易日自动做四件事:收集数据 → 滚动回测 → 复盘总结 → 调整规则,' +
-    '并把每一笔交易、每一条教训记在这个页面上。</div>' +
-    '<button class="btn primary" id="ag-start"><span class="hi hi-play"></span> 启动智能体</button>' +
-    '</div></div></div>'
-  const b = document.getElementById('ag-start')
-  if (b) b.addEventListener('click', function () { toast('启动接口尚未实现', 'warn') })
-}
-function renderError(msg) {
-  container.innerHTML = '<div class="ag-wrap"><div class="panel"><div class="empty">' +
-    '<div class="ic"><span class="hi hi-bell"></span></div>' +
-    '<div class="msg">读取智能体状态失败</div>' +
-    '<div class="ag-note" style="max-width:56ch;margin:0 auto 14px">' + esc(msg) + '</div>' +
-    '<button class="btn" id="ag-retry"><span class="hi hi-refresh"></span> 重试</button>' +
-    '</div></div></div>'
-  const b = document.getElementById('ag-retry')
-  if (b) b.addEventListener('click', boot)
+function errNotice(msg) {
+  return { kind: 'err', icon: 'hi-bell', html: '读取智能体状态失败:' + esc(msg),
+    action: { id: 'ag-retry', label: '重试' } }
 }
 
 function bindOps() {
   const rules = document.getElementById('ag-rules')
   const goto = document.getElementById('ag-goto-rules')
   if (goto && rules) goto.addEventListener('click', function () { rules.scrollIntoView({ behavior: 'smooth', block: 'start' }) })
-  ;['ag-run', 'ag-toggle'].forEach(function (id) {
+  const retry = document.getElementById('ag-retry')
+  if (retry) retry.addEventListener('click', boot)
+  // 控制接口(手动触发 / 暂停 / 启动)还没定,先明说没实现,不做假的成功提示
+  ;['ag-run', 'ag-toggle', 'ag-start'].forEach(function (id) {
     const b = document.getElementById(id)
-    // 控制接口(手动触发 / 暂停)还没定,先明说没实现,不做假的成功提示
     if (b) b.addEventListener('click', function () { toast('控制接口尚未实现', 'warn') })
   })
 }
@@ -738,14 +762,14 @@ async function boot() {
   try {
     r = await fetch(API, { headers: apiHeaders(), cache: 'no-store' })
   } catch (e) {
-    renderError('请求没发出去:' + (e && e.message ? e.message : e)); return
+    render({}, errNotice('请求没发出去 · ' + (e && e.message ? e.message : e))); return
   }
-  if (r.status === 404) { renderNotImplemented(); return }
-  if (!r.ok) { renderError('接口返回 HTTP ' + r.status); return }
+  if (r.status === 404) { render({}, NOTICE.dev); return }
+  if (!r.ok) { render({}, errNotice('接口返回 HTTP ' + r.status)); return }
   let d
-  try { d = await r.json() } catch (e) { renderError('返回的不是合法 JSON'); return }
-  if (!d || typeof d !== 'object') { renderError('返回体为空'); return }
-  if (d.state === 'never_started' || d.enabled === false) { renderNeverStarted(d); return }
+  try { d = await r.json() } catch (e) { render({}, errNotice('返回的不是合法 JSON')); return }
+  if (!d || typeof d !== 'object') { render({}, errNotice('返回体为空')); return }
+  if (d.state === 'never_started' || d.enabled === false) { render(d, NOTICE.idle); return }
   render(d)
 }
 

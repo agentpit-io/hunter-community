@@ -307,10 +307,13 @@ try {
     }
     var H_FULL = render(FULL)
     var H_EMPTY = render(EMPTY)
+    // 后端接口整个不存在(404)时传的就是这个 —— 页面必须照常出骨架
+    var H_SKEL = render({}, NOTICE.dev)
   `, ctx, { filename: 'assert-agent' })
 
   const H = ctx.H_FULL
   const E = ctx.H_EMPTY
+  const S = ctx.H_SKEL
 
   // ① 区块顺序(用户 2026-09-09 指定:规则紧跟净值曲线,成长总结压最后)
   const at = (s) => H.indexOf(s)
@@ -350,6 +353,26 @@ try {
   }
   if ((E.match(/—/g) || []).length >= 20) console.log('PASS 智能体 · 空字段落到 —')
   else { failed++; console.log('FAIL 智能体 · 空字段没落到 —,只有', (E.match(/—/g) || []).length, '处') }
+
+  // ④ 后端整个不存在时,骨架照常渲染 —— 不许整页换成一张说明卡。
+  //   用户 2026-09-09 明确要求:「把没获取到后端数据的地方都用 — 表示」。
+  //   整页替换掉的话,连这一页长什么样都看不见,而「这页会展示什么」本身就是信息。
+  const skel = ['当前基于', '护栏', '净值 vs 基准', '当前生效的规则', '持仓明细',
+    '今日观察列表', '今日操作报告', '策略演进', '每日成长总结']
+  const lost = skel.filter(s => S.indexOf(s) < 0)
+  if (!lost.length) console.log('PASS 智能体 · 后端 404 时九个区块骨架都在')
+  else { failed++; console.log('FAIL 智能体 · 后端 404 时丢了区块:', lost.join(' / ')) }
+  for (const [name, re] of banned) {
+    if (!re.test(S)) console.log('PASS 智能体 · 骨架不出现', name)
+    else { failed++; console.log('FAIL 智能体 · 骨架里出现了', name) }
+  }
+  // 买卖方向 / 教训类型缺失时不许猜 —— 猜错比留空严重
+  if (!/>卖出</.test(S) && !/>买入</.test(S)) console.log('PASS 智能体 · 骨架不猜买卖方向')
+  else { failed++; console.log('FAIL 智能体 · 骨架凭空写了买卖方向') }
+  if (!/亏损教训|验证通过/.test(S)) console.log('PASS 智能体 · 骨架不猜教训类型')
+  else { failed++; console.log('FAIL 智能体 · 骨架凭空写了教训类型') }
+  if (/ag-banner dev/.test(S)) console.log('PASS 智能体 · 骨架顶上说明了为什么全是 —')
+  else { failed++; console.log('FAIL 智能体 · 骨架没有提示条,用户不知道为什么全是 —') }
 } catch (e) {
   failed++
   console.log('FAIL 智能体定向断言 ·', e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e)
