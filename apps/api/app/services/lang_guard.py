@@ -26,6 +26,7 @@ for _ in range(6):
 from agents.translation import (  # noqa: E402
     ensure_chinese,
     looks_like_slug,
+    starts_with_chinese,
     translate_desc,
 )
 from agents.text_sanitizer import (  # noqa: E402
@@ -45,5 +46,5 @@ __all__ = [
     "has_english_prose", "sanitize_json_values", "sanitize_llm_text",
     "strip_english_prose", "strip_thinking_preamble",
     # 翻译 —— 同样走这层中转,理由和上面一样:agents/ 不在 api 进程的 sys.path 里
-    "ensure_chinese", "translate_desc", "looks_like_slug",
+    "ensure_chinese", "translate_desc", "looks_like_slug", "starts_with_chinese",
 ]

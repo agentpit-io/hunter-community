@@ -370,8 +370,11 @@ def _yaml_str(v: str) -> str:
     return '"' + str(v or "").replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def set_hunter_field(path: Path, key: str, value: str) -> bool:
+def set_hunter_field(path: Path, key: str, value: str | None) -> bool:
     """往 SKILL.md 的 `hunter:` 段里写一个字段 · **只动那一行,其余原样保留**。
+
+    `value=None` 表示**删掉这个字段**(用于清理写坏了的值 —— 留一行垃圾
+    比没有更糟,因为读取方会优先用它)。
 
     为什么不用下面的 `render()` 重写整个文件:`render` 是给「UI 新建的 SKILL」用的,
     它按我们的模板重排 frontmatter。拿它去改**第三方装进来的** SKILL,
@@ -394,23 +397,27 @@ def set_hunter_field(path: Path, key: str, value: str) -> bool:
         return False
     head, raw, close, body = m.groups()
 
-    line = f"  {key}: {_yaml_str(value)}"
     lines = raw.split("\n")
+    hit = next((i for i, ln in enumerate(lines)
+                if re.match(rf"^\s+{re.escape(key)}\s*:", ln)), None)
 
-    # 段内已有同名字段 → 就地替换
-    for i, ln in enumerate(lines):
-        if re.match(rf"^\s+{re.escape(key)}\s*:", ln):
-            lines[i] = line
-            break
+    if value is None:                       # 删除
+        if hit is None:
+            return True                     # 本来就没有 · 当作成功
+        lines.pop(hit)
     else:
-        # 找 `hunter:` 段;没有就补一个
-        for i, ln in enumerate(lines):
-            if re.match(r"^hunter\s*:\s*$", ln):
-                lines.insert(i + 1, line)
-                break
+        line = f"  {key}: {_yaml_str(value)}"
+        if hit is not None:                 # 就地替换
+            lines[hit] = line
         else:
-            lines.append("hunter:")
-            lines.append(line)
+            # 找 `hunter:` 段;没有就补一个
+            for i, ln in enumerate(lines):
+                if re.match(r"^hunter\s*:\s*$", ln):
+                    lines.insert(i + 1, line)
+                    break
+            else:
+                lines.append("hunter:")
+                lines.append(line)
 
     try:
         path.write_text(head + "\n".join(lines) + close + body, encoding="utf-8")

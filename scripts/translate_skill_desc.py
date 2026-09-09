@@ -38,7 +38,12 @@ import argparse
 import sys
 
 from app.services import skill_files
-from app.services.lang_guard import contains_chinese, looks_like_slug, translate_desc
+from app.services.lang_guard import (
+    contains_chinese,
+    looks_like_slug,
+    starts_with_chinese,
+    translate_desc,
+)
 
 
 def main() -> int:
@@ -54,6 +59,7 @@ def main() -> int:
         return 1
 
     todo, skipped, done, failed = [], [], [], []
+    existing_map: dict[str, str] = {}   # skill 名 -> 旧的 description_zh(用于删坏值)
 
     for d in sorted(p for p in root.iterdir() if p.is_dir()):
         f = d / "SKILL.md"
@@ -71,10 +77,19 @@ def main() -> int:
         h = fm.get("hunter") if isinstance(fm.get("hunter"), dict) else {}
         existing = str((h or {}).get("description_zh") or "").strip()
 
+        # 已有译文但**开头不是中文** = 写坏了的值(2026-09-09 踩过:模型先吐一段
+        # 英文内心戏再给译文,旧版校验只看"含不含中文"就放行了)。
+        # 留着比没有更糟 —— 读取方会优先用它。所以当作没有,重翻;
+        # 重翻仍失败的话下面会把这行删掉,回落英文原文。
+        existing_map[d.name] = existing
+        bad_existing = bool(existing) and not starts_with_chinese(existing)
+        if bad_existing:
+            print(f"  ⚠ {d.name} 已有译文是坏的(英文开头),将重翻")
+
         if not desc:
             skipped.append((d.name, "没有 description"))
             continue
-        if existing and not args.force:
+        if existing and not bad_existing and not args.force:
             skipped.append((d.name, "已有中文说明"))
             continue
         if contains_chinese(desc):
@@ -97,9 +112,15 @@ def main() -> int:
         if args.dry_run:
             continue
         zh = translate_desc(desc)
-        if zh == desc or not contains_chinese(zh):
+        if zh == desc or not starts_with_chinese(zh):
+            # 翻不出来就回落英文原文。如果原来存着一个写坏的值,
+            # **必须删掉** —— 读取方会优先用它,留着就是把垃圾给用户看。
+            if existing_map.get(d.name):
+                skill_files.set_hunter_field(f, "description_zh", None)
+                print("  ⚠ 翻译未生效 · 已删掉旧的坏值 · 回落英文原文")
+            else:
+                print("  ⚠ 翻译未生效,保留英文原文")
             failed.append((d.name, "翻译未生效 · 保留英文原文"))
-            print("  ⚠ 翻译未生效,保留原文")
             continue
         if skill_files.set_hunter_field(f, "description_zh", zh):
             done.append(d.name)
