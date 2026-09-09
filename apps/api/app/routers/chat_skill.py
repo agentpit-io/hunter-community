@@ -327,8 +327,15 @@ async def update_skill(key: str, body: SkillPatch, request: Request):
             "source_url": h.get("source_url") or "",
             "origin": str(fm.get("origin") or h.get("origin") or "ui"),
         }
+        # ⚠️ `render()` 会在正文前**自动加一行 `# {display_name}`**。
+        # 而我们从文件读出来的 body **已经带着上一次加的那个标题** ——
+        # 直接回写就会每编辑一次多一个标题(实测正文 3855 → 3866 字符)。
+        # 所以先把开头的一级标题剥掉,让 render 重新加一个正确的。
+        new_body = patch.get("body")
+        if new_body is None:
+            new_body = re.sub(r"^\s*#\s+[^\n]*\n+", "", body_md, count=1)
         try:
-            skill_files.save(merged, patch.get("body") or body_md)
+            skill_files.save(merged, new_body)
         except skill_files.SkillWriteError as e:
             raise HTTPException(400, str(e))
         return {"ok": True, **_after_write()}
