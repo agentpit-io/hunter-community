@@ -162,6 +162,36 @@ def looks_like_slug(text: str) -> bool:
     return " " not in t and len(t) <= 40
 
 
+def _extract_translation(out: str) -> str:
+    """从模型回复里把**真正的译文**抠出来。
+
+    ## 为什么不能只靠 prompt
+
+    交接稿 A15 那条坑在这儿又踩了一次:`gemini-3.5-flash` 无视
+    「第一个字符必须是中文」,**七次全部**先吐一段英文内心戏再给译文:
+
+        , I need to translate the provided text into Simplified Chinese,
+        adhering to the specified rules.
+
+        **Translation:**
+        通过全面的基本面和估值分析评估美股
+
+    A15 的结论是"改 prompt 无效,要改调用方式"。那边用的是 assistant prefill
+    (把正文第一行塞进 messages 让模型只能续写),但**翻译没有固定的第一行**,
+    prefill 不上。所以改成后处理:反正内心戏永远在前、译文永远在后,
+    **从第一个以中文开头的行取到结尾**就行,不依赖模型改行为。
+
+    找不到中文行就返回 "" —— 交给调用方当失败处理(保留英文原文)。
+    """
+    text = (out or "").replace("<<<TEXT>>>", "").replace("<<<END>>>", "")
+    lines = text.splitlines()
+    for i, ln in enumerate(lines):
+        if starts_with_chinese(ln):
+            body = " ".join(x.strip() for x in lines[i:] if x.strip())
+            return " ".join(body.split())
+    return ""
+
+
 def translate_desc(text: str, *, model: str | None = None) -> str:
     """把 SKILL 说明翻成中文 · **失败一律返回原文**(见本节顶部的说明)。"""
     raw = (text or "").strip()
@@ -194,14 +224,7 @@ def translate_desc(text: str, *, model: str | None = None) -> str:
         logger.warning("translate_desc: 翻译失败 · 保留原文 · err={}", e)
         return raw
 
-    # 剥开场白 —— gemini 常先说一段"我将把文本翻译成…"再给正文(交接稿 A15)
-    out = strip_thinking_preamble(out).strip()
-    # 有的还自己加个标题
-    for marker in ("**Translation:**", "**译文:**", "**译文：**", "译文:", "译文："):
-        if marker in out:
-            out = out.split(marker, 1)[1].strip()
-    # 说明是一栏单行文本,换行进 YAML 只会添乱
-    out = " ".join(out.split())
+    out = _extract_translation(out)
 
     # ⚠️ 校验必须看**开头**,不能只问"有没有中文"。
     # 第一版只判 contains_chinese,而内心戏后面跟着真译文,照样含中文 ——
