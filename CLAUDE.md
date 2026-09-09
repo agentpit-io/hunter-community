@@ -767,6 +767,53 @@ raw = prefill + resp.choices[0].message.content   # 记得拼回去
   而且每次编得都不一样 —— 同一个 SKILL 回答质量忽好忽坏，多半是这个原因。
   （investor_panel 的 9 个流派方法论文件曾经一个都没装，2026-09-08 补齐。）
 
+---
+
+## 停止生成:一个 `abortRef`,三条路径各自负责往里放取消函数
+
+2026-09-09 需求:正在生成回答时能一键掐掉。发送按钮在 `busy` 时原地变成方块图标。
+
+### 三条路径的停法不一样,只有一条是后端真停
+
+| 路径 | 怎么停 | 后端真的停了吗 |
+|---|---|---|
+| 普通对话 | `abortSession()` → `POST /session/:id/abort` | **是** |
+| 多专家辩论 | 切断 SSE 不再等 | **否** —— 后端没有取消接口,任务跑完后结果被丢弃 |
+| Kronos 预测 | 同上 | **否** |
+
+后两条对用户而言"不再等、进度卡消失、输入框解锁"就是停了,代价是后端白跑一趟
+(浪费算力,不影响正确性)。**这一点必须在注释和交付说明里写清楚**,
+不能让人以为点了就省下了后端开销。要真停得给辩论/预测后端加取消接口,是另一件事。
+
+### 约定:谁开始生成,谁负责往 `abortRef` 里放一个取消函数
+
+```tsx
+const abortRef = useRef<(() => void) | null>(null)
+// 普通对话
+abortRef.current = () => { void abortSession(sessionId).catch(...) }
+// 辩论 / 预测
+const ctl = new AbortController(); abortRef.current = () => ctl.abort()
+```
+
+停止按钮只管调 `abortRef.current?.()`,**不关心当前跑的是哪一种**。
+以后加新的长任务,照这个约定放一个取消函数进去,按钮不用改。
+
+### 三条实现要点
+
+1. **`generating` 必须和 `disabled` 分开传给 InputBox。**
+   原来 `disabled = busy || !sessionId` 把两件事揉在一起,所以生成中按钮是灰的、点不动 ——
+   而"正在生成"恰恰是用户最需要能点的时候。`!sessionId` 仍然禁用,两者含义完全不同。
+2. **先解锁界面再发 abort 请求。** 用户要的是点下去立刻停,不该等一个网络往返;
+   而且 abort 请求失败也不能把人卡在生成态里(所以失败只 `console.warn`,不弹错误条)。
+3. **用户主动停不是故障,不许画错误卡。** 取消时抛 `name === 'AbortError'`
+   (沿用浏览器 AbortController 的语义,fetch 中断和 SSE 中断能用同一个条件认出来),
+   `catch` 开头 `if (isAbortError(e)) return`。否则一点停止就弹一张"辩论失败"。
+
+图标用 `<Square size={13} fill="currentColor" />` —— 不给 `fill` 只有一圈描边,
+看着不像停止键。
+
+SaaS 侧结构同构,已一并实现(`hunter` 5422a51)。
+
 ## 详细文档
 
 完整问题清单与实施记录(在 agentpit repo 内,不在本仓):
