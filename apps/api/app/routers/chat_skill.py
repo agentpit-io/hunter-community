@@ -264,6 +264,13 @@ class SkillPatch(BaseModel):
     prompt_tpl: str | None = None
     enabled: bool | None = None
     sort_order: int | None = None
+    # 下面几个只对**文件型** SKILL(user-skills/{key}/SKILL.md)有意义 ——
+    # 数据库那套 `chat_user_skill` 表里没有对应列,传了也只会被上面的
+    # `sets` 拼进 SQL 然后报错,所以文件分支必须排在数据库分支**之前**。
+    description: str | None = None      # 英文/原始说明
+    description_zh: str | None = None   # 中文说明(UI 那栏「说明」优先读它)
+    category: str | None = None
+    body: str | None = None             # 方法论正文(markdown)
 
 
 @router.patch("/chat/skills/{key}")
@@ -284,6 +291,47 @@ async def update_skill(key: str, body: SkillPatch, request: Request):
             patch["prompt_tpl"] = t
     if "icon" in patch:
         patch["icon"] = patch["icon"][:4]
+
+    # ── 文件型 SKILL(user-skills/{key}/SKILL.md)────────────────
+    #
+    # 2026-09-09 用户报「自己建的 skill,点它会问那栏改不了」。根因是
+    # **创建走文件、修改走数据库**,两条路不通:`POST /chat/skills` 早就改成
+    # 写 `user-skills/{slug}/SKILL.md` 了(见它的 docstring),而这里一直只认
+    # `custom:{id}` 那套旧的 `chat_user_skill` 表,于是文件型的一律 404。
+    #
+    # 只允许改**用户目录**里的。内置 `skills/` 随代码走,改了下次 git pull
+    # 就被覆盖 —— 那种要在仓库里改并提交,不能让运行时写。
+    user_dir = skill_files.USER_SKILLS_DIR / key
+    if not key.startswith("custom:") and (user_dir / "SKILL.md").is_file():
+        try:
+            fm, body_md = skill_files._parse_frontmatter(
+                (user_dir / "SKILL.md").read_text(encoding="utf-8"))
+        except Exception as e:                       # noqa: BLE001
+            raise HTTPException(500, f"读取失败: {e}")
+        h = fm.get("hunter") if isinstance(fm.get("hunter"), dict) else {}
+        h = h or {}
+        # 合并:patch 里给了什么就改什么,没给的保持原样。
+        # **`render()` 会按模板重排整个文件**,所以这里必须把原有字段一个个带上,
+        # 漏一个就等于把它删了。
+        merged = {
+            "name": key,
+            "display_name": patch.get("name") or h.get("display_name") or key,
+            "icon": patch.get("icon") or h.get("icon") or "⭐",
+            "description": patch.get("description") or fm.get("description") or "",
+            "description_zh": patch.get("description_zh") or h.get("description_zh") or "",
+            "category": patch.get("category") or h.get("category") or "其他",
+            "prompt_tpl": patch.get("prompt_tpl") or h.get("prompt_tpl") or "",
+            "needs_tools": h.get("needs_tools") or [],
+            "needs_data": h.get("needs_data") or [],
+            "brand": h.get("brand") or "",
+            "source_url": h.get("source_url") or "",
+            "origin": str(fm.get("origin") or h.get("origin") or "ui"),
+        }
+        try:
+            skill_files.save(merged, patch.get("body") or body_md)
+        except skill_files.SkillWriteError as e:
+            raise HTTPException(400, str(e))
+        return {"ok": True, **_after_write()}
 
     c = get_conn(); cur = c.cursor()
     if key.startswith("custom:"):

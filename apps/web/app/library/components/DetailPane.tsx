@@ -237,8 +237,7 @@ function CapDetail({ item, onUse, onChanged, capGroups, onMoveCap }: {
       {item.hint && <Row label="说明" value={item.hint} />}
       {/* 提问模板放在最显眼处 —— 用户要判断的是"点了会发生什么",
           模板就是答案,而且他还能照着改成自己的问法 */}
-      <div style={{ fontSize: 11, color: HUNTER.INK_F, margin: '8px 0 4px' }}>点它会问</div>
-      <div style={tplBox}>{item.prompt_tpl || '（没有模板）'}</div>
+      <PromptTplRow item={item} onChanged={onChanged} />
       {blocked && item.blocked_by.length > 0 && (
         <>
           <Divider />
@@ -321,6 +320,106 @@ function CapDetail({ item, onUse, onChanged, capGroups, onMoveCap }: {
           只对用户自己加的显示:内置的删不得。 */}
       {!item.builtin && <CapDeleteButton item={item} onChanged={onChanged} />}
     </div>
+  )
+}
+
+/**
+ * 「点它会问」· 自己加的能力可以就地改。
+ *
+ * 2026-09-09 用户报「自己建的 skill,这栏改不了」。原来这里只是一个只读的
+ * `<div>`,而**唯一的写入口是新建** —— 想改一个字只能删了重建。
+ *
+ * 编辑按钮**常驻可见**,不藏 hover(仓内铁律:新功能藏起来等于没做)。
+ * 内置能力不给编辑:它随代码走,改了下次 `git pull` 就被覆盖,
+ * 让用户以为改好了才是更糟的体验。
+ */
+function PromptTplRow({ item, onChanged }: {
+  item: CapabilityItem; onChanged?: () => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [text, setText] = useState(item.prompt_tpl || '')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  async function save() {
+    const tpl = text.trim()
+    if (!tpl) { setErr('模板不能为空'); return }
+    setBusy(true); setErr('')
+    try {
+      const h: Record<string, string> = { 'Content-Type': 'application/json' }
+      const t = typeof window !== 'undefined' ? localStorage.getItem('hunter_token') || '' : ''
+      if (t) h['Authorization'] = `Bearer ${t}`
+      const r = await fetch(`/api/chat/skills/${encodeURIComponent(item.key)}`, {
+        method: 'PATCH', headers: h, cache: 'no-store',
+        body: JSON.stringify({ prompt_tpl: tpl }),
+      })
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}))
+        throw new Error(d?.detail || `HTTP ${r.status}`)
+      }
+      setEditing(false)
+      onChanged?.()
+    } catch (e: any) {
+      setErr(e?.message || String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8,
+        fontSize: 11, color: HUNTER.INK_F, margin: '8px 0 4px',
+      }}>
+        <span>点它会问</span>
+        {!item.builtin && !editing && (
+          <button
+            onClick={() => { setText(item.prompt_tpl || ''); setErr(''); setEditing(true) }}
+            style={{
+              padding: '1px 7px', fontSize: 10.5, borderRadius: 5,
+              border: `1px solid ${HUNTER.LINE}`, background: 'transparent',
+              color: HUNTER.THEME, cursor: 'pointer', fontFamily: 'inherit',
+            }}
+          >
+            编辑
+          </button>
+        )}
+      </div>
+
+      {editing ? (
+        <>
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            rows={3}
+            autoFocus
+            style={{
+              ...tplBox, width: '100%', boxSizing: 'border-box',
+              fontFamily: 'inherit', resize: 'vertical',
+            }}
+          />
+          <div style={{ fontSize: 10.5, color: HUNTER.INK_F, margin: '4px 0 6px', lineHeight: 1.7 }}>
+            用 <code>{'{股票}'}</code> 这样的花括号留占位符 · 点「用它」时会填进输入框并选中它
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button onClick={save} disabled={busy}
+                    style={{ ...useBtnBig, width: 'auto', flex: 1, padding: '6px 0', fontSize: 11.5 }}>
+              {busy ? '保存中…' : '保存'}
+            </button>
+            <button onClick={() => { setEditing(false); setErr('') }} disabled={busy}
+                    style={{ ...useBtnBig, width: 'auto', flex: 1, padding: '6px 0', fontSize: 11.5,
+                             background: 'transparent', color: HUNTER.INK_S,
+                             border: `1px solid ${HUNTER.LINE}` }}>
+              取消
+            </button>
+          </div>
+        </>
+      ) : (
+        <div style={tplBox}>{item.prompt_tpl || '（没有模板）'}</div>
+      )}
+      {err && <div style={{ marginTop: 6, fontSize: 11, color: '#9B3A22' }}>保存失败 · {err}</div>}
+    </>
   )
 }
 
