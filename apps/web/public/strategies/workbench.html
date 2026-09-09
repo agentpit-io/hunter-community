@@ -287,6 +287,10 @@ function renderInlineResult(d, draft) {
 
   const num = (v, suffix = '', digits = 2) =>
     (v === null || v === undefined || Number.isNaN(v)) ? '—' : Number(v).toFixed(digits) + suffix
+  // 后端这几个指标是小数(0.152 = 15.2%),乘 100 之前先保住 null/undefined ——
+  // `undefined * 100` 是 NaN,num() 会显示 "—",看起来像"这次算不出来",
+  // 而真实原因可能是字段名写错了。两种情况都显示 "—" 时很难分辨,所以显式一点
+  const pct100 = v => (v === null || v === undefined) ? v : Number(v) * 100
   const cell = (label, val, note) => `
     <div style="flex:1 1 120px;padding:10px 12px;border:1px solid var(--divider);border-radius:10px;background:var(--card)">
       <div style="font-size:11px;color:var(--muted)">${label}</div>
@@ -326,12 +330,21 @@ function renderInlineResult(d, draft) {
               </div>`
     })()}
 
+    <!-- ⚠️ 字段名必须与 backtest_engine._calc_metrics() 的返回逐字对齐。
+         原来这五个格子读的是 annual_return_pct / max_drawdown_pct /
+         win_rate_pct / turnover_pct —— **后端一个都没有**(它返回
+         ann_ret / max_dd / win_rate / turnover,且都是小数不是百分数),
+         于是工作台里跑完回测,五个指标有四个恒显示 "—",只有夏普是对的。
+         num() 把 undefined 显示成 "—" 反而让它看起来像"这次算不出来",
+         而不是"字段名写错了" —— 这类错静默得很彻底,发现于 2026-09-09。
+         胜率是**绝对胜率**(赚钱的期数占比),不是跑赢基准的比例,
+         也不一定是"月度"(换仓频率可以是周/季/半年),标签跟着改。 -->
     <div style="display:flex;flex-wrap:wrap;gap:8px">
-      ${cell('年化收益', num(m.annual_return_pct, '%'))}
+      ${cell('年化收益', num(pct100(m.ann_ret), '%'))}
       ${cell('夏普比率', num(m.sharpe, '', 2))}
-      ${cell('最大回撤', num(m.max_drawdown_pct, '%'))}
-      ${cell('月度胜率', num(m.win_rate_pct, '%'))}
-      ${cell('平均换手', num(m.turnover_pct, '%'))}
+      ${cell('最大回撤', num(pct100(m.max_dd), '%'))}
+      ${cell('胜率', num(pct100(m.win_rate), '%'), `${m.n_periods || 0} 期里赚钱的占比`)}
+      ${cell('平均换手', num(pct100(m.turnover), '%'), '每期换掉多少仓位')}
     </div>
 
     ${tc.gross_total_return_pct !== undefined ? `
