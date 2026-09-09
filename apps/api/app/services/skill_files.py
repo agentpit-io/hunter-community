@@ -401,14 +401,43 @@ def set_hunter_field(path: Path, key: str, value: str | None) -> bool:
     hit = next((i for i, ln in enumerate(lines)
                 if re.match(rf"^\s+{re.escape(key)}\s*:", ln)), None)
 
+    # ⚠️ 旧值可能**跨了很多行**。
+    #
+    # 2026-09-09 踩过:翻译第一版把模型整段思考过程(几十行 markdown)写了进来,
+    # 后来的版本替换时**只换掉第一行**,残留的几十行留在 frontmatter 里 ——
+    # 解析器读到那些孤儿行就乱了,`display_name` / `brand` / `origin` 全读不到,
+    # 界面上表现为「来源未记录」。**写坏的数据不会自己消失,替换只换一行。**
+    #
+    # 所以替换/删除之前,先把该字段后面**不属于任何字段的续行**一并吃掉。
+    # 判据:合法的字段行只认 `key:`(key 里不含空格、不以符号开头)。
+    # **不要把 `- x` 也当合法** —— 模型的思考过程里就有
+    # `- "equity research initiation reports" -> ...` 这种行,
+    # 认它就会在那里停下、把后面的垃圾全留着(实测漏网)。
+    # 而 description_zh 后面本来也不该跟列表项(列表项只跟在自己的 key 后面)。
+    def _eat_orphan_lines(start: int) -> None:
+        j = start
+        while j < len(lines):
+            ln = lines[j]
+            if not ln.strip():                       # 空行:先跳过,看后面是不是还有垃圾
+                nxt = next((x for x in lines[j + 1:] if x.strip()), "")
+                if re.match(r"^\s*[A-Za-z_][A-Za-z0-9_-]*\s*:", nxt):
+                    return                            # 后面就是正常字段了,停
+                lines.pop(j)
+                continue
+            if re.match(r"^\s*[A-Za-z_][A-Za-z0-9_-]*\s*:", ln):
+                return                                # 正常字段行 · 停
+            lines.pop(j)                              # 孤儿行 · 吃掉
+
     if value is None:                       # 删除
         if hit is None:
             return True                     # 本来就没有 · 当作成功
         lines.pop(hit)
+        _eat_orphan_lines(hit)
     else:
         line = f"  {key}: {_yaml_str(value)}"
         if hit is not None:                 # 就地替换
             lines[hit] = line
+            _eat_orphan_lines(hit + 1)
         else:
             # 找 `hunter:` 段;没有就补一个
             for i, ln in enumerate(lines):
