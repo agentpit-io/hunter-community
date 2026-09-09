@@ -62,7 +62,7 @@ function renderLeftPanel() {
     const dirty = spec.length && !isDefaultParams(k, draft.params)
     const paramRow = p => {
       const inputStyle = 'padding:3px 5px;font-size:11px;border:1px solid var(--line);'
-        + 'border-radius:4px;background:var(--bg);color:var(--fg)'
+        + 'border-radius:4px;background:var(--bg);color:var(--text)'
       const field = p.type === 'select'
         ? `<select data-param="${k}" data-pkey="${p.key}" style="${inputStyle};width:auto;max-width:150px">
              ${(p.options || []).map(o =>
@@ -326,7 +326,7 @@ function renderInlineResult(d, draft) {
         `${(factorByKey(k) || {}).name || k}(${paramSummary(k, draft.params)})`).join(' · ')
       return `<div style="padding:7px 11px;margin-bottom:10px;border:1px solid var(--divider);
                           border-radius:8px;font-size:11.5px;color:var(--muted);line-height:1.7">
-                <b style="color:var(--fg)">本次用的自定义因子参数</b> · ${line}
+                <b style="color:var(--text)">本次用的自定义因子参数</b> · ${line}
               </div>`
     })()}
 

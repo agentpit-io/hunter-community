@@ -1021,6 +1021,14 @@ def _check_params() -> list[str]:
             problems.append(f"{key}: computer 不接 params —— 用户调了不生效(假参数)")
         if key not in LOCAL_ONLY:
             problems.append(f"{key}: 不在 LOCAL_ONLY,调参会走实时重算打爆上游")
+        # 下架的因子不该有参数:它永远算不出值,画出来的参数框是纯装饰。
+        # (2026-09-09 镜像到 SaaS 时补的这条 —— 那边 turnover_20 / size_inv
+        #  因为没有 financial_store 估不出总股本而 offline,照抄参数就会出现
+        #  "调了半天一个数都不出来"。这里同样拦住,免得将来下架某个因子时忘了摘参数。)
+        fd = get_factor(key)
+        if fd is not None and not fd.enabled:
+            problems.append(f"{key}: 因子已下架({fd.offline_reason or '未说明'}),"
+                            f"却登记了参数 —— 界面会画出一个调了也没结果的框")
         for p in spec:
             t = param_type(p)
             miss = [f for f in ("key", "label", "default", "hint") if f not in p]

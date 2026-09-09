@@ -218,7 +218,12 @@ function strategyToApi(record) {
     // 而界面上没有任何提示
     factors: (record.factors || []).map(k => {
       const f = { key: k, weight_pct: (record.weights || {})[k] || 0 }
-      if (hasParams(k) && !isDefaultParams(k, record.params)) f.params = paramsOf(k, record.params)
+      // 判据只用 isDefaultParams,**不要**再加 `hasParams(k) &&`:参数定义还没
+      // 从后端拉到时 hasParams 恒 false,那道与会把用户存着的自定义参数整个吞掉 ——
+      // 存下来的策略明天打开就变回默认口径,而界面上没有任何提示。
+      // isDefaultParams 自己处理了"定义没拉到"这一支(见它的注释),
+      // factorsPayload 走的也是同一条判据,两处保持一致。
+      if (!isDefaultParams(k, record.params)) f.params = paramsOf(k, record.params)
       return f
     }),
     config: record.config || {},
