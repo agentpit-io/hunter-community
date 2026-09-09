@@ -510,7 +510,13 @@ function askHunterFromBacktest() {
   // 没跑过回测时把写死的数字**当成真结果发给模型**,让它分析"这些指标合理吗"。
   // 模型会认真点评一组根本不存在的业绩,而用户以为那是自己策略的表现。
   // 连"基准 +6.2%""2024-Q4"这些也是编进 prompt 的。
-  const real = JSON.parse(localStorage.getItem('quant_backtest_result') || 'null')
+  // ⚠️ 键名必须是 LS_RESULT('hunter_backtest_result')。原来写的
+  // 'quant_backtest_result' **没有任何地方写过** —— workbench 存的是 LS_RESULT。
+  // 于是 real 恒为 null:用户刚跑完回测点「问 Hunter」,得到的是
+  // "还没有回测结果,先去跑一次"。清假数据那轮把兜底 mock 去掉之后,
+  // 这条死键就从"悄悄用假数据"变成了"功能直接不可用",更明显但同样是坏的。
+  let real = null
+  try { real = JSON.parse(localStorage.getItem(LS_RESULT) || 'null') } catch {}
   const m = real?.metrics || d._metrics
   if (!m) {
     alert('还没有回测结果 —— 先到「策略工作台」跑一次回测,再让 Hunter 分析。')

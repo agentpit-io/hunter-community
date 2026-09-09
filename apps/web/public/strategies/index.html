@@ -199,9 +199,12 @@ container.innerHTML = `
           <div class="desc" style="max-height:36px;overflow:hidden">${s.description || '(无描述)'}</div>
           <div class="factors">${factorLine}</div>
           <div class="stats">
-            <div><div class="k">Sharpe</div><div class="v">${(m.sharpe||0).toFixed(2)}</div></div>
-            <div><div class="k">年化</div><div class="v pos">${fmtPct(m.ann_ret||0)}</div></div>
-            <div><div class="k">最大回撤</div><div class="v neg">${fmtPct(m.max_dd||0)}</div></div>
+            <!-- 这三个是社区榜单从 API 拿的**真**指标,但 `|| 0` 会把"没算过"
+                 显示成 0.00 —— 一个看起来像结论的数字。铁律点名的就是这种,
+                 _17 那轮漏在这里了。没有就显示 "—" -->
+            <div><div class="k">Sharpe</div><div class="v">${m.sharpe==null?'—':m.sharpe.toFixed(2)}</div></div>
+            <div><div class="k">年化</div><div class="v ${m.ann_ret>=0?'pos':'neg'}">${m.ann_ret==null?'—':fmtPct(m.ann_ret)}</div></div>
+            <div><div class="k">最大回撤</div><div class="v neg">${m.max_dd==null?'—':fmtPct(m.max_dd)}</div></div>
           </div>
         </div>`
     }).join('')

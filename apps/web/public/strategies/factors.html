@@ -137,7 +137,11 @@ let html = `
     <span class="sep">·</span>
     <span><b>年化</b>单因子等权 top 20 组合的历史年化</span>
     <span class="sep">·</span>
-    <span>数据回溯 <b>2021-01 → 2026-07</b> · 月频</span>
+    <!-- 原来写死「数据回溯 2021-01 → 2026-07 · 月频」—— 那是配着当初 60 个
+         编的 ic/ann/vol 一起说的话,让整排数字看起来像一份真回测。
+         _17 那轮删掉了那 60 个数字,却漏了这句给它们背书的说明。
+         真 IC 的区间由 /api/quant/factors/ic-ranking 的参数决定。 -->
+    <span>IC 由 <b>ic_engine</b> 从 factor_ic 表算 · 没算过的显示「—」</span>
   </div>
 
   <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
