@@ -537,6 +537,26 @@ def _compute_candle_5d(codes, trade_date):
 _LOT = 100.0   # 腾讯源 volume 单位为「手」· 1 手 = 100 股
 
 
+def _shares_traded(code: str, volume: float) -> float:
+    """把 klines.volume 换成「股」。
+
+    2026-09-09 实测(库里 2026-09-08 这天各板块 volume 中位数):
+    主板 / 创业板 约 12 万 ~ 53 万,**科创板(688)约 1470 万** —— 差两个量级。
+    对照真实成交量:600519 约 175 万股/日、688981 约 2800 万股/日,
+    说明腾讯源对 **688 给的是「股」,其他板块给的是「手」**。local_kline 没做归一。
+    不归一的后果:688 的换手率被高估 100 倍(实测中芯国际日换手 1112%),
+    Amihud 被低估 100 倍。这里统一换成股,在因子层修正,不动 klines 存量。
+    """
+    return volume if code.startswith("688") else volume * _LOT
+
+
+# 估算股本 / 市值 / 换手的合理性边界 —— 越界说明上游财务字段错了(实测 600941 的 bps 给成 3.02,
+# 真值约 65;688981 的 bps 给成 659),按 CLAUDE.md「空的比假的好」丢掉该股票,而不是让它进截面排名
+_BPS_RANGE = (0.3, 300.0)          # 每股净资产(元)
+_MCAP_RANGE = (2e9, 5e12)          # 总市值(元):20 亿 ~ 5 万亿(工商银行约 2.9 万亿)
+_TURNOVER_MAX = 0.5                # 日均换手率上限 50%
+
+
 def _fetch_klines_ohlcv(codes, trade_date, back_days):
     """klines 取 (ts, high, close, volume) · 按 code 分组 · ts 升序"""
     conn = get_conn(); cur = conn.cursor()
@@ -575,6 +595,8 @@ def _estimate_shares(codes, trade_date):
             continue
         if a <= 0 or b <= 0 or not (0 <= d < 100):
             continue
+        if not (_BPS_RANGE[0] <= b <= _BPS_RANGE[1]):
+            continue                                   # bps 离谱 = 上游字段错,丢
         equity = a * (1 - d / 100.0)
         if equity <= 0:
             continue
@@ -626,8 +648,10 @@ def _compute_turnover_20(codes, trade_date, params=None):
     for code, series in kl.items():
         vols = [v for _, _, _, v in series if v is not None and v > 0]
         if len(vols) < n: continue
-        traded = sum(vols[-n:]) / n * _LOT
-        out[code] = traded / shares[code]
+        traded = _shares_traded(code, sum(vols[-n:]) / n)
+        t = traded / shares[code]
+        if 0 < t <= _TURNOVER_MAX:
+            out[code] = t
     return out
 
 
@@ -647,7 +671,7 @@ def _compute_amihud_20(codes, trade_date, params=None):
         rows = rows[-(n + 1):]
         vals = []
         for (c0, _v0), (c1, v1) in zip(rows[:-1], rows[1:]):
-            amt = v1 * _LOT * c1
+            amt = _shares_traded(code, v1) * c1
             if amt > 0:
                 vals.append(abs(c1 / c0 - 1) / amt)
         if len(vals) >= n // 2:
@@ -667,7 +691,7 @@ def _compute_size_inv(codes, trade_date):
         closes = [c for _, _, c, _ in series if c is not None and c > 0]
         if not closes: continue
         mcap = closes[-1] * shares[code]
-        if mcap > 0:
+        if _MCAP_RANGE[0] <= mcap <= _MCAP_RANGE[1]:
             out[code] = -math.log(mcap)
     return out
 
