@@ -582,6 +582,10 @@ function renderShell(activeTab, title, subTitle, actions) {
            页面本身保留 —— 工作台里「查看完整报告 →」还指着它,
            那里有因子分档验证 / Bootstrap / 逐笔明细 / 下单 CSV,
            是"决定要用这个策略之后"才看的东西。只是不再占一个一级入口。 -->
+      <!-- 小鹿智能体(2026-09-09)。自迭代量化原型:每日自动收数据 / 回测 / 复盘 / 改规则。
+           放在工作台与数据之间 —— 工作台是「人调策略」,它是「策略自己调自己」,
+           两者是同一件事的手动挡与自动挡,挨着放才看得出关系。 -->
+      <a href="/strategies/agent.html"    class="tab-h ${activeTab==='agent'?'active':''}">小鹿智能体</a>
       <a href="/strategies/data.html"      class="tab-h ${activeTab==='data'?'active':''}">数据</a>
     </div>
     <div id="page-content"></div>

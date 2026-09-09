@@ -25,7 +25,7 @@ const vm = require('vm')
 const DIR = __dirname
 const PAGES = process.argv.slice(2).length
   ? process.argv.slice(2)
-  : ['index.html', 'factors.html', 'workbench.html', 'backtest.html', 'data.html']
+  : ['index.html', 'factors.html', 'workbench.html', 'backtest.html', 'data.html', 'agent.html']
 
 // ─── 假 DOM ───────────────────────────────────────────────────────
 // 不解析 HTML:每次查询都返回一个新的空元素。
@@ -216,6 +216,143 @@ try {
 } catch (e) {
   failed++
   console.log('FAIL 参数区定向断言 ·', e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e)
+}
+
+// ─── 针对小鹿智能体的定向断言 ─────────────────────────────────────
+// 这个页面的全部数字来自后端,本地跑不到接口,所以直接把两份 fixture
+// 塞进渲染函数验证两件事:
+//   ① 区块顺序 —— 净值曲线 → 规则 → 持仓 → 操作报告 → 演进 → 成长总结
+//   ② 字段为 null 时落到 `—`,不出现 NaN / undefined / 凭空的 0.00
+// 第 ② 条是仓内铁律「空的比假的好」的机器可验形式:光靠 review 看不住,
+// 以后有人给某个字段加 `|| 0` 兜底,这里会当场红。
+// fixture 是测试固件,不是产品数据 —— 产品代码里一个业务数字都没有。
+try {
+  const ctx = vm.createContext(makeContext('agent.html'))
+  vm.runInContext(appJs, ctx, { filename: 'app.js' })
+  const ag = inlineScripts(fs.readFileSync(path.join(DIR, 'agent.html'), 'utf8'))
+  ag.forEach((src, i) => vm.runInContext(src, ctx, { filename: `agent#${i + 1}` }))
+
+  vm.runInContext(`
+    var FULL = {
+      state:'running', paper:true, version:'v7', day_count:34, iteration_count:7,
+      last_run_text:'09-09 05:32 ET', next_run_text:'09-10 05:30 ET',
+      strategy:{name:'动量突破 + 财报后漂移', version:'v7', summary:'买强势股的突破',
+                market_label:'美股', market_note:'暂不支持 A 股', universe:'S&P 500', universe_size:503,
+                rebalance:'事件驱动', data_source:'日线 + 财报日历'},
+      guardrails:{initial_capital:10000, max_position_pct:15, max_holdings:8,
+                  daily_loss_halt_pct:-3, consecutive_loss_pause:3, long_only:true, triggered_today:false},
+      pipeline:{date:'2026-09-09', steps:[
+        {key:'collect', name:'收集数据', status:'ok', at:'05:30', duration_ms:2400, summary:'503 只'},
+        {key:'backtest', name:'滚动回测', status:'ok', at:'05:31', duration_ms:18000, summary:'重跑 7 条规则'},
+        {key:'review', name:'复盘总结', status:'ok', at:'05:32', duration_ms:900, summary:'产出 1 条教训'},
+        {key:'adjust', name:'调整策略', status:'warn', at:'05:32', duration_ms:120, summary:'改 1 条规则'}]},
+      overview:{pnl_abs:1024, pnl_pct:10.2, equity:11024, benchmark_symbol:'SPY', benchmark_pct:6.4,
+                excess_pt:3.8, max_dd_pct:-10, max_dd_abs:-1003, dd_from:'08-26', dd_to:'09-01',
+                trades_total:100, trades_win:40, win_rate:40, profit_factor:2.7, sharpe:1.28,
+                risk_free_pct:4.3, holdings_count:6, max_holdings:8, invested_pct:62, cash:4189},
+      nav:{benchmark_symbol:'SPY', points:[
+        {date:'2026-08-01', agent_pct:0, benchmark_pct:0},
+        {date:'2026-08-15', agent_pct:8.6, benchmark_pct:4.3},
+        {date:'2026-09-01', agent_pct:-2.3, benchmark_pct:-0.4},
+        {date:'2026-09-09', agent_pct:10.2, benchmark_pct:6.4}],
+        version_marks:[{index:1, version:'v6'}], drawdown:{from_index:1, to_index:2, pct:-10}},
+      rules:[{id:'R-01', kind:'buy', condition:'动量前 10%', since_text:'v1 起', status:'active',
+              stats:[{label:'触发', value:23},{label:'触发后胜率', value:'43%'},{label:'样本', value:null}]},
+             {id:'R-03', kind:'risk', condition:'跌破 -6% 出', since_text:'观察期', status:'observing', stats:[]}],
+      holdings:{as_of:'09-09 16:00 ET', quote_delay_min:15, items:[
+        {symbol:'NVDA', name:'英伟达', cost:178.4, price:195.62, pnl_pct:9.7, hold_days:18,
+         bench_pct:2.1, sharpe:1.94, entry_rule:'R-02', entry_rule_text:'财报后放量突破'},
+        {symbol:'COST', name:'好市多', cost:903.1, price:918.44, pnl_pct:1.7, hold_days:9,
+         bench_pct:0.9, sharpe:null, sharpe_na_reason:'持有 9 日,样本不足', entry_rule:'R-04'}]},
+      watchlist:{items:[
+        {symbol:'MU', score:92, price:142.3, rule_id:'R-02', progress_pct:82, gap:'距 20 日高还差 0.8%'},
+        {symbol:'SMCI', price:41.88, blocked:true, blocked_reason:'波动率 68% 超风险预算'}]},
+      trades:{date:'2026-09-09', items:[
+        {ts_market:'09:31', ts_market_tz:'ET', ts_local:'21:31 沪', side:'buy', symbol:'SHOP',
+         shares:41, price:121.55, amount:4983, position_pct:12.4, rule_id:'R-02',
+         rule_name:'财报后放量突破', rationale:'量能达 20 日均量 2.3 倍'},
+        {ts_market:'15:47', ts_market_tz:'ET', side:'sell', symbol:'TSLA', shares:14, price:232.8,
+         pnl_abs:-251, pnl_pct:-7.1, rule_id:'R-03', rationale:'尾盘跌破止损线',
+         adjustment:'今晚把 R-03 止损收到 -6%'}]},
+      versions:[{label:'v5 → v6', date:'09-02', change:'改移动止盈', reason:'多次出场后继续涨',
+                 effect:'4 笔平均多留 2.1 pt', status:'released'},
+                {label:'v6 → v7', date:'09-06', change:'排除财报当日', reason:'隔夜跳空', status:'current'}],
+      lessons:[{date:'09-09', title:'止损设太宽', kind:'loss', what:'两笔止损亏 487 美元',
+                why:'-8% 是拍脑袋定的', learned:'该按回来的概率定',
+                landed:{status:'landed', text:'R-03 止损 -8% → -6%'}},
+               {date:'09-08', title:'移动止盈更优', kind:'validated', what:'触发 4 次',
+                landed:{status:'pending', text:'样本 4/15,继续累积'}}]
+    }
+    // 后端字段全空的极端情况 —— 页面必须显示 —,而不是 NaN / 0.00 / undefined
+    var EMPTY = {
+      state:'running', version:null, day_count:null, iteration_count:null,
+      strategy:{name:null, summary:null, market_label:null, universe:null, universe_size:null,
+                rebalance:null, data_source:null},
+      guardrails:{initial_capital:null, max_position_pct:null, max_holdings:null,
+                  daily_loss_halt_pct:null, consecutive_loss_pause:null, triggered_today:null},
+      pipeline:{steps:[{key:'collect', name:'收集数据', status:'fail', at:null,
+                        duration_ms:null, summary:null}]},
+      overview:{pnl_abs:null, pnl_pct:null, equity:null, benchmark_symbol:null, benchmark_pct:null,
+                excess_pt:null, max_dd_pct:null, max_dd_abs:null, trades_total:null, trades_win:null,
+                win_rate:null, profit_factor:null, sharpe:null, risk_free_pct:null,
+                holdings_count:null, max_holdings:null, invested_pct:null, cash:null},
+      nav:{points:[]},
+      rules:[{id:null, kind:'buy', condition:null, since_text:null, stats:[{label:'触发', value:null}]}],
+      holdings:{items:[{symbol:'X', name:null, cost:null, price:null, pnl_pct:null, hold_days:null,
+                        bench_pct:null, sharpe:null, entry_rule:null}]},
+      watchlist:{items:[{symbol:'Y', score:null, price:null, rule_id:null, progress_pct:null, gap:null}]},
+      trades:{items:[{side:'buy', symbol:'Z', shares:null, price:null, rule_id:null, rationale:null}]},
+      versions:[{label:null, date:null, change:null}],
+      lessons:[{date:null, title:null, kind:'loss', what:null, landed:null}]
+    }
+    var H_FULL = render(FULL)
+    var H_EMPTY = render(EMPTY)
+  `, ctx, { filename: 'assert-agent' })
+
+  const H = ctx.H_FULL
+  const E = ctx.H_EMPTY
+
+  // ① 区块顺序(用户 2026-09-09 指定:规则紧跟净值曲线,成长总结压最后)
+  const at = (s) => H.indexOf(s)
+  const order = [
+    ['当前策略在最上', at('当前基于'), at('净值 vs 基准')],
+    ['净值曲线在规则之前', at('净值 vs 基准'), at('当前生效的规则')],
+    ['规则在持仓之前', at('当前生效的规则'), at('持仓明细')],
+    ['持仓在操作报告之前', at('持仓明细'), at('今日操作报告')],
+    ['操作报告在策略演进之前', at('今日操作报告'), at('策略演进')],
+    ['成长总结排最后', at('策略演进'), at('每日成长总结')],
+  ]
+  for (const [name, a, b] of order) {
+    if (a >= 0 && b >= 0 && a < b) console.log('PASS 智能体 ·', name)
+    else { failed++; console.log('FAIL 智能体 ·', name, `(${a} → ${b})`) }
+  }
+
+  // ② 关键内容真的渲染出来了
+  const need = [
+    ['触发的规则挂在交易上', /class="ag-rule"[^>]*>R-03</],
+    ['净值曲线画出了 svg', /<svg[^>]*viewBox="0 0 720 250"/],
+    ['换版竖线', /stroke-dasharray="3 3"/],
+    ['教训带落地状态', /已落地 · R-03 止损/],
+    ['未落地的教训也标出来', /暂不落地 · 样本 4\/15/],
+    ['样本不足的个股 Sharpe 显示 —', /class="n ag-na" title="持有 9 日,样本不足">—</],
+    ['被护栏否决的候选', /已否决/],
+  ]
+  for (const [name, re] of need) {
+    if (re.test(H)) console.log('PASS 智能体 ·', name)
+    else { failed++; console.log('FAIL 智能体 ·', name) }
+  }
+
+  // ③ 铁律:字段全空时不许出现假数字
+  const banned = [['NaN', /NaN/], ['undefined', /undefined/], ['凭空的 null 字面量', />null</]]
+  for (const [name, re] of banned) {
+    if (!re.test(E)) console.log('PASS 智能体 · 空数据不出现', name)
+    else { failed++; console.log('FAIL 智能体 · 空数据里出现了', name) }
+  }
+  if ((E.match(/—/g) || []).length >= 20) console.log('PASS 智能体 · 空字段落到 —')
+  else { failed++; console.log('FAIL 智能体 · 空字段没落到 —,只有', (E.match(/—/g) || []).length, '处') }
+} catch (e) {
+  failed++
+  console.log('FAIL 智能体定向断言 ·', e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e)
 }
 
 console.log(failed ? `SOME FAILED (${failed})` : 'ALL OK')

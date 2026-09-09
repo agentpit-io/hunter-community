@@ -1,0 +1,757 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>小鹿智能体 · 猎鹿人 Hunter</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    /* 小鹿智能体 · 页面私有样式(前缀 ag-,沿用 data.html 的 dc- 惯例) */
+    .ag-wrap{padding:0 20px 40px;display:flex;flex-direction:column;gap:14px}
+    .ag-na{color:var(--soft)}
+
+    /* 状态条 */
+    .ag-status{display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+      background:#fff;border:1px solid var(--line);border-radius:14px;padding:13px 16px}
+    .ag-idn{display:flex;align-items:center;gap:10px}
+    .ag-idn .av{width:38px;height:38px;border-radius:11px;background:var(--brand-pale);
+      display:grid;place-items:center;color:var(--brand);flex-shrink:0}
+    .ag-idn .av .hi{font-size:23px}
+    .ag-idn .nm{font-family:var(--serif);font-size:16px;font-weight:650;line-height:1.25}
+    .ag-idn .sb{color:var(--muted);font-size:11.5px;margin-top:1px}
+    .ag-live{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600}
+    .ag-live i{width:7px;height:7px;border-radius:50%;background:currentColor}
+    .ag-live.on{color:var(--success)}
+    .ag-live.on i{animation:agp 2.4s ease-in-out infinite}
+    .ag-live.off{color:var(--muted)}
+    .ag-live.never{color:var(--tag-warn-fg)}
+    @keyframes agp{0%,100%{opacity:1}50%{opacity:.35}}
+    @media(prefers-reduced-motion:reduce){.ag-live.on i{animation:none}}
+    .ag-paper{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:700;
+      letter-spacing:.04em;background:#fdf1e4;color:#9b571f;border:1px solid #e6cbaa;
+      border-radius:8px;padding:5px 10px}
+    .ag-paper.live{background:#fbeceb;color:#9c3a32;border-color:#e6b9b4}
+    .ag-clock{margin-left:auto;text-align:right;font-size:11.5px;color:var(--muted);line-height:1.6}
+    .ag-clock b{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
+    .ag-ops{display:flex;gap:7px}
+
+    /* 当前策略条 */
+    .ag-strat{background:#fff;border:1px solid var(--line);border-left:3px solid var(--brand);
+      border-radius:12px;padding:13px 16px}
+    .ag-strat .hd{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+    .ag-strat .lb{color:var(--muted);font-size:11.5px;letter-spacing:.03em}
+    .ag-strat .nm{font-family:var(--serif);font-size:16px;font-weight:650}
+    .ag-strat .ds{color:var(--muted);font-size:12.5px;line-height:1.8;margin-top:8px;max-width:78ch}
+    .ag-strat .ds b{color:var(--text);font-weight:600}
+    .ag-strat .mt{display:flex;gap:20px;flex-wrap:wrap;margin-top:10px;padding-top:9px;
+      border-top:1px solid var(--line);font-size:12px}
+    .ag-strat .mt .k{color:var(--soft);font-size:10.5px;letter-spacing:.05em;
+      text-transform:uppercase;margin-right:5px}
+    .ag-strat .mt b{font-variant-numeric:tabular-nums;color:var(--brand-dark)}
+    .ag-strat .mt .dim{color:var(--soft)}
+
+    /* 护栏条 */
+    .ag-guard{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--panel);
+      border:1px solid var(--line);border-radius:11px;padding:9px 13px;font-size:12px}
+    .ag-guard .lb{color:var(--muted);font-weight:600;letter-spacing:.03em}
+    .ag-guard .g{background:#fff;border:1px solid var(--line);border-radius:7px;
+      padding:3px 9px;color:var(--text)}
+    .ag-guard .g b{color:var(--brand-dark);font-variant-numeric:tabular-nums}
+    .ag-guard .st{margin-left:auto;font-weight:600}
+    .ag-guard .st.ok{color:var(--success)}
+    .ag-guard .st.hit{color:var(--danger)}
+
+    /* 今日流水线 */
+    .ag-pipe{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--line);
+      border-radius:12px;overflow:hidden;background:#fff}
+    @media(max-width:820px){.ag-pipe{grid-template-columns:1fr 1fr}}
+    .ag-step{padding:12px 14px;border-right:1px solid var(--line)}
+    .ag-step:last-child{border-right:0}
+    .ag-step .n{font-size:10.5px;color:var(--soft);letter-spacing:.08em;font-variant-numeric:tabular-nums}
+    .ag-step .t{font-size:13px;font-weight:650;margin-top:3px;display:flex;align-items:center;gap:6px}
+    .ag-step .t .hi{font-size:14px}
+    .ag-step .d{color:var(--muted);font-size:11.5px;margin-top:4px;line-height:1.55}
+    .ag-step.ok .t{color:var(--success)}
+    .ag-step.warn{background:#fdf7f2}
+    .ag-step.warn .t{color:var(--tag-warn-fg)}
+    .ag-step.fail{background:#fdf1f0}
+    .ag-step.fail .t{color:var(--danger)}
+    .ag-step.pending .t{color:var(--soft)}
+
+    /* KPI */
+    .ag-kpi{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}
+    @media(max-width:1100px){.ag-kpi{grid-template-columns:repeat(3,1fr)}}
+    @media(max-width:620px){.ag-kpi{grid-template-columns:repeat(2,1fr)}}
+    .ag-k{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+    .ag-k .k{font-size:10.5px;color:var(--muted);letter-spacing:.05em;text-transform:uppercase}
+    .ag-k .v{font-family:var(--serif);font-size:22px;font-weight:700;margin-top:4px;
+      font-variant-numeric:tabular-nums;letter-spacing:.01em}
+    .ag-k .v.pos{color:var(--up)} .ag-k .v.neg{color:var(--dn)}
+    .ag-k .s{font-size:11px;color:var(--muted);margin-top:3px;line-height:1.5}
+    .ag-k.hero{background:linear-gradient(180deg,#fff,#fdf8f2);border-color:#e3d2bd}
+
+    /* 净值图 */
+    .ag-chart{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 16px 8px}
+    .ag-chart .hd{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+    .ag-chart .hd .ti{font-family:var(--serif);font-size:14.5px;font-weight:650}
+    .ag-lg{display:flex;gap:12px;margin-left:auto;font-size:11.5px;color:var(--muted);flex-wrap:wrap}
+    .ag-lg span{display:inline-flex;align-items:center;gap:5px}
+    .ag-lg i{width:16px;height:2.5px;border-radius:2px;display:inline-block}
+
+    /* 规则手册 */
+    .ag-rules{display:grid;grid-template-columns:repeat(auto-fill,minmax(258px,1fr));gap:10px}
+    .ag-r{border:1px solid var(--line);border-radius:11px;padding:11px 13px;background:#fff}
+    .ag-r .hd{display:flex;align-items:center;gap:7px;font-size:12px}
+    .ag-r .id{font-family:ui-monospace,menlo,monospace;font-weight:700;color:var(--brand-dark)}
+    .ag-r .since{margin-left:auto;color:var(--soft);font-size:10.5px}
+    .ag-r .since.obs{color:var(--tag-warn-fg)}
+    .ag-r .cond{font-size:12.5px;margin-top:7px;line-height:1.7}
+    .ag-r .ft{display:flex;gap:12px;flex-wrap:wrap;margin-top:9px;padding-top:8px;
+      border-top:1px solid var(--line);font-size:11px;color:var(--muted)}
+    .ag-r .ft b{display:block;color:var(--text);font-size:13px;font-weight:700;
+      font-variant-numeric:tabular-nums;margin-top:1px}
+    .ag-r .ft b.dim{color:var(--soft);font-weight:400;font-size:12px}
+
+    /* 双栏 · 持仓 / 观察 */
+    .ag-two{display:grid;grid-template-columns:1.5fr 1fr;gap:14px;align-items:start}
+    @media(max-width:1000px){.ag-two{grid-template-columns:1fr}}
+    .ag-scroll{overflow-x:auto}
+    .ag-tb{width:100%;border-collapse:collapse;font-size:12.5px;min-width:560px}
+    .ag-tb th,.ag-tb td{padding:9px 8px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+    .ag-tb th{background:var(--panel);color:var(--muted);font-weight:600;font-size:10.5px;
+      letter-spacing:.05em;text-transform:uppercase}
+    .ag-tb tr:last-child td{border-bottom:0}
+    .ag-tb td.n{text-align:right;font-family:ui-monospace,menlo,monospace;font-variant-numeric:tabular-nums}
+    .ag-tb .pos{color:var(--up);font-weight:650} .ag-tb .neg{color:var(--dn);font-weight:650}
+    .ag-sym{font-weight:650}
+    .ag-sym s{display:block;text-decoration:none;color:var(--muted);font-size:11px;font-weight:400;margin-top:1px}
+    .ag-rule{font-family:ui-monospace,menlo,monospace;font-size:10.5px;background:var(--brand-pale);
+      color:var(--brand-dark);border-radius:5px;padding:2px 6px;border:0;cursor:help;display:inline-block}
+    .ag-rule:hover{background:var(--brand);color:#fff}
+
+    .ag-wl{display:flex;flex-direction:column;gap:8px}
+    .ag-w{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:#fff}
+    .ag-w.blocked{opacity:.72}
+    .ag-w .r1{display:flex;align-items:baseline;gap:8px}
+    .ag-w .r1 .sy{font-weight:650;font-size:13.5px}
+    .ag-w .r1 .px{margin-left:auto;font-family:ui-monospace,menlo,monospace;font-size:12px;
+      font-variant-numeric:tabular-nums}
+    .ag-w .r2{color:var(--muted);font-size:11.5px;margin-top:5px;line-height:1.6}
+    .ag-w .r2 b{color:var(--brand-dark);font-variant-numeric:tabular-nums}
+    .ag-gap{height:5px;background:#efe7dc;border-radius:3px;margin-top:7px;overflow:hidden}
+    .ag-gap i{display:block;height:100%;background:var(--brand);border-radius:3px}
+
+    /* 交易时间线 */
+    .ag-tl{display:flex;flex-direction:column}
+    .ag-t{display:grid;grid-template-columns:70px 1fr;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
+    .ag-t:last-child{border-bottom:0}
+    .ag-t .tm{font-family:ui-monospace,menlo,monospace;font-size:11px;color:var(--muted);
+      line-height:1.5;font-variant-numeric:tabular-nums}
+    .ag-t .tm s{display:block;text-decoration:none;color:var(--soft);font-size:10px}
+    .ag-act{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:13.5px}
+    .ag-act .buy{color:var(--up);font-weight:700} .ag-act .sell{color:var(--dn);font-weight:700}
+    .ag-act .qty{font-family:ui-monospace,menlo,monospace;font-size:12.5px;font-variant-numeric:tabular-nums}
+    .ag-why{color:var(--muted);font-size:12px;line-height:1.75;margin-top:6px}
+    .ag-why b{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums;
+      border-bottom:1px dotted var(--line-strong)}
+    .ag-post{margin-top:7px;font-size:11.5px;padding:6px 10px;border-radius:8px;background:var(--panel);
+      color:var(--muted);display:inline-block;line-height:1.6}
+    .ag-post b{color:var(--text)}
+    .ag-post.act{background:#fdf1e4;color:#8a5a1b}
+
+    /* 版本演进 */
+    .ag-vers{display:flex;overflow-x:auto;padding-bottom:4px}
+    .ag-v{min-width:186px;flex:1;padding:11px 14px 11px 0;margin-right:14px;
+      border-top:2px solid var(--line);position:relative}
+    .ag-v.now{border-top-color:var(--brand)}
+    .ag-v.next{opacity:.62}
+    .ag-v::before{content:"";position:absolute;top:-6px;left:0;width:10px;height:10px;border-radius:50%;
+      background:#fff;border:2px solid var(--line-strong)}
+    .ag-v.now::before{background:var(--brand);border-color:var(--brand)}
+    .ag-v .vn{font-family:ui-monospace,menlo,monospace;font-weight:700;font-size:12.5px;
+      color:var(--brand-dark);margin-top:8px}
+    .ag-v .vd{color:var(--soft);font-size:10.5px;margin-top:1px}
+    .ag-v .vc{font-size:12px;line-height:1.65;margin-top:6px}
+    .ag-v .vr{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.55}
+
+    /* 成长日记 */
+    .ag-diary{display:flex;flex-direction:column;gap:11px}
+    .ag-d{border:1px solid var(--line);border-left:3px solid var(--danger);border-radius:11px;
+      padding:13px 15px;background:#fff}
+    .ag-d.win{border-left-color:var(--success)}
+    .ag-d .hd{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}
+    .ag-d .hd .dt{font-family:ui-monospace,menlo,monospace;font-size:11px;color:var(--muted)}
+    .ag-d .hd .ti{font-family:var(--serif);font-size:14px;font-weight:650;flex:1}
+    .ag-d dl{margin:9px 0 0;display:grid;grid-template-columns:76px 1fr;gap:5px 12px;
+      font-size:12.5px;line-height:1.75}
+    .ag-d dt{color:var(--muted);font-size:11.5px}
+    .ag-d dd{margin:0}
+    .ag-land{margin-top:10px;font-size:12px;padding:7px 11px;border-radius:8px;
+      display:flex;align-items:center;gap:7px;line-height:1.55}
+    .ag-land.yes{background:#eef5f1;color:var(--tag-ok-fg)}
+    .ag-land.no{background:var(--panel-2);color:var(--muted)}
+
+    .ag-note{font-size:11.5px;color:var(--muted);line-height:1.75}
+    .ag-note code{background:var(--panel);padding:1px 5px;border-radius:4px;font-size:11px}
+    .ag-miss{padding:26px 20px;text-align:center;color:var(--muted);font-size:12.5px;line-height:1.8}
+  </style>
+</head>
+<body>
+<script src="app.js"></script>
+<script>
+// ═══════════════════════════════════════════════════════════════════
+// 小鹿智能体 · 自迭代量化原型
+//
+// 【本页零硬编码业务数字】所有行情 / 业绩 / 归因文本一律来自
+// GET /api/quant/agent/dashboard。取不到就显示 `—` 并注明原因 ——
+// 仓内铁律「严禁 mock 兜底 · 空的比假的好」。
+// 契约见 docs/agent-dashboard-contract.md,那份文档是给后端对接用的。
+//
+// 后端还没实现时,页面显示「接口尚未实现」的说明卡,不是白屏、也不是假数据。
+// ═══════════════════════════════════════════════════════════════════
+document.body.innerHTML = renderShell('agent', '策略广场 / 小鹿智能体',
+  '自迭代量化原型 · 每日自跑 · 美股',
+  '<button class="btn small" id="ag-reload"><span class="hi hi-refresh"></span> 刷新</button>')
+
+const container = document.getElementById('page-content')
+const API = '/api/quant/agent/dashboard'
+
+// ─── 格式化 · 一律 null 安全 ────────────────────────────────────────
+// 判据统一用 Number.isFinite:后端给 null / undefined / NaN 都落到 `—`。
+// 不许写 `v || 0` —— `0.00` 看起来像个结论(仓内铁律点名的写法)。
+const NA = '<span class="ag-na">—</span>'
+function esc(s) {
+  // 归因 / 教训正文是 LLM 生成的,进 innerHTML 前必须转义
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+}
+function txt(s, fallback) {
+  const v = (s == null ? '' : String(s)).trim()
+  return v ? esc(v) : (fallback === undefined ? NA : fallback)
+}
+function fixed(v, dg) { return Number.isFinite(v) ? v.toFixed(dg == null ? 2 : dg) : null }
+function num(v, dg) { const s = fixed(v, dg); return s == null ? NA : s }
+function pct(v, dg, sign) {
+  const s = fixed(v, dg == null ? 1 : dg)
+  if (s == null) return NA
+  return (sign && v > 0 ? '+' : '') + s + '%'
+}
+function money(v, sign) {
+  if (!Number.isFinite(v)) return NA
+  const a = Math.abs(v).toLocaleString('en-US', { maximumFractionDigits: 0 })
+  return (v < 0 ? '-' : (sign ? '+' : '')) + '$' + a
+}
+function int(v) { return Number.isFinite(v) ? String(Math.round(v)) : NA }
+// 中式惯例:红涨绿跌。标的虽是美股,但与策略工作台 / 回测结果保持一致,
+// 换成美式绿涨红跌得整站一起换(style.css 的 --up / --dn)。
+function dir(v) { return Number.isFinite(v) ? (v > 0 ? 'pos' : (v < 0 ? 'neg' : '')) : '' }
+
+// ─── 空块 ──────────────────────────────────────────────────────────
+function missing(what, why) {
+  return '<div class="ag-miss"><div style="font-size:13px;color:var(--text)">' + esc(what) + '</div>' +
+    (why ? '<div style="margin-top:6px">' + esc(why) + '</div>' : '') + '</div>'
+}
+function panel(title, cnt, body) {
+  return '<div class="panel"><div class="p-hd">' + esc(title) +
+    (cnt ? '<span class="cnt">' + cnt + '</span>' : '') + '</div>' + body + '</div>'
+}
+
+// ═══ ① 状态条 ═════════════════════════════════════════════════════
+const STATE_TEXT = { running: ['on', '运行中'], paused: ['off', '已暂停'], never_started: ['never', '尚未启动'] }
+function vStatus(d) {
+  const st = STATE_TEXT[d.state] || ['off', txt(d.state, '状态未知')]
+  const paper = d.paper === false
+    ? '<span class="ag-paper live"><span class="hi hi-bell"></span>真实下单</span>'
+    : '<span class="ag-paper"><span class="hi hi-hand"></span>纸上交易 · 未接券商</span>'
+  const clock = (d.last_run_text || d.next_run_text)
+    ? '<div class="ag-clock">上次收工 <b>' + txt(d.last_run_text) + '</b><br>下次开跑 <b>' + txt(d.next_run_text) + '</b></div>'
+    : '<div class="ag-clock">运行时间 ' + NA + '</div>'
+  return '<div class="ag-status">' +
+    '<div class="ag-idn"><div class="av"><span class="hi hi-deer"></span></div><div>' +
+      '<div class="nm">小鹿智能体 <span style="font-family:ui-monospace,menlo,monospace;font-size:12px;color:var(--brand-dark)">' +
+        txt(d.version, '') + '</span></div>' +
+      '<div class="sb">' + (Number.isFinite(d.day_count) ? '第 ' + int(d.day_count) + ' 个交易日 · ' : '') +
+        (Number.isFinite(d.iteration_count) ? '已自我迭代 ' + int(d.iteration_count) + ' 版 · ' : '') +
+        '纯自动,无人工干预</div>' +
+    '</div></div>' +
+    '<span class="ag-live ' + st[0] + '"><i></i>' + st[1] + '</span>' + paper + clock +
+    '<div class="ag-ops">' +
+      '<button class="btn small" id="ag-run"><span class="hi hi-play"></span> 立即跑一次</button>' +
+      '<button class="btn small" id="ag-toggle">' + (d.state === 'paused' ? '恢复' : '暂停') + '</button>' +
+    '</div></div>'
+}
+
+// ═══ ② 当前策略 ═══════════════════════════════════════════════════
+function vStrategy(d) {
+  const s = d.strategy
+  if (!s) return '<div class="ag-strat">' + missing('当前策略未接入', '后端 dashboard.strategy 为空') + '</div>'
+  const meta = [
+    ['市场', txt(s.market_label, NA) + (s.market_note ? ' <span class="dim">· ' + esc(s.market_note) + '</span>' : '')],
+    ['股票池', txt(s.universe, NA) + (Number.isFinite(s.universe_size) ? ' · <b>' + int(s.universe_size) + '</b> 只' : '')],
+    ['换仓', txt(s.rebalance, NA)],
+    ['数据源', txt(s.data_source, NA)],
+  ].map(function (m) { return '<span><span class="k">' + m[0] + '</span>' + m[1] + '</span>' }).join('')
+  return '<div class="ag-strat">' +
+    '<div class="hd"><span class="lb">当前基于</span><span class="nm">' + txt(s.name, '未命名策略') + '</span>' +
+      (s.version ? '<span class="chip solid">' + esc(s.version) + '</span>' : '') +
+      '<button class="btn small" style="margin-left:auto" id="ag-goto-rules"><span class="hi hi-book"></span> 看规则</button>' +
+    '</div>' +
+    '<div class="ds">' + txt(s.summary, '<span class="ag-na">策略说明未填写</span>') + '</div>' +
+    '<div class="mt">' + meta + '</div></div>'
+}
+
+// ═══ ③ 护栏 ═══════════════════════════════════════════════════════
+function vGuard(d) {
+  const g = d.guardrails
+  if (!g) return ''
+  const items = [
+    ['起始资金', money(g.initial_capital)],
+    ['单票上限', pct(g.max_position_pct, 0)],
+    ['最多持仓', Number.isFinite(g.max_holdings) ? int(g.max_holdings) + ' 只' : NA],
+    ['单日亏损熔断', pct(g.daily_loss_halt_pct, 0)],
+    ['连亏停机', Number.isFinite(g.consecutive_loss_pause) ? int(g.consecutive_loss_pause) + ' 笔停一天' : NA],
+  ].map(function (it) { return '<span class="g">' + it[0] + ' <b>' + it[1] + '</b></span>' }).join('')
+  const dirn = g.long_only === false ? '' : '<span class="g">只做多 · 不加杠杆</span>'
+  let st = '<span class="st">今日护栏状态 ' + NA + '</span>'
+  if (g.triggered_today === false) st = '<span class="st ok"><span class="hi hi-check"></span> 今日未触发</span>'
+  else if (g.triggered_today === true) st = '<span class="st hit"><span class="hi hi-bell"></span> ' +
+    txt(g.triggered_text, '今日已触发') + '</span>'
+  return '<div class="ag-guard"><span class="lb">护栏</span>' + items + dirn + st + '</div>'
+}
+
+// ═══ ④ 今日流水线 ═════════════════════════════════════════════════
+const STEP_ICON = { collect: 'hi-download', backtest: 'hi-refresh', review: 'hi-book', adjust: 'hi-edit' }
+function vPipeline(d) {
+  const p = d.pipeline
+  if (!p || !Array.isArray(p.steps) || !p.steps.length) {
+    return '<div class="ag-pipe" style="grid-template-columns:1fr">' +
+      missing('今日还没有运行记录', '智能体每个交易日跑一次:收集数据 → 滚动回测 → 复盘总结 → 调整策略') + '</div>'
+  }
+  const cells = p.steps.map(function (s, i) {
+    const cls = ['ok', 'warn', 'fail', 'pending'].indexOf(s.status) >= 0 ? s.status : 'pending'
+    const dur = Number.isFinite(s.duration_ms)
+      ? (s.duration_ms >= 1000 ? (s.duration_ms / 1000).toFixed(1) + 's' : Math.round(s.duration_ms) + 'ms')
+      : null
+    return '<div class="ag-step ' + cls + '">' +
+      '<div class="n">' + txt(s.at, '') + ' · 步骤 ' + (i + 1) + '</div>' +
+      '<div class="t"><span class="hi ' + (STEP_ICON[s.key] || 'hi-check') + '"></span>' + txt(s.name, '未命名步骤') + '</div>' +
+      '<div class="d">' + txt(s.summary, '<span class="ag-na">无产出说明</span>') +
+        (dur ? '<br>耗时 ' + dur : '') + '</div></div>'
+  }).join('')
+  return '<div class="ag-pipe"' + (p.steps.length !== 4 ? ' style="grid-template-columns:repeat(' +
+    Math.min(p.steps.length, 4) + ',1fr)"' : '') + '>' + cells + '</div>'
+}
+
+// ═══ ⑤ 量化总览 ═══════════════════════════════════════════════════
+function vKpi(d) {
+  const o = d.overview
+  if (!o) return '<div class="panel">' + missing('量化总览未接入', 'dashboard.overview 为空') + '</div>'
+  const bench = txt(o.benchmark_symbol, 'S&P 500')
+  const cards = [
+    { hero: 1, k: '总损益', v: money(o.pnl_abs, true), c: dir(o.pnl_abs),
+      s: pct(o.pnl_pct, 1, true) + ' · 账面 ' + money(o.equity) },
+    { k: '对比 ' + bench, v: Number.isFinite(o.excess_pt) ? (o.excess_pt > 0 ? '+' : '') + fixed(o.excess_pt, 1) + ' pt' : NA,
+      c: dir(o.excess_pt), s: '同期 ' + bench + ' ' + pct(o.benchmark_pct, 1, true) },
+    { k: '最大回撤', v: pct(o.max_dd_pct, 1), c: Number.isFinite(o.max_dd_pct) ? 'neg' : '',
+      s: money(o.max_dd_abs) + (o.dd_from ? ' · ' + esc(o.dd_from) + ' → ' + esc(o.dd_to || '') : '') },
+    { k: '盈利交易', v: (Number.isFinite(o.trades_win) && Number.isFinite(o.trades_total))
+        ? int(o.trades_win) + ' / ' + int(o.trades_total) : NA,
+      s: '胜率 ' + pct(o.win_rate, 0) + ' · 盈亏比 ' + num(o.profit_factor, 1) },
+    { k: '夏普比率', v: num(o.sharpe, 2),
+      s: Number.isFinite(o.sharpe) ? '年化 · 无风险利率 ' + pct(o.risk_free_pct, 1) : '样本不足或未计算' },
+    { k: '当前仓位', v: (Number.isFinite(o.holdings_count) && Number.isFinite(o.max_holdings))
+        ? int(o.holdings_count) + ' / ' + int(o.max_holdings) : NA,
+      s: pct(o.invested_pct, 0) + ' 已投 · 现金 ' + money(o.cash) },
+  ]
+  return '<div class="ag-kpi">' + cards.map(function (c) {
+    return '<div class="ag-k' + (c.hero ? ' hero' : '') + '">' +
+      '<div class="k">' + c.k + '</div>' +
+      '<div class="v ' + (c.c || '') + '">' + c.v + '</div>' +
+      '<div class="s">' + c.s + '</div></div>'
+  }).join('') + '</div>'
+}
+
+// ═══ ⑥ 净值曲线(手绘 SVG,不引图表库) ═══════════════════════════════
+function svgNav(nav) {
+  const pts = (nav && Array.isArray(nav.points)) ? nav.points.filter(function (p) {
+    return Number.isFinite(p && p.agent_pct)
+  }) : []
+  if (pts.length < 2) return missing('净值序列为空', '至少要 2 个交易日才画得出曲线')
+
+  const A = pts.map(function (p) { return p.agent_pct })
+  const Bm = pts.map(function (p) { return Number.isFinite(p.benchmark_pct) ? p.benchmark_pct : null })
+  const all = A.concat(Bm.filter(function (v) { return v != null })).concat([0])
+  let lo = Math.min.apply(null, all), hi = Math.max.apply(null, all)
+  const pad = Math.max((hi - lo) * 0.15, 1)
+  lo = Math.floor((lo - pad) / 2) * 2; hi = Math.ceil((hi + pad) / 2) * 2
+
+  const L = 46, R = 700, T = 18, B = 206
+  const X = function (i) { return L + (i / (pts.length - 1)) * (R - L) }
+  const Y = function (v) { return B - ((v - lo) / (hi - lo)) * (B - T) }
+  const path = function (arr) {
+    let dd = '', pen = false
+    arr.forEach(function (v, i) {
+      if (v == null) { pen = false; return }
+      dd += (pen ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(v).toFixed(1) + ' '; pen = true
+    })
+    return dd.trim()
+  }
+  let s = ''
+
+  // 最大回撤区间底色 —— 压在所有线下面
+  const dd = nav.drawdown
+  if (dd && Number.isFinite(dd.from_index) && Number.isFinite(dd.to_index)) {
+    const x0 = X(dd.from_index), x1 = X(dd.to_index)
+    s += '<rect x="' + x0.toFixed(1) + '" y="' + T + '" width="' + Math.max(x1 - x0, 1).toFixed(1) +
+      '" height="' + (B - T) + '" fill="#e8d9c6" opacity=".45"></rect>'
+    if (Number.isFinite(dd.pct)) {
+      s += '<text x="' + ((x0 + x1) / 2).toFixed(1) + '" y="' + (B - 6) + '" text-anchor="middle" ' +
+        'font-size="10.5" fill="#8a5a1b">最大回撤 ' + fixed(dd.pct, 1) + '%</text>'
+    }
+  }
+  // 网格 + y 刻度
+  const stepY = Math.max(2, Math.round((hi - lo) / 4 / 2) * 2)
+  for (let v = lo; v <= hi + 0.001; v += stepY) {
+    s += '<line x1="' + L + '" y1="' + Y(v).toFixed(1) + '" x2="' + R + '" y2="' + Y(v).toFixed(1) +
+      '" stroke="' + (Math.abs(v) < 0.001 ? '#cfcbbf' : '#eae7de') + '" stroke-width="1"></line>' +
+      '<text x="' + (L - 9) + '" y="' + (Y(v) + 3.5).toFixed(1) + '" text-anchor="end" ' +
+      'font-size="10.5" fill="#777970">' + (v > 0 ? '+' : '') + v + '%</text>'
+  }
+  // 换版竖线 —— 自迭代做得对不对,看的是换版之后斜率变了没有
+  ;(nav.version_marks || []).forEach(function (m) {
+    if (!Number.isFinite(m.index)) return
+    s += '<line x1="' + X(m.index).toFixed(1) + '" y1="' + T + '" x2="' + X(m.index).toFixed(1) + '" y2="' + B +
+      '" stroke="#c9b9a4" stroke-width="1.5" stroke-dasharray="3 3"></line>' +
+      '<text x="' + (X(m.index) + 4).toFixed(1) + '" y="' + (T + 11) + '" font-size="10" fill="#a2a49d" ' +
+      'font-family="ui-monospace,menlo,monospace">' + esc(m.version || '') + '</text>'
+  })
+  // 基准 + 智能体
+  const bPath = path(Bm)
+  if (bPath) s += '<path d="' + bPath + '" fill="none" stroke="#8ea3b8" stroke-width="1.8" ' +
+    'stroke-linejoin="round" stroke-linecap="round"></path>'
+  const aPath = path(A)
+  s += '<path d="' + aPath + ' L' + X(pts.length - 1).toFixed(1) + ' ' + Y(lo) + ' L' + L + ' ' + Y(lo) +
+    ' Z" fill="#b56b2d" opacity=".07"></path>' +
+    '<path d="' + aPath + '" fill="none" stroke="#b56b2d" stroke-width="2.4" ' +
+    'stroke-linejoin="round" stroke-linecap="round"></path>'
+  // 终点
+  const last = pts.length - 1
+  s += '<circle cx="' + X(last).toFixed(1) + '" cy="' + Y(A[last]).toFixed(1) +
+    '" r="4" fill="#b56b2d" stroke="#fff" stroke-width="1.8"></circle>' +
+    '<text x="' + R + '" y="' + (Y(A[last]) - 10).toFixed(1) + '" text-anchor="end" font-size="12" ' +
+    'font-weight="700" fill="#8f4f1d">' + (A[last] > 0 ? '+' : '') + fixed(A[last], 1) + '%</text>'
+  if (Bm[last] != null) {
+    s += '<circle cx="' + X(last).toFixed(1) + '" cy="' + Y(Bm[last]).toFixed(1) +
+      '" r="3.2" fill="#8ea3b8" stroke="#fff" stroke-width="1.6"></circle>' +
+      '<text x="' + R + '" y="' + (Y(Bm[last]) + 16).toFixed(1) + '" text-anchor="end" font-size="11.5" ' +
+      'font-weight="600" fill="#6f8399">' + esc(nav.benchmark_symbol || '基准') + ' ' +
+      (Bm[last] > 0 ? '+' : '') + fixed(Bm[last], 1) + '%</text>'
+  }
+  // x 轴日期 —— 最多 6 个,均匀取
+  const want = Math.min(6, pts.length)
+  for (let k = 0; k < want; k++) {
+    const i = Math.round(k * (pts.length - 1) / (want - 1))
+    if (!pts[i] || !pts[i].date) continue
+    s += '<text x="' + X(i).toFixed(1) + '" y="' + (B + 17) + '" text-anchor="middle" font-size="10.5" ' +
+      'fill="#777970" font-family="ui-monospace,menlo,monospace">' + esc(String(pts[i].date).slice(5)) + '</text>'
+  }
+  return '<svg viewBox="0 0 720 250" style="width:100%;height:250px;display:block" role="img" aria-label="' +
+    '净值曲线 · 智能体累计 ' + fixed(A[last], 1) + '%">' + s + '</svg>'
+}
+function vNav(d) {
+  const nav = d.nav || {}
+  const bench = esc(nav.benchmark_symbol || '基准')
+  return '<div class="ag-chart"><div class="hd">' +
+    '<div class="ti">净值 vs 基准</div>' +
+    (Number.isFinite(d.day_count) ? '<span class="chip">近 ' + int(d.day_count) + ' 个交易日</span>' : '') +
+    '<div class="ag-lg">' +
+      '<span><i style="background:#b56b2d"></i>小鹿智能体</span>' +
+      '<span><i style="background:#8ea3b8"></i>' + bench + '</span>' +
+      '<span><i style="background:#e8d9c6;height:9px;border-radius:2px"></i>最大回撤区间</span>' +
+      '<span><i style="background:#c9b9a4;width:2px;height:11px"></i>策略换版</span>' +
+    '</div></div>' + svgNav(nav) +
+    '<div class="ag-note" style="padding:2px 2px 10px">竖线标的是<b>策略换版那一天</b> —— ' +
+    '自迭代做得对不对,看的是换版之后曲线相对基准的斜率变了没有,不是看总收益。</div></div>'
+}
+
+// ═══ ⑦ 规则手册(按用户要求排在净值曲线下方) ═══════════════════════
+const RULE_KIND = { buy: ['', '买入'], sell: ['cool', '卖出'], risk: ['warn', '风控'] }
+function vRules(d) {
+  const rs = d.rules
+  if (!Array.isArray(rs) || !rs.length) {
+    return panel('当前生效的规则', '', missing('还没有规则',
+      '智能体的买卖规则由它每晚复盘后自己增删改;交易记录里的 R-xx 都指向这里'))
+  }
+  const cards = rs.map(function (r) {
+    const kind = RULE_KIND[r.kind] || ['', txt(r.kind, '规则')]
+    const obs = r.status === 'observing'
+    const stats = (Array.isArray(r.stats) ? r.stats : []).map(function (st) {
+      const v = st.value == null ? NA : esc(String(st.value))
+      return '<span>' + esc(st.label || '') + '<b' + (st.dim ? ' class="dim"' : '') + '>' + v + '</b></span>'
+    }).join('')
+    return '<div class="ag-r">' +
+      '<div class="hd"><span class="id">' + txt(r.id, 'R-??') + '</span>' +
+        '<span class="chip ' + kind[0] + '">' + kind[1] + '</span>' +
+        '<span class="since' + (obs ? ' obs' : '') + '">' + txt(obs ? (r.since_text || '观察期') : r.since_text, '') + '</span></div>' +
+      '<div class="cond">' + txt(r.condition, '<span class="ag-na">条件未填写</span>') + '</div>' +
+      (stats ? '<div class="ft">' + stats + '</div>' : '') + '</div>'
+  }).join('')
+  return panel('当前生效的规则', esc(rs.length + ' 条 · 交易记录里的 R-xx 都指向这里'),
+    '<div class="ag-rules" id="ag-rules">' + cards + '</div>' +
+    '<div class="ag-note" style="margin-top:12px">每条规则都带<b>触发次数与触发后胜率</b> —— ' +
+    '没有这两个数,就分不清一条规则是「有效」还是「只是没怎么触发」。</div>')
+}
+
+// ═══ ⑧ 持仓明细 + 观察列表 ════════════════════════════════════════
+function ruleChip(id, title) {
+  if (!id) return NA
+  return '<button class="ag-rule" title="' + esc(title || id) + '">' + esc(id) + '</button>'
+}
+function vHoldings(d) {
+  const h = d.holdings
+  if (!h || !Array.isArray(h.items) || !h.items.length) {
+    return panel('持仓明细', '', missing('当前空仓', '没有持仓时这里是空的,不是出错'))
+  }
+  const rows = h.items.map(function (it) {
+    // Sharpe 样本不足时显示 `—` 并说明原因:四五天的日收益样本算出来的夏普
+    // 会在 0.2~3.0 之间乱跳,写出来只会误导。组合级夏普在上面的总览里。
+    const sh = Number.isFinite(it.sharpe)
+      ? '<td class="n">' + fixed(it.sharpe, 2) + '</td>'
+      : '<td class="n ag-na" title="' + esc(it.sharpe_na_reason || '样本不足,未计算') + '">—</td>'
+    return '<tr>' +
+      '<td class="ag-sym">' + txt(it.symbol, '?') + '<s>' + txt(it.name, '') + '</s></td>' +
+      '<td class="n">' + num(it.cost, 2) + '</td>' +
+      '<td class="n">' + num(it.price, 2) + '</td>' +
+      '<td class="n ' + dir(it.pnl_pct) + '">' + pct(it.pnl_pct, 1, true) + '</td>' +
+      '<td class="n">' + (Number.isFinite(it.hold_days) ? int(it.hold_days) + ' 日' : NA) + '</td>' +
+      '<td class="n">' + pct(it.bench_pct, 1, true) + '</td>' + sh +
+      '<td>' + ruleChip(it.entry_rule, it.entry_rule_text) + '</td></tr>'
+  }).join('')
+  const cnt = esc(h.items.length + ' 只') +
+    (Number.isFinite(h.quote_delay_min) ? ' · 报价延迟 ' + int(h.quote_delay_min) + ' 分钟' : '') +
+    (h.as_of ? ' · ' + esc(h.as_of) : '')
+  return panel('持仓明细', cnt,
+    '<div class="ag-scroll"><table class="ag-tb"><thead><tr>' +
+    '<th>股票</th><th style="text-align:right">买入价</th><th style="text-align:right">现价</th>' +
+    '<th style="text-align:right">收益</th><th style="text-align:right">持有</th>' +
+    '<th style="text-align:right">同期基准</th><th style="text-align:right">Sharpe</th><th>买入规则</th>' +
+    '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
+    '<div class="ag-note" style="margin-top:10px"><b>Sharpe 列在样本不足时显示 —</b>:' +
+    '个股夏普用持有期日收益算,四五天的样本得出的数字会在 0.2 和 3.0 之间乱跳,写出来只会误导。' +
+    '组合级夏普在上面的总览里。</div>')
+}
+function vWatch(d) {
+  const w = d.watchlist
+  if (!w || !Array.isArray(w.items) || !w.items.length) {
+    return panel('今日观察列表', '', missing('今日没有候选', '所有标的都不满足当前规则的预备条件'))
+  }
+  const cards = w.items.map(function (it) {
+    if (it.blocked) {
+      return '<div class="ag-w blocked"><div class="r1"><span class="sy">' + txt(it.symbol, '?') + '</span>' +
+        '<span class="chip warn">已否决</span><span class="px">' + num(it.price, 2) + '</span></div>' +
+        '<div class="r2">' + txt(it.blocked_reason, '被护栏挡下,未说明原因') + '</div></div>'
+    }
+    const p = Number.isFinite(it.progress_pct) ? Math.max(0, Math.min(100, it.progress_pct)) : null
+    return '<div class="ag-w"><div class="r1"><span class="sy">' + txt(it.symbol, '?') + '</span>' +
+      (Number.isFinite(it.score) ? '<span class="chip brand">评分 ' + int(it.score) + '</span>' : '') +
+      '<span class="px">' + num(it.price, 2) + '</span></div>' +
+      // gap 写的是「还差什么才买」,不是一串代码 —— 否则用户看不出智能体在等什么
+      '<div class="r2">' + txt(it.gap, '<span class="ag-na">未说明触发条件</span>') + '</div>' +
+      (p == null ? '' : '<div class="ag-gap"><i style="width:' + p.toFixed(0) + '%"></i></div>') +
+      '<div class="r2" style="margin-top:5px">距 ' + ruleChip(it.rule_id, it.rule_text) + ' 触发 ' +
+        (p == null ? NA : '<b>' + p.toFixed(0) + '%</b>') + '</div></div>'
+  }).join('')
+  return panel('今日观察列表',
+    esc(w.items.length + ' 只') + (d.strategy && d.strategy.version ? ' · 按 ' + esc(d.strategy.version) + ' 规则筛' : ''),
+    '<div class="ag-wl">' + cards + '</div>' +
+    '<div class="ag-note" style="margin-top:11px">观察列表写的是<b>还差什么才买</b>,不是一串代码 —— ' +
+    '否则用户看不出智能体在等什么、也无法判断它等得对不对。</div>')
+}
+
+// ═══ ⑨ 今日操作报告 ═══════════════════════════════════════════════
+function vTrades(d) {
+  const t = d.trades
+  if (!t || !Array.isArray(t.items) || !t.items.length) {
+    return panel('今日操作报告', t && t.date ? esc(t.date) : '',
+      missing('今天没有成交', '没有标的触发买卖规则。空仓不动也是一种执行结果,不是故障'))
+  }
+  const rows = t.items.map(function (it) {
+    const isBuy = it.side === 'buy'
+    const pnl = Number.isFinite(it.pnl_abs)
+      ? '<span class="qty ' + dir(it.pnl_abs) + '" style="font-weight:650">' + money(it.pnl_abs, true) +
+        (Number.isFinite(it.pnl_pct) ? ' · ' + pct(it.pnl_pct, 1, true) : '') + '</span>'
+      : (Number.isFinite(it.amount)
+          ? '<span class="qty" style="color:var(--muted)">' + money(it.amount) +
+            (Number.isFinite(it.position_pct) ? ' · 占仓 ' + pct(it.position_pct, 1) : '') + '</span>'
+          : '')
+    return '<div class="ag-t">' +
+      '<div class="tm">' + txt(it.ts_market, '') + '<s>' + txt(it.ts_market_tz, '') + '</s>' +
+        '<s style="margin-top:3px">' + txt(it.ts_local, '') + '</s></div>' +
+      '<div><div class="ag-act">' +
+        '<span class="' + (isBuy ? 'buy' : 'sell') + '">' + (isBuy ? '买入' : '卖出') + '</span>' +
+        '<b>' + txt(it.symbol, '?') + '</b>' +
+        '<span class="qty">' + (Number.isFinite(it.shares) ? int(it.shares) + ' 股' : '') +
+          (Number.isFinite(it.price) ? ' @ ' + fixed(it.price, 2) : '') + '</span>' + pnl +
+        '<span style="margin-left:auto">' + ruleChip(it.rule_id, it.rule_text) +
+          (it.rule_name ? ' <span style="font-size:11.5px;color:var(--muted)">' + esc(it.rule_name) + '</span>' : '') +
+        '</span></div>' +
+      // rationale 由后端组织,数字必须来自成交与行情表(见文件末尾的说明)
+      '<div class="ag-why">' + txt(it.rationale, '<span class="ag-na">本笔没有归因说明</span>') + '</div>' +
+      (it.followup ? '<div class="ag-post"><span class="hi hi-lightbulb"></span> ' + esc(it.followup) + '</div>' : '') +
+      (it.adjustment ? '<div class="ag-post act"><span class="hi hi-edit"></span> ' + esc(it.adjustment) + '</div>' : '') +
+      '</div></div>'
+  }).join('')
+  return panel('今日操作报告',
+    esc(t.items.length + ' 笔') + (t.date ? ' · ' + esc(t.date) : '') + ' · 每笔注明触发了哪条规则',
+    '<div class="ag-tl">' + rows + '</div>' +
+    '<div class="ag-note" style="margin-top:12px;padding-top:11px;border-top:1px solid var(--line)">' +
+    '<b>归因里的数字必须来自成交记录与行情表</b>,模型只负责把它们组织成人话、不参与计算 —— ' +
+    '对应仓内铁律「LLM 严禁自由生成用户可见的数字」,后端出文本前要做正则回读校验。</div>')
+}
+
+// ═══ ⑩ 策略演进 ═══════════════════════════════════════════════════
+function vVersions(d) {
+  const vs = d.versions
+  if (!Array.isArray(vs) || !vs.length) {
+    return panel('策略演进', '', missing('还没有版本记录', '每次改规则都会在这里留一格:改了什么、因哪条教训而改、改后效果'))
+  }
+  const cells = vs.map(function (v) {
+    const cls = v.status === 'current' ? ' now' : (v.status === 'observing' ? ' next' : '')
+    return '<div class="ag-v' + cls + '">' +
+      '<div class="vn">' + txt(v.label, '?') + '</div>' +
+      '<div class="vd">' + txt(v.date, '') + (v.status === 'current' ? ' · 当前' : '') + '</div>' +
+      '<div class="vc">' + txt(v.change, '<span class="ag-na">未记录改动</span>') + '</div>' +
+      '<div class="vr">' + (v.reason ? '起因:' + esc(v.reason) : '') +
+        (v.effect ? '<br>' + esc(v.effect) : '') + '</div></div>'
+  }).join('')
+  return panel('策略演进', esc(vs.length + ' 版 · 每版都能追到是哪条教训促成的'),
+    '<div class="ag-vers">' + cells + '</div>')
+}
+
+// ═══ ⑪ 每日成长总结(按用户要求放最下方) ═══════════════════════════
+function vLessons(d) {
+  const ls = d.lessons
+  if (!Array.isArray(ls) || !ls.length) {
+    return panel('每日成长总结', '', missing('还没有复盘记录',
+      '每个交易日收工后,智能体把当天的亏损拆开归因,写成一条「学到了什么」,并标明有没有落到规则上'))
+  }
+  const landed = ls.filter(function (l) { return l.landed && l.landed.status === 'landed' }).length
+  const cards = ls.map(function (l) {
+    const isWin = l.kind === 'validated'
+    const rows = [['发生了什么', l.what], ['为什么', l.why], ['学到了', l.learned]]
+      .filter(function (r) { return r[1] })
+      .map(function (r) { return '<dt>' + r[0] + '</dt><dd>' + esc(r[1]) + '</dd>' }).join('')
+    // 落地状态是判断它「真在迭代」还是「在写日记」的唯一凭据 —— 缺了也要显式说缺
+    let land = '<div class="ag-land no"><span class="hi hi-hand"></span><span>落地状态未记录</span></div>'
+    if (l.landed && l.landed.status === 'landed') {
+      land = '<div class="ag-land yes"><span class="hi hi-check"></span><span>已落地 · ' +
+        txt(l.landed.text, '未说明改了什么') + '</span></div>'
+    } else if (l.landed && l.landed.status === 'pending') {
+      land = '<div class="ag-land no"><span class="hi hi-hand"></span><span>暂不落地 · ' +
+        txt(l.landed.text, '未说明原因') + '</span></div>'
+    }
+    return '<div class="ag-d' + (isWin ? ' win' : '') + '">' +
+      '<div class="hd"><span class="dt">' + txt(l.date, '') + '</span>' +
+        '<span class="ti">' + txt(l.title, '未命名复盘') + '</span>' +
+        '<span class="chip' + (isWin ? '' : ' warn') + '">' + (isWin ? '验证通过' : '亏损教训') + '</span></div>' +
+      (rows ? '<dl>' + rows + '</dl>' : '<div class="ag-note" style="margin-top:8px">正文为空</div>') +
+      land + '</div>'
+  }).join('')
+  return panel('每日成长总结', esc(ls.length + ' 条 · ' + landed + ' 条已落地为规则改动'),
+    '<div class="ag-diary">' + cards + '</div>' +
+    '<div class="ag-note" style="margin-top:12px;padding-top:11px;border-top:1px solid var(--line)">' +
+    '每条教训都必须标<b>落地状态</b>。只写「学到了什么」而不落到规则上,下周会一字不差地再写一遍 —— ' +
+    '「已落地 / 暂不落地 + 理由」是判断智能体<b>真的在迭代</b>还是<b>在写日记</b>的唯一凭据。</div>')
+}
+
+// ═══ 组装 · 顺序即产品叙事 ════════════════════════════════════════
+// 它是谁 → 按什么做 → 今天跑了吗 → 成绩 → 曲线 → 规则 →
+// 持仓与候选 → 今天做了什么 → 怎么演进过来的 → 学到了什么
+function render(d) {
+  // 返回 html 而不只是写进 container:render_check.js 靠这个返回值断言区块顺序
+  const html = '<div class="ag-wrap">' +
+    vStatus(d) + vStrategy(d) + vGuard(d) + vPipeline(d) + vKpi(d) + vNav(d) + vRules(d) +
+    '<div class="ag-two">' + vHoldings(d) + vWatch(d) + '</div>' +
+    vTrades(d) + vVersions(d) + vLessons(d) +
+    '<div class="ag-note" style="text-align:center;padding:6px 0 0">' +
+    '涨跌配色沿用站内中式惯例(<span style="color:var(--up);font-weight:650">红涨</span> · ' +
+    '<span style="color:var(--dn);font-weight:650">绿跌</span>),与策略工作台、回测结果一致 —— 虽然标的是美股。' +
+    '</div></div>'
+  container.innerHTML = html
+  bindOps()
+  return html
+}
+
+// ─── 三种「没内容」是三件不同的事,必须分开说 ──────────────────────
+// 1. 后端还没这个接口(404)      → 开发期状态,给出契约位置
+// 2. 接口有、但从没启动过        → 产品状态,给出启动入口
+// 3. 启动了但某块为空            → 各渲染函数自己显示 `—`(上面已处理)
+function renderNotImplemented() {
+  container.innerHTML = '<div class="ag-wrap"><div class="panel"><div class="empty">' +
+    '<div class="ic"><span class="hi hi-puzzle"></span></div>' +
+    '<div class="msg">后端还没有 <code>' + API + '</code></div>' +
+    '<div class="ag-note" style="max-width:56ch;margin:0 auto">' +
+    '这个页面不放任何样例数字(仓内铁律「空的比假的好」),所以接口通之前它就是空的。<br>' +
+    '字段契约见 <code>docs/agent-dashboard-contract.md</code>。</div>' +
+    '</div></div></div>'
+}
+function renderNeverStarted(d) {
+  container.innerHTML = '<div class="ag-wrap">' + vStatus(d) + vStrategy(d) +
+    '<div class="panel"><div class="empty">' +
+    '<div class="ic"><span class="hi hi-sprout"></span></div>' +
+    '<div class="msg">小鹿智能体还没开始跑</div>' +
+    '<div class="ag-note" style="max-width:56ch;margin:0 auto 14px">' +
+    '启动后它每个交易日自动做四件事:收集数据 → 滚动回测 → 复盘总结 → 调整规则,' +
+    '并把每一笔交易、每一条教训记在这个页面上。</div>' +
+    '<button class="btn primary" id="ag-start"><span class="hi hi-play"></span> 启动智能体</button>' +
+    '</div></div></div>'
+  const b = document.getElementById('ag-start')
+  if (b) b.addEventListener('click', function () { toast('启动接口尚未实现', 'warn') })
+}
+function renderError(msg) {
+  container.innerHTML = '<div class="ag-wrap"><div class="panel"><div class="empty">' +
+    '<div class="ic"><span class="hi hi-bell"></span></div>' +
+    '<div class="msg">读取智能体状态失败</div>' +
+    '<div class="ag-note" style="max-width:56ch;margin:0 auto 14px">' + esc(msg) + '</div>' +
+    '<button class="btn" id="ag-retry"><span class="hi hi-refresh"></span> 重试</button>' +
+    '</div></div></div>'
+  const b = document.getElementById('ag-retry')
+  if (b) b.addEventListener('click', boot)
+}
+
+function bindOps() {
+  const rules = document.getElementById('ag-rules')
+  const goto = document.getElementById('ag-goto-rules')
+  if (goto && rules) goto.addEventListener('click', function () { rules.scrollIntoView({ behavior: 'smooth', block: 'start' }) })
+  ;['ag-run', 'ag-toggle'].forEach(function (id) {
+    const b = document.getElementById(id)
+    // 控制接口(手动触发 / 暂停)还没定,先明说没实现,不做假的成功提示
+    if (b) b.addEventListener('click', function () { toast('控制接口尚未实现', 'warn') })
+  })
+}
+
+async function boot() {
+  container.innerHTML = '<div class="ag-wrap"><div class="panel">' +
+    '<div class="cnt" style="padding:24px;text-align:center">加载中…</div></div></div>'
+  let r
+  try {
+    r = await fetch(API, { headers: apiHeaders(), cache: 'no-store' })
+  } catch (e) {
+    renderError('请求没发出去:' + (e && e.message ? e.message : e)); return
+  }
+  if (r.status === 404) { renderNotImplemented(); return }
+  if (!r.ok) { renderError('接口返回 HTTP ' + r.status); return }
+  let d
+  try { d = await r.json() } catch (e) { renderError('返回的不是合法 JSON'); return }
+  if (!d || typeof d !== 'object') { renderError('返回体为空'); return }
+  if (d.state === 'never_started' || d.enabled === false) { renderNeverStarted(d); return }
+  render(d)
+}
+
+const reload = document.getElementById('ag-reload')
+if (reload) reload.addEventListener('click', boot)
+boot()
+</script>
+</body>
+</html>
