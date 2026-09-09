@@ -639,7 +639,15 @@ export default function ChatWorkspace({
           mime: a.mime,
           filename: a.filename,
         })),
+        // 用户在能力库点了哪个 SKILL —— 必须显式告诉模型。
+        // opencode 是让**模型自己**按 description 匹配该用哪个 SKILL 的,
+        // 而自建 SKILL 的模板常常不带名字(2026-09-09 用户那条就是
+        // 「{GOOG}这只票,现在到底能不能做?」),模型无从判断就走默认流程了。
+        skillKey: pendingSkillKey || undefined,
       })
+      // 这一条已经用掉了 —— 不清的话下一条随口问的话也会被当成"还在用那个 SKILL"。
+      // (debate / forecast 两个分支在上面各自 consume 过,普通分支一直漏了)
+      if (pendingSkillKey) onSkillConsumed?.()
 
       // 自动生成标题 · 若这是首条 user msg 且当前 session title 是"新对话"或空
       if (isFirstUserMsg) {

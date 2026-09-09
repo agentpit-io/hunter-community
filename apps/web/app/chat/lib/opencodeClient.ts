@@ -121,6 +121,18 @@ export interface SendMessageArgs {
   model?: { providerID: string; modelID: string }
   /** 图片附件 · 走 BFF 的 image → text OCR 拦截 · LLM 收到的还是纯文本 part */
   attachments?: SendAttachment[]
+  /**
+   * 用户在能力库里点选的 SKILL —— **必须显式告诉模型用哪个**。
+   *
+   * opencode 把每个 SKILL 的 name + description 列给模型,由**模型自己**
+   * 按 description 匹配该用哪个。所以用户点了「用它」但消息文本里没提
+   * SKILL 名时(自建 SKILL 的模板常常不带名字),模型根本不知道要用它,
+   * 就走默认的通用分析流程了 —— 2026-09-09 用户报「我的 SKILL 没生效」。
+   *
+   * BFF 收到后把它注入 `system` 字段(不进 parts,所以不会出现在可见对话里),
+   * 并从转发给 opencode 的 body 里删掉(opencode 不认这个字段)。
+   */
+  skillKey?: string
 }
 
 export async function sendMessage(args: SendMessageArgs): Promise<any> {
@@ -143,6 +155,8 @@ export async function sendMessage(args: SendMessageArgs): Promise<any> {
   const body: any = { parts }
   if (args.agent) body.agent = args.agent
   if (args.model) body.model = args.model
+  // 见 SendMessageArgs.skillKey 的说明 · BFF 用完即删,不会转发给 opencode
+  if (args.skillKey) body.skillKey = args.skillKey
   return req(
     'POST',
     `/session/${encodeURIComponent(args.sessionId)}/message`,

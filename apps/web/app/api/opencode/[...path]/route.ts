@@ -746,6 +746,33 @@ async function handle(req: Request, segs: string[]): Promise<Response> {
           body.system = userProfile ? `${baseSystem}\n\n【用户偏好】\n${userProfile}` : baseSystem
         }
 
+        // ── 用户在能力库点选的 SKILL ────────────────────────────
+        //
+        // opencode 把每个 SKILL 的 name + description 列给模型,**由模型自己**
+        // 按 description 匹配该用哪个。所以只有当用户的话里出现了 SKILL 名
+        // (「用 rice-quant 分析…」)时它才认得出来。
+        //
+        // 而自建 SKILL 的提问模板常常不带名字 —— 2026-09-09 用户那条是
+        // 「{GOOG}这只票,现在到底能不能做?值得冒多大风险」,模型无从判断,
+        // 就走了默认的通用深度分析,用户看到的就是"我的 SKILL 没生效"。
+        //
+        // 前端把点选的 key 放在 body.skillKey 里,这里转成一句硬指令塞进 system
+        // (**不进 parts**,所以不会出现在可见对话里),然后**从 body 删掉** ——
+        // opencode 不认这个字段,原样转发会被它当成非法入参。
+        const pickedSkill = typeof body.skillKey === 'string' ? body.skillKey.trim() : ''
+        delete body.skillKey
+        if (pickedSkill) {
+          body.system = `${body.system || ''}
+
+【本轮必须使用的 SKILL】
+- 用户在能力库里**明确点选**了 skill: ${pickedSkill}(不是随口提问)。
+- **先读这个 skill 的方法论正文,再严格按它的步骤与输出结构执行本轮分析。**
+  不要走默认的通用六段深度分析 —— 那正是用户抱怨"我的 skill 没生效"的样子。
+- 它要求扮演某个角色、按某套框架打分/审计的,就照做;
+  它规定的小节标题、判断口径、禁止事项都以它为准(合规红线仍然优先)。
+- 找不到这个 skill 时,**如实告诉用户"没找到这个能力"**,不要假装按它做了。`
+        }
+
         const patched = new TextEncoder().encode(JSON.stringify(body))
         const resp = await forward(req, segs, patched)
         // 发过消息 = 会话活跃,刷新排序时间(失败不影响主流程)
