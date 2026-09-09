@@ -234,7 +234,7 @@ function CapDetail({ item, onUse, onChanged, capGroups, onMoveCap }: {
       <Row label="来源" value={item.builtin ? '内置' : '你自己加的'} />
       {item.slow && <Row label="耗时" value="⏱ 较长(30s+)" />}
       <Divider />
-      {item.hint && <Row label="说明" value={item.hint} />}
+      <SkillHintRow item={item} onChanged={onChanged} />
       {/* 提问模板放在最显眼处 —— 用户要判断的是"点了会发生什么",
           模板就是答案,而且他还能照着改成自己的问法 */}
       <PromptTplRow item={item} onChanged={onChanged} />
@@ -320,6 +320,115 @@ function CapDetail({ item, onUse, onChanged, capGroups, onMoveCap }: {
           只对用户自己加的显示:内置的删不得。 */}
       {!item.builtin && <CapDeleteButton item={item} onChanged={onChanged} />}
     </div>
+  )
+}
+
+/**
+ * 「说明」· 自己加的能力可以就地改。
+ *
+ * 这一栏不只是给人看的 —— **模型靠它判断什么时候该用这个 SKILL**。
+ * opencode 把每个 SKILL 的名字 + 说明列给模型,由模型自己按说明匹配;
+ * 2026-09-09 用户那个「仙股交易风控官」写的是一句角色描述
+ * (「提供你需要评估的股票代码…进行无情审计」),不是"什么时候用我",
+ * 于是直接提问时匹配不上,模型就走了默认流程。
+ * 所以编辑框里要把这件事说清楚,不能只让用户随便写。
+ */
+function SkillHintRow({ item, onChanged }: {
+  item: CapabilityItem; onChanged?: () => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [text, setText] = useState(item.hint || '')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  async function save() {
+    const v = text.trim()
+    if (!v) { setErr('说明不能为空') ; return }
+    setBusy(true); setErr('')
+    try {
+      const h: Record<string, string> = { 'Content-Type': 'application/json' }
+      const t = typeof window !== 'undefined' ? localStorage.getItem('hunter_token') || '' : ''
+      if (t) h['Authorization'] = `Bearer ${t}`
+      const r = await fetch(`/api/chat/skills/${encodeURIComponent(item.key)}`, {
+        method: 'PATCH', headers: h, cache: 'no-store',
+        // 中文说明写进 description_zh(UI 优先读它);同时覆盖 description,
+        // 让 opencode 那边拿到的匹配依据也是这一句
+        body: JSON.stringify({ description: v, description_zh: v }),
+      })
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}))
+        throw new Error(d?.detail || `HTTP ${r.status}`)
+      }
+      setEditing(false)
+      onChanged?.()
+    } catch (e: any) {
+      setErr(e?.message || String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!item.hint && item.builtin) return null
+
+  return (
+    <>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8,
+        fontSize: 11, color: HUNTER.INK_F, margin: '8px 0 4px',
+      }}>
+        <span>说明</span>
+        {!item.builtin && !editing && (
+          <button
+            onClick={() => { setText(item.hint || ''); setErr(''); setEditing(true) }}
+            style={{
+              padding: '1px 7px', fontSize: 10.5, borderRadius: 5,
+              border: `1px solid ${HUNTER.LINE}`, background: 'transparent',
+              color: HUNTER.THEME, cursor: 'pointer', fontFamily: 'inherit',
+            }}
+          >
+            编辑
+          </button>
+        )}
+      </div>
+
+      {editing ? (
+        <>
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            rows={4}
+            autoFocus
+            style={{
+              ...tplBox, width: '100%', boxSizing: 'border-box',
+              fontFamily: 'inherit', resize: 'vertical',
+            }}
+          />
+          <div style={{ fontSize: 10.5, color: HUNTER.INK_F, margin: '4px 0 6px', lineHeight: 1.75 }}>
+            ⚠️ 这段不只是给人看的 —— <b>模型靠它判断什么时候该用这个能力</b>。
+            写成「<b>什么情况下用我</b>」而不是「我是谁」,直接提问时才匹配得上。<br />
+            ✅ 例:<i>评估仙股/低价股能不能碰、值不值得冒险时用。做风控审计,不推荐买入。</i><br />
+            ❌ 例:<i>提供你需要评估的股票代码进行无情审计。</i>(这是角色描述,不是触发条件)
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button onClick={save} disabled={busy}
+                    style={{ ...useBtnBig, width: 'auto', flex: 1, padding: '6px 0', fontSize: 11.5 }}>
+              {busy ? '保存中…' : '保存'}
+            </button>
+            <button onClick={() => { setEditing(false); setErr('') }} disabled={busy}
+                    style={{ ...useBtnBig, width: 'auto', flex: 1, padding: '6px 0', fontSize: 11.5,
+                             background: 'transparent', color: HUNTER.INK_S,
+                             border: `1px solid ${HUNTER.LINE}` }}>
+              取消
+            </button>
+          </div>
+        </>
+      ) : (
+        item.hint
+          ? <div style={{ ...tplBox, background: 'transparent', border: 'none', padding: 0 }}>{item.hint}</div>
+          : <div style={{ fontSize: 11.5, color: HUNTER.INK_F }}>（还没写说明）</div>
+      )}
+      {err && <div style={{ marginTop: 6, fontSize: 11, color: '#9B3A22' }}>保存失败 · {err}</div>}
+    </>
   )
 }
 
