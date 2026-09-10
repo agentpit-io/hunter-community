@@ -1,12 +1,12 @@
-"""筛选脚本 DSL —— thinkScript 子集 → TradingView scanner 字段。
+"""筛选脚本 DSL —— thinkScript 子集 → 扫描源字段。
 
 用户拿来的是 thinkorswim 的 Stock Hacker 脚本(`def x = ...; plot scan = ...`)。
-这里把那套语法解析成 AST,把函数调用映射成 TradingView 的字段名,
+这里把那套语法解析成 AST,把函数调用映射成扫描源的字段名,
 拉一次全市场数据,然后**在本地逐行求值**。
 
-## 为什么本地求值,而不是翻译成 TradingView 的 filter
+## 为什么本地求值,而不是翻译成上游的 filter
 
-TradingView 的 `filter` 只支持「字段 op 常量/字段」,做不了算术。而 thinkScript
+上游的 `filter` 只支持「字段 op 常量/字段」,做不了算术。而 thinkScript
 脚本里最常见的一类条件恰恰是算术:
 
     (high52 - close) / high52 <= 0.10        # 距 52 周高点 10% 以内
@@ -14,7 +14,7 @@ TradingView 的 `filter` 只支持「字段 op 常量/字段」,做不了算术�
 翻译不过去。而全市场一次拉全的代价实测很低(A 股 5237 只 · 205KB · 594ms),
 拉回来自己算反而**又快又不受 filter 表达能力限制**。
 `type=stock` / `is_primary` 这类纯常量条件仍然下推,那是为了把
-ETF、优先股份额这些噪音在服务端就去掉(见 tv_screener 的 BASE_FILTER)。
+ETF、优先股份额这些噪音在服务端就去掉(见 screen_source 的 BASE_FILTER)。
 
 ## 缺数据的行怎么处理 —— 不猜,也不当成 False
 
@@ -27,12 +27,12 @@ False —— 那样 `close > 20` 会把所有没有报价的票判成"不满足"
 
 ## 周期映射是近似的,必须说出来
 
-TradingView 没有"任意窗口最高价"字段,只有 `price_52_week_high` / `High.3M`
+扫描源没有"任意窗口最高价"字段,只有 `price_52_week_high` / `High.3M`
 这些固定窗口。`Highest(high, 252)` 只能映射到 52 周高点 —— 252 个交易日
 和 52 个日历周不是同一个东西。这类近似一律写进返回体的 `notes`,不静默替换。
 
 **映射不上的直接报错,不找"最接近的"顶上。** `Average(volume, 100)` 在
-TradingView 只有 10/30/60/90 天均量,拿 90 天冒充 100 天就是在编数字。
+扫描源只有 10/30/60/90 天均量,拿 90 天冒充 100 天就是在编数字。
 """
 from __future__ import annotations
 
@@ -62,7 +62,7 @@ class Stmt:
 # 词法
 # ═══════════════════════════════════════════════════════════════
 
-# 标识符允许带点:TradingView 字段名本身就长这样(MACD.hist / High.All / Perf.Y)
+# 标识符允许带点:上游字段名本身就长这样(MACD.hist / High.All / Perf.Y)
 _TOKEN_RE = re.compile(r"""
     (?P<ws>\s+)
   | (?P<comment>\#[^\n]*)
@@ -291,14 +291,14 @@ class _Parser:
 
 
 # ═══════════════════════════════════════════════════════════════
-# 函数 → TradingView 字段
+# 函数 → 扫描源字段
 # ═══════════════════════════════════════════════════════════════
 
-# thinkScript 的价格序列名 → TradingView 当日字段
+# thinkScript 的价格序列名 → 扫描源当日字段
 _PRICE = {"close": "close", "open": "open", "high": "high", "low": "low",
           "volume": "volume", "hlc3": None, "ohlc4": None}
 
-# Highest/Lowest 的窗口:交易日数 → TradingView 固定窗口字段。
+# Highest/Lowest 的窗口:交易日数 → 扫描源固定窗口字段。
 # 键是**允许的交易日区间**(闭区间),因为 252/250/251 说的都是"一年"。
 _HIGH_WINDOWS = [
     ((4, 6),     "High.5D",            "近 5 日最高"),
@@ -315,7 +315,7 @@ _LOW_WINDOWS = [
     ((248, 254), "price_52_week_low", "52 周最低"),
 ]
 
-# Average(volume, N) 能映射的天数 —— TradingView 只有这四个
+# Average(volume, N) 能映射的天数 —— 扫描源只有这四个
 _VOL_AVG_DAYS = (10, 30, 60, 90)
 
 
@@ -339,10 +339,10 @@ def _price_arg(node, fn: str) -> str:
 
 
 class _FieldResolver:
-    """把 AST 里的名字和函数调用解析成 TradingView 字段名。
+    """把 AST 里的名字和函数调用解析成扫描源字段名。
 
-    `has_field` 由 tv_screener 注入(来自 metainfo 实拉),所以周期支持范围
-    是**跟着 TradingView 走**的,不用在代码里维护一份会过期的白名单。
+    `has_field` 由 screen_source 注入(来自 metainfo 实拉),所以周期支持范围
+    是**跟着扫描源走**的,不用在代码里维护一份会过期的白名单。
     """
 
     def __init__(self, has_field, sma_periods: list[int], ema_periods: list[int],
@@ -362,12 +362,12 @@ class _FieldResolver:
         low = name.lower()
         if low in _PRICE and _PRICE[low]:
             return _PRICE[low]
-        # 直接写 TradingView 字段名也放行 —— 3777 个字段,不可能都包成函数
+        # 直接写扫描源字段名也放行 —— 3777 个字段,不可能都包成函数
         if self.has_field(name):
             return name
         raise ScreenError(
             f"不认识 {name!r}。它既不是 close/open/high/low/volume,"
-            f"也不是 TradingView 的字段名。"
+            f"也不是扫描源的字段名。"
             f"如果想用自定义变量,要先 `def {name} = ...;` 定义。")
 
     # ── 函数 ────────────────────────────────────────────────
@@ -382,18 +382,18 @@ class _FieldResolver:
             if src == "volume":
                 if n not in _VOL_AVG_DAYS:
                     raise ScreenError(
-                        f"{fn}(volume, {n}) 映射不了 —— TradingView 只提供 "
+                        f"{fn}(volume, {n}) 映射不了 —— 扫描源只提供 "
                         f"{'/'.join(map(str, _VOL_AVG_DAYS))} 天的均量字段。"
                         f"请把周期改成这四个之一。"
                         f"(不拿 90 天冒充 {n} 天:那是在编数字)")
                 return f"average_volume_{n}d_calc"
             if src != "close":
                 raise ScreenError(
-                    f"{fn}({src}, {n}):TradingView 的均线只基于收盘价,"
+                    f"{fn}({src}, {n}):扫描源的均线只基于收盘价,"
                     f"没有 {src} 的均线字段")
             if n not in self.sma_periods:
                 raise ScreenError(
-                    f"{fn}(close, {n}) 映射不了 —— TradingView 没有 SMA{n}。"
+                    f"{fn}(close, {n}) 映射不了 —— 扫描源没有 SMA{n}。"
                     f"可用周期:{', '.join(map(str, self.sma_periods))}")
             return f"SMA{n}"
 
@@ -426,12 +426,12 @@ class _FieldResolver:
                     if n not in (5, 21, 63, 126, 252):
                         self._note(
                             f"{fn}({src}, {n}) → {fld}({label})· "
-                            f"TradingView 只有固定窗口,交易日数与日历窗口存在口径差异")
+                            f"扫描源只有固定窗口,交易日数与日历窗口存在口径差异")
                     else:
                         self._note(f"{fn}({src}, {n}) → {fld}({label})")
                     return fld
             raise ScreenError(
-                f"{fn}({src}, {n}) 映射不了 —— TradingView 没有任意窗口的最高/最低价,"
+                f"{fn}({src}, {n}) 映射不了 —— 扫描源没有任意窗口的最高/最低价,"
                 f"只有 5 日 / 1 月(≈21) / 3 月(≈63) / 6 月(≈126) / 52 周(≈252)。"
                 f"请把周期改成接近这几个的值。")
 
@@ -440,7 +440,7 @@ class _FieldResolver:
                 return "RSI"
             n = _int_arg(args[0], fn, 1)
             if n == 14:
-                self._note("RSI(14) → RSI(TradingView 的默认 RSI 就是 14 周期)")
+                self._note("RSI(14) → RSI(扫描源的默认 RSI 就是 14 周期)")
                 return "RSI"
             if n not in self.rsi_periods:
                 raise ScreenError(
@@ -452,7 +452,7 @@ class _FieldResolver:
             f"不支持的函数 {fn}()。"
             f"目前支持:Average(close|volume, N) · ExpAverage(close, N) · "
             f"Highest(high, N) · Lowest(low, N) · RSI(N)。"
-            f"其它指标可以直接写 TradingView 字段名,例如 MACD.hist、ADX、Perf.Y、"
+            f"其它指标可以直接写扫描源字段名,例如 MACD.hist、ADX、Perf.Y、"
             f"market_cap_basic —— 在「可用字段」里搜。")
 
 
@@ -464,13 +464,13 @@ class _FieldResolver:
 class Compiled:
     stmts: list[Stmt]
     plot_name: str
-    fields: list[str]                     # 需要向 TradingView 请求的字段
+    fields: list[str]                     # 需要向扫描源请求的字段
     notes: list[str] = _dc_field(default_factory=list)
 
 
 def compile_script(src: str, has_field, sma_periods: list[int],
                    ema_periods: list[int], rsi_periods: list[int]) -> Compiled:
-    """解析脚本 + 解析出需要哪些 TradingView 字段。不发网络请求。"""
+    """解析脚本 + 解析出需要哪些扫描源字段。不发网络请求。"""
     stmts, plot_name = _Parser(src).parse()
     rs = _FieldResolver(has_field, sma_periods, ema_periods, rsi_periods)
     fields: list[str] = []
@@ -678,7 +678,7 @@ _OP_LABEL = {
 
 
 def field_label(name: str) -> str:
-    """TradingView 字段名 → 中文标签(查不到就原样返回)。"""
+    """扫描源字段名 → 中文标签(查不到就原样返回)。"""
     if name in _FIELD_LABEL:
         return _FIELD_LABEL[name]
     m = _SMA_RE.match(name)

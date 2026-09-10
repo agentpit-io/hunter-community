@@ -23,7 +23,7 @@
 ## 数字单位
 
 「100万」= 1000000,「1亿」= 100000000。
-百分号**不换算**:TradingView 的百分比字段本身就是以百分数计的
+百分号**不换算**:扫描源的百分比字段本身就是以百分数计的
 (return_on_equity 给的 15 就是 15%),写成 0.15 反而错。
 """
 from __future__ import annotations
@@ -36,7 +36,7 @@ from app.services.quant.screen_dsl import ScreenError
 # 词表
 # ═══════════════════════════════════════════════════════════════
 
-# 固定字段:中文/英文说法 → TradingView 字段名。
+# 固定字段:中文/英文说法 → 扫描源字段名。
 # 同一个字段可以有多种说法,长的写在前面(匹配时按长度倒序,避免「市盈率」被「市」截胡)。
 _FIELD_WORDS: dict[str, str] = {
     "成交量": "volume", "成交额": "volume", "volume": "volume", "量能": "volume",
@@ -103,7 +103,7 @@ def _parse_number(m: re.Match) -> float:
         return v * 1e12
     if u in _UNIT:
         return v * _UNIT[u]
-    # 百分号不换算 —— TradingView 的百分比字段本身就是百分数计的
+    # 百分号不换算 —— 扫描源的百分比字段本身就是百分数计的
     return v
 
 
@@ -131,7 +131,7 @@ _RSI_N_RE = re.compile(r"rsi\s*\(?\s*(\d+)\s*\)?", re.I)
 
 
 class _Vocab:
-    """把可用周期带进来 —— 能不能用 SMA37 由 TradingView 说了算,不在这里硬编码。"""
+    """把可用周期带进来 —— 能不能用 SMA37 由扫描源说了算,不在这里硬编码。"""
 
     def __init__(self, has_field, sma, ema, rsi):
         self.has_field = has_field
@@ -152,7 +152,7 @@ class _Vocab:
             n = int(m.group(1))
             if n not in (10, 30, 60, 90):
                 raise ScreenError(
-                    f"「{m.group(0)}」映射不了 —— TradingView 只有 10/30/60/90 天均量")
+                    f"「{m.group(0)}」映射不了 —— 扫描源只有 10/30/60/90 天均量")
             return f"average_volume_{n}d_calc", m.group(0)
         m = _EMA_RE.search(text)
         if m:
@@ -173,7 +173,7 @@ class _Vocab:
             n = int(m.group(1))
             if n not in self.sma:
                 raise ScreenError(
-                    f"「{m.group(0)}」映射不了 —— TradingView 没有 SMA{n}")
+                    f"「{m.group(0)}」映射不了 —— 扫描源没有 SMA{n}")
             return f"SMA{n}", m.group(0)
         for w, fld in self.words:
             if not self.has_field(fld):

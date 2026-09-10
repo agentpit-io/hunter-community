@@ -1,7 +1,7 @@
-"""TradingView 全市场扫描 —— 取数通道 + 护栏。
+"""全市场扫描 —— 取数通道 + 护栏。
 
-对接 `scanner.tradingview.com/{market}/scan`,TradingView 网页版筛选器自己调的
-那个接口。免 key、免登录,国内 IP 直连可用(2026-09-10 本机实测:中位 583ms,
+对接上游扫描服务的内部端点(地址见 _BASE,那是它网页版筛选器自己调的接口)。
+免 key、免登录,国内 IP 直连可用(2026-09-10 本机实测:中位 583ms,
 连打 30 次全 200)。
 
 ## 定位:探索性初筛工具,不是数据源
@@ -12,7 +12,7 @@
    收盘价",而是"月线周期上最新那根的收盘",实测 NVDA 的 close / close|1W /
    close|1M 三个值完全相同(223.67)。拿它算动量会得到恒等于 0 的因子。
    要涨跌幅得用 `Perf.W` / `Perf.1M` / `Perf.Y` 这类预算好的字段。
-2. **不是官方 API,没有 SLA。** 反向工程来的内部端点,TradingView 的服务条款
+2. **不是官方 API,没有 SLA。** 反向工程来的内部端点,上游的服务条款
    禁止自动化访问。随时可能改字段或封 IP,不能让生产链路依赖它。
 3. **口径与站内数据源不一致。** 见下面 MARKET_CAP_WARN。
 
@@ -62,6 +62,10 @@ class NeedsAI(ScreenError):
     """
 
 
+# ⚠️ 下面三个值是**上游要求的**,不是可配项:换掉 Origin / Referer 会被直接拒。
+# 对外文案、报错、注释一律不再点名上游是谁(2026-09-10 产品要求),
+# 但这三行藏不住 —— 本仓是公开仓,谁都读得到。真要隐藏得把整个通道
+# 做成可插拔的私有实现,那是另一件事。
 _BASE = "https://scanner.tradingview.com"
 _TIMEOUT = 25.0
 _UA = {
@@ -97,7 +101,7 @@ class MarketDef:
 
 # 只开 A 股 / 港股 / 美股(2026-09-10 用户指定)。
 #
-# TradingView 那边日/韩/印/英股同样能扫(实测都是 200,覆盖 4386 / 4302 / 8659 / 9447 只),
+# 上游那边日/韩/印/英股同样能扫(实测都是 200,覆盖 4386 / 4302 / 8659 / 9447 只),
 # 但站内没有任何配套能力去接:代码归一化(market_source.market_of)只认
 # A/港/美三种形态,自选、K线、财报、深度分析全都不支持别的市场。
 # 扫得出来却什么也做不了,只会让人以为站内支持这些市场。
@@ -129,10 +133,10 @@ BASE_FILTER = [
 # description 是股票名 —— 只给代码的结果没法看。
 ALWAYS_COLS = ["name", "description", "close", "currency", "volume"]
 
-DELAY_WARN = "TradingView 免订阅数据延迟 15 分钟(update_mode=delayed_streaming_900),盘中信号请勿依赖。"
+DELAY_WARN = "免订阅通道数据延迟 15 分钟,盘中信号请勿依赖。"
 
 MARKET_CAP_WARN = (
-    "market_cap_basic 是 TradingView 口径,与站内国内源实测有系统性差异:"
+    "market_cap_basic 是扫描源口径,与站内国内源实测有系统性差异:"
     "A 股 10 只抽样里中芯国际差 -37%、比亚迪 -8%、格力 -7%(A+H 两地上市股尤其大);"
     "且它与 total_shares_outstanding_current 自身对不上(close×股本 / 市值 = 0.36~0.63)。"
     "可以用来排序和粗筛,不要当作市值真值,更不要写进因子。"
@@ -172,7 +176,7 @@ def get_meta(market_key: str) -> _Meta:
             r.raise_for_status()
             raw = r.json().get("fields") or []
     except Exception as e:                                        # noqa: BLE001
-        raise ScreenError(f"拉 TradingView 字段表失败:{type(e).__name__} · {e}") from e
+        raise ScreenError(f"拉扫描源字段表失败:{type(e).__name__} · {e}") from e
 
     names = {f.get("n") for f in raw if f.get("n")}
     # name / description 不在 metainfo 里但实际可用(实测能取到值),补进白名单,
@@ -204,10 +208,10 @@ def _market(key: str) -> MarketDef:
 # ═══════════════════════════════════════════════════════════════
 
 def _normalize_code(tv_symbol: str, market_key: str, name: str) -> str:
-    """TradingView 符号 → 站内代码格式。
+    """上游符号 → 站内代码格式。
 
     站内格式见 market_source.market_of:6 位纯数字 = A 股,5 位 = 港股,
-    含字母 = 美股。港股 TradingView 给的是 `HKEX:700`,站内要 `00700` ——
+    含字母 = 美股。港股上游给的是 `HKEX:700`,站内要 `00700` ——
     **必须补零到 5 位**,否则 market_of('700') 会判成 A 股然后去深交所找。
     """
     bare = tv_symbol.split(":", 1)[-1] if ":" in tv_symbol else tv_symbol
@@ -221,7 +225,7 @@ def fetch_rows(market_key: str, columns: list[str], limit_scan: int = _MAX_ROWS,
                extra_filter: list | None = None) -> tuple[list[dict], int]:
     """拉全市场。→ (行, 上游 totalCount)
 
-    行是 dict:TradingView 字段名 → 值,外加 `_symbol` / `_code`。
+    行是 dict:上游字段名 → 值,外加 `_symbol` / `_code`。
     """
     md = _market(market_key)
     cols: list[str] = []
@@ -248,11 +252,11 @@ def fetch_rows(market_key: str, columns: list[str], limit_scan: int = _MAX_ROWS,
                 r = cli.post(f"{_BASE}/{md.tv}/scan", json=body)
             except Exception as e:                                # noqa: BLE001
                 raise ScreenError(
-                    f"连 TradingView 失败:{type(e).__name__} · {e}。"
+                    f"连扫描源失败:{type(e).__name__} · {e}。"
                     f"这是免费的非官方通道,没有 SLA —— 稍后重试,或改用站内数据源。") from e
             if r.status_code != 200:
                 raise ScreenError(
-                    f"TradingView 返回 HTTP {r.status_code}。"
+                    f"扫描源返回 HTTP {r.status_code}。"
                     + ("被限流了,等一会儿再试。" if r.status_code == 429 else
                        f"响应片段:{r.text[:200]}"))
             data = r.json()
@@ -358,7 +362,7 @@ def run_script(script: str, market_key: str = "us", limit: int = 100,
         "columns": want,
         "notes": c.notes,
         "warnings": warnings,
-        "source": "TradingView scanner(非官方接口 · 延迟 15 分钟)",
+        "source": "全市场扫描源(非官方接口 · 延迟 15 分钟)",
         "timing_ms": {"fetch": round(fetch_ms), "evaluate": round(eval_ms)},
     }
 
@@ -460,7 +464,7 @@ PRESETS = [
         "desc": "均线多头排列 + 逼近 52 周高点 + 有量。thinkorswim 经典 Stock Hacker 脚本。",
         "script": """# ===== 上升趋势 =====
 # 均量条件(90 日均量 > 100 万股)
-# 注:TradingView 只有 10/30/60/90 天均量,原脚本的 Average(volume,100) 映射不了
+# 注:扫描源只有 10/30/60/90 天均量,原脚本的 Average(volume,100) 映射不了
 def avgVol90 = Average(volume, 90);
 def cond_avgVol = avgVol90 > 1000000;
 

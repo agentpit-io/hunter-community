@@ -75,11 +75,11 @@ grep -rn "mock\|_mock\|Object.assign\|writeDefault\|\|\| 0" apps/web/public apps
 688981 给 659)。用它推股本 / 市值时必须带合理性边界(`_BPS_RANGE` / `_MCAP_RANGE` / `_TURNOVER_MAX`),
 越界丢该股票,不进截面排名。
 
-## 数据坑:TradingView 扫描通道(`tv_screener`)的四个陷阱
+## 数据坑:外部扫描通道(`screen_source`)的四个陷阱
 
-2026-09-10 接入全市场扫描(`apps/api/app/services/quant/tv_screener.py` +
+2026-09-10 接入全市场扫描(`apps/api/app/services/quant/screen_source.py` +
 `screen_dsl.py`,前端 `strategies/screener.html`)时实测出来的。
-它是 `scanner.tradingview.com` 的**非官方内部接口**:免 key、国内直连,
+它是上游的**非官方内部接口**(地址见 `screen_source._BASE`):免 key、国内直连,
 中位 583ms,连打 30 次无限流。定位是**探索性初筛**,不进 `factor_value`、不进回测、不进推送。
 
 ### 1. 翻页不带 `sort` 会静默漏掉三分之一的池子(最隐蔽)
@@ -122,7 +122,7 @@ PB 全部 ≤6%),但**市值差得多**:中芯国际 -37%、比亚迪 -8%、格�
 
 - **全市场都是延迟 15 分钟**(`update_mode = delayed_streaming_900`,美股/港股/A 股无一例外),
   盘中信号不能用。`lang=zh_CN` 实测**也只返回英文名**,没有中文名可拿。
-- **周期映射不上一律报错,不找"最接近的"顶替**。`Average(volume, 100)` 在 TradingView
+- **周期映射不上一律报错,不找"最接近的"顶替**。`Average(volume, 100)` 在扫描源
   只有 10/30/60/90 天均量 —— 拿 90 天冒充 100 天就是在编数字,违反本仓第一条铁律。
   报错信息里要写清可用值,LLM 和用户才能自己改。
 - 缺字段的行求值结果是 `None`,**不计入命中也不算"不满足"**,单独计进 `skipped_incomplete`
