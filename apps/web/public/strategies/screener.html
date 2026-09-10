@@ -6,33 +6,80 @@
   <title>扫描筛选 · 猎鹿人 Hunter</title>
   <link rel="stylesheet" href="style.css" />
   <style>
-    .sc-split{display:grid;grid-template-columns:minmax(360px,.85fr) 1.15fr;gap:14px;align-items:start}
-    /* grid 子项默认 min-width:auto —— 不肯收缩到内容宽度以下。
-       结果是结果面板被那张 nowrap 的宽表撑到 1572px(视口只有 972px),
-       而 .sc-scroll 的 overflow-x:auto **完全失效**(它自己 scrollWidth==clientWidth,
-       根本没得滚),横向滚的是整个面板,警告块跟着一起左移出屏。
-       2026-09-10 开浏览器点出来的,CSS 上加 min-width:0 才让内层真正接管滚动。 */
-    .sc-split>*{min-width:0}
-    @media(max-width:1080px){.sc-split{grid-template-columns:1fr}}
+    /* ── 魔法筛选(生成区) ─────────────────────────────── */
+    .mg{background:#F2F8FE;border:1px solid #DCEBFA;border-radius:10px;padding:13px 15px 11px}
+    .mg-hd{display:flex;align-items:center;gap:7px;color:#2E86DE;font-size:13.5px;
+      font-weight:700;letter-spacing:.04em;margin-bottom:10px}
+    .mg-row{display:flex;flex-wrap:wrap;gap:9px;align-items:stretch}
+    .mg-seg{display:inline-flex;background:#fff;border:1px solid #DCEBFA;border-radius:8px;padding:3px}
+    .mg-seg button{border:0;background:transparent;border-radius:6px;padding:6px 15px;cursor:pointer;
+      font-size:13px;font-family:inherit;color:var(--muted)}
+    .mg-seg button.on{background:#EDE4F7;color:#7B3FA8;font-weight:700}
+    .mg-ta{flex:1;min-width:240px;box-sizing:border-box;min-height:44px;max-height:210px;resize:vertical;
+      border:1px solid #DCEBFA;border-radius:8px;padding:11px 12px;background:#fff;color:var(--text);
+      font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.6}
+    .mg-ta:focus{outline:none;border-color:#2E86DE}
+    .mg-gen{border:0;background:#2E86DE;color:#fff;border-radius:8px;padding:0 22px;cursor:pointer;
+      font-size:14px;font-weight:600;font-family:inherit;white-space:nowrap;display:flex;
+      align-items:center;gap:7px;justify-content:center}
+    .mg-gen:disabled{opacity:.5;cursor:not-allowed}
+    .mg-eg{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+    .mg-eg button{display:inline-flex;align-items:center;gap:7px;background:#fff;
+      border:1px solid #DCEBFA;border-radius:8px;padding:6px 12px;cursor:pointer;
+      font-size:12.5px;font-family:inherit;color:var(--text)}
+    .mg-eg button:hover{border-color:#2E86DE;color:#2E86DE}
+    .mg-eg .ar{color:#2E86DE;font-size:12px}
 
-    .sc-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
-    .sc-bar .lb{font-size:12px;color:var(--muted)}
-    .sc-seg{display:flex;flex-wrap:wrap;gap:6px}
-    .sc-seg button{border:1px solid var(--line,#E8E0D6);background:#fff;border-radius:7px;
-      padding:5px 11px;cursor:pointer;font-size:12.5px;font-family:inherit;color:var(--text)}
-    .sc-seg button.on{border-color:var(--brand);background:#FDF3E7;color:#A85F17;font-weight:600}
-    .sc-seg button:disabled{opacity:.45;cursor:not-allowed}
+    /* ── 条件区 ────────────────────────────────────────── */
+    .cd-hd{display:flex;align-items:center;flex-wrap:wrap;gap:8px;font-size:14.5px;
+      color:var(--text);margin:16px 0 4px}
+    .cd-hd b{font-weight:700}
+    .cd-hd .mk{background:#FDF3E7;color:#A85F17;border-radius:6px;padding:2px 9px;font-size:12px;font-weight:600}
+    .cd-list{border-left:2px dashed var(--line,#E8E0D6);padding-left:14px;margin-top:6px}
+    .cd{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:7px 2px;
+      border-bottom:1px solid transparent}
+    .cd:hover{background:#FBFAF8}
+    .cd.off{opacity:.42}
+    .cd.var{opacity:.75}
+    .cd .nm{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--soft,#B9AFA2);
+      min-width:112px;flex-shrink:0}
+    .cd .body{display:flex;align-items:center;flex-wrap:wrap;gap:6px;flex:1;min-width:200px}
+    .cd .acts{display:flex;align-items:center;gap:3px;margin-left:auto;flex-shrink:0}
+    .cd .acts button{border:0;background:transparent;cursor:pointer;padding:3px 5px;border-radius:5px;
+      font-size:13px;line-height:1;color:var(--soft,#B9AFA2)}
+    .cd .acts button:hover{background:#F0EBE4;color:var(--text)}
+    .cd .acts button.del:hover{background:#FDECEC;color:#9B2C2C}
 
-    .sc-ed{width:100%;box-sizing:border-box;min-height:330px;resize:vertical;
-      font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.65;
-      border:1px solid var(--line,#E8E0D6);border-radius:8px;padding:11px 12px;background:#fff;
-      color:var(--text);tab-size:2}
-    .sc-ed:focus{outline:none;border-color:var(--brand)}
+    .tk{font-size:13.5px}
+    .tk.f{color:var(--text);font-weight:600}
+    .tk.o{color:#B4429B;font-weight:600}
+    .tk.l{color:#2E86DE;font-weight:700}
+    .tk.p{color:var(--soft,#B9AFA2)}
+    .tk.r{color:#7B3FA8;font-weight:600}
+    .tk.k{color:var(--muted)}
+    .sc-num{background:#1E2740;color:#fff;border:0;border-radius:5px;padding:3px 7px;
+      font-family:ui-monospace,Menlo,monospace;font-size:12.5px;text-align:center;
+      min-width:34px;font-weight:600}
+    .sc-num:focus{outline:2px solid #2E86DE}
+    .cd.off .sc-num{background:#9A9A9A}
 
+    .sw{position:relative;width:32px;height:17px;border-radius:9px;background:#D6CFC5;
+      cursor:pointer;flex-shrink:0;border:0;padding:0}
+    .sw.on{background:#3FB27F}
+    .sw i{position:absolute;top:2px;left:2px;width:13px;height:13px;border-radius:50%;
+      background:#fff;transition:left .15s}
+    .sw.on i{left:17px}
+
+    .cd-edit{width:100%;box-sizing:border-box;margin-top:6px;border:1px solid #2E86DE;
+      border-radius:7px;padding:8px 10px;font-family:ui-monospace,Menlo,monospace;
+      font-size:12.5px;color:var(--text);background:#fff;min-height:56px;resize:vertical}
+    .cd-edit:focus{outline:none}
+
+    /* ── 通用 ──────────────────────────────────────────── */
     .sc-err{background:#FDECEC;border:1px solid #F3C9C9;color:#9B2C2C;border-radius:8px;
-      padding:10px 13px;font-size:12.5px;line-height:1.7;margin-top:9px;white-space:pre-wrap}
+      padding:10px 13px;font-size:12.5px;line-height:1.7;margin-top:10px;white-space:pre-wrap}
     .sc-warn{background:#FDF3E7;border:1px solid #F0DCC0;color:#8A5A1B;border-radius:8px;
-      padding:9px 12px;font-size:12px;line-height:1.7;margin-top:9px}
+      padding:9px 12px;font-size:12px;line-height:1.7;margin-top:10px}
     .sc-warn ul{margin:0;padding-left:17px}
     .sc-warn li+li{margin-top:4px}
     .sc-note{color:var(--muted);font-size:11.5px;line-height:1.7;margin-top:8px}
@@ -51,7 +98,7 @@
     .sc-tb th .ar{color:var(--brand);margin-left:3px}
     .sc-tb td.n{text-align:right;font-family:ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
     .sc-tb tr:last-child td{border-bottom:none}
-    .sc-tb .cd{font-family:ui-monospace,Menlo,monospace;color:var(--brand-dark);font-weight:600}
+    .sc-tb .cd2{font-family:ui-monospace,Menlo,monospace;color:var(--brand-dark);font-weight:600}
     .sc-na{color:var(--soft,#B9AFA2)}
 
     .sc-syn{font-size:12px;line-height:1.85;color:var(--muted)}
@@ -62,7 +109,6 @@
       margin-top:10px;background:#fff}
     details.sc-fold summary{cursor:pointer;font-size:12.5px;color:var(--text);font-weight:600}
     details.sc-fold[open] summary{margin-bottom:8px}
-
     .sc-fd{display:flex;gap:7px;margin-bottom:8px}
     .sc-fd input{flex:1;border:1px solid var(--line,#E8E0D6);border-radius:7px;padding:6px 10px;
       font-size:12.5px;font-family:inherit;color:var(--text);background:#fff}
@@ -71,33 +117,42 @@
     .sc-fl span{background:var(--bg,#FAF7F3);border-radius:5px;padding:3px 7px;cursor:pointer;
       font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--text)}
     .sc-fl span:hover{background:#FDF3E7;color:#A85F17}
+
+    .sc-runbar{display:flex;flex-wrap:wrap;gap:9px;align-items:center;margin-top:14px}
+    /* grid 子项默认 min-width:auto,不加这行结果面板会被宽表撑破,
+       内层 .sc-scroll 的 overflow-x 会完全失效(2026-09-10 实测) */
+    .sc-wrap>*{min-width:0}
   </style>
 </head>
 <body>
 <script src="app.js"></script>
 <script>
 // ═══════════════════════════════════════════════════════════════════
-// 扫描筛选 · TradingView 全市场
+// 扫描筛选 · 对齐 chartink 的「魔法筛选 + 可视条件行」交互
 //
 // 用 renderShell('agent', …) —— 顶栏高亮仍停在「小鹿智能体」。
-// 它是小鹿的**取数入口**(候选票从哪来),不是并列的第六个一级功能;
-// 单独占一个 tab 会让人以为这是另一套独立的策略体系。
+// 它是小鹿的取数入口(候选票从哪来),不是并列的第六个一级功能。
 //
-// ── 这一页在产品上是什么 ──────────────────────────────────────────
-// **探索性初筛**。三条边界写死在界面上(不是只写在文档里):
-//   1. 延迟 15 分钟 —— TradingView 免订阅数据的实况
-//   2. 只有当前快照、没有历史 —— 所以结果不能回测,页面上不提供"拿去回测"的按钮
-//   3. 市值口径与站内国内源不一致 —— 只能排序粗筛
-// 后端每次返回都会带 warnings,这里**原样渲染**,不做折叠、不做"下次不再提示"。
-// 把风险藏进折叠面板等于没说。
+// ── 数据模型:脚本就是模型 ────────────────────────────────────────
+// 界面上一行条件 = 脚本里一句 `def`;「同时满足以下全部条件」= `plot scan = a and b …`。
+// 不另造一套条件对象再翻译回脚本 —— 那样前端认为的条件和后端真正跑的
+// 会慢慢漂移,而且两边单独看都"对",极难发现。
+// 所以:改任何东西都回写成脚本 → 送后端 /parse 重新解析 → 用返回的条件重渲染。
+// 启用状态也不用前端自己记:build_script 只把启用的写进 plot,
+// 解析回来 plot_refs 里有谁谁就是启用的,天然闭环。
+//
+// ── 三条边界写死在界面上 ────────────────────────────────────────
+// 延迟 15 分钟 / 只有快照没有历史不能回测 / 市值口径与站内不一致。
+// 后端每次都带 warnings,这里原样渲染,不折叠、不做"下次不再提示"。
 // ═══════════════════════════════════════════════════════════════════
 document.body.innerHTML = renderShell('agent', '策略广场 / 扫描筛选',
   '写筛选脚本 · 扫全市场找候选票',
   '<a class="btn small" href="/strategies/agent.html">← 回小鹿智能体</a>')
 
 const container = document.getElementById('page-content')
-const META_API = '/api/quant/screener/meta'
-const RUN_API  = '/api/quant/screener/run'
+const META_API  = '/api/quant/screener/meta'
+const PARSE_API = '/api/quant/screener/parse'
+const RUN_API   = '/api/quant/screener/run'
 const FIELD_API = '/api/quant/screener/fields'
 
 const NA = '<span class="sc-na">—</span>'
@@ -106,92 +161,255 @@ function esc(s) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
 }
-// 数字一律 Number.isFinite 判据 · 不写 `v || 0`(0 看起来像个结论)
-function num(v, dg) {
+function num(v) {
   if (!Number.isFinite(v)) return NA
   const a = Math.abs(v)
   if (a >= 1e8) return (v / 1e8).toFixed(2) + '亿'
   if (a >= 1e4) return (v / 1e4).toFixed(1) + '万'
-  return v.toFixed(dg == null ? 2 : dg)
+  return v.toFixed(2)
 }
 function plain(v) { return Number.isFinite(v) ? v.toFixed(2) : (v == null ? NA : esc(v)) }
 
 // ─── 状态 ─────────────────────────────────────────────────────────
 const S = {
-  meta: null,          // 后端 /meta · 拿不到就是 null,不编默认值
-  metaErr: null,
+  meta: null, metaErr: null,
   market: 'us',
-  script: '',
-  running: false,
+  input: '',                 // 生成框里的原文
+  mode: 'append',            // append | replace
+  conditions: [],            // 已生效的条件行(后端 /parse 产出)
+  combine: 'all',            // all | custom
+  plotName: 'scan', plotExpr: '',
+  notes: [], parseWarnings: [],
+  editing: null,             // 正在编辑原文的条件名
+  generating: false, running: false,
+  genError: null, runError: null,
   result: null,
-  error: null,
-  // 默认按市值降序 —— 不给 sort_by 的话上游是按代码字母序返回的(翻页要稳定排序,
-  // 见 tv_screener._SORT),选股结果按字母序排没有任何意义,用户会以为命中的就是这几只。
-  // 市值口径虽然不准(warnings 里写了),但用来排序是它明确允许的用法。
-  sortBy: 'market_cap_basic',
-  desc: true,
+  probe: {},                 // 条件名 → 单独测试的命中数
+  sortBy: 'market_cap_basic', desc: true,
 }
 
-const LS_SCRIPT = 'hunter_screener_script'
-const LS_MARKET = 'hunter_screener_market'
+const LS = 'hunter_screener_script_v2'
+const LS_MK = 'hunter_screener_market'
 function saveDraft() {
   try {
-    localStorage.setItem(LS_SCRIPT, S.script)
-    localStorage.setItem(LS_MARKET, S.market)
-  } catch (e) { /* 隐私模式下 localStorage 会抛,草稿丢了不影响用 */ }
-}
-function loadDraft() {
-  try {
-    const s = localStorage.getItem(LS_SCRIPT)
-    const m = localStorage.getItem(LS_MARKET)
-    if (s) S.script = s
-    if (m) S.market = m
-  } catch (e) { /* 同上 */ }
+    localStorage.setItem(LS, buildScript(true))
+    localStorage.setItem(LS_MK, S.market)
+  } catch (e) { /* 隐私模式会抛,草稿丢了不影响用 */ }
 }
 
-// ─── 左栏 · 编辑器 ────────────────────────────────────────────────
-function vEditor() {
-  const markets = (S.meta && S.meta.markets) || []
+// ─── 条件 → 脚本(与后端 build_script 同规则) ──────────────────────
+// 停用的条件**保留 def**、只是不进 plot —— 重新启用时原文一字不差地回来。
+function buildScript(allEnabled) {
+  const lines = []
+  const on = []
+  S.conditions.forEach(function (c) {
+    if (!c.expr) return
+    lines.push('def ' + c.name + ' = ' + c.expr + ';')
+    if (c.is_bool && (allEnabled || c.enabled)) on.push(c.name)
+  })
+  if (!lines.length) return ''
+  if (S.combine === 'custom' && S.plotExpr) {
+    lines.push('plot ' + S.plotName + ' = ' + S.plotExpr + ';')
+  } else if (on.length) {
+    lines.push('plot ' + S.plotName + ' = ' + on.join(' and ') + ';')
+  } else {
+    lines.push('plot ' + S.plotName + ' = false;')
+  }
+  return lines.join('\n')
+}
+
+// ═══ 魔法筛选(生成区) ═══════════════════════════════════════════
+function vMagic() {
   const presets = (S.meta && S.meta.presets) || []
+  const chips = presets.length
+    ? presets.map(function (p) {
+        return '<button data-preset="' + esc(p.key) + '" title="' + esc(p.desc) + '">' +
+          esc(p.name) + '<span class="ar">↵</span></button>'
+      }).join('')
+    : '<span class="sc-na" style="font-size:12px">' +
+      (S.metaErr ? '示例没拿到' : '加载中…') + '</span>'
 
+  const markets = (S.meta && S.meta.markets) || []
   const mkBtns = markets.length
     ? markets.map(function (m) {
         return '<button data-mkt="' + esc(m.key) + '" class="' +
           (m.key === S.market ? 'on' : '') + '">' + esc(m.label) + '</button>'
       }).join('')
     : '<span class="sc-na" style="font-size:12px">' +
-      (S.metaErr ? '市场列表没拿到' : '加载中…') + '</span>'
+      (S.metaErr ? '市场没拿到' : '加载中…') + '</span>'
 
-  const psBtns = presets.length
-    ? presets.map(function (p) {
-        return '<button data-preset="' + esc(p.key) + '" title="' + esc(p.desc) + '">' +
-          esc(p.name) + '</button>'
-      }).join('')
-    : '<span class="sc-na" style="font-size:12px">' +
-      (S.metaErr ? '示例没拿到' : '加载中…') + '</span>'
-
-  const canRun = !!S.meta && !S.running
-  return '<div class="panel"><div class="p-hd">筛选脚本</div>' +
-    '<div class="sc-bar"><span class="lb">市场</span><div class="sc-seg" id="sc-mkts">' + mkBtns + '</div></div>' +
-    '<div class="sc-bar"><span class="lb">示例</span><div class="sc-seg" id="sc-presets">' + psBtns + '</div></div>' +
-    '<textarea class="sc-ed" id="sc-script" spellcheck="false" ' +
-      'placeholder="# 例:\ndef sma50 = Average(close, 50);\nplot scan = close > sma50 and volume > 1000000;">' +
-      esc(S.script) + '</textarea>' +
-    '<div class="sc-bar" style="margin-top:10px">' +
-      '<button class="btn" id="sc-run"' + (canRun ? '' : ' disabled') + '>' +
-        (S.running ? '扫描中…' : '<span class="hi hi-play"></span> 运行扫描') + '</button>' +
-      '<button class="btn small" id="sc-clear">清空</button>' +
-      '<span class="sc-na" style="font-size:11.5px;margin-left:auto">Ctrl/Cmd + Enter 运行</span>' +
+  return '<div class="mg">' +
+    '<div class="mg-hd"><span class="hi hi-sparkle"></span>魔法筛选</div>' +
+    '<div class="mg-row">' +
+      '<div class="mg-seg" id="mg-mode">' +
+        '<button data-mode="append" class="' + (S.mode === 'append' ? 'on' : '') + '">追加</button>' +
+        '<button data-mode="replace" class="' + (S.mode === 'replace' ? 'on' : '') + '">替换</button>' +
+      '</div>' +
+      '<div class="mg-seg" id="mg-mkts">' + mkBtns + '</div>' +
+      '<textarea class="mg-ta" id="mg-input" spellcheck="false" ' +
+        'placeholder="把筛选脚本粘进来,点「生成」。例:\ndef sma50 = Average(close, 50);\nplot scan = close > sma50 and volume > 1000000;">' +
+        esc(S.input) + '</textarea>' +
+      '<button class="mg-gen" id="mg-gen"' + (S.meta && !S.generating ? '' : ' disabled') + '>' +
+        (S.generating ? '生成中…' : '<span class="hi hi-play"></span> 生成') + '</button>' +
     '</div>' +
-    (S.error ? '<div class="sc-err">' + esc(S.error) + '</div>' : '') +
+    '<div class="mg-eg" id="mg-eg">' + chips + '</div>' +
+    '</div>' +
+    (S.genError ? '<div class="sc-err">' + esc(S.genError) + '</div>' : '') +
     (S.metaErr ? '<div class="sc-err">读不到扫描配置:' + esc(S.metaErr) +
-      '\n后端可能还没部署 /api/quant/screener/*。界面骨架照常显示,但运行会失败。</div>' : '') +
-    vSyntax() +
-    vFields() +
+      '\n后端可能还没部署 /api/quant/screener/*。界面骨架照常显示,但生成和扫描都会失败。</div>' : '')
+}
+
+// ═══ 条件行 ═══════════════════════════════════════════════════════
+function vTok(t, ci, ti) {
+  if (t.k === 'num') {
+    return '<input class="sc-num" data-c="' + ci + '" data-t="' + ti + '" ' +
+      'value="' + esc(t.t) + '" size="' + Math.max(1, String(t.t).length) + '" ' +
+      'aria-label="数值" />'
+  }
+  const cls = { field: 'f', op: 'o', logic: 'l', paren: 'p', ref: 'r', kw: 'k' }[t.k] || ''
+  return '<span class="tk ' + cls + '">' + esc(t.t) + '</span>'
+}
+
+function vCond(c, i) {
+  const isVar = !c.is_bool
+  const off = c.is_bool && !c.enabled
+  const body = (c.tokens || []).map(function (t, ti) { return vTok(t, i, ti) }).join(' ')
+  // 中间变量(def sma50 = Average(close,50))不是条件,不能单独停用 ——
+  // 停掉它,引用它的条件会直接报"不认识 sma50"。所以只给删除,不给开关。
+  const sw = isVar
+    ? '<span class="sc-na" style="font-size:11px;padding:0 6px">变量</span>'
+    : '<button class="sw ' + (c.enabled ? 'on' : '') + '" data-act="toggle" data-i="' + i +
+      '" title="' + (c.enabled ? '停用这条(保留原文)' : '启用这条') + '"><i></i></button>'
+  const probe = S.probe[c.name]
+  const probeTxt = probe === undefined ? '' :
+    (probe === null ? '<span class="sc-na" style="font-size:11px">单独测试失败</span>'
+      : '<span style="font-size:11px;color:var(--brand-dark)">单独命中 ' + probe + '</span>')
+  return '<div class="cd' + (off ? ' off' : '') + (isVar ? ' var' : '') + '">' +
+    '<span class="nm">' + esc(c.name) + '</span>' +
+    '<span class="body">' + body + ' ' + probeTxt + '</span>' +
+    '<span class="acts">' +
+      '<button data-act="edit" data-i="' + i + '" title="编辑原文">✎</button>' +
+      '<button data-act="dup" data-i="' + i + '" title="复制一条">⧉</button>' +
+      '<button data-act="copy" data-i="' + i + '" title="复制脚本文本">⎘</button>' +
+      (isVar ? '' : '<button data-act="probe" data-i="' + i + '" title="只用这一条扫一次">🐞</button>') +
+      sw +
+      '<button class="del" data-act="del" data-i="' + i + '" title="删除">✕</button>' +
+    '</span>' +
+    (S.editing === c.name
+      ? '<textarea class="cd-edit" id="cd-edit" spellcheck="false">' + esc(c.expr) + '</textarea>' +
+        '<div class="sc-note" style="width:100%">改完按 Ctrl/Cmd + Enter 生效,Esc 取消。' +
+        '这里写的是原始表达式(分号不用写)。</div>'
+      : '') +
     '</div>'
 }
 
-function vSyntax() {
+function vConditions() {
+  if (!S.conditions.length) {
+    return '<div class="sc-note" style="padding:22px 4px">' +
+      '还没有条件。把筛选脚本粘进上面的框里点「生成」,或者直接点一个示例。</div>'
+  }
+  const onCount = S.conditions.filter(function (c) { return c.is_bool && c.enabled }).length
+  const mk = (S.meta && (S.meta.markets || []).filter(function (m) { return m.key === S.market })[0]) || null
+  return '<div class="cd-hd">股票需<b>同时满足</b>以下<b>' + onCount + '</b> 个条件' +
+      (mk ? '<span class="mk">' + esc(mk.label) + '</span>' : '') +
+      '<button class="btn small" id="cd-copyall" style="margin-left:auto">复制脚本</button>' +
+      '<button class="btn small" id="cd-clear">清空</button>' +
+    '</div>' +
+    (S.combine === 'custom'
+      ? '<div class="sc-warn">这个脚本的最终条件不是「若干条件全部满足」,而是自定义组合:' +
+        '<code>' + esc(S.plotExpr) + '</code>。所以下面每一条不能单独停用 —— ' +
+        '停用开关会改变组合的含义。要逐条开关,请把最后一句改成 ' +
+        '<code>plot scan = 条件A and 条件B;</code> 的形式。</div>'
+      : '') +
+    '<div class="cd-list" id="cd-list">' +
+      S.conditions.map(vCond).join('') +
+    '</div>' +
+    vNotes()
+}
+
+function vNotes() {
+  const ws = (S.notes || []).concat(S.parseWarnings || [])
+  if (!ws.length) return ''
+  return '<div class="sc-warn"><ul>' +
+    ws.map(function (w) { return '<li>' + esc(w) + '</li>' }).join('') + '</ul></div>'
+}
+
+// ═══ 结果 ═════════════════════════════════════════════════════════
+function vRunBar() {
+  const n = S.conditions.filter(function (c) { return c.is_bool && c.enabled }).length
+  return '<div class="sc-runbar">' +
+    '<button class="btn" id="sc-run"' + (S.conditions.length && !S.running ? '' : ' disabled') + '>' +
+      (S.running ? '扫描中…' : '<span class="hi hi-search"></span> 运行扫描') + '</button>' +
+    (S.conditions.length && !n && S.combine !== 'custom'
+      ? '<span class="sc-na" style="font-size:12px">一条都没启用,扫不出东西</span>' : '') +
+    '</div>' +
+    (S.runError ? '<div class="sc-err">' + esc(S.runError) + '</div>' : '')
+}
+
+function vResult() {
+  if (!S.result) return ''
+  const r = S.result
+  const stats = [
+    ['全市场', r.universe_total, ''], ['已扫描', r.scanned, ''],
+    ['命中', r.matched, 'hit'], ['算不出', r.skipped_incomplete, ''],
+  ].map(function (s) {
+    return '<div class="s ' + s[2] + '"><div class="k">' + s[0] + '</div><div class="v">' +
+      (Number.isFinite(s[1]) ? s[1] : NA) + '</div></div>'
+  }).join('')
+  const t = r.timing_ms || {}
+  const timing = (Number.isFinite(t.fetch) ? '取数 ' + t.fetch + 'ms' : '') +
+    (Number.isFinite(t.evaluate) ? ' · 求值 ' + t.evaluate + 'ms' : '')
+  return '<div class="panel" style="margin-top:14px"><div class="p-hd">扫描结果' +
+    '<span class="cnt">' + esc(r.market_label || '') +
+    (r.returned != null ? ' · 显示前 ' + r.returned + ' 只' : '') + '</span></div>' +
+    '<div class="sc-stat">' + stats + '</div>' +
+    vWarn(r) + vTable(r) +
+    '<div class="sc-runbar">' +
+      '<button class="btn small" id="sc-copy">复制命中代码</button>' +
+      '<span class="sc-na" style="font-size:11.5px;margin-left:auto">' + esc(timing) + '</span>' +
+    '</div>' +
+    '<div class="sc-note">数据源:' + esc(r.source || '—') + '</div></div>'
+}
+
+function vWarn(r) {
+  const ws = (r.notes || []).concat(r.warnings || [])
+  if (!ws.length) return ''
+  return '<div class="sc-warn"><ul>' +
+    ws.map(function (w) { return '<li>' + esc(w) + '</li>' }).join('') + '</ul></div>'
+}
+
+function vTable(r) {
+  const picks = r.picks || []
+  if (!picks.length) {
+    return '<div class="sc-note" style="padding:20px 4px;text-align:center">' +
+      '没有一只满足全部条件。<br>把条件放宽一点再试 —— 或者看看上面「算不出」的数量,' +
+      '如果它很大,说明这个市场缺你用到的字段。</div>'
+  }
+  const skip = { name: 1, description: 1, close: 1, currency: 1 }
+  const cols = (r.columns || []).filter(function (c) { return !skip[c] })
+  const head = '<tr><th>代码</th><th>名称</th><th data-sort="close" class="n">现价</th>' +
+    cols.map(function (c) {
+      return '<th data-sort="' + esc(c) + '" class="n">' + esc(c) +
+        (S.sortBy === c ? '<span class="ar">' + (S.desc ? '↓' : '↑') + '</span>' : '') + '</th>'
+    }).join('') + '</tr>'
+  const rows = picks.map(function (p) {
+    const f = p.fields || {}
+    return '<tr><td class="cd2">' + esc(p.code || '') + '</td>' +
+      '<td>' + (p.name ? esc(String(p.name).slice(0, 34)) : NA) + '</td>' +
+      '<td class="n">' + plain(p.close) + ' <span class="sc-na">' + esc(p.currency || '') + '</span></td>' +
+      cols.map(function (c) {
+        const v = f[c]
+        if (v == null) return '<td class="n">' + NA + '</td>'
+        if (typeof v === 'number') return '<td class="n">' + num(v) + '</td>'
+        return '<td>' + esc(String(v).slice(0, 22)) + '</td>'
+      }).join('') + '</tr>'
+  }).join('')
+  return '<div class="sc-scroll"><table class="sc-tb"><thead>' + head +
+    '</thead><tbody>' + rows + '</tbody></table></div>'
+}
+
+// ═══ 语法 / 字段 ══════════════════════════════════════════════════
+function vHelp() {
   return '<details class="sc-fold"><summary>语法速查</summary><div class="sc-syn">' +
     '<b>结构</b>　<code>#</code> 注释 · <code>def 名字 = 表达式;</code> 定义 · ' +
     '<code>plot scan = 综合条件;</code> 最后一句就是筛选结果,必须有。<br>' +
@@ -206,158 +424,293 @@ function vSyntax() {
     '(<b>N 只能接近 5/21/63/126/252</b>)· <code>RSI()</code> 默认 14 周期<br>' +
     '<b>字段</b>　也可以直接写 TradingView 字段名,共 3777 个,下面能搜。<br>' +
     '<span style="color:var(--soft)">周期映射不上会直接报错并告诉你可用值 —— ' +
-    '不会拿相近的周期顶替(那等于把 90 天当 100 天用)。</span>' +
-    '</div></details>'
-}
-
-function vFields() {
-  return '<details class="sc-fold" id="sc-fd-fold"><summary>可用字段(3777 个 · 搜索)</summary>' +
+    '不会拿相近的周期顶替(那等于把 90 天当 100 天用)。</span></div></details>' +
+    '<details class="sc-fold" id="sc-fd-fold"><summary>可用字段(3777 个 · 搜索)</summary>' +
     '<div class="sc-fd"><input id="sc-fd-q" placeholder="搜字段名,如 pe / margin / volume / RSI" /></div>' +
     '<div class="sc-fl" id="sc-fd-list"><span class="sc-na">输入关键词开始搜索</span></div>' +
-    '<div class="sc-note">点一下把字段名插进脚本光标处。</div></details>'
+    '<div class="sc-note">点一下把字段名插进上面的生成框光标处。</div></details>'
 }
 
-// ─── 右栏 · 结果 ──────────────────────────────────────────────────
-function vResult() {
-  if (!S.result) {
-    return '<div class="panel"><div class="p-hd">扫描结果</div>' +
-      '<div class="sc-note" style="padding:26px 4px;text-align:center">' +
-      '还没有跑过。左边写好脚本、选好市场,点「运行扫描」。<br>' +
-      '不知道从哪开始就先点一个「示例」。</div></div>'
-  }
-  const r = S.result
-  const stats = [
-    ['全市场', Number.isFinite(r.universe_total) ? r.universe_total : null, ''],
-    ['已扫描', Number.isFinite(r.scanned) ? r.scanned : null, ''],
-    ['命中', Number.isFinite(r.matched) ? r.matched : null, 'hit'],
-    ['算不出', Number.isFinite(r.skipped_incomplete) ? r.skipped_incomplete : null, ''],
-  ].map(function (s) {
-    return '<div class="s ' + s[2] + '"><div class="k">' + s[0] + '</div><div class="v">' +
-      (s[1] == null ? NA : s[1]) + '</div></div>'
-  }).join('')
-
-  const t = r.timing_ms || {}
-  const timing = (Number.isFinite(t.fetch) ? '取数 ' + t.fetch + 'ms' : '') +
-    (Number.isFinite(t.evaluate) ? ' · 求值 ' + t.evaluate + 'ms' : '')
-
-  return '<div class="panel"><div class="p-hd">扫描结果' +
-    '<span class="cnt">' + esc(r.market_label || '') +
-    (r.returned != null ? ' · 显示前 ' + r.returned + ' 只' : '') + '</span></div>' +
-    '<div class="sc-stat">' + stats + '</div>' +
-    vWarnings(r) +
-    vTable(r) +
-    '<div class="sc-bar" style="margin-top:10px">' +
-      '<button class="btn small" id="sc-copy">复制命中代码</button>' +
-      '<span class="sc-na" style="font-size:11.5px;margin-left:auto">' + esc(timing) + '</span>' +
-    '</div>' +
-    '<div class="sc-note">数据源:' + esc(r.source || '—') + '</div>' +
-    '</div>'
-}
-
-function vWarnings(r) {
-  const ws = (r.notes || []).concat(r.warnings || [])
-  if (!ws.length) return ''
-  // 不折叠、不记住"已读" —— 口径与时效是每次看结果都必须在眼前的东西
-  return '<div class="sc-warn"><ul>' +
-    ws.map(function (w) { return '<li>' + esc(w) + '</li>' }).join('') + '</ul></div>'
-}
-
-function vTable(r) {
-  const picks = r.picks || []
-  if (!picks.length) {
-    return '<div class="sc-note" style="padding:20px 4px;text-align:center">' +
-      '没有一只满足全部条件。<br>' +
-      '把条件放宽一点再试 —— 或者看看上面「算不出」的数量,' +
-      '如果它很大,说明这个市场缺你用到的字段。</div>'
-  }
-  // 列 = 代码/名称/现价 + 脚本真正用到的字段。ALWAYS_COLS 里的不重复展示。
-  const skip = { name: 1, description: 1, close: 1, currency: 1, _symbol: 1, _code: 1 }
-  const cols = (r.columns || []).filter(function (c) { return !skip[c] })
-  const head = '<tr><th data-sort="">代码</th><th>名称</th>' +
-    '<th data-sort="close" class="n">现价</th>' +
-    cols.map(function (c) {
-      return '<th data-sort="' + esc(c) + '" class="n">' + esc(c) +
-        (S.sortBy === c ? '<span class="ar">' + (S.desc ? '↓' : '↑') + '</span>' : '') + '</th>'
-    }).join('') + '</tr>'
-  const rows = picks.map(function (p) {
-    const f = p.fields || {}
-    return '<tr><td class="cd">' + esc(p.code || '') + '</td>' +
-      '<td>' + (p.name ? esc(String(p.name).slice(0, 34)) : NA) + '</td>' +
-      '<td class="n">' + plain(p.close) + ' <span class="sc-na">' + esc(p.currency || '') + '</span></td>' +
-      cols.map(function (c) {
-        const v = f[c]
-        if (v == null) return '<td class="n">' + NA + '</td>'
-        if (typeof v === 'number') return '<td class="n">' + num(v) + '</td>'
-        return '<td>' + esc(String(v).slice(0, 22)) + '</td>'
-      }).join('') + '</tr>'
-  }).join('')
-  return '<div class="sc-scroll"><table class="sc-tb"><thead>' + head +
-    '</thead><tbody>' + rows + '</tbody></table></div>'
-}
-
-// ─── 渲染 + 绑定 ──────────────────────────────────────────────────
+// ═══ 渲染 ═════════════════════════════════════════════════════════
 function render() {
-  const html = '<div class="sc-split">' + vEditor() + vResult() + '</div>'
+  const html = '<div class="sc-wrap">' + vMagic() + vConditions() + vRunBar() +
+    vResult() + vHelp() + '</div>'
   container.innerHTML = html
   bind()
+  const ed = document.getElementById('cd-edit')
+  if (ed) { ed.focus(); ed.setSelectionRange(ed.value.length, ed.value.length) }
   return html
 }
 
 function bind() {
-  const ed = document.getElementById('sc-script')
-  if (ed) {
-    ed.addEventListener('input', function () { S.script = ed.value; saveDraft() })
-    ed.addEventListener('keydown', function (e) {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); run() }
+  const inp = document.getElementById('mg-input')
+  if (inp) {
+    inp.addEventListener('input', function () { S.input = inp.value })
+    inp.addEventListener('keydown', function (e) {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); generate() }
     })
   }
-  const mkts = document.getElementById('sc-mkts')
+  const gen = document.getElementById('mg-gen')
+  if (gen) gen.addEventListener('click', generate)
+
+  const mode = document.getElementById('mg-mode')
+  if (mode) mode.addEventListener('click', function (e) {
+    const b = e.target && e.target.closest ? e.target.closest('button') : null
+    if (!b || !b.dataset.mode) return
+    S.mode = b.dataset.mode; render()
+  })
+  const mkts = document.getElementById('mg-mkts')
   if (mkts) mkts.addEventListener('click', function (e) {
     const b = e.target && e.target.closest ? e.target.closest('button') : null
-    if (!b || !b.dataset || !b.dataset.mkt) return
-    S.market = b.dataset.mkt; saveDraft(); render()
+    if (!b || !b.dataset.mkt) return
+    S.market = b.dataset.mkt; S.probe = {}; saveDraft()
+    // 换市场要重新解析:字段在不同市场的可用性不一样(A 股没有的字段在美股有)
+    if (S.conditions.length) reparse(buildScript()); else render()
   })
-  const ps = document.getElementById('sc-presets')
-  if (ps) ps.addEventListener('click', function (e) {
+  const eg = document.getElementById('mg-eg')
+  if (eg) eg.addEventListener('click', function (e) {
     const b = e.target && e.target.closest ? e.target.closest('button') : null
-    if (!b || !b.dataset || !b.dataset.preset) return
+    if (!b || !b.dataset.preset) return
     const p = ((S.meta && S.meta.presets) || []).filter(function (x) {
       return x.key === b.dataset.preset
     })[0]
     if (!p) return
-    S.script = p.script
-    S.market = p.market || S.market
-    S.error = null
-    saveDraft(); render()
+    S.input = p.script
+    if (p.market) S.market = p.market
+    generate()
   })
-  const runBtn = document.getElementById('sc-run')
-  if (runBtn) runBtn.addEventListener('click', run)
-  const clr = document.getElementById('sc-clear')
+
+  const list = document.getElementById('cd-list')
+  if (list) list.addEventListener('click', onCondAction)
+  if (list) list.addEventListener('change', onNumChange)
+  const edt = document.getElementById('cd-edit')
+  if (edt) edt.addEventListener('keydown', function (e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); commitEdit(edt.value) }
+    if (e.key === 'Escape') { S.editing = null; render() }
+  })
+
+  const copyAll = document.getElementById('cd-copyall')
+  if (copyAll) copyAll.addEventListener('click', function () { copyText(buildScript(), '脚本') })
+  const clr = document.getElementById('cd-clear')
   if (clr) clr.addEventListener('click', function () {
-    S.script = ''; S.error = null; saveDraft(); render()
+    S.conditions = []; S.result = null; S.probe = {}; S.notes = []; S.parseWarnings = []
+    S.combine = 'all'; S.plotExpr = ''; saveDraft(); render()
   })
+
+  const run = document.getElementById('sc-run')
+  if (run) run.addEventListener('click', runScan)
   const copy = document.getElementById('sc-copy')
   if (copy) copy.addEventListener('click', function () {
     const codes = ((S.result && S.result.picks) || []).map(function (p) { return p.code }).join('\n')
-    if (!codes) { toast('没有可复制的代码', 'warn'); return }
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(codes).then(function () { toast('已复制 ' + codes.split('\n').length + ' 个代码') },
-        function () { toast('复制失败,请手动选中', 'warn') })
-    } else { toast('这个浏览器不支持一键复制', 'warn') }
+    copyText(codes, codes ? codes.split('\n').length + ' 个代码' : '')
   })
   const th = document.querySelector('.sc-tb thead')
   if (th) th.addEventListener('click', function (e) {
     const c = e.target && e.target.closest ? e.target.closest('th') : null
-    if (!c || !c.dataset || !c.dataset.sort) return
+    if (!c || !c.dataset.sort) return
     if (S.sortBy === c.dataset.sort) S.desc = !S.desc
     else { S.sortBy = c.dataset.sort; S.desc = true }
-    run()
+    runScan()
   })
   const q = document.getElementById('sc-fd-q')
   if (q) q.addEventListener('input', debounceFields)
-  // 字段点击用事件委托,在这里挂一次。render() 会重建整棵子树,所以不会累积。
-  const fdList = document.getElementById('sc-fd-list')
-  if (fdList) fdList.addEventListener('click', insertField)
+  const fl = document.getElementById('sc-fd-list')
+  if (fl) fl.addEventListener('click', insertField)
+}
+
+function copyText(txt, what) {
+  if (!txt) { toast('没有可复制的内容', 'warn'); return }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(txt).then(
+      function () { toast('已复制' + (what ? ' ' + what : '')) },
+      function () { toast('复制失败,请手动选中', 'warn') })
+  } else { toast('这个浏览器不支持一键复制', 'warn') }
+}
+
+// ─── 条件行的动作 ─────────────────────────────────────────────────
+function onCondAction(e) {
+  const b = e.target && e.target.closest ? e.target.closest('[data-act]') : null
+  if (!b) return
+  const i = parseInt(b.dataset.i, 10)
+  const c = S.conditions[i]
+  if (!c) return
+  const act = b.dataset.act
+  if (act === 'toggle') {
+    if (S.combine === 'custom') { toast('自定义组合下不能单独停用', 'warn'); return }
+    c.enabled = !c.enabled; S.probe = {}; saveDraft(); render(); return
+  }
+  if (act === 'del') {
+    // 被别人引用的变量不能删 —— 删了引用方会直接报"不认识 xxx"
+    const used = S.conditions.some(function (o, j) {
+      return j !== i && new RegExp('\\b' + c.name + '\\b').test(o.expr || '')
+    })
+    if (used) { toast('「' + c.name + '」被别的条件引用着,先改那一条', 'warn'); return }
+    S.conditions.splice(i, 1); S.probe = {}
+    reparse(buildScript()); return
+  }
+  if (act === 'edit') { S.editing = (S.editing === c.name ? null : c.name); render(); return }
+  if (act === 'dup') {
+    const copy = { name: uniqName(c.name), expr: c.expr, is_bool: c.is_bool, enabled: c.enabled }
+    S.conditions.splice(i + 1, 0, copy)
+    reparse(buildScript()); return
+  }
+  if (act === 'copy') { copyText('def ' + c.name + ' = ' + c.expr + ';', '这一条'); return }
+  if (act === 'probe') { probeOne(c); return }
+}
+
+function uniqName(base) {
+  const taken = {}
+  S.conditions.forEach(function (c) { taken[c.name] = 1 })
+  let n = 2
+  while (taken[base + '_' + n]) n++
+  return base + '_' + n
+}
+
+// 数字内联编辑:按 token 自带的源码偏移做**精确替换**。
+// 不用"第 n 个数字"做正则 —— `Average(close,50) > 50` 会认错人。
+function onNumChange(e) {
+  const el = e.target
+  if (!el || !el.classList || !el.classList.contains('sc-num')) return
+  const ci = parseInt(el.dataset.c, 10), ti = parseInt(el.dataset.t, 10)
+  const c = S.conditions[ci]
+  if (!c) return
+  const tok = (c.tokens || [])[ti]
+  if (!tok || tok.k !== 'num') return
+  const v = (el.value || '').trim()
+  if (!/^-?\d+(\.\d+)?$/.test(v)) { toast('要填一个数字', 'warn'); render(); return }
+  c.expr = c.expr.slice(0, tok.s) + v + c.expr.slice(tok.e)
+  reparse(buildScript())
+}
+
+function commitEdit(text) {
+  const c = S.conditions.filter(function (x) { return x.name === S.editing })[0]
+  if (!c) { S.editing = null; render(); return }
+  c.expr = (text || '').trim().replace(/;+$/, '')
+  S.editing = null
+  reparse(buildScript())
+}
+
+// ─── 与后端往返 ───────────────────────────────────────────────────
+async function post(url, body) {
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: apiHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(body),
+  })
+  let d = null
+  try { d = await r.json() } catch (e) { /* 400 也可能不是 JSON */ }
+  return { ok: r.ok, status: r.status, data: d }
+}
+
+function applyParsed(d) {
+  // 启用状态不由前端记 —— 谁在 plot_refs 里谁就是启用的(build_script 只写启用的)。
+  // 变量(非布尔)没有启用概念,恒为 true。
+  const refs = {}
+  ;(d.plot_refs || []).forEach(function (n) { refs[n] = 1 })
+  S.conditions = (d.conditions || []).map(function (c) {
+    return {
+      name: c.name, expr: c.expr, tokens: c.tokens, is_bool: c.is_bool,
+      enabled: !c.is_bool ? true : (d.combine === 'custom' ? true : !!refs[c.name]),
+    }
+  })
+  S.combine = d.combine || 'all'
+  S.plotName = d.plot_name || 'scan'
+  S.plotExpr = d.combine === 'custom' ? (d.plot_expr || '') : ''
+  S.notes = d.notes || []
+  S.parseWarnings = d.warnings || []
+}
+
+async function reparse(script) {
+  if (!script) {
+    S.conditions = []; S.result = null; saveDraft(); render(); return
+  }
+  const r = await post(PARSE_API, { script: script, market: S.market })
+  if (!r.ok) {
+    S.genError = (r.data && (r.data.detail || r.data.error)) || ('解析失败 · HTTP ' + r.status)
+    render(); return
+  }
+  S.genError = null
+  applyParsed(r.data)
+  S.result = null           // 条件变了,旧结果就不是这套条件的结果了,不能留着骗人
+  S.probe = {}
+  saveDraft(); render()
+}
+
+async function generate() {
+  const text = (S.input || '').trim()
+  if (!text) { S.genError = '生成框是空的。把筛选脚本粘进来,或者点一个示例。'; render(); return }
+  S.generating = true; S.genError = null; render()
+
+  // 追加模式:把已有条件的脚本和新脚本拼起来,重名的自动改名。
+  // 拼在前面 —— 新条件排在下面,和"追加"这个词一致。
+  let script = text
+  if (S.mode === 'append' && S.conditions.length) {
+    script = rename(buildScript(true), text)
+  }
+  const r = await post(PARSE_API, { script: script, market: S.market })
+  S.generating = false
+  if (!r.ok) {
+    S.genError = (r.data && (r.data.detail || r.data.error)) || ('生成失败 · HTTP ' + r.status)
+    render(); return
+  }
+  applyParsed(r.data)
+  S.input = ''
+  S.result = null; S.probe = {}
+  saveDraft(); render()
+}
+
+// 追加时重名会被后端判成「名字定义了两次」。这里先把新脚本里撞名的 def 改掉。
+function rename(oldScript, newScript) {
+  const taken = {}
+  const re = /\b(?:def|plot)\s+([A-Za-z_][A-Za-z0-9_]*)/g
+  let m
+  while ((m = re.exec(oldScript))) taken[m[1]] = 1
+  let out = newScript
+  const names = []
+  re.lastIndex = 0
+  while ((m = re.exec(newScript))) names.push(m[1])
+  names.forEach(function (n) {
+    if (!taken[n]) { taken[n] = 1; return }
+    let k = 2
+    while (taken[n + '_' + k]) k++
+    const nn = n + '_' + k
+    taken[nn] = 1
+    out = out.replace(new RegExp('\\b' + n + '\\b', 'g'), nn)
+  })
+  // 两个 plot 只能留一个 —— 后一个(新脚本的)会被改名成 scan_2,
+  // 而 parse 认最后一个 plot,所以把旧的降级成 def 更符合"追加"的语义:
+  // 旧条件继续参与,新脚本的 plot 说了算。
+  return oldScript.replace(/\bplot\s+/g, 'def ') + '\n' + out
+}
+
+async function runScan() {
+  const script = buildScript()
+  if (!script) { S.runError = '还没有条件'; render(); return }
+  S.running = true; S.runError = null; render()
+  const r = await post(RUN_API, {
+    script: script, market: S.market, limit: 100,
+    sort_by: S.sortBy || null, descending: S.desc,
+  })
+  S.running = false
+  if (!r.ok) {
+    S.runError = (r.data && (r.data.detail || r.data.error)) || ('扫描失败 · HTTP ' + r.status)
+    S.result = null; render(); return
+  }
+  S.result = r.data
+  render()
+}
+
+// 单独测试一条:只留这一条(和它依赖的变量)跑一次,看它自己能命中多少。
+// 用来判断"是哪一条把结果筛没了"。
+async function probeOne(c) {
+  const lines = []
+  S.conditions.forEach(function (o) {
+    if (o.expr) lines.push('def ' + o.name + ' = ' + o.expr + ';')
+  })
+  lines.push('plot ' + S.plotName + ' = ' + c.name + ';')
+  const r = await post(RUN_API, { script: lines.join('\n'), market: S.market, limit: 1 })
+  S.probe[c.name] = (r.ok && r.data && Number.isFinite(r.data.matched)) ? r.data.matched : null
+  render()
 }
 
 // ─── 字段搜索 ─────────────────────────────────────────────────────
@@ -382,68 +735,35 @@ async function searchFields() {
   try { d = await r.json() } catch (e) { list.innerHTML = '<span class="sc-na">返回的不是合法 JSON</span>'; return }
   const fs = (d && d.fields) || []
   if (!fs.length) { list.innerHTML = '<span class="sc-na">没有匹配的字段</span>'; return }
-  // 只写内容,**不在这里挂监听** —— 监听在 bind() 里挂一次。
-  // 2026-09-10 浏览器实测的坑:原来每次搜完都给同一个 DOM 节点再 addEventListener 一次,
-  // 连搜三个关键词之后点一个字段,插进去的是三份(beta_1_yearbeta_1_yearbeta_1_year)。
-  // innerHTML 换掉的是子节点,list 本身没换,监听全留着。
-  list.innerHTML = fs.map(function (f) { return '<span data-f="' + esc(f) + '">' + esc(f) + '</span>' }).join('')
+  // 只写内容,不挂监听 —— 监听在 bind() 里挂一次(2026-09-10:原来每次搜完都再挂一个,
+  // 连搜三次后点一个字段会插三份)
+  list.innerHTML = fs.map(function (f) {
+    return '<span data-f="' + esc(f) + '">' + esc(f) + '</span>'
+  }).join('')
 }
 
 function insertField(e) {
   const s = e.target && e.target.dataset ? e.target.dataset.f : null
   if (!s) return
-  const ed = document.getElementById('sc-script')
+  const ed = document.getElementById('mg-input')
   if (!ed) return
-  // 插在**光标处**,不是往末尾追加 —— 说明文案写的就是"插进脚本光标处",
-  // 而且末尾通常在 `plot scan = ...;` 之后,追加进去直接把脚本变成语法错误。
   const v = ed.value || ''
   let a = ed.selectionStart, b = ed.selectionEnd
   if (typeof a !== 'number' || typeof b !== 'number') { a = v.length; b = v.length }
-  S.script = v.slice(0, a) + s + v.slice(b)
-  ed.value = S.script
+  S.input = v.slice(0, a) + s + v.slice(b)
+  ed.value = S.input
   const pos = a + s.length
-  try { ed.focus(); ed.setSelectionRange(pos, pos) } catch (err) { /* 老浏览器没有 setSelectionRange */ }
-  saveDraft()
-}
-
-// ─── 跑 ───────────────────────────────────────────────────────────
-async function run() {
-  if (S.running) return
-  if (!(S.script || '').trim()) { S.error = '脚本是空的。先写条件,或点上面的「示例」。'; render(); return }
-  S.running = true; S.error = null; render()
-  let r
-  try {
-    r = await fetch(RUN_API, {
-      method: 'POST',
-      headers: apiHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({
-        script: S.script, market: S.market, limit: 100,
-        sort_by: S.sortBy || null, descending: S.desc,
-      }),
-    })
-  } catch (e) {
-    S.running = false
-    S.error = '请求没发出去 · ' + (e && e.message ? e.message : e)
-    render(); return
-  }
-  S.running = false
-  let d = null
-  try { d = await r.json() } catch (e) { /* 400 也可能不是 JSON */ }
-  if (!r.ok) {
-    // 后端把「脚本哪里写错了 / 周期可用值是哪些」写在 detail 里,原样显示。
-    // 不要替换成"扫描失败"之类的通用话术 —— 那句话对用户没有任何帮助。
-    S.error = (d && (d.detail || d.error)) || ('扫描失败 · HTTP ' + r.status)
-    S.result = null
-    render(); return
-  }
-  S.result = d
-  render()
+  try { ed.focus(); ed.setSelectionRange(pos, pos) } catch (err) { /* 老浏览器 */ }
 }
 
 // ─── 启动 ─────────────────────────────────────────────────────────
 async function boot() {
-  loadDraft()
-  render()                                  // 先把骨架画出来,不等网络
+  try {
+    const m = localStorage.getItem(LS_MK)
+    if (m) S.market = m
+  } catch (e) { /* 隐私模式 */ }
+  render()                                   // 先把骨架画出来,不等网络
+
   let r
   try {
     r = await fetch(META_API, { headers: apiHeaders(), cache: 'no-store' })
@@ -452,20 +772,22 @@ async function boot() {
   }
   if (!r.ok) { S.metaErr = 'HTTP ' + r.status; render(); return }
   try { S.meta = await r.json() } catch (e) { S.metaErr = '返回的不是合法 JSON'; render(); return }
-  // 小鹿页面的「直接跑示例」链接带 ?preset=xxx 过来 —— 它是明确的指令,
-  // 优先级高于 localStorage 里的上次草稿(否则点了示例还是看到旧脚本,像没生效)
+
+  // ?preset=xxx 是明确指令,优先级高于上次草稿
   let want = null
   try { want = new URLSearchParams(location.search || '').get('preset') } catch (e) { /* 老浏览器 */ }
-  const list = S.meta.presets || []
-  const chosen = want ? list.filter(function (p) { return p.key === want })[0] : null
+  const chosen = want ? (S.meta.presets || []).filter(function (p) { return p.key === want })[0] : null
   if (chosen) {
-    S.script = chosen.script
+    S.input = chosen.script
     S.market = chosen.market || S.market
-    saveDraft()
-  } else if (!S.script) {
-    const p = list[0]
-    if (p) { S.script = p.script; S.market = p.market || S.market }
+    S.mode = 'replace'
+    await generate()
+    S.mode = 'append'
+    render(); return
   }
+  let draft = null
+  try { draft = localStorage.getItem(LS) } catch (e) { /* 隐私模式 */ }
+  if (draft && draft.trim()) { await reparse(draft); return }
   render()
 }
 

@@ -44,6 +44,20 @@ class ScreenError(ValueError):
     """脚本写错了 —— message 直接给用户看,必须说清楚错在哪、能怎么改。"""
 
 
+@dataclass
+class Stmt:
+    """一条 `def x = ...;` 或 `plot scan = ...;`。
+
+    `expr_start` / `expr_end` 是**表达式**在源码里的字节跨度(不含 `def x =` 和分号)。
+    可视化条件行靠它拿到"这一条的原文",数字的内联编辑靠 num 节点自带的位置。
+    """
+    name: str
+    node: object
+    kind: str                 # 'def' | 'plot'
+    expr_start: int = 0
+    expr_end: int = 0
+
+
 # ═══════════════════════════════════════════════════════════════
 # 词法
 # ═══════════════════════════════════════════════════════════════
@@ -138,9 +152,9 @@ class _Parser:
         return self._next()
 
     # ── 程序 ────────────────────────────────────────────────
-    def parse(self) -> tuple[list[tuple[str, object]], str]:
-        """→ ([(名字, AST), ...], 最终 plot 的名字)"""
-        stmts: list[tuple[str, object]] = []
+    def parse(self) -> tuple[list["Stmt"], str]:
+        """→ ([Stmt, ...], 最终 plot 的名字)"""
+        stmts: list[Stmt] = []
         plot_name: str | None = None
         seen: set[str] = set()
         while self._peek() is not None:
@@ -159,7 +173,11 @@ class _Parser:
                 raise ScreenError(f"名字 {name!r} 定义了两次")
             seen.add(name)
             self._expect_op("=", f"{kind} {name}")
+            # 记下表达式在源码里的跨度 —— 可视化条件行要拿它当"这一条的原文"
+            expr_start = self._peek().pos if self._peek() is not None else 0
             node = self._expr()
+            last = self.toks[self.i - 1] if self.i > 0 else None
+            expr_end = (last.pos + len(last.val)) if last is not None else expr_start
             # 分号:thinkScript 要求,但最后一句漏写很常见,容忍脚本结尾那一处
             if self._at_op(";"):
                 self._next()
@@ -167,7 +185,8 @@ class _Parser:
                 t2 = self._peek()
                 raise ScreenError(
                     f"第 {_line_of(self.src, t2.pos)} 行:{name} 这一句缺分号 `;`")
-            stmts.append((name, node))
+            stmts.append(Stmt(name=name, node=node, kind=kind,
+                              expr_start=expr_start, expr_end=expr_end))
             if kind == "plot":
                 plot_name = name
         if not stmts:
@@ -244,7 +263,9 @@ class _Parser:
             raise ScreenError("表达式在这里断掉了(可能是括号没配对,或者比较号后面没写东西)")
         if t.kind == "num":
             self._next()
-            return ("num", float(t.val))
+            # 带上源码里的起止位置 —— 前端要按位置把数字换掉做内联编辑
+            # (按第 n 个数字做正则替换会在 `Average(close,50) > 50` 这种表达式上认错人)
+            return ("num", float(t.val), t.pos, t.pos + len(t.val))
         if t.kind in ("true", "false"):
             self._next()
             return ("bool", t.kind == "true")
@@ -441,7 +462,7 @@ class _FieldResolver:
 
 @dataclass
 class Compiled:
-    stmts: list[tuple[str, object]]
+    stmts: list[Stmt]
     plot_name: str
     fields: list[str]                     # 需要向 TradingView 请求的字段
     notes: list[str] = _dc_field(default_factory=list)
@@ -486,9 +507,9 @@ def compile_script(src: str, has_field, sma_periods: list[int],
             walk(node[3], owner)
             return
 
-    for name, node in stmts:
-        walk(node, name)
-        defined.add(name)
+    for st in stmts:
+        walk(st.node, st.name)
+        defined.add(st.name)
 
     return Compiled(stmts=stmts, plot_name=plot_name, fields=fields, notes=rs.notes)
 
@@ -583,9 +604,9 @@ def build_resolver_cache(c: Compiled, has_field, sma_periods, ema_periods,
         elif k == "bin":
             walk(node[2]); walk(node[3])
 
-    for name, node in c.stmts:
-        walk(node)
-        defined.add(name)
+    for st in c.stmts:
+        walk(st.node)
+        defined.add(st.name)
     return cache
 
 
@@ -595,11 +616,238 @@ def evaluate(c: Compiled, rows: list[dict], resolver_cache: dict) -> tuple[list[
     skipped = 0
     for row in rows:
         env: dict = {}
-        for name, node in c.stmts:
-            env[name] = _eval(node, row, env, resolver_cache)
+        for st in c.stmts:
+            env[st.name] = _eval(st.node, row, env, resolver_cache)
         verdict = _truthy(env.get(c.plot_name))
         if verdict is None:
             skipped += 1
         elif verdict:
             hits.append(row)
     return hits, skipped
+
+
+# ═══════════════════════════════════════════════════════════════
+# 可视化条件行 —— 脚本 ↔ 界面的双向桥
+#
+# Chartink 那套界面的核心是「一行 = 一个条件」,可以逐条编辑 / 停用 / 删除。
+# 我们的 DSL 天然就是这个形状:**一个 `def` 就是一个条件**,
+# `plot scan = a and b and c;` 就是"同时满足以下全部条件"。
+# 所以不需要另造一套数据模型 —— 脚本本身就是模型,这里只做展示层翻译。
+#
+# 为什么条件行要带 `expr`(原文)而不只是 tokens:
+# tokens 是给人看的中文,回写不了。改数字靠 num token 自带的 s/e 偏移
+# 在 `expr` 上做精确替换 —— 按"第 n 个数字"做正则替换会在
+# `Average(close,50) > 50` 这种表达式上认错人。
+# ═══════════════════════════════════════════════════════════════
+
+# 字段 → 中文标签。查不到的原样显示(3777 个字段不可能全翻,
+# 也不该硬翻 —— 翻错比不翻更糟)。
+_FIELD_LABEL = {
+    "close": "收盘价", "open": "开盘价", "high": "最高价", "low": "最低价",
+    "volume": "成交量", "change": "涨跌幅",
+    "price_52_week_high": "52周最高", "price_52_week_low": "52周最低",
+    "High.5D": "近5日最高", "High.1M": "近1月最高", "High.3M": "近3月最高",
+    "High.6M": "近6月最高", "all_time_high": "历史最高",
+    "Low.5D": "近5日最低", "Low.1M": "近1月最低", "Low.3M": "近3月最低",
+    "Low.6M": "近6月最低", "all_time_low": "历史最低",
+    "market_cap_basic": "市值", "price_earnings_ttm": "市盈率TTM",
+    "price_book_fq": "市净率", "return_on_equity": "净资产收益率",
+    "dividends_yield_current": "股息率", "debt_to_equity": "负债权益比",
+    "gross_margin_ttm": "毛利率TTM", "total_revenue_yoy_growth_ttm": "营收同比增长",
+    "relative_volume_10d_calc": "相对成交量", "current_ratio": "流动比率",
+    "earnings_per_share_diluted_ttm": "每股收益TTM", "beta_1_year": "贝塔",
+    "RSI": "RSI(14)", "ADX": "ADX", "ATR": "ATR",
+    "MACD.macd": "MACD", "MACD.signal": "MACD信号线", "MACD.hist": "MACD柱",
+    "Perf.W": "近1周涨幅", "Perf.1M": "近1月涨幅", "Perf.3M": "近3月涨幅",
+    "Perf.6M": "近6月涨幅", "Perf.Y": "近1年涨幅", "Perf.YTD": "年初至今涨幅",
+    "Volatility.D": "日波动率", "Volatility.W": "周波动率", "Volatility.M": "月波动率",
+    "sector": "板块", "industry": "行业", "currency": "币种",
+}
+
+_SMA_RE = re.compile(r"^SMA(\d+)$")
+_EMA_RE = re.compile(r"^EMA(\d+)$")
+_RSI_RE = re.compile(r"^RSI(\d+)$")
+_AVGVOL_RE = re.compile(r"^average_volume_(\d+)d_calc$")
+
+_OP_LABEL = {
+    ">": "大于", ">=": "大于等于", "<": "小于", "<=": "小于等于",
+    "==": "等于", "!=": "不等于",
+    "and": "且", "or": "或",
+    "+": "+", "-": "−", "*": "×", "/": "÷",
+}
+
+
+def field_label(name: str) -> str:
+    """TradingView 字段名 → 中文标签(查不到就原样返回)。"""
+    if name in _FIELD_LABEL:
+        return _FIELD_LABEL[name]
+    m = _SMA_RE.match(name)
+    if m:
+        return f"{m.group(1)}日均线"
+    m = _EMA_RE.match(name)
+    if m:
+        return f"{m.group(1)}日EMA"
+    m = _RSI_RE.match(name)
+    if m:
+        return f"RSI({m.group(1)})"
+    m = _AVGVOL_RE.match(name)
+    if m:
+        return f"{m.group(1)}日均量"
+    return name
+
+
+def _fmt_num(v: float) -> str:
+    """去掉浮点尾巴 —— 用户写的 0.10 不该显示成 0.1 的同时又变 0.10000000001。"""
+    if v == int(v) and abs(v) < 1e15:
+        return str(int(v))
+    return repr(round(v, 10)).rstrip("0").rstrip(".")
+
+
+# 二元运算优先级 —— 只用来决定要不要补括号
+_PREC = {"or": 1, "and": 2, "==": 3, "!=": 3, ">": 3, ">=": 3, "<": 3, "<=": 3,
+         "+": 4, "-": 4, "*": 5, "/": 5}
+
+
+def _tok_stream(node, rs, base: int, out: list, defined: dict, parent_prec: int = 0):
+    """AST → 展示 token。`base` 是表达式在源码里的起点,用来把数字位置归一化。"""
+    k = node[0]
+    if k == "num":
+        out.append({"k": "num", "t": _fmt_num(node[1]),
+                    "s": node[2] - base, "e": node[3] - base})
+        return
+    if k == "bool":
+        out.append({"k": "kw", "t": "真" if node[1] else "假"})
+        return
+    if k == "name":
+        nm = node[1]
+        if nm in defined:
+            # 引用了上面某个 def —— 显示它的中文别名(条件行的标题)
+            out.append({"k": "ref", "t": defined[nm], "ref": nm})
+            return
+        out.append({"k": "field", "t": field_label(rs.field_of_name(nm)), "raw": nm})
+        return
+    if k == "call":
+        fld = rs.field_of_call(node[1], node[2])
+        out.append({"k": "field", "t": field_label(fld), "raw": fld})
+        return
+    if k == "un":
+        out.append({"k": "op", "t": "非" if node[1] == "not" else "−"})
+        _tok_stream(node[2], rs, base, out, defined, 99)
+        return
+    # bin
+    op = node[1]
+    prec = _PREC.get(op, 0)
+    need_paren = prec < parent_prec
+    if need_paren:
+        out.append({"k": "paren", "t": "("})
+    _tok_stream(node[2], rs, base, out, defined, prec)
+    out.append({"k": "logic" if op in ("and", "or") else "op",
+                "t": _OP_LABEL.get(op, op)})
+    # 右子树用 prec+1:同优先级的右结合要补括号(a - (b - c) 不能显示成 a - b - c)
+    _tok_stream(node[3], rs, base, out, defined, prec + 1)
+    if need_paren:
+        out.append({"k": "paren", "t": ")"})
+
+
+def decompose(src: str, c: Compiled, has_field, sma_periods, ema_periods,
+              rsi_periods) -> dict:
+    """把编译结果拆成可视化条件行。
+
+    返回 conditions + combine:
+      · combine='all'    plot 是若干 def 名字的纯 and 链 → "同时满足以下全部"
+      · combine='custom' plot 里有 or / 算术 / 直接写的表达式 → 原样保留,界面上只读
+    """
+    rs = _FieldResolver(has_field, sma_periods, ema_periods, rsi_periods)
+    defined: dict[str, str] = {}
+    conditions = []
+    plot_stmt = None
+
+    for st in c.stmts:
+        if st.kind == "plot":
+            plot_stmt = st
+            continue
+        toks: list = []
+        _tok_stream(st.node, rs, st.expr_start, toks, defined)
+        expr = src[st.expr_start:st.expr_end]
+        # 数字用**源码原文**显示,不用格式化后的值:用户写 0.10,界面上就该是 0.10。
+        # 归一化成 0.1 之后再回写,会在他没改任何东西的情况下把脚本改掉。
+        for t in toks:
+            if t["k"] == "num":
+                t["t"] = expr[t["s"]:t["e"]]
+        # 条件行的中文标题:纯展示,给 plot 里引用它时用
+        label = "".join(t["t"] for t in toks if t["k"] != "paren")
+        defined[st.name] = label if len(label) <= 24 else st.name
+        conditions.append({
+            "name": st.name,
+            "expr": expr,
+            "tokens": toks,
+            # 布尔条件才能独立开关;中间变量(如 def sma50 = Average(close,50))
+            # 不是条件,界面上要区别对待 —— 停用它会让引用它的条件直接报错
+            "is_bool": _is_boolean(st.node),
+        })
+
+    combine = "custom"
+    plot_names: list[str] = []
+    if plot_stmt is not None:
+        plot_names = _flatten_and_names(plot_stmt.node)
+        if plot_names:
+            combine = "all"
+
+    return {
+        "conditions": conditions,
+        "combine": combine,
+        "plot_name": c.plot_name,
+        "plot_expr": src[plot_stmt.expr_start:plot_stmt.expr_end] if plot_stmt else "",
+        "plot_refs": plot_names,
+        "notes": rs.notes,
+    }
+
+
+def _is_boolean(node) -> bool:
+    """这条 def 产出的是真假值还是数字?决定界面上能不能单独停用。"""
+    k = node[0]
+    if k == "bool":
+        return True
+    if k == "un":
+        return node[1] == "not"
+    if k == "bin":
+        return node[1] in ("and", "or", ">", ">=", "<", "<=", "==", "!=")
+    return False
+
+
+def _flatten_and_names(node) -> list[str]:
+    """`a and b and c` → ['a','b','c']。只要出现别的东西就返回 [] (走 custom)。"""
+    if node[0] == "name":
+        return [node[1]]
+    if node[0] == "bin" and node[1] == "and":
+        left = _flatten_and_names(node[2])
+        right = _flatten_and_names(node[3])
+        if left and right:
+            return left + right
+    return []
+
+
+def build_script(conditions: list[dict], plot_name: str = "scan",
+                 plot_expr: str | None = None) -> str:
+    """条件行 → 脚本。界面改完之后回写用。
+
+    停用的条件**保留在脚本里**(仍然是 `def`),只是不进 plot ——
+    这样用户重新启用时原文一字不差地回来。删除才是真删。
+    """
+    lines = []
+    enabled = []
+    for c in conditions:
+        if not c.get("expr"):
+            continue
+        lines.append(f"def {c['name']} = {c['expr']};")
+        if c.get("enabled", True) and c.get("is_bool"):
+            enabled.append(c["name"])
+    if plot_expr:
+        lines.append(f"plot {plot_name} = {plot_expr};")
+    elif enabled:
+        lines.append(f"plot {plot_name} = " + " and ".join(enabled) + ";")
+    else:
+        # 一条都没启用 —— 不要生成 `plot scan = ;`(语法错),
+        # 让调用方拿到一个能解析、但注定 0 命中的脚本,前端好给提示
+        lines.append(f"plot {plot_name} = false;")
+    return "\n".join(lines)

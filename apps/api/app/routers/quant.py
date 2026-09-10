@@ -1213,6 +1213,27 @@ async def screener_meta():
     }
 
 
+class ScreenParseIn(BaseModel):
+    script: str = ""
+    preset: str | None = None
+    market: str = "us"
+
+
+@router.post("/screener/parse")
+async def screener_parse(body: ScreenParseIn):
+    """脚本 → 可视化条件行。界面上点「生成」走这条,不拉行情。"""
+    script = body.script or ""
+    if body.preset and not script.strip():
+        p = tv_screener.preset(body.preset)
+        if p is None:
+            raise HTTPException(404, f"没有这个示例脚本:{body.preset}")
+        script = p["script"]
+    try:
+        return tv_screener.parse_script(script, body.market)
+    except ScreenError as e:
+        raise HTTPException(400, str(e))
+
+
 @router.get("/screener/fields")
 async def screener_fields(market: str = "us", q: str = "", limit: int = 50):
     try:

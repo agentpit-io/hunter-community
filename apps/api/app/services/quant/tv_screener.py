@@ -342,6 +342,40 @@ def run_script(script: str, market_key: str = "us", limit: int = 100,
     }
 
 
+def parse_script(script: str, market_key: str = "us") -> dict:
+    """只解析、不拉数 —— 界面上点「生成」走这条,把脚本变成可视化条件行。
+
+    和 run_script 共用同一个编译器,所以**界面上看到的条件就是真正会跑的条件**。
+    另起一套解析会立刻漂移(前端认为的条件和后端跑的不是一回事),那种 bug
+    极难发现,因为两边单独看都"对"。
+    """
+    md = _market(market_key)
+    if not (script or "").strip():
+        raise ScreenError("脚本是空的。至少要有一句 `plot scan = <条件>;`")
+    if len(script) > 20000:
+        raise ScreenError("脚本太长(上限 20000 字符)")
+    meta = get_meta(market_key)
+
+    def has_field(n: str) -> bool:
+        return n in meta.names
+
+    c: Compiled = screen_dsl.compile_script(
+        script, has_field, meta.sma, meta.ema, meta.rsi)
+    d = screen_dsl.decompose(script, c, has_field, meta.sma, meta.ema, meta.rsi)
+
+    warnings = [DELAY_WARN]
+    if md.note:
+        warnings.append(md.note)
+    if any("market_cap" in f for f in c.fields):
+        warnings.append(MARKET_CAP_WARN)
+
+    d["market"] = md.key
+    d["market_label"] = md.label
+    d["fields"] = c.fields
+    d["warnings"] = warnings
+    return d
+
+
 # ═══════════════════════════════════════════════════════════════
 # 预置脚本 —— 前端「示例」与 MCP 的 preset 参数共用一份
 # ═══════════════════════════════════════════════════════════════
