@@ -569,10 +569,10 @@ def field_search(market_key: str, q: str, limit: int = 50) -> list[dict]:
     labels = {n: screen_dsl.field_label_cn(n) for n in base}
 
     def pack(names):
-        return [{"name": n, "label": labels.get(n)} for n in names]
+        return _collapse([{"name": n, "label": labels.get(n)} for n in names], limit)
 
     if not q:
-        return pack(base[:limit])
+        return pack(base)
     exact = [n for n in base if n.lower() == q]
     prefix = [n for n in base if n.lower().startswith(q) and n.lower() != q]
     sub = [n for n in base if q in n.lower() and not n.lower().startswith(q)]
@@ -580,4 +580,48 @@ def field_search(market_key: str, q: str, limit: int = 50) -> list[dict]:
     # 中文命中排在英文子串命中之后 —— 搜英文时不希望被中文结果挤掉
     seen = set(hit)
     cn = [n for n in base if n not in seen and (labels.get(n) or "").lower().find(q) >= 0]
-    return pack((hit + cn)[:limit])
+    return pack(hit + cn)
+
+
+# 同族折叠 —— 只有**数字**不同的字段算一族(EMA10/EMA12/…/EMA300 共 31 个)。
+#
+# 不折叠的话搜一个 "e" 就被 31 个 EMA 刷满整屏,别的字段一个都看不见。
+#
+# **判据只看数字**,这一点是刻意的:`return_on_equity_fq / _fy / _ttm` 差的是
+# 报告期字母,它们是三个**真正不同**的字段(最近季 / 最近年 / 滚动12个月),
+# 折叠掉就没法选了。而 EMA10 与 EMA20 只是同一个指标的参数不同,
+# 收起来让用户点开再挑周期,信息一点没少。
+_FAMILY_MIN = 3
+
+
+def _collapse(items: list[dict], limit: int) -> list[dict]:
+    import re as _re
+    groups: dict[str, list[dict]] = {}
+    order: list[str] = []
+    for it in items:
+        key = _re.sub(r"\d+", "#", it["name"])
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(it)
+
+    out: list[dict] = []
+    for key in order:
+        g = groups[key]
+        if len(g) < _FAMILY_MIN:
+            out.extend(g)
+            continue
+        # 族标签:拿成员标签把数字换成 N(10日EMA → N日EMA)。
+        # 成员没有中文名时退回族键(EMA# → EMA#),照旧是英文。
+        first = g[0]
+        fam_label = None
+        if first.get("label"):
+            fam_label = _re.sub(r"\d+", "N", first["label"])
+        out.append({
+            "name": first["name"],          # 代表项 · 前端不会直接插它
+            "label": fam_label,
+            "family": key.replace("#", "N"),
+            "count": len(g),
+            "members": g,
+        })
+    return out[:limit]

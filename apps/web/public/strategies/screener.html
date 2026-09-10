@@ -195,6 +195,14 @@
     .sc-fl span:hover{background:#FDF3E7;color:#A85F17}
     /* 有中文名的用正文字体(等宽体排中文很丑),并留一点标记表示可悬停看英文 */
     .sc-fl span.cn{font-family:inherit;font-size:12px;border-bottom:1px dotted var(--soft,#B9AFA2)}
+    /* 族标签:一眼看出这是一组,右上角是周期个数 */
+    .sc-fl span.fam{font-family:inherit;font-size:12px;background:#EDE4F7;color:#7B3FA8;
+      border-bottom:0;font-weight:600}
+    .sc-fl span.fam b{margin-left:5px;font-size:10px;background:#7B3FA8;color:#fff;
+      border-radius:8px;padding:0 5px;font-weight:600}
+    .sc-fl span.fam.on{background:#7B3FA8;color:#fff}
+    .sc-fl span.fam.on b{background:#fff;color:#7B3FA8}
+    .sc-fl span.sub{margin-left:2px;background:#F6F1FB}
 
     .sc-runbar{display:flex;flex-wrap:wrap;gap:9px;align-items:center;margin-top:14px}
     /* 左右留边 —— 与 agent.html 的 .ag-wrap 同一套(padding:0 20px 40px)。
@@ -271,6 +279,8 @@ const S = {
   pending: '',               // 正在生成的那段原文(S.input 会被清空,按钮文案要靠它)
   ai: null,                  // 这批条件是 AI 翻的话:{model, script, source_text, ...}
   kw: null,                  // 这批条件是本地关键词匹配出来的话:{matched, script, ...}
+  fieldRows: [],             // 字段搜索结果(含折叠的族)
+  fieldOpen: {},             // 哪些族被点开了
   canTryAi: false,           // 本地两条路都不通 —— 弹「AI 识别」按钮问用户要不要花 token
   aiText: '',                // 点 AI 识别时要重发的原文
   generating: false, running: false,
@@ -1300,17 +1310,48 @@ async function searchFields() {
   // 显示中文名、鼠标悬停出英文原名;**插进脚本的永远是英文字段名**
   // (DSL 只认英文,插中文进去必然解析失败)。
   // 后端拿不准时 label 为 null,这里就照旧显示英文 —— 半吊子翻译更误导。
-  list.innerHTML = fs.map(function (f) {
+  S.fieldRows = fs
+  S.fieldOpen = {}          // 换了关键词就把展开状态清掉
+  paintFields()
+}
+
+// 把搜索结果画出来。只有数字不同的字段(EMA10…EMA300)后端已经折叠成一族,
+// 这里画成一个可点开的族标签 —— 不折叠的话搜个 "e" 就被 31 个 EMA 刷满整屏。
+function paintFields() {
+  const list = document.getElementById('sc-fd-list')
+  if (!list) return
+  const rows = S.fieldRows || []
+  const html = rows.map(function (f) {
     const name = (typeof f === 'string') ? f : (f && f.name)
     if (!name) return ''
-    const label = (typeof f === 'object' && f.label) ? f.label : ''
+    if (f.members && f.members.length) {
+      const open = !!S.fieldOpen[f.family]
+      const head = '<span class="fam' + (open ? ' on' : '') + '" data-fam="' + esc(f.family) + '"' +
+        ' title="' + esc(f.family) + ' · ' + f.count + ' 个周期,点开选">' +
+        esc(f.label || f.family) + '<b>' + f.count + '</b></span>'
+      if (!open) return head
+      return head + f.members.map(function (m) {
+        return '<span data-f="' + esc(m.name) + '" title="' + esc(m.name) + '"' +
+          (m.label ? ' class="cn sub"' : ' class="sub"') + '>' + esc(m.label || m.name) + '</span>'
+      }).join('')
+    }
+    const label = f.label || ''
     return '<span data-f="' + esc(name) + '" title="' + esc(name) + '"' +
       (label ? ' class="cn"' : '') + '>' + esc(label || name) + '</span>'
   }).join('')
+  list.innerHTML = html || '<span class="sc-na">没有匹配的字段</span>'
 }
 
 function insertField(e) {
-  const s = e.target && e.target.dataset ? e.target.dataset.f : null
+  const t = e.target
+  // 族标签:点开/收起,不插入。族里的周期各不相同,替用户挑一个是瞎猜。
+  const fam = t && t.dataset ? t.dataset.fam : null
+  if (fam) {
+    S.fieldOpen[fam] = !S.fieldOpen[fam]
+    paintFields()
+    return
+  }
+  const s = t && t.dataset ? t.dataset.f : null
   if (!s) return
   const ed = document.getElementById('mg-input')
   if (!ed) return
