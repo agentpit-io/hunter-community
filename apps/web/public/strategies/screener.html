@@ -193,6 +193,8 @@
     .sc-fl span{background:var(--bg,#FAF7F3);border-radius:5px;padding:3px 7px;cursor:pointer;
       font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--text)}
     .sc-fl span:hover{background:#FDF3E7;color:#A85F17}
+    /* 有中文名的用正文字体(等宽体排中文很丑),并留一点标记表示可悬停看英文 */
+    .sc-fl span.cn{font-family:inherit;font-size:12px;border-bottom:1px dotted var(--soft,#B9AFA2)}
 
     .sc-runbar{display:flex;flex-wrap:wrap;gap:9px;align-items:center;margin-top:14px}
     /* 左右留边 —— 与 agent.html 的 .ag-wrap 同一套(padding:0 20px 40px)。
@@ -1295,8 +1297,15 @@ async function searchFields() {
   if (!fs.length) { list.innerHTML = '<span class="sc-na">没有匹配的字段</span>'; return }
   // 只写内容,不挂监听 —— 监听在 bind() 里挂一次(2026-09-10:原来每次搜完都再挂一个,
   // 连搜三次后点一个字段会插三份)
+  // 显示中文名、鼠标悬停出英文原名;**插进脚本的永远是英文字段名**
+  // (DSL 只认英文,插中文进去必然解析失败)。
+  // 后端拿不准时 label 为 null,这里就照旧显示英文 —— 半吊子翻译更误导。
   list.innerHTML = fs.map(function (f) {
-    return '<span data-f="' + esc(f) + '">' + esc(f) + '</span>'
+    const name = (typeof f === 'string') ? f : (f && f.name)
+    if (!name) return ''
+    const label = (typeof f === 'object' && f.label) ? f.label : ''
+    return '<span data-f="' + esc(name) + '" title="' + esc(name) + '"' +
+      (label ? ' class="cn"' : '') + '>' + esc(label || name) + '</span>'
   }).join('')
 }
 

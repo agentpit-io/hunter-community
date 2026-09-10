@@ -662,6 +662,29 @@ _FIELD_LABEL = {
     "Perf.6M": "近6月涨幅", "Perf.Y": "近1年涨幅", "Perf.YTD": "年初至今涨幅",
     "Volatility.D": "日波动率", "Volatility.W": "周波动率", "Volatility.M": "月波动率",
     "sector": "板块", "industry": "行业", "currency": "币种",
+
+    # 固定搭配 —— 这些**不能**靠词素拼,必须逐条给准确译名。
+    # (price_to_book 拼出来是「价格账面」,free_cash_flow 是「自由现金流量」,
+    #  price_target_high 是「价格目标价最高价」—— 都不是中文里的说法。)
+    "free_cash_flow": "自由现金流", "free_cash_flow_ttm": "自由现金流TTM",
+    "operating_cash_flow_ttm": "经营现金流TTM",
+    "price_target_high": "目标价上限", "price_target_low": "目标价下限",
+    "price_target_average": "目标价均值", "price_target_median": "目标价中位",
+    "price_book_ratio": "市净率", "price_sales_ratio": "市销率",
+    "price_free_cash_flow_ttm": "市现率TTM",
+    "price_earnings_growth_ttm": "PEG(TTM)",
+    "enterprise_value_ebitda_ttm": "EV/EBITDA(TTM)",
+    "enterprise_value_current": "企业价值",
+    "gross_margin": "毛利率", "operating_margin": "营业利润率",
+    "net_margin": "净利率", "pre_tax_margin": "税前利润率",
+    "after_tax_margin": "税后利润率",
+    "dividend_payout_ratio_ttm": "股息支付率TTM",
+    "dividends_per_share_fq": "每股股息(最近季)",
+    "total_shares_outstanding_current": "总股本",
+    "float_shares_outstanding": "流通股本",
+    "number_of_employees": "员工人数",
+    "relative_volume_10d_calc": "10日相对成交量",
+    "Value.Traded": "成交额", "Volatility.D": "日波动率",
 }
 
 _SMA_RE = re.compile(r"^SMA(\d+)$")
@@ -851,3 +874,121 @@ def build_script(conditions: list[dict], plot_name: str = "scan",
         # 让调用方拿到一个能解析、但注定 0 命中的脚本,前端好给提示
         lines.append(f"plot {plot_name} = false;")
     return "\n".join(lines)
+
+
+# ═══════════════════════════════════════════════════════════════
+# 字段中文名 —— 词素拼装
+#
+# 扫描源的字段名是高度组合化的:
+#   average_volume_10d_calc = average + volume + 10d + calc
+#   postmarket_volume       = postmarket + volume
+#   total_revenue_yoy_growth_ttm = total + revenue + yoy + growth + ttm
+# 所以不用逐个翻 3777 个,按词素拼既准又不用维护。
+#
+# **只在所有词素都认识时才拼**。有一个不认识就整体返回 None,界面上照旧显示
+# 英文原名 —— 半吊子翻译(「盘后 volume」「average 成交量」)比不翻更误导,
+# 而且会让人以为这个字段的含义已经被确认过了。
+# ═══════════════════════════════════════════════════════════════
+
+# 修饰词(可多个,按出现顺序拼在头词前面)
+_MOR_MOD = {
+    "average": "平均", "avg": "平均", "relative": "相对", "total": "总",
+    "net": "净", "gross": "毛", "operating": "经营", "free": "自由",
+    "premarket": "盘前", "postmarket": "盘后", "after": "盘后", "pre": "盘前",
+    "basic": "基本", "diluted": "稀释", "forward": "预期", "fwd": "预期",
+    "enterprise": "企业", "book": "账面",
+    "continuing": "持续经营", "discontinued": "终止经营",
+    "common": "普通", "preferred": "优先", "long": "长期", "short": "短期",
+    "tangible": "有形", "intangible": "无形", "goodwill": "商誉",
+    # 「每股」「人均」是修饰,要拼在头词**前面**(每股收益),
+    # 当后缀会拼出「盈利(每股)」这种不像话的中文
+    "share": "每股", "employee": "人均",
+}
+
+# 头词(必须至少命中一个,否则不拼)
+_MOR_HEAD = {
+    "volume": "成交量", "price": "价格", "close": "收盘价", "open": "开盘价",
+    "high": "最高价", "low": "最低价", "change": "变动", "cap": "市值",
+    "earnings": "盈利", "revenue": "营收", "income": "利润", "profit": "利润",
+    "margin": "利润率", "yield": "收益率", "debt": "负债", "equity": "权益",
+    "assets": "资产", "liabilities": "负债", "cash": "现金", "flow": "流量",
+    "dividends": "股息", "dividend": "股息", "shares": "股本",
+    "eps": "每股收益", "ebitda": "EBITDA", "ebit": "EBIT",
+    "employees": "员工数", "sales": "销售额", "inventory": "存货",
+    "receivables": "应收款", "payables": "应付款", "capex": "资本开支",
+    "buyback": "回购", "float": "流通股", "beta": "贝塔",
+    "volatility": "波动率", "turnover": "换手率", "growth": "增长",
+    "ratio": "比率", "value": "价值", "rating": "评级", "target": "目标价",
+    "gap": "跳空", "range": "区间", "performance": "涨幅", "perf": "涨幅",
+}
+
+# 后缀/限定(拼在括号里或直接接在后面)
+_MOR_SUF = {
+    "ttm": "TTM", "fq": "最近季", "fy": "最近年", "fh": "最近半年",
+    "yoy": "同比", "qoq": "环比", "abs": "绝对值", "percent": "百分比",
+    "pct": "百分比", "usd": "美元",
+}
+
+# 纯噪音,翻译时直接跳过(不影响"是否全部认识"的判定)
+_MOR_SKIP = {"calc", "per", "the"}
+
+_PERIOD_RE2 = re.compile(r"^(\d+)([dwmy])$")
+_MOR_UNIT = {"d": "日", "w": "周", "m": "月", "y": "年"}
+
+
+def field_label_cn(name: str) -> str | None:
+    """字段名 → 中文标签。**拿不准就返回 None**(界面照旧显示英文)。"""
+    if not name or not isinstance(name, str):
+        return None
+    exact = field_label(name)
+    if exact != name:            # 精选表 / 技术指标模式已经认得
+        return exact
+    if not re.fullmatch(r"[A-Za-z0-9_.]+", name):
+        return None
+
+    mods: list[str] = []
+    periods: list[str] = []
+    heads: list[str] = []
+    sufs: list[str] = []
+    toks = [t for t in re.split(r"[_.]", name.lower()) if t]
+    for idx, tok in enumerate(toks):
+        # `current` 位置不同意思不同,不能一概而论:
+        #   total_current_liabilities → 流动负债(会计科目)
+        #   dividends_yield_current   → 最新一期
+        # 词中当「流动」、结尾当「最新」。一律译成「当前」会得到
+        # 「总当前负债」这种既不是流动负债、也没人这么说的东西。
+        if tok == "current":
+            if idx == len(toks) - 1:
+                sufs.append("最新")
+            else:
+                mods.append("流动")
+            continue
+        if tok in _MOR_SKIP:
+            continue
+        m = _PERIOD_RE2.match(tok)
+        if m:
+            periods.append(m.group(1) + _MOR_UNIT[m.group(2)])
+            continue
+        if tok in _MOR_MOD:
+            mods.append(_MOR_MOD[tok]); continue
+        if tok in _MOR_HEAD:
+            heads.append(_MOR_HEAD[tok]); continue
+        if tok in _MOR_SUF:
+            sufs.append(_MOR_SUF[tok]); continue
+        return None              # 有一个词素不认识 → 整体放弃
+    if len(heads) != 1:
+        # 0 个头词 = 没认出核心概念;**2 个以上 = 固定搭配**,不能逐词拼。
+        # 实测反例:price_target_high 三个头词拼出「价格目标价最高价」,
+        # price_free_cash_flow_current 拼出「自由当前价格现金流量」——
+        # 每个词素都认识,拼起来却是胡话。认识词素 ≠ 拼得对。
+        # 这类术语要么进上面的精选表,要么就老老实实显示英文。
+        return None
+
+    # 「每股」「人均」在中文里是最外层的量词,必须排在其它修饰之前:
+    # total + 每股 + 负债 逐字拼是「总每股负债」,正确语序是「每股总负债」。
+    _OUTER = ("每股", "人均")
+    mods.sort(key=lambda w: 0 if w in _OUTER else 1)
+    core = "".join(periods) + "".join(mods) + "".join(heads)
+    if sufs:
+        core += "(" + "·".join(sufs) + ")"
+    return core

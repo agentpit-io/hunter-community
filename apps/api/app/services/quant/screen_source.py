@@ -552,15 +552,32 @@ def preset(key: str) -> dict | None:
     return None
 
 
-def field_search(market_key: str, q: str, limit: int = 50) -> list[str]:
-    """字段搜索 —— 前端「可用字段」用。3777 个字段不可能列全,只能搜。"""
+def field_search(market_key: str, q: str, limit: int = 50) -> list[dict]:
+    """字段搜索 —— 前端「可用字段」用。3777 个字段不可能列全,只能搜。
+
+    返回 [{name, label}]:
+      · name  字段名(英文)。**脚本里要写的就是它**,点击插入的也是它。
+      · label 中文名,拿不准时为 None —— 界面上就显示英文原名。
+              半吊子翻译比不翻更误导,详见 screen_dsl.field_label_cn。
+
+    中文名也参与搜索:用户搜「成交量」应该能找到 volume。
+    """
     meta = get_meta(market_key)
     q = (q or "").strip().lower()
     base = sorted(n for n in meta.names
                   if isinstance(n, str) and "|" not in n and "[" not in n)
+    labels = {n: screen_dsl.field_label_cn(n) for n in base}
+
+    def pack(names):
+        return [{"name": n, "label": labels.get(n)} for n in names]
+
     if not q:
-        return base[:limit]
+        return pack(base[:limit])
     exact = [n for n in base if n.lower() == q]
     prefix = [n for n in base if n.lower().startswith(q) and n.lower() != q]
     sub = [n for n in base if q in n.lower() and not n.lower().startswith(q)]
-    return (exact + prefix + sub)[:limit]
+    hit = exact + prefix + sub
+    # 中文命中排在英文子串命中之后 —— 搜英文时不希望被中文结果挤掉
+    seen = set(hit)
+    cn = [n for n in base if n not in seen and (labels.get(n) or "").lower().find(q) >= 0]
+    return pack((hit + cn)[:limit])
