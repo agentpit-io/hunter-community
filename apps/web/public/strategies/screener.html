@@ -27,10 +27,15 @@
       border:1px solid #DCEBFA;border-radius:8px;padding:9px 12px;background:#fff;color:var(--text);
       font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.55}
     .mg-ta:focus{outline:none;border-color:#2E86DE}
+    /* 生成按钮和它下面那排(复制脚本/清空)竖着排成一列 */
+    .mg-genwrap{display:flex;flex-direction:column;gap:7px}
     .mg-gen{border:0;background:#2E86DE;color:#fff;border-radius:8px;padding:0 22px;cursor:pointer;
       font-size:14px;font-weight:600;font-family:inherit;white-space:nowrap;display:flex;
-      align-items:center;gap:7px;justify-content:center}
+      align-items:center;gap:7px;justify-content:center;min-height:40px;flex:1}
     .mg-gen:disabled{opacity:.5;cursor:not-allowed}
+    .mg-genbar{display:flex;gap:6px}
+    .mg-genbar .btn{flex:1;justify-content:center}
+    .mg-genbar .btn:disabled{opacity:.45;cursor:not-allowed}
     .mg-eg{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
     .mg-eg button{display:inline-flex;align-items:center;gap:7px;background:#fff;
       border:1px solid #DCEBFA;border-radius:8px;padding:6px 12px;cursor:pointer;
@@ -147,6 +152,12 @@
     /* 左右留边 —— 与 agent.html 的 .ag-wrap 同一套(padding:0 20px 40px)。
        原来一条都没写,条件行的文字直接贴在窗口左边缘上。 */
     .sc-wrap{padding:0 20px 40px;display:flex;flex-direction:column;gap:12px}
+    /* 说明性区块(条件区下面的提示、语法速查、可用字段)收成三分之一宽。
+       它们都是「看一眼就走」的辅助信息,铺满整屏只会把真正要看的条件挤下去。
+       选择器限定 `.sc-wrap >` —— 结果面板里的 .sc-warn 是另一回事,不受影响。
+       min-width 兜住窄屏,不然在手机上会挤成一列字。 */
+    .sc-wrap>.sc-warn,
+    .sc-wrap>details.sc-fold{width:33%;min-width:360px;box-sizing:border-box}
     /* grid 子项默认 min-width:auto,不加这行结果面板会被宽表撑破,
        内层 .sc-scroll 的 overflow-x 会完全失效(2026-09-10 实测) */
     .sc-wrap>*{min-width:0}
@@ -310,8 +321,18 @@ function vMagic() {
       '<textarea class="mg-ta" id="mg-input" spellcheck="false" ' +
         'placeholder="把筛选脚本粘进来,点「生成」。例:\ndef sma50 = Average(close, 50);\nplot scan = close > sma50 and volume > 1000000;">' +
         esc(S.input) + '</textarea>' +
-      '<button class="mg-gen" id="mg-gen"' + (S.meta && !S.generating ? '' : ' disabled') + '>' +
-        (S.generating ? '生成中…' : '<span class="hi hi-play"></span> 生成') + '</button>' +
+      // 「复制脚本 / 清空」放在生成按钮**正下方**:它们操作的是同一份东西
+      // (生成框产出的条件),原来钉在条件区标题的最右端,和生成隔了整整一屏。
+      '<div class="mg-genwrap">' +
+        '<button class="mg-gen" id="mg-gen"' + (S.meta && !S.generating ? '' : ' disabled') + '>' +
+          (S.generating ? '生成中…' : '<span class="hi hi-play"></span> 生成') + '</button>' +
+        '<div class="mg-genbar">' +
+          '<button class="btn small" id="cd-copyall"' + (S.conditions.length ? '' : ' disabled') +
+            '>复制脚本</button>' +
+          '<button class="btn small" id="cd-clear"' + (S.conditions.length ? '' : ' disabled') +
+            '>清空</button>' +
+        '</div>' +
+      '</div>' +
     '</div>' +
     '<div class="mg-eg" id="mg-eg">' + chips + '</div>' +
     '</div>' +
@@ -383,10 +404,9 @@ function vConditions() {
   }
   const onCount = S.conditions.filter(function (c) { return c.is_bool && c.enabled }).length
   const mk = (S.meta && (S.meta.markets || []).filter(function (m) { return m.key === S.market })[0]) || null
+  // 复制脚本 / 清空已经挪到生成按钮正下方(vMagic),这里只留标题
   return '<div class="cd-hd">股票需<b>同时满足</b>以下<b>' + onCount + '</b> 个条件' +
       (mk ? '<span class="mk">' + esc(mk.label) + '</span>' : '') +
-      '<button class="btn small" id="cd-copyall" style="margin-left:auto">复制脚本</button>' +
-      '<button class="btn small" id="cd-clear">清空</button>' +
     '</div>' +
     (S.combine === 'custom'
       ? '<div class="sc-warn">这个脚本的最终条件不是「若干条件全部满足」,而是自定义组合:' +
