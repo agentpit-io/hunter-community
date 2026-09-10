@@ -139,52 +139,83 @@ class _Vocab:
         # 按长度倒序,保证「市盈率ttm」先于「市盈率」、「52周最高」先于「最高价」
         self.words = sorted(_FIELD_WORDS.items(), key=lambda kv: -len(kv[0]))
 
-    def field(self, text: str) -> tuple[str, str] | None:
-        """在文本里找一个字段。→ (字段名, 命中的原文) 或 None。"""
-        # 两个版本各有用处,不能只留一个:
-        #   去空格版 —— 中文里「市 盈 率」「20 日均线」这种空格是噪音,必须抹掉
-        #   带空格版 —— 英文的词边界全靠空格,抹了之后 "price above 20" 变成
-        #               "priceabove20",\b 断言直接失效(实测英文用例全挂)
-        low_ns = text.lower().replace(" ", "")
+    def _candidates(self, text: str) -> list[tuple[int, int, str, str, str]]:
+        """文本里所有可能的字段命中 → [(起点, -长度, 字段名, 原文, 错误)]。
+
+        `错误` 非空表示"认出来了但用不了"(如 37 日均线),排序时照样参与 ——
+        它排在最左就该报错,而不是被右边一个能用的字段顶掉。
+        """
         low = text.lower()
-        m = _AVGVOL_RE.search(text)
-        if m:
+        low_ns = low.replace(" ", "")
+        out: list[tuple[int, int, str, str, str]] = []
+
+        for m in _AVGVOL_RE.finditer(text):
             n = int(m.group(1))
-            if n not in (10, 30, 60, 90):
-                raise ScreenError(
-                    f"「{m.group(0)}」映射不了 —— 扫描源只有 10/30/60/90 天均量")
-            return f"average_volume_{n}d_calc", m.group(0)
-        m = _EMA_RE.search(text)
-        if m:
+            err = "" if n in (10, 30, 60, 90) else \
+                f"「{m.group(0)}」映射不了 —— 扫描源只有 10/30/60/90 天均量"
+            out.append((m.start(), -len(m.group(0)),
+                        f"average_volume_{n}d_calc", m.group(0), err))
+        for m in _EMA_RE.finditer(text):
             n = int(m.group(1))
-            if n not in self.ema:
-                raise ScreenError(f"没有 {n} 日 EMA")
-            return f"EMA{n}", m.group(0)
-        m = _RSI_N_RE.search(text)
-        if m:
+            err = "" if n in self.ema else f"没有 {n} 日 EMA"
+            out.append((m.start(), -len(m.group(0)), f"EMA{n}", m.group(0), err))
+        for m in _RSI_N_RE.finditer(text):
             n = int(m.group(1))
-            if n == 14:
-                return "RSI", m.group(0)
-            if n not in self.rsi:
-                raise ScreenError(f"没有 RSI({n})")
-            return f"RSI{n}", m.group(0)
-        m = _MA_RE.search(text)
-        if m:
+            fld = "RSI" if n == 14 else f"RSI{n}"
+            err = "" if (n == 14 or n in self.rsi) else f"没有 RSI({n})"
+            out.append((m.start(), -len(m.group(0)), fld, m.group(0), err))
+        for m in _MA_RE.finditer(text):
             n = int(m.group(1))
-            if n not in self.sma:
-                raise ScreenError(
-                    f"「{m.group(0)}」映射不了 —— 扫描源没有 SMA{n}")
-            return f"SMA{n}", m.group(0)
+            err = "" if n in self.sma else \
+                f"「{m.group(0)}」映射不了 —— 扫描源没有 SMA{n}"
+            out.append((m.start(), -len(m.group(0)), f"SMA{n}", m.group(0), err))
+
         for w, fld in self.words:
             if not self.has_field(fld):
                 continue
             if w.isascii():
                 # 纯英文词必须按**词边界**匹配。裸 `in` 会让 "RSI below 30"
                 # 里的 "be(low)" 命中字段 low —— 实测真踩到,产出 `low < 30`。
-                if re.search(r"(?<![a-z0-9])" + re.escape(w) + r"(?![a-z0-9])", low):
-                    return fld, w
-            elif w in low_ns:
-                return fld, w
+                m = re.search(r"(?<![a-z0-9])" + re.escape(w) + r"(?![a-z0-9])", low)
+                if m:
+                    out.append((m.start(), -len(w), fld, w, ""))
+            else:
+                i = low.find(w)
+                if i >= 0:
+                    out.append((i, -len(w), fld, w, ""))
+                elif w in low_ns:
+                    # 原文里夹了空格(「市 盈 率」)。位置没法精确还原,
+                    # 排到最后 —— 只在没有别的候选时才用它。
+                    out.append((len(text), -len(w), fld, w, ""))
+        return out
+
+    def field(self, text: str) -> tuple[str, str] | None:
+        """在文本里找字段 —— **取最左出现的那个**,同位置取更长的。
+
+        2026-09-10 修:原来是按"模式类别"顺序返回(均线正则整体排在词表前面),
+        于是「收盘价高于50日均线」的左操作数被判成 SMA50 而不是 close。
+        句子里谁先出现谁就是左操作数,这是唯一说得通的规则。
+        """
+        cands = self._candidates(text)
+        if not cands:
+            return None
+        cands.sort(key=lambda c: (c[0], c[1]))
+        start, _neg, fld, word, err = cands[0]
+        if err:
+            raise ScreenError(err)
+        return fld, word
+
+    def ma_field(self, text: str) -> str | None:
+        """只找均线类字段 —— 「站上/跌破 X 日均线」这类模板专用。
+
+        不能用 field():那句话里 `收盘价` 出现在更左边,会被优先返回。
+        """
+        for _s, _n, fld, _w, err in sorted(self._candidates(text),
+                                           key=lambda c: (c[0], c[1])):
+            if err:
+                raise ScreenError(err)
+            if fld.startswith("SMA") or fld.startswith("EMA"):
+                return fld
         return None
 
 
@@ -226,17 +257,23 @@ def _clause_to_expr(clause: str, vocab: _Vocab) -> str | None:
             return ("(price_52_week_high - close) / price_52_week_high <= "
                     + _fmt(pct))
 
-    # 站上 / 跌破 均线
-    m = re.search(r"(站上|站稳|突破|上穿|高于|在.{0,2}之上)", t)
-    if m and re.search(r"均线|ma|ema|线", low):
-        got = vocab.field(t)
-        if got and (got[0].startswith("SMA") or got[0].startswith("EMA")):
-            return f"close > {got[0]}"
-    m = re.search(r"(跌破|下穿|失守|在.{0,2}之下)", t)
-    if m and re.search(r"均线|ma|ema|线", low):
-        got = vocab.field(t)
-        if got and (got[0].startswith("SMA") or got[0].startswith("EMA")):
-            return f"close < {got[0]}"
+    # 站上 / 跌破 均线 —— **只收成句的行话**。
+    #
+    # 「高于」「低于」这类通用比较符**绝不能**放进来:它们两边是什么由句子决定,
+    # 不一定是"收盘价 vs 均线"。2026-09-10 实测,「50日均线高于150日均线」
+    # 因为 `高于` 在这张表里,整句被这条模板吞掉,产出 `收盘价 大于 50日均线` ——
+    # 和用户想要的完全是两回事。通用比较符一律走下面的三段式。
+    #
+    # 另外这里必须用 ma_field 而不是 field:「收盘价站上50日均线」里
+    # `收盘价` 出现得更靠左,field() 会优先返回它。
+    if re.search(r"(站上|站稳|升破|突破|上穿)", t) and re.search(r"均线|ma|ema|线", low):
+        ma = vocab.ma_field(t)
+        if ma:
+            return f"close > {ma}"
+    if re.search(r"(跌破|下穿|失守|跌穿)", t) and re.search(r"均线|ma|ema|线", low):
+        ma = vocab.ma_field(t)
+        if ma:
+            return f"close < {ma}"
 
     # ── 通用三段式:字段 + 比较符 + 数字 ─────────────────
     got = vocab.field(t)
