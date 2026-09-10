@@ -63,8 +63,8 @@ def _system_prompt(market_label: str, sma: list[int], ema: list[int],
     return f"""你是一个选股筛选脚本的翻译器。把用户的中文/英文描述翻译成筛选脚本。
 
 # 输出格式
-只输出 JSON:{{"script": "<脚本>"}}
-不要解释,不要 markdown 代码块,不要任何脚本以外的文字。
+**只输出脚本本身**,一行一句。
+不要 JSON,不要 markdown 代码块,不要解释,不要任何脚本以外的文字。
 
 # 脚本语法
 每句 `def 名字 = 表达式;`,最后一句必须是 `plot scan = 条件A and 条件B;`。
@@ -97,19 +97,38 @@ RSI()                 14 周期;RSI(N) 的 N 只能取 {', '.join(map(str, rsi))
 """
 
 
-def _extract_script(parsed: dict | None, raw: str) -> str:
-    """从模型返回里取脚本。JSON 拿不到就退回扫原文里的代码块。"""
-    if isinstance(parsed, dict):
-        s = parsed.get("script")
-        if isinstance(s, str) and s.strip():
-            return s.strip()
-    # 网关不支持 json_object 时模型可能直接吐脚本,兜一层
-    m = re.search(r"```(?:\w+)?\s*(.+?)```", raw or "", re.S)
+def _extract_script(raw: str) -> str:
+    """从模型返回里取出脚本。
+
+    **不走 JSON。** 第一版让模型返回 {"script": "..."},实测 gemini 会把多行脚本
+    里的换行原样塞进 JSON 字符串,产出的根本不是合法 JSON,解析必失败
+    (2026-09-10:第一次线上调用就栽在这,报错是「看不懂的字符 '{'」——
+    兜底把整个 JSON 当成脚本喂给了解析器)。
+    用 JSON 包多行代码本来就脆,直接要纯文本反而稳,反正后面有真解析器把关。
+    """
+    s = (raw or "").strip()
+    if not s:
+        return ""
+    # markdown 代码块(prompt 说了不要,但模型经常还是加)
+    m = re.search(r"```(?:[A-Za-z]*)\s*\n?(.+?)```", s, re.S)
     if m:
-        return m.group(1).strip()
-    if raw and ("plot " in raw or "def " in raw):
-        return raw.strip()
-    return ""
+        s = m.group(1).strip()
+    # 模型偶尔还是回 JSON —— 认一下,取 script 字段
+    if s.startswith("{"):
+        try:
+            obj = json.loads(s)
+            if isinstance(obj, dict) and isinstance(obj.get("script"), str):
+                return obj["script"].strip()
+        except Exception:                                   # noqa: BLE001
+            # JSON 不合法(多半就是换行没转义)—— 退而求其次,把 script 字段的值抠出来
+            m2 = re.search(r'"script"\s*:\s*"(.*)"\s*\}?\s*$', s, re.S)
+            if m2:
+                return m2.group(1).replace("\\n", "\n").replace('\\"', '"').strip()
+    # 前面可能有一两句寒暄,从第一个 def/plot 开始截
+    m3 = re.search(r"(^|\n)\s*(def|plot)\s+[A-Za-z_]", s)
+    if m3:
+        s = s[m3.start():].strip()
+    return s
 
 
 def looks_like_script(text: str) -> bool:
@@ -130,7 +149,10 @@ def translate(text: str, market_label: str, sma: list[int], ema: list[int],
     `validate(script)` 由调用方注入:拿真解析器验一遍,不通过就抛 ScreenError。
     翻译器不认识字段,校验必须交给唯一的权威(screen_dsl + metainfo)。
     """
-    from app.services.online_analysis.llm_client import llm_json_call
+    # 复用在线分析那套客户端的网关/key/超时配置,但**不用 llm_json_call** ——
+    # 它强制 response_format=json_object 且会拼 ZH_ONLY_RULE(要求用中文回答),
+    # 而这里要的是一段纯代码,两条都帮倒忙。
+    from app.services.online_analysis.llm_client import get_client
 
     text = (text or "").strip()
     if not text:
@@ -145,23 +167,33 @@ def translate(text: str, market_label: str, sma: list[int], ema: list[int],
 
     # 最多两轮:第一轮直译,失败把**解析器的原话**喂回去让它改。
     # 报错文本写得很具体(「没有 SMA37,可用周期:...」),比泛泛说"你错了"有用得多。
-    for attempt in (1, 2):
-        parsed, meta = llm_json_call(system, user, model=MODEL,
-                                     max_tokens=1200, temperature=0.1,
-                                     retry_on_parse_fail=False)
-        tokens_in += meta.get("tokens_in") or 0
-        tokens_out += meta.get("tokens_out") or 0
-        if meta.get("error") == "no_api_key":
-            raise ScreenError(
-                "这个部署没有配 LLM key,自然语言识别用不了。"
-                "可以直接写筛选脚本(点「语法速查」看写法),或在 .env 里配 LLM_API_KEY。")
-        if meta.get("error"):
-            raise ScreenError(f"调用模型失败:{meta['error']}")
+    client = get_client()
+    if client is None:
+        raise ScreenError(
+            "这个部署没有配 LLM key,自然语言识别用不了。"
+            "可以直接写筛选脚本(点「语法速查」看写法),或在 .env 里配 LLM_API_KEY。")
 
-        script = _extract_script(parsed, meta.get("raw_text") or "")
+    for attempt in (1, 2):
+        try:
+            completion = client.chat.completions.create(
+                model=MODEL,
+                messages=[{"role": "system", "content": system},
+                          {"role": "user", "content": user}],
+                max_tokens=1200,
+                temperature=0.1,
+            )
+        except Exception as e:                              # noqa: BLE001
+            raise ScreenError(f"调用模型失败:{type(e).__name__} · {e}") from e
+        raw = (completion.choices[0].message.content or "") if completion.choices else ""
+        usage = getattr(completion, "usage", None)
+        if usage:
+            tokens_in += usage.prompt_tokens or 0
+            tokens_out += usage.completion_tokens or 0
+
+        script = _extract_script(raw)
         if not script:
             last_err = "模型没有产出脚本(可能没看懂这段描述)"
-            user = f"{text}\n\n(上一次你没有输出脚本。请只输出 {{\"script\": \"...\"}})"
+            user = f"{text}\n\n(上一次你没有输出脚本。请直接输出脚本本身,不要任何别的文字)"
             continue
 
         try:
