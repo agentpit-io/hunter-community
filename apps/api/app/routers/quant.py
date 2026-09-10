@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import date, timedelta
@@ -1229,7 +1230,9 @@ async def screener_parse(body: ScreenParseIn):
             raise HTTPException(404, f"没有这个示例脚本:{body.preset}")
         script = p["script"]
     try:
-        return tv_screener.parse_script(script, body.market)
+        # to_thread 不能省:自然语言那条分支要调 LLM(秒级、同步阻塞),
+        # 直接在 async 路由里跑会把整个事件循环卡住,别的用户的请求全在排队。
+        return await asyncio.to_thread(tv_screener.parse_script, script, body.market)
     except ScreenError as e:
         raise HTTPException(400, str(e))
 
@@ -1252,9 +1255,10 @@ async def screener_run(body: ScreenIn):
             raise HTTPException(404, f"没有这个示例脚本:{body.preset}")
         script = p["script"]
     try:
-        return tv_screener.run_script(
-            script, body.market, limit=body.limit,
-            sort_by=body.sort_by, descending=body.descending)
+        # 同上 —— 拉全市场实测 1~3s,同步 httpx,不能占着事件循环
+        return await asyncio.to_thread(
+            tv_screener.run_script,
+            script, body.market, body.limit, body.sort_by, body.descending)
     except ScreenError as e:
         # 脚本写错、周期映射不了、上游挂了 —— 都是 400,message 直接给用户看。
         # 不要吞成 500 空结果:用户看到"0 只命中"会以为是市场里真的没有票满足条件。

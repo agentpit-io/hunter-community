@@ -359,8 +359,31 @@ def parse_script(script: str, market_key: str = "us") -> dict:
     def has_field(n: str) -> bool:
         return n in meta.names
 
-    c: Compiled = screen_dsl.compile_script(
-        script, has_field, meta.sma, meta.ema, meta.rsi)
+    def _compile(src: str) -> Compiled:
+        return screen_dsl.compile_script(src, has_field, meta.sma, meta.ema, meta.rsi)
+
+    ai = None
+    original_text = script
+    try:
+        c: Compiled = _compile(script)
+    except ScreenError:
+        # 解析不了 —— 分两种情况处理,判据是"用户有没有在写脚本"。
+        #
+        # 写着 def/plot 却解析不过 = 他的脚本有错,把真实报错还给他。
+        # 让 LLM 去"猜他想写什么"再悄悄改成别的,是调脚本时最坏的体验。
+        #
+        # 没有 def/plot = 大白话,交给模型翻译。
+        from app.services.quant import screen_nl
+        if screen_nl.looks_like_script(script):
+            raise
+        translated = screen_nl.translate(
+            script, md.label, meta.sma, meta.ema, meta.rsi, validate=_compile)
+        script = translated["script"]
+        c = _compile(script)             # translate 里已经 validate 过,这里必成功
+        ai = {k: translated[k] for k in ("model", "attempts", "tokens_in", "tokens_out")}
+        ai["source_text"] = original_text
+        ai["script"] = script
+
     d = screen_dsl.decompose(script, c, has_field, meta.sma, meta.ema, meta.rsi)
 
     warnings = [DELAY_WARN]
@@ -373,6 +396,13 @@ def parse_script(script: str, market_key: str = "us") -> dict:
     d["market_label"] = md.label
     d["fields"] = c.fields
     d["warnings"] = warnings
+    if ai:
+        # 让前端能明确标出"这几条是 AI 翻的",并且把生成的脚本亮出来给人核对。
+        # AI 产出的东西必须可审计 —— 用户至少要能看见它到底写了什么才敢用。
+        d["ai"] = ai
+        warnings.append(
+            f"以上条件由 {ai['model']} 根据你的描述自动翻译,已通过语法与字段校验,"
+            f"但**是否符合你的本意需要你自己确认**。跑扫描前请逐条核对。")
     return d
 
 
