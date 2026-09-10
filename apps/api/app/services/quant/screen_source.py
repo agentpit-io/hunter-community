@@ -133,6 +133,9 @@ BASE_FILTER = [
 # description 是股票名 —— 只给代码的结果没法看。
 ALWAYS_COLS = ["name", "description", "close", "currency", "volume"]
 
+# ⚠️ 这两条的**开头几个字**被前端 screener.html 的 DROP_PREFIX 用来过滤显示
+# (产品要求这两条不出现在筛选器页面上)。改文案要同步改那里,
+# 否则它们会悄悄冒回页面。MCP 与 API 响应仍然带着它们 —— 模型需要知道数据是延迟的。
 DELAY_WARN = "免订阅通道数据延迟 15 分钟,盘中信号请勿依赖。"
 
 MARKET_CAP_WARN = (

@@ -504,8 +504,17 @@ function vConditions() {
 //   · 提示条(notes / warnings)—— 整条丢掉。它们本来就只是提醒。
 //   · 报错文案 —— 只把名字换掉,不能整条丢:丢了用户就不知道为什么失败了。
 const SRC_ALIAS = '行情源'
+// 要挡掉的提示,按**内容前缀**匹配 —— 不能再按厂商名匹配了:
+// 2026-09-10 后端把文案里的厂商名换成中性词之后,按名字过滤的规则当场失效,
+// 这两条提示又冒回页面上。用前缀是脆的,所以规则写在这里、并在后端那两个
+// 常量(DELAY_WARN / MARKET_CAP_WARN)旁边留了指向本处的注释:改文案要同步改这里。
+const DROP_PREFIX = ['免订阅通道数据延迟', 'market_cap_basic 是']
 function dropSrc(list) {
-  return (list || []).filter(function (w) { return String(w).indexOf('TradingView') < 0 })
+  return (list || []).filter(function (w) {
+    const t = String(w)
+    if (t.indexOf('TradingView') >= 0) return false          // 兜底:万一哪里漏改
+    return !DROP_PREFIX.some(function (p) { return t.indexOf(p) === 0 })
+  })
 }
 function maskSrc(s) {
   return String(s == null ? '' : s).replace(/TradingView/g, SRC_ALIAS)
