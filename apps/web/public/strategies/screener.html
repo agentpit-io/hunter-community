@@ -34,7 +34,10 @@
       align-items:center;gap:7px;justify-content:center;min-height:40px;flex:1}
     .mg-gen:disabled{opacity:.5;cursor:not-allowed}
     .mg-genbar{display:flex;gap:6px}
-    .mg-genbar .btn{flex:1;justify-content:center}
+    /* nowrap 不能省 —— 两个按钮平分「生成」那 122px 的话,
+       「复制脚本」会被折成「复制脚 / 本」两行(实测)。
+       nowrap 之后这一列按内容撑开,生成按钮跟着一起变宽,三个仍然左右对齐。 */
+    .mg-genbar .btn{flex:1;justify-content:center;white-space:nowrap;padding:5px 10px}
     .mg-genbar .btn:disabled{opacity:.45;cursor:not-allowed}
     .mg-eg{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
     .mg-eg button{display:inline-flex;align-items:center;gap:7px;background:#fff;
