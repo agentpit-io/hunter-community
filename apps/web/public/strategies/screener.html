@@ -355,6 +355,9 @@ function bind() {
   })
   const q = document.getElementById('sc-fd-q')
   if (q) q.addEventListener('input', debounceFields)
+  // 字段点击用事件委托,在这里挂一次。render() 会重建整棵子树,所以不会累积。
+  const fdList = document.getElementById('sc-fd-list')
+  if (fdList) fdList.addEventListener('click', insertField)
 }
 
 // ─── 字段搜索 ─────────────────────────────────────────────────────
@@ -379,16 +382,28 @@ async function searchFields() {
   try { d = await r.json() } catch (e) { list.innerHTML = '<span class="sc-na">返回的不是合法 JSON</span>'; return }
   const fs = (d && d.fields) || []
   if (!fs.length) { list.innerHTML = '<span class="sc-na">没有匹配的字段</span>'; return }
+  // 只写内容,**不在这里挂监听** —— 监听在 bind() 里挂一次。
+  // 2026-09-10 浏览器实测的坑:原来每次搜完都给同一个 DOM 节点再 addEventListener 一次,
+  // 连搜三个关键词之后点一个字段,插进去的是三份(beta_1_yearbeta_1_yearbeta_1_year)。
+  // innerHTML 换掉的是子节点,list 本身没换,监听全留着。
   list.innerHTML = fs.map(function (f) { return '<span data-f="' + esc(f) + '">' + esc(f) + '</span>' }).join('')
-  list.addEventListener('click', function (e) {
-    const s = e.target && e.target.dataset ? e.target.dataset.f : null
-    if (!s) return
-    const ed = document.getElementById('sc-script')
-    if (!ed) return
-    S.script = (S.script || '') + s
-    ed.value = S.script
-    saveDraft()
-  })
+}
+
+function insertField(e) {
+  const s = e.target && e.target.dataset ? e.target.dataset.f : null
+  if (!s) return
+  const ed = document.getElementById('sc-script')
+  if (!ed) return
+  // 插在**光标处**,不是往末尾追加 —— 说明文案写的就是"插进脚本光标处",
+  // 而且末尾通常在 `plot scan = ...;` 之后,追加进去直接把脚本变成语法错误。
+  const v = ed.value || ''
+  let a = ed.selectionStart, b = ed.selectionEnd
+  if (typeof a !== 'number' || typeof b !== 'number') { a = v.length; b = v.length }
+  S.script = v.slice(0, a) + s + v.slice(b)
+  ed.value = S.script
+  const pos = a + s.length
+  try { ed.focus(); ed.setSelectionRange(pos, pos) } catch (err) { /* 老浏览器没有 setSelectionRange */ }
+  saveDraft()
 }
 
 // ─── 跑 ───────────────────────────────────────────────────────────
