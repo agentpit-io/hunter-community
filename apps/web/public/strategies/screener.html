@@ -63,12 +63,18 @@
     .sc-num:focus{outline:2px solid #2E86DE}
     .cd.off .sc-num{background:#9A9A9A}
 
-    .sw{position:relative;width:32px;height:17px;border-radius:9px;background:#D6CFC5;
-      cursor:pointer;flex-shrink:0;border:0;padding:0}
-    .sw.on{background:#3FB27F}
-    .sw i{position:absolute;top:2px;left:2px;width:13px;height:13px;border-radius:50%;
-      background:#fff;transition:left .15s}
-    .sw.on i{left:17px}
+    /* 选择器必须写成 `.cd .acts button.sw` —— 上面那条 `.cd .acts button{background:transparent}`
+       特异性是 (0,2,1),裸 `.sw` 只有 (0,1,0),会被压掉。
+       2026-09-10 实测症状:开关整个透明,只剩白色圆点浮在白底上 = 看不见,
+       而 classList 和点击都正常,所以功能测试全绿也发现不了。 */
+    .cd .acts button.sw{position:relative;width:32px;height:17px;border-radius:9px;
+      background:#D6CFC5;cursor:pointer;flex-shrink:0;border:0;padding:0;margin:0 2px}
+    .cd .acts button.sw:hover{background:#C9C1B6}
+    .cd .acts button.sw.on{background:#3FB27F}
+    .cd .acts button.sw.on:hover{background:#37A071}
+    .cd .acts button.sw i{position:absolute;top:2px;left:2px;width:13px;height:13px;
+      border-radius:50%;background:#fff;transition:left .15s}
+    .cd .acts button.sw.on i{left:17px}
 
     .cd-edit{width:100%;box-sizing:border-box;margin-top:6px;border:1px solid #2E86DE;
       border-radius:7px;padding:8px 10px;font-family:ui-monospace,Menlo,monospace;
