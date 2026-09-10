@@ -16,14 +16,20 @@
    禁止自动化访问。随时可能改字段或封 IP,不能让生产链路依赖它。
 3. **口径与站内数据源不一致。** 见下面 MARKET_CAP_WARN。
 
-## 必须下推的两个过滤 —— 这是正确性前提,不是优化
+## 必须下推的三个过滤 —— 这是正确性前提,不是优化
 
 不加 `type=stock` + `is_primary`,结果里会混进 ETF、优先股份额、权证。
-实测第一次拉美股就拿到 `NASDAQ:GOODM` / `GOOGN`(Alphabet 的可转换优先股
+实测第一次拉美股就拿到 `NASDAQ:GOOGM` / `GOOGN`(Alphabet 的可转换优先股
 存托份额):**市值字段直接继承母公司的 4.12 万亿,PE 却是 2.38**。
 按市值排序时它们会插在 GOOG 前面。
 
 加上过滤后字段填充率也跟着好转(A 股实测:市值 70%→100%,ROE 68%→97%)。
+
+**但前两条挡不住普通优先股。** `NYSE:NEE/PW` 这类 type=stock、is_primary=True
+全都满足,只有 `typespecs=["preferred"]` 能把它和普通股的 `["common"]` 区分开。
+所以第三条 `typespecs has common` 同样是必须的 —— 少了它,2026-09-10 一次
+真实扫描的前两名就是两只市值和 PE 全为 null 的优先股。
+实测影响:美股 7486 → 7405(剔 81 只),A 股 / 港股本来就没有,不受影响。
 
 ## 时效与口径 —— 每次返回都要带上,不能只写在文档里
 
@@ -102,6 +108,12 @@ MARKET_ORDER = ["a", "hk", "us"]
 BASE_FILTER = [
     {"left": "type", "operation": "equal", "right": "stock"},
     {"left": "is_primary", "operation": "equal", "right": True},
+    # typespecs 这条不能省。`type=stock` + `is_primary=True` **挡不住优先股** ——
+    # 2026-09-10 一次真实扫描的结果里出现了 NYSE:NEE/PW 和 OAK/PA,
+    # 实测它们 type=stock、is_primary=True,只有 typespecs=["preferred"] 能区分
+    # (普通股是 ["common"])。它们的市值/PE 全是 null,混在选股结果里毫无意义。
+    # 实测影响:美股 7486 → 7405(剔 81 只),A 股和港股本来就没有,不受影响。
+    {"left": "typespecs", "operation": "has", "right": ["common"]},
 ]
 
 # 永远带回来的列(不管脚本用不用)。currency 是给跨市场比较兜底的,
