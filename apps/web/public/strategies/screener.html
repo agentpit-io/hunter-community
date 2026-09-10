@@ -40,7 +40,6 @@
       border-bottom:1px solid transparent}
     .cd:hover{background:#FBFAF8}
     .cd.off{opacity:.42}
-    .cd.var{opacity:.75}
     .cd .nm{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--soft,#B9AFA2);
       min-width:112px;flex-shrink:0}
     /* body 不占 flex:1、acts 不用 margin-left:auto —— 按钮**紧跟条件内容**,
@@ -231,6 +230,39 @@ function buildScript(allEnabled) {
   return lines.join('\n')
 }
 
+// 某个名字有没有被别的条件引用
+function referenced(name, exceptIdx) {
+  const re = new RegExp('\\b' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b')
+  return S.conditions.some(function (o, j) {
+    return j !== exceptIdx && re.test(o.expr || '')
+  })
+}
+
+// 清掉没人引用的中间变量。
+//
+// 变量在界面上不显示,所以一旦没人引用就成了**看不见又删不掉**的死代码:
+// 它还会白白多请求一列 TradingView 字段。删条件/改表达式之后必须跑一次。
+// 循环到不动为止 —— 变量可以引用变量(def a = …; def b = a * 2;),
+// 删掉 b 之后 a 才变成孤儿。
+//
+// 只在**我们自己造成孤儿**的时候跑(删除/编辑/改数字)。用户刚粘进来的脚本
+// 不动 —— 那是他的原文,里面有个没用到的变量也是他的事,静默改掉会让
+// 「复制脚本」copy 出来的东西和他粘进去的对不上。
+function pruneVars() {
+  let changed = true
+  while (changed) {
+    changed = false
+    for (let i = S.conditions.length - 1; i >= 0; i--) {
+      const c = S.conditions[i]
+      if (c.is_bool) continue
+      if (!referenced(c.name, i)) { S.conditions.splice(i, 1); changed = true }
+    }
+  }
+}
+
+// 结构变了 → 清孤儿 → 回写脚本 → 重新解析(拿到最新 tokens)
+function rebuild() { pruneVars(); return reparse(buildScript()) }
+
 // ═══ 魔法筛选(生成区) ═══════════════════════════════════════════
 function vMagic() {
   const presets = (S.meta && S.meta.presets) || []
@@ -284,27 +316,33 @@ function vTok(t, ci, ti) {
 }
 
 function vCond(c, i) {
-  const isVar = !c.is_bool
-  const off = c.is_bool && !c.enabled
+  // 中间变量(def sma50 = Average(close,50))**不渲染**。
+  //
+  // 它不是条件,是实现细节:引用它的条件已经把它的标签内联显示了
+  // (cond_sma20_50 渲染成「20日均线 大于 50日均线」,而不是「sma20 大于 sma50」),
+  // 所以单独占一行只是噪音 —— 一份 7 条件的脚本会多出 5 行看不懂的东西。
+  // chartink 也是这么处理的:它把指标直接写进条件行,没有变量的概念。
+  //
+  // 变量仍然留在脚本里(buildScript 照写),只是界面上不出现。
+  // 配套的是 pruneVars():条件被删/改之后没人引用的变量自动清掉 ——
+  // 否则会留下**看不见又删不掉**的死代码。
+  if (!c.is_bool) return ''
+  const off = !c.enabled
   const body = (c.tokens || []).map(function (t, ti) { return vTok(t, i, ti) }).join(' ')
-  // 中间变量(def sma50 = Average(close,50))不是条件,不能单独停用 ——
-  // 停掉它,引用它的条件会直接报"不认识 sma50"。所以只给删除,不给开关。
-  const sw = isVar
-    ? '<span class="sc-na" style="font-size:11px;padding:0 6px">变量</span>'
-    : '<button class="sw ' + (c.enabled ? 'on' : '') + '" data-act="toggle" data-i="' + i +
+  const sw = '<button class="sw ' + (c.enabled ? 'on' : '') + '" data-act="toggle" data-i="' + i +
       '" title="' + (c.enabled ? '停用这条(保留原文)' : '启用这条') + '"><i></i></button>'
   const probe = S.probe[c.name]
   const probeTxt = probe === undefined ? '' :
     (probe === null ? '<span class="sc-na" style="font-size:11px">单独测试失败</span>'
       : '<span style="font-size:11px;color:var(--brand-dark)">单独命中 ' + probe + '</span>')
-  return '<div class="cd' + (off ? ' off' : '') + (isVar ? ' var' : '') + '">' +
+  return '<div class="cd' + (off ? ' off' : '') + '">' +
     '<span class="nm">' + esc(c.name) + '</span>' +
     '<span class="body">' + body + ' ' + probeTxt + '</span>' +
     '<span class="acts">' +
       '<button data-act="edit" data-i="' + i + '" title="编辑原文">✎</button>' +
       '<button data-act="dup" data-i="' + i + '" title="复制一条">⧉</button>' +
       '<button data-act="copy" data-i="' + i + '" title="复制脚本文本">⎘</button>' +
-      (isVar ? '' : '<button data-act="probe" data-i="' + i + '" title="只用这一条扫一次">🐞</button>') +
+      '<button data-act="probe" data-i="' + i + '" title="只用这一条扫一次">🐞</button>' +
       sw +
       '<button class="del" data-act="del" data-i="' + i + '" title="删除">✕</button>' +
     '</span>' +
@@ -553,19 +591,19 @@ function onCondAction(e) {
     c.enabled = !c.enabled; S.probe = {}; saveDraft(); render(); return
   }
   if (act === 'del') {
-    // 被别人引用的变量不能删 —— 删了引用方会直接报"不认识 xxx"
-    const used = S.conditions.some(function (o, j) {
-      return j !== i && new RegExp('\\b' + c.name + '\\b').test(o.expr || '')
-    })
-    if (used) { toast('「' + c.name + '」被别的条件引用着,先改那一条', 'warn'); return }
+    // 被别人引用的不能删 —— 删了引用方会直接报"不认识 xxx"。
+    // (变量现在不渲染、点不到这里;留着是因为条件之间也可以互相引用。)
+    if (referenced(c.name, i)) {
+      toast('「' + c.name + '」被别的条件引用着,先改那一条', 'warn'); return
+    }
     S.conditions.splice(i, 1); S.probe = {}
-    reparse(buildScript()); return
+    rebuild(); return
   }
   if (act === 'edit') { S.editing = (S.editing === c.name ? null : c.name); render(); return }
   if (act === 'dup') {
     const copy = { name: uniqName(c.name), expr: c.expr, is_bool: c.is_bool, enabled: c.enabled }
     S.conditions.splice(i + 1, 0, copy)
-    reparse(buildScript()); return
+    rebuild(); return
   }
   if (act === 'copy') { copyText('def ' + c.name + ' = ' + c.expr + ';', '这一条'); return }
   if (act === 'probe') { probeOne(c); return }
@@ -592,7 +630,7 @@ function onNumChange(e) {
   const v = (el.value || '').trim()
   if (!/^-?\d+(\.\d+)?$/.test(v)) { toast('要填一个数字', 'warn'); render(); return }
   c.expr = c.expr.slice(0, tok.s) + v + c.expr.slice(tok.e)
-  reparse(buildScript())
+  rebuild()
 }
 
 function commitEdit(text) {
@@ -600,7 +638,8 @@ function commitEdit(text) {
   if (!c) { S.editing = null; render(); return }
   c.expr = (text || '').trim().replace(/;+$/, '')
   S.editing = null
-  reparse(buildScript())
+  // 改完表达式可能把某个变量的最后一个引用去掉了 → rebuild 里会清孤儿
+  rebuild()
 }
 
 // ─── 与后端往返 ───────────────────────────────────────────────────
