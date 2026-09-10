@@ -91,7 +91,8 @@ RSI()                 14 周期;RSI(N) 的 N 只能取 {', '.join(map(str, rsi))
 2. "100万" = 1000000,"1亿" = 100000000,"5%" 在涨跌幅字段里写 5(不是 0.05)。
 3. 用户说"均线多头排列"指 短期均线 > 中期均线 > 长期均线,常见是 20/50/200。
 4. 用户说"接近52周新高" 用 (price_52_week_high - close) / price_52_week_high <= 阈值。
-5. 看不懂用户在说什么,就输出 {{"script": ""}},不要瞎编。
+5. 看不懂用户在说什么(比如闲聊、和选股无关的话),就只输出一个单词 NONE,
+   不要瞎编条件。
 
 当前市场:{market_label}
 """
@@ -113,6 +114,9 @@ def _extract_script(raw: str) -> str:
     m = re.search(r"```(?:[A-Za-z]*)\s*\n?(.+?)```", s, re.S)
     if m:
         s = m.group(1).strip()
+    # 没闭合的围栏 / 零散反引号 —— 实测出现过,漏掉的话解析器会报
+    # 「看不懂的字符 '`'」,用户完全不知道发生了什么
+    s = s.replace("```", "").replace("`", "").strip()
     # 模型偶尔还是回 JSON —— 认一下,取 script 字段
     if s.startswith("{"):
         try:
@@ -191,6 +195,11 @@ def translate(text: str, market_label: str, sma: list[int], ema: list[int],
             tokens_out += usage.completion_tokens or 0
 
         script = _extract_script(raw)
+        # 模型自己说看不懂 —— 直接告诉用户,不要再让它试第二次编一个出来
+        if script.strip().upper().rstrip(".。") == "NONE":
+            raise ScreenError(
+                "没看懂这段描述想筛什么。换个说法试试,"
+                "比如「成交量大于100万,且收盘价站上50日均线」;或者直接写筛选脚本。")
         if not script:
             last_err = "模型没有产出脚本(可能没看懂这段描述)"
             user = f"{text}\n\n(上一次你没有输出脚本。请直接输出脚本本身,不要任何别的文字)"
