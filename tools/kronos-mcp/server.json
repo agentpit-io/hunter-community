@@ -1,0 +1,42 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.hangeaiagent/kronos-mcp",
+  "title": "Kronos",
+  "description": "Stock price forecasting for A-shares, US and HK equities — K-line time-series model",
+  "repository": {
+    "url": "https://github.com/agentpit-io/hunter-community",
+    "source": "github",
+    "subfolder": "tools/kronos-mcp"
+  },
+  "version": "0.1.1",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "kronos-mcp",
+      "version": "0.1.1",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "KRONOS_API_KEY",
+          "description": "KRONOS-type API key from https://hunter.agentpit.io/dev/api-keys",
+          "isRequired": true,
+          "isSecret": true
+        },
+        {
+          "name": "KRONOS_URL",
+          "description": "Override the upstream endpoint if you self-host",
+          "default": "https://kronos.agentpit.io"
+        },
+        {
+          "name": "KRONOS_TIMEOUT",
+          "description": "Read timeout in seconds. GPU inference takes 30-70s",
+          "default": "180"
+        }
+      ]
+    }
+  ]
+}

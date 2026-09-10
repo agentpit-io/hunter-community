@@ -1,0 +1,42 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.hangeaiagent/truesource-mcp",
+  "title": "TrueSource",
+  "description": "First-hand market signals: filings, procurement wins, R&D expansion, macro data",
+  "repository": {
+    "url": "https://github.com/agentpit-io/hunter-community",
+    "source": "github",
+    "subfolder": "tools/truesource-mcp"
+  },
+  "version": "0.1.1",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "truesource-mcp",
+      "version": "0.1.1",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "HUNTER_API_KEY",
+          "description": "API key from https://hunter.agentpit.io/dev/api-keys",
+          "isRequired": true,
+          "isSecret": true
+        },
+        {
+          "name": "TRUESOURCE_URL",
+          "description": "Override the upstream endpoint if you self-host",
+          "default": "https://hunter.agentpit.io/api/saas/truesource"
+        },
+        {
+          "name": "TRUESOURCE_MAX_ITEMS",
+          "description": "Cap on items per response",
+          "default": "40"
+        }
+      ]
+    }
+  ]
+}

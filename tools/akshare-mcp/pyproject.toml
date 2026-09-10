@@ -1,0 +1,51 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agentpit-akshare-mcp"
+version = "0.1.1"
+description = "MCP server that lets a model explore AKShare's 1000+ China market data functions on its own — search, inspect, call"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "AgentPit", email = "hangeaiagent@gmail.com" }]
+keywords = [
+    "mcp", "model-context-protocol", "akshare", "a-share", "china",
+    "stock", "finance", "macro", "futures", "fund",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+dependencies = [
+    "akshare>=1.14.0",
+    "mcp>=2.0.0",
+]
+
+[project.optional-dependencies]
+# 远程传输(sse / streamable-http)才需要。stdio 用不上,
+# 不装能省掉一串依赖 —— Claude Desktop / Cursor 走的就是 stdio。
+remote = [
+    "uvicorn>=0.30.0",
+    "starlette>=0.37.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/agentpit-io/hunter-community"
+Repository = "https://github.com/agentpit-io/hunter-community"
+Documentation = "https://github.com/agentpit-io/hunter-community/blob/main/tools/akshare-mcp/README.md"
+Issues = "https://github.com/agentpit-io/hunter-community/issues"
+
+[project.scripts]
+akshare-mcp = "akshare_mcp.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["akshare_mcp"]

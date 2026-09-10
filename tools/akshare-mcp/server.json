@@ -1,0 +1,31 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.hangeaiagent/akshare-mcp",
+  "title": "AKShare",
+  "description": "Let a model explore AKShare's 1000+ China market data functions on its own — search, inspect, call",
+  "repository": {
+    "url": "https://github.com/agentpit-io/hunter-community",
+    "source": "github",
+    "subfolder": "tools/akshare-mcp"
+  },
+  "version": "0.1.1",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "agentpit-akshare-mcp",
+      "version": "0.1.1",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "AKSHARE_MAX_ROWS",
+          "description": "Cap on rows per response",
+          "default": "200"
+        }
+      ]
+    }
+  ]
+}

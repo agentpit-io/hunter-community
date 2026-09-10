@@ -18,11 +18,14 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
     && apt-get purge -y gcc g++ && apt-get autoremove -y
 
-COPY server.py .
+COPY akshare_mcp/ ./akshare_mcp/
 
-ENV AKSHARE_MCP_HOST=0.0.0.0 \
+# 镜像里显式设成 sse —— 代码默认是 stdio(给 uvx / Claude Desktop 用),
+# 这里设回来,原来那条 docker run -p 8931:8931 的用法一个字不用改。
+ENV AKSHARE_MCP_TRANSPORT=sse \
+    AKSHARE_MCP_HOST=0.0.0.0 \
     AKSHARE_MCP_PORT=8931 \
     AKSHARE_MAX_ROWS=200
 
 EXPOSE 8931
-CMD ["python", "server.py"]
+CMD ["python", "-m", "akshare_mcp.server"]

@@ -52,9 +52,9 @@ import json
 import os
 
 import akshare as ak
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
-mcp = FastMCP("akshare-mcp")
+mcp = MCPServer("akshare-mcp")
 
 # 单次返回的最大行数。AKShare 有些接口一次几万行,原样塞进模型上下文
 # 会把真正有用的东西挤掉,而且多数问题看前几十行就够了。
@@ -210,10 +210,32 @@ def _to_json(func: str, df) -> str:
     return json.dumps(out, ensure_ascii=False)
 
 
+def main() -> None:
+    """入口 —— PyPI 的 console_scripts 指向这里。
+
+    **默认 stdio**:Claude Desktop / Cursor / uvx 走这个,是 MCP 的默认形态。
+    Docker 镜像里 ENV 把它设成了 sse,所以原来那条
+    `docker run -p 8931:8931` 的用法一个字都不用改。
+
+    host/port 在 mcp 2.x 里是 run() 的关键字参数,不再是 1.x 的 mcp.settings。
+    """
+    transport = (os.getenv("AKSHARE_MCP_TRANSPORT") or "stdio").strip().lower()
+    if transport == "stdio":
+        mcp.run(transport="stdio")
+        return
+
+    # 见文件头的安全提醒 —— **不要把它暴露到公网**,它没有鉴权
+    host = os.getenv("AKSHARE_MCP_HOST", "0.0.0.0")
+    port = int(os.getenv("AKSHARE_MCP_PORT", "8931"))
+    if transport in ("http", "streamable-http"):
+        mcp.run(transport="streamable-http", host=host, port=port)
+    elif transport == "sse":
+        mcp.run(transport="sse", host=host, port=port)
+    else:
+        raise SystemExit(
+            f"未知的 AKSHARE_MCP_TRANSPORT={transport!r} —— "
+            f"只支持 stdio(默认)/ streamable-http / sse")
+
+
 if __name__ == "__main__":
-    # SSE 传输 —— Hunter 的「接入一个工具」目前支持 sse / http 两种远程传输。
-    # 默认绑 0.0.0.0 是为了能从 docker 外面访问;见文件头的安全提醒,
-    # **不要把它暴露到公网**
-    mcp.settings.host = os.getenv("AKSHARE_MCP_HOST", "0.0.0.0")
-    mcp.settings.port = int(os.getenv("AKSHARE_MCP_PORT", "8931"))
-    mcp.run(transport="sse")
+    main()

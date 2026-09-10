@@ -1,5 +1,7 @@
 # AKShare MCP
 
+<!-- mcp-name: io.github.hangeaiagent/akshare-mcp -->
+
 把 AKShare 变成一个**你自己跑的能力**,接进 Hunter。
 
 ---
