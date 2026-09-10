@@ -7,6 +7,12 @@
   <link rel="stylesheet" href="style.css" />
   <style>
     .sc-split{display:grid;grid-template-columns:minmax(360px,.85fr) 1.15fr;gap:14px;align-items:start}
+    /* grid 子项默认 min-width:auto —— 不肯收缩到内容宽度以下。
+       结果是结果面板被那张 nowrap 的宽表撑到 1572px(视口只有 972px),
+       而 .sc-scroll 的 overflow-x:auto **完全失效**(它自己 scrollWidth==clientWidth,
+       根本没得滚),横向滚的是整个面板,警告块跟着一起左移出屏。
+       2026-09-10 开浏览器点出来的,CSS 上加 min-width:0 才让内层真正接管滚动。 */
+    .sc-split>*{min-width:0}
     @media(max-width:1080px){.sc-split{grid-template-columns:1fr}}
 
     .sc-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
