@@ -129,6 +129,24 @@ PB 全部 ≤6%),但**市值差得多**:中芯国际 -37%、比亚迪 -8%、格�
   并在 warnings 里说明。把 None 当 0 或当 False 会让 `close > 20` 把所有没报价的票判成
   "不满足",结果看起来完整、实际漏了几百只。
 
+## 部署坑:`apps/web/public/**` **新增**文件要 `restart web`,改动文件不用
+
+`docker-compose.yml` 里 web 有 `- ./apps/web/public:/app/public:ro`,所以
+public 下的静态文件是 bind mount 进去的 —— **改**已有文件(agent.html、app.js)
+`git pull` 完立刻生效,不用 build、不用重启。
+
+但**新增**文件不行。2026-09-10 加 `strategies/screener.html` 时实测:
+`git pull` 后 `docker compose exec web ls` 在容器里**看得到这个文件**(22943 字节),
+`curl` 却是 **404** —— 同一时刻 agent.html 的改动已经生效了。
+Next.js 的 `next start` 在**启动时**扫一次 public 目录建静态路由表,之后不再重扫。
+
+所以:
+- 只改现有文件 → 什么都不用做。
+- 新增文件 → `docker compose restart web` 就够(**不需要 build**,省几分钟)。
+- `restart` 不换容器,不触发 Recreate,对 web 这种无状态服务没有风险。
+
+排查提示:「文件明明在容器里却 404」这个组合,先想启动期缓存,不要去怀疑挂载或 nginx。
+
 ## 铁律:db/migrations 里的 .sql **对已有部署不生效**
 
 `docker-compose.yml` 把 `./db/migrations` 挂到 postgres 的
