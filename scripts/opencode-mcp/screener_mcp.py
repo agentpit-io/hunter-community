@@ -96,7 +96,8 @@ async def list_tools():
                 "  · 『美股里 PE 小于 15 且 RSI 小于 30 的有哪些』\n"
                 "  · 用户直接贴一段 thinkScript / Stock Hacker 脚本让你跑\n"
                 "\n"
-                "覆盖:美股 7487 · A股 5237 · 港股 2396 · 另有日/韩/印/英股。\n"
+                "覆盖:A股 5237 · 港股 2396 · 美股 7487(只开这三个市场,\n"
+                "站内的代码归一化与下游能力也只支持它们)。\n"
                 "已自动过滤 ETF、优先股份额、权证,只留普通股主上市。\n"
                 "\n"
                 + _SYNTAX +
@@ -130,9 +131,9 @@ async def list_tools():
                     },
                     "market": {
                         "type": "string",
-                        "enum": ["us", "hk", "a", "jp", "kr", "in", "uk"],
+                        "enum": ["a", "hk", "us"],
                         "default": "us",
-                        "description": "us=美股 hk=港股 a=A股 jp=日本 kr=韩国 in=印度 uk=英国",
+                        "description": "a=A股 hk=港股 us=美股",
                     },
                     "limit": {
                         "type": "integer",

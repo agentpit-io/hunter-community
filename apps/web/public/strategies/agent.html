@@ -702,8 +702,9 @@ function vLessons(d) {
 }
 
 // ═══ 扫描筛选入口 ═════════════════════════════════════════════════
-// 放在「持仓与候选」之后 —— 候选池那块回答"我在看哪些票",
-// 紧接着的自然问题是"这些候选是从哪来的、我能不能自己找一批"。
+// 位置:净值曲线之后、当前生效的规则之前(用户 2026-09-10 指定)。
+// 叙事上讲得通 —— 看完"这套策略跑成什么样",下一步要么是改规则,
+// 要么是换一批票,扫描筛选就是后一条路的入口,摆在规则前面并列给出。
 //
 // 只做**入口**,不在这一页嵌编辑器:脚本编辑 + 结果表需要的版面
 // 跟这一页的叙事节奏冲突(这一页是"看智能体在干什么",是只读的)。
@@ -725,7 +726,7 @@ function vScreener() {
     '<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">' +
       '<div style="flex:1;min-width:260px;font-size:12.5px;line-height:1.75;color:var(--muted)">' +
         '用 thinkScript 风格的脚本从<b style="color:var(--text)">整个市场</b>里筛票 —— ' +
-        '美股 7487 · A股 5237 · 港股 2396,秒级出结果。' +
+        'A股 5237 · 港股 2396 · 美股 7487,秒级出结果。' +
         '写法例:<code style="background:var(--bg,#FAF7F3);border-radius:4px;padding:1px 5px;' +
         'font-family:ui-monospace,menlo,monospace;font-size:11.5px">plot scan = close > Average(close, 50);</code>' +
       '</div>' +
@@ -743,8 +744,8 @@ function vScreener() {
 }
 
 // ═══ 组装 · 顺序即产品叙事 ════════════════════════════════════════
-// 它是谁 → 按什么做 → 今天跑了吗 → 成绩 → 曲线 → 规则 →
-// 持仓与候选 → 从哪找候选 → 今天做了什么 → 怎么演进过来的 → 学到了什么
+// 它是谁 → 按什么做 → 今天跑了吗 → 成绩 → 曲线 → 从哪找候选 → 规则 →
+// 持仓与候选 → 今天做了什么 → 怎么演进过来的 → 学到了什么
 function vBanner(n) {
   if (!n) return ''
   return '<div class="ag-banner ' + n.kind + '"><span class="hi ' + (n.icon || 'hi-lightbulb') + '"></span>' +
@@ -754,9 +755,9 @@ function vBanner(n) {
 function render(d, notice) {
   // 返回 html 而不只是写进 container:render_check.js 靠这个返回值断言区块顺序
   const html = '<div class="ag-wrap">' + vBanner(notice) +
-    vStatus(d) + vStrategy(d) + vGuard(d) + vPipeline(d) + vKpi(d) + vNav(d) + vRules(d) +
+    vStatus(d) + vStrategy(d) + vGuard(d) + vPipeline(d) + vKpi(d) + vNav(d) +
+    vScreener() + vRules(d) +
     '<div class="ag-two">' + vHoldings(d) + vWatch(d) + '</div>' +
-    vScreener() +
     vTrades(d) + vVersions(d) + vLessons(d) +
     '<div class="ag-note" style="text-align:center;padding:6px 0 0">' +
     '涨跌配色沿用站内中式惯例(<span style="color:var(--up);font-weight:650">红涨</span> · ' +

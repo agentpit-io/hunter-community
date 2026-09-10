@@ -80,19 +80,23 @@ class MarketDef:
         self.key, self.tv, self.label, self.currency, self.note = key, tv, label, currency, note
 
 
+# 只开 A 股 / 港股 / 美股(2026-09-10 用户指定)。
+#
+# TradingView 那边日/韩/印/英股同样能扫(实测都是 200,覆盖 4386 / 4302 / 8659 / 9447 只),
+# 但站内没有任何配套能力去接:代码归一化(market_source.market_of)只认
+# A/港/美三种形态,自选、K线、财报、深度分析全都不支持别的市场。
+# 扫得出来却什么也做不了,只会让人以为站内支持这些市场。
+# 真要开的时候,先补 market_of 与下游链路,再往这里加。
 MARKETS: dict[str, MarketDef] = {
-    "us": MarketDef("us", "america", "美股", "USD"),
-    "hk": MarketDef("hk", "hongkong", "港股", "HKD"),
     "a":  MarketDef("a", "china", "A股", "CNY",
                     "站内 A 股已有腾讯 / AKShare 直连通道,数据更贴国内口径。"
                     "这里主要用于快速初筛,不要用它替代站内数据。"),
-    "jp": MarketDef("jp", "japan", "日本股", "JPY"),
-    "kr": MarketDef("kr", "korea", "韩国股", "KRW"),
-    "in": MarketDef("in", "india", "印度股", "INR"),
-    "uk": MarketDef("uk", "uk", "英国股", "GBP"),
+    "hk": MarketDef("hk", "hongkong", "港股", "HKD"),
+    "us": MarketDef("us", "america", "美股", "USD"),
 }
 
-MARKET_ORDER = ["us", "hk", "a", "jp", "kr", "in", "uk"]
+# 顺序与 source_catalog.MARKET_ORDER 一致(A 股在最前)
+MARKET_ORDER = ["a", "hk", "us"]
 
 # 永远下推的过滤 —— 见模块 docstring
 BASE_FILTER = [
