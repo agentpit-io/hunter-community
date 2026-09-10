@@ -15,9 +15,13 @@
     .mg-seg button{border:0;background:transparent;border-radius:6px;padding:6px 15px;cursor:pointer;
       font-size:13px;font-family:inherit;color:var(--muted)}
     .mg-seg button.on{background:#EDE4F7;color:#7B3FA8;font-weight:700}
-    .mg-ta{flex:1;min-width:240px;box-sizing:border-box;min-height:44px;max-height:210px;resize:vertical;
-      border:1px solid #DCEBFA;border-radius:8px;padding:11px 12px;background:#fff;color:var(--text);
-      font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.6}
+    /* 生成框**不能**只写 flex:1 —— 宽屏上它会一直撑到屏幕边,
+       把「生成」按钮甩到几百像素外,视线要横跨整屏才能从输入框走到按钮。
+       给一个 max-width 收住,按钮就紧跟在它后面(2026-09-10 用户指出)。 */
+    .mg-ta{flex:1 1 380px;min-width:240px;max-width:560px;box-sizing:border-box;
+      min-height:40px;max-height:200px;resize:vertical;
+      border:1px solid #DCEBFA;border-radius:8px;padding:9px 12px;background:#fff;color:var(--text);
+      font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.55}
     .mg-ta:focus{outline:none;border-color:#2E86DE}
     .mg-gen{border:0;background:#2E86DE;color:#fff;border-radius:8px;padding:0 22px;cursor:pointer;
       font-size:14px;font-weight:600;font-family:inherit;white-space:nowrap;display:flex;
@@ -82,10 +86,15 @@
       border-radius:50%;background:#fff;transition:left .15s}
     .cd .acts button.sw.on i{left:17px}
 
-    .cd-edit{width:100%;box-sizing:border-box;margin-top:6px;border:1px solid #2E86DE;
-      border-radius:7px;padding:8px 10px;font-family:ui-monospace,Menlo,monospace;
-      font-size:12.5px;color:var(--text);background:#fff;min-height:56px;resize:vertical}
+    /* editbox 占满一行(靠 .cd 的 flex-wrap 换行),里面的输入框只占三分之一宽 ——
+       改的是一句短表达式,给一整屏宽度反而看不出光标在哪 */
+    .cd-editbox{width:100%;margin-top:8px}
+    .cd-edit{width:33%;min-width:300px;max-width:560px;box-sizing:border-box;
+      border:1px solid #2E86DE;border-radius:7px;padding:8px 10px;
+      font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:var(--text);
+      background:#fff;min-height:52px;resize:vertical;display:block}
     .cd-edit:focus{outline:none}
+    .cd-editbar{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:7px}
 
     /* ── 通用 ──────────────────────────────────────────── */
     .sc-err{background:#FDECEC;border:1px solid #F3C9C9;color:#9B2C2C;border-radius:8px;
@@ -131,6 +140,9 @@
     .sc-fl span:hover{background:#FDF3E7;color:#A85F17}
 
     .sc-runbar{display:flex;flex-wrap:wrap;gap:9px;align-items:center;margin-top:14px}
+    /* 左右留边 —— 与 agent.html 的 .ag-wrap 同一套(padding:0 20px 40px)。
+       原来一条都没写,条件行的文字直接贴在窗口左边缘上。 */
+    .sc-wrap{padding:0 20px 40px;display:flex;flex-direction:column;gap:12px}
     /* grid 子项默认 min-width:auto,不加这行结果面板会被宽表撑破,
        内层 .sc-scroll 的 overflow-x 会完全失效(2026-09-10 实测) */
     .sc-wrap>*{min-width:0}
@@ -347,9 +359,15 @@ function vCond(c, i) {
       '<button class="del" data-act="del" data-i="' + i + '" title="删除">✕</button>' +
     '</span>' +
     (S.editing === c.name
-      ? '<textarea class="cd-edit" id="cd-edit" spellcheck="false">' + esc(c.expr) + '</textarea>' +
-        '<div class="sc-note" style="width:100%">改完按 Ctrl/Cmd + Enter 生效,Esc 取消。' +
-        '这里写的是原始表达式(分号不用写)。</div>'
+      ? '<div class="cd-editbox">' +
+          '<textarea class="cd-edit" id="cd-edit" spellcheck="false">' + esc(c.expr) + '</textarea>' +
+          '<div class="cd-editbar">' +
+            '<button class="btn small" id="cd-save">保存</button>' +
+            '<button class="btn small" id="cd-cancel">取消</button>' +
+            '<span class="sc-note" style="margin:0">写原始表达式,分号不用写 · ' +
+            'Ctrl/Cmd + Enter 保存 · Esc 取消</span>' +
+          '</div>' +
+        '</div>'
       : '') +
     '</div>'
 }
@@ -539,6 +557,15 @@ function bind() {
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); commitEdit(edt.value) }
     if (e.key === 'Escape') { S.editing = null; render() }
   })
+  // 快捷键之外必须有按钮 —— 只写「Ctrl+Enter 生效」等于把保存藏起来,
+  // 用户改完看不到任何可点的东西,会以为编辑功能是坏的(2026-09-10 用户指出)
+  const save = document.getElementById('cd-save')
+  if (save) save.addEventListener('click', function () {
+    const t = document.getElementById('cd-edit')
+    if (t) commitEdit(t.value)
+  })
+  const cancel = document.getElementById('cd-cancel')
+  if (cancel) cancel.addEventListener('click', function () { S.editing = null; render() })
 
   const copyAll = document.getElementById('cd-copyall')
   if (copyAll) copyAll.addEventListener('click', function () { copyText(buildScript(), '脚本') })
