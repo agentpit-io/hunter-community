@@ -62,9 +62,11 @@ def _system_prompt(market_label: str, sma: list[int], ema: list[int],
                    rsi: list[int]) -> str:
     return f"""你是一个选股筛选脚本的翻译器。把用户的中文/英文描述翻译成筛选脚本。
 
-# 输出格式
-**只输出脚本本身**,一行一句。
-不要 JSON,不要 markdown 代码块,不要解释,不要任何脚本以外的文字。
+# 输出格式(最重要的一条)
+**你的回答的第一个字符必须是 `d`(def)或 `p`(plot)。**
+不要前言,不要"好的我明白了",不要复述规则,不要解释你的思路,
+不要 JSON,不要 markdown 代码块。整个回答就是脚本本身,一行一句。
+翻译不了的时候,整个回答就是四个字母:NONE
 
 # 脚本语法
 每句 `def 名字 = 表达式;`,最后一句必须是 `plot scan = 条件A and 条件B;`。
@@ -128,11 +130,21 @@ def _extract_script(raw: str) -> str:
             m2 = re.search(r'"script"\s*:\s*"(.*)"\s*\}?\s*$', s, re.S)
             if m2:
                 return m2.group(1).replace("\\n", "\n").replace('\\"', '"').strip()
-    # 前面可能有一两句寒暄,从第一个 def/plot 开始截
+    # 从第一个 def/plot 开始截 —— 模型很爱先写一段推理再给答案,实测:
+    #   ", I understand the instructions. I will translate ... \n\nOutput:\nNONE"
+    # 这段前言必须扔掉。
     m3 = re.search(r"(^|\n)\s*(def|plot)\s+[A-Za-z_]", s)
     if m3:
-        s = s[m3.start():].strip()
-    return s
+        return s[m3.start():].strip()
+
+    # 没有 def/plot 了。模型说它看不懂时会以 NONE 结尾(前面照样有一段推理)
+    if re.search(r"(^|[\s:：\n])NONE[.。\s]*$", s, re.I):
+        return "NONE"
+
+    # **返回空,不要把这段推理当脚本。**
+    # 早先这里 `return s`,于是整段英文推理被喂给解析器,用户看到的是
+    # 「第 1 行:看不懂的字符 "'"」—— 完全指不到真正的原因(2026-09-10 实测)。
+    return ""
 
 
 def looks_like_script(text: str) -> bool:
@@ -201,8 +213,10 @@ def translate(text: str, market_label: str, sma: list[int], ema: list[int],
                 "没看懂这段描述想筛什么。换个说法试试,"
                 "比如「成交量大于100万,且收盘价站上50日均线」;或者直接写筛选脚本。")
         if not script:
-            last_err = "模型没有产出脚本(可能没看懂这段描述)"
-            user = f"{text}\n\n(上一次你没有输出脚本。请直接输出脚本本身,不要任何别的文字)"
+            last_err = "模型没有产出脚本"
+            user = (f"{text}\n\n(上一次你没有输出脚本,而是输出了别的文字。"
+                    f"请直接以 def 开头输出脚本,不要任何前言和解释。"
+                    f"实在翻译不了就只回 NONE)")
             continue
 
         try:
@@ -224,6 +238,6 @@ def translate(text: str, market_label: str, sma: list[int], ema: list[int],
 
     # 两轮都不行 —— 把模型最后一次的错误如实说出来,不返回半成品脚本
     raise ScreenError(
-        f"没能把这段描述转成筛选条件。模型产出的脚本有问题:{last_err}\n"
-        f"可以把描述写得更具体(比如「成交量大于100万,且收盘价站上50日均线」),"
-        f"或者直接写脚本。")
+        f"没能把这段描述转成筛选条件({last_err})。\n"
+        f"把描述写得更具体些通常就好了,比如「成交量大于100万,且收盘价站上50日均线」;"
+        f"也可以直接写筛选脚本(点「语法速查」看写法)。")
