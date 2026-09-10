@@ -43,8 +43,15 @@
     .cd.var{opacity:.75}
     .cd .nm{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--soft,#B9AFA2);
       min-width:112px;flex-shrink:0}
-    .cd .body{display:flex;align-items:center;flex-wrap:wrap;gap:6px;flex:1;min-width:200px}
-    .cd .acts{display:flex;align-items:center;gap:3px;margin-left:auto;flex-shrink:0}
+    /* body 不占 flex:1、acts 不用 margin-left:auto —— 按钮**紧跟条件内容**,
+       条件写得长按钮就自然往右挪。
+       原来是 `flex:1` + `margin-left:auto` 把按钮钉在最右边,条件短的时候
+       中间空出一大片,眼睛要横扫整屏才能从"这条是什么"找到"这条的按钮",
+       条件越短越难对上(2026-09-10 用户指出)。 */
+    .cd .body{display:flex;align-items:center;flex-wrap:wrap;gap:6px;min-width:0}
+    /* 不做 hover 才显形 —— 仓内铁律「入口不许藏在 hover 里」,
+       而且开关的绿色本身就是"这条启不启用"的状态指示,淡化了就看不清。 */
+    .cd .acts{display:flex;align-items:center;gap:3px;flex-shrink:0;margin-left:12px}
     .cd .acts button{border:0;background:transparent;cursor:pointer;padding:3px 5px;border-radius:5px;
       font-size:13px;line-height:1;color:var(--soft,#B9AFA2)}
     .cd .acts button:hover{background:#F0EBE4;color:var(--text)}
