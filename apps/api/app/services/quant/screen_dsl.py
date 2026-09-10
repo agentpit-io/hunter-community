@@ -920,7 +920,7 @@ _MOR_HEAD = {
     "employees": "员工数", "sales": "销售额", "inventory": "存货",
     "receivables": "应收款", "payables": "应付款", "capex": "资本开支",
     "buyback": "回购", "float": "流通股", "beta": "贝塔",
-    "volatility": "波动率", "turnover": "换手率", "growth": "增长",
+    "volatility": "波动率", "turnover": "换手率",
     "ratio": "比率", "value": "价值", "rating": "评级", "target": "目标价",
     "gap": "跳空", "range": "区间", "performance": "涨幅", "perf": "涨幅",
 }
@@ -930,6 +930,9 @@ _MOR_SUF = {
     "ttm": "TTM", "fq": "最近季", "fy": "最近年", "fh": "最近半年",
     "yoy": "同比", "qoq": "环比", "abs": "绝对值", "percent": "百分比",
     "pct": "百分比", "usd": "美元",
+    # growth 总是附着在别的科目上(净利润**同比增长**),当头词会让
+    # heads 变成 2 个而整体放弃 —— 它是后缀不是核心概念
+    "growth": "增长",
 }
 
 # 纯噪音,翻译时直接跳过(不影响"是否全部认识"的判定)
@@ -946,7 +949,12 @@ def field_label_cn(name: str) -> str | None:
     exact = field_label(name)
     if exact != name:            # 精选表 / 技术指标模式已经认得
         return exact
-    if not re.fullmatch(r"[A-Za-z0-9_.]+", name):
+    if name in _TECH_LABEL:      # 技术指标是专有名词,不参与拼装
+        return _TECH_LABEL[name]
+    cand = _candle_label(name)
+    if cand:
+        return cand
+    if not re.fullmatch(r"[A-Za-z0-9_.+\-]+", name):
         return None
 
     mods: list[str] = []
@@ -954,6 +962,21 @@ def field_label_cn(name: str) -> str | None:
     heads: list[str] = []
     sufs: list[str] = []
     toks = [t for t in re.split(r"[_.]", name.lower()) if t]
+
+    # 多词词干优先(取最长)。金融术语大多是固定搭配,
+    # return_on_equity 逐词素拼是「回报权益」,整体才是「净资产收益率」。
+    stem_at = stem_len = -1
+    stem_cn = ""
+    for i in range(len(toks)):
+        for j in range(len(toks), i, -1):
+            key = "_".join(toks[i:j])
+            if key in _MOR_STEM and (j - i) > stem_len:
+                stem_at, stem_len, stem_cn = i, j - i, _MOR_STEM[key]
+                break
+    if stem_at >= 0:
+        heads.append(stem_cn)
+        toks = toks[:stem_at] + toks[stem_at + stem_len:]
+
     for idx, tok in enumerate(toks):
         # `current` 位置不同意思不同,不能一概而论:
         #   total_current_liabilities → 流动负债(会计科目)
@@ -992,6 +1015,165 @@ def field_label_cn(name: str) -> str | None:
     _OUTER = ("每股", "人均")
     mods.sort(key=lambda w: 0 if w in _OUTER else 1)
     core = "".join(periods) + "".join(mods) + "".join(heads)
+    # 同比 + 增长 合成一个词 —— 拆开写成「(同比·增长)」不像中文
+    if "同比" in sufs and "增长" in sufs:
+        sufs = ["同比增长"] + [x for x in sufs if x not in ("同比", "增长")]
+    elif "环比" in sufs and "增长" in sufs:
+        sufs = ["环比增长"] + [x for x in sufs if x not in ("环比", "增长")]
     if sufs:
         core += "(" + "·".join(sufs) + ")"
     return core
+
+
+# ── 多词词干 ───────────────────────────────────────────────────
+#
+# 金融术语大多是固定搭配,逐词素拼必错(free + cash + flow 拼出「自由现金流量」,
+# return + on + equity 拼出「回报权益」)。这里把它们**整体**给译名,
+# 剩下的修饰/周期/后缀照旧由拼装逻辑处理 —— 于是
+#   free_cash_flow_per_share_fq → 每股 + 自由现金流 + (最近季)
+# 不用为每个周期变体单独列一条。
+#
+# 键是下划线连接的 token 序列,匹配时**取最长**。
+_MOR_STEM = {
+    # 利润表
+    "total_revenue": "营业总收入", "net_revenue": "营业收入净额",
+    "gross_profit": "毛利润", "oper_income": "营业利润",
+    "net_income": "净利润", "cost_of_goods": "营业成本",
+    "sell_gen_admin_exp_total": "销售管理费用",
+    "research_and_dev": "研发支出", "income_from_cont_ops": "持续经营利润",
+    "net_revenue_after_provision": "拨备后营业收入",
+    "pre_tax_income": "税前利润", "after_tax_income": "税后利润",
+    # 现金流
+    "free_cash_flow": "自由现金流", "operating_cash_flow": "经营现金流",
+    "cash_f_operating_activities": "经营活动现金流",
+    "cash_f_investing_activities": "投资活动现金流",
+    "cash_f_financing_activities": "筹资活动现金流",
+    "capital_expenditures": "资本开支",
+    "total_cash_dividends_paid": "现金分红总额",
+    # 资产负债表
+    "total_assets": "总资产", "total_debt": "总负债",
+    "total_liabilities": "负债合计", "total_equity": "股东权益",
+    "long_term_debt": "长期负债", "net_debt": "净负债",
+    "total_current_assets": "流动资产合计",
+    "total_current_liabilities": "流动负债合计",
+    "cash_n_equivalents": "现金及等价物",
+    "cash_n_short_term_invest": "现金及短期投资",
+    "working_capital": "营运资金", "book_value_per_share": "每股净资产",
+    "book_tangible_per_share": "每股有形净资产",
+    # 比率
+    "quick_ratio": "速动比率", "current_ratio": "流动比率",
+    "debt_to_equity": "产权比率", "debt_to_asset": "资产负债率",
+    "debt_to_revenue": "负债收入比",
+    "long_term_debt_to_assets": "长期负债资产比",
+    "return_on_equity": "净资产收益率", "return_on_assets": "总资产收益率",
+    "return_on_invested_capital": "投入资本回报率",
+    "return_on_capital_employed": "已动用资本回报率",
+    "return_on_common_equity": "普通股权益回报率",
+    "return_on_tang_equity": "有形权益回报率",
+    "return_on_tang_assets": "有形资产回报率",
+    "return_on_total_capital": "总资本回报率",
+    "asset_turnover": "总资产周转率", "fixed_assets_turnover": "固定资产周转率",
+    "invent_turnover": "存货周转率", "receivables_turnover": "应收账款周转率",
+    "interst_cover": "利息保障倍数",
+    "ebitda_interst_cover": "EBITDA利息保障倍数",
+    "ebitda_less_capex_interst_cover": "EBITDA减资本开支利息保障倍数",
+    "net_debt_to_ebitda": "净负债/EBITDA",
+    "effective_interest_rate_on_debt": "债务实际利率",
+    "research_and_dev_ratio": "研发费用率",
+    "dividend_payout_ratio": "股息支付率",
+    "cash_dividend_coverage_ratio": "现金股息保障倍数",
+    "ebitda_margin": "EBITDA利润率", "free_cash_flow_margin": "自由现金流利润率",
+    # 每股 / 股本 / 股东
+    "earnings_per_share_diluted": "稀释每股收益",
+    "earnings_per_share_basic": "基本每股收益",
+    "eps_diluted_growth_percent": "稀释每股收益增长率",
+    "dps_common_stock_prim_issue": "普通股每股股息",
+    "number_of_shareholders": "股东户数", "number_of_employees": "员工人数",
+    "dividends_yield": "股息率",
+    # 估值 / 评分
+    "price_sales": "市销率", "altman_z_score": "Altman Z 值",
+    "piotroski_f_score": "Piotroski F 值", "graham_numbers": "格雷厄姆数",
+    "ncavps_ratio": "净流动资产每股比",
+    # 预测
+    "earnings_per_share_forecast": "每股收益预测", "revenue_forecast": "营收预测",
+}
+
+# 技术指标 —— 这些是专有名词,不参与拼装,逐条给名
+_TECH_LABEL = {
+    "ADX": "ADX 趋向指标", "ADX+DI": "ADX +DI", "ADX-DI": "ADX -DI",
+    "ADR": "平均日波幅ADR", "ADRP": "平均日波幅%",
+    "ATR": "真实波幅ATR", "ATRP": "真实波幅%",
+    "AO": "动量震荡AO", "BBPower": "牛熊力量",
+    "CCI20": "CCI(20)", "ChaikinMoneyFlow": "蔡金资金流",
+    "MoneyFlow": "资金流MFI", "Mom": "动量", "Mom_14": "动量(14)",
+    "ROC": "变动率ROC", "UO": "终极震荡UO",
+    "VWAP": "成交量加权均价VWAP", "VWMA": "成交量加权均线VWMA",
+    "W.R": "威廉指标%R",
+    "HullMA9": "赫尔均线(9)", "HullMA20": "赫尔均线(20)", "HullMA200": "赫尔均线(200)",
+    "BB.upper": "布林带上轨", "BB.lower": "布林带下轨", "BB.basis": "布林带中轨",
+    "BB.upper_50": "布林带上轨(50)", "BB.lower_50": "布林带下轨(50)",
+    "BB.basis_50": "布林带中轨(50)",
+    "KltChnl.upper": "肯特纳通道上轨", "KltChnl.lower": "肯特纳通道下轨",
+    "KltChnl.basis": "肯特纳通道中轨",
+    "DonchCh20.Upper": "唐奇安通道上轨", "DonchCh20.Lower": "唐奇安通道下轨",
+    "DonchCh20.Middle": "唐奇安通道中轨",
+    "Stoch.K": "随机指标K", "Stoch.D": "随机指标D",
+    "Stoch.RSI.K": "随机RSI K", "Stoch.RSI.D": "随机RSI D",
+    "Aroon.Up": "Aroon 上升", "Aroon.Down": "Aroon 下降",
+    "P.SAR": "抛物线SAR",
+    "Ichimoku.CLine": "一目均衡·转换线", "Ichimoku.BLine": "一目均衡·基准线",
+    "Ichimoku.Lead1": "一目均衡·先行带A", "Ichimoku.Lead2": "一目均衡·先行带B",
+    "Recommend.All": "综合技术评级", "Recommend.MA": "均线评级",
+    "Recommend.Other": "震荡指标评级",
+    "High.All": "历史最高", "Low.All": "历史最低",
+    "High.All.Calc": "历史最高(计算)", "Low.All.Calc": "历史最低(计算)",
+    "Perf.All": "上市以来涨幅", "Perf.5D": "近5日涨幅",
+    "Value.Traded": "成交额",
+    "AvgValue.Traded_10d": "10日均成交额", "AvgValue.Traded_30d": "30日均成交额",
+    "AvgValue.Traded_60d": "60日均成交额", "AvgValue.Traded_90d": "90日均成交额",
+}
+
+# K 线形态 —— Candle.<形态>[.Bullish|.Bearish]
+_CANDLE = {
+    "3blackcrows": "三只乌鸦", "3whitesoldiers": "红三兵",
+    "abandonedbaby": "弃婴", "darkcloudcover": "乌云盖顶",
+    "doji": "十字星", "doji.dragonfly": "蜻蜓十字", "doji.gravestone": "墓碑十字",
+    "dojistar": "十字星孕育", "downsidetasukigap": "下降跳空并列阴线",
+    "upsidetasukigap": "上升跳空并列阳线",
+    "engulfing": "吞没形态", "eveningdojistar": "黄昏十字星",
+    "eveningstar": "黄昏之星", "morningdojistar": "早晨十字星",
+    "morningstar": "早晨之星",
+    "fallingthreemethods": "下降三法", "risingthreemethods": "上升三法",
+    "fallingwindow": "向下跳空缺口", "risingwindow": "向上跳空缺口",
+    "hammer": "锤子线", "hangingman": "上吊线", "invertedhammer": "倒锤子线",
+    "shootingstar": "流星线",
+    "harami": "孕线", "haramicross": "十字孕线",
+    "kicking": "反冲形态", "longshadow.lower": "长下影线",
+    "longshadow.upper": "长上影线",
+    "marubozu.black": "光头光脚阴线", "marubozu.white": "光头光脚阳线",
+    "onneck": "颈上线", "piercing": "刺透形态",
+    "spinningtop.black": "纺锤线(阴)", "spinningtop.white": "纺锤线(阳)",
+    "tristar": "三星形态", "tweezerbottom": "平底", "tweezertop": "平顶",
+}
+_DIR = {"bullish": "看涨", "bearish": "看跌"}
+
+
+def _candle_label(name: str) -> str | None:
+    """`Candle.Engulfing.Bullish` → 「K线·吞没形态(看涨)」。
+
+    形态名后面可能跟 Bullish/Bearish,也可能没有(Doji、Hammer 这类不分方向)。
+    形态本身认不出来就返回 None —— 不硬翻,免得把「三只乌鸦」译成别的东西。
+    """
+    if not name.startswith("Candle."):
+        return None
+    rest = name[len("Candle."):].lower()
+    direction = ""
+    for d, cn in _DIR.items():
+        if rest.endswith("." + d):
+            direction = cn
+            rest = rest[: -(len(d) + 1)]
+            break
+    cn = _CANDLE.get(rest)
+    if not cn:
+        return None
+    return "K线·" + cn + (f"({direction})" if direction else "")
