@@ -1218,6 +1218,9 @@ class ScreenParseIn(BaseModel):
     script: str = ""
     preset: str | None = None
     market: str = "us"
+    # 默认 False:脚本解析和本地关键词匹配都不花钱,AI 要用户点了「AI 识别」才走。
+    # 默认打开的话每一次手滑都在烧 token。
+    allow_ai: bool = False
 
 
 @router.post("/screener/parse")
@@ -1232,7 +1235,12 @@ async def screener_parse(body: ScreenParseIn):
     try:
         # to_thread 不能省:自然语言那条分支要调 LLM(秒级、同步阻塞),
         # 直接在 async 路由里跑会把整个事件循环卡住,别的用户的请求全在排队。
-        return await asyncio.to_thread(tv_screener.parse_script, script, body.market)
+        return await asyncio.to_thread(
+            tv_screener.parse_script, script, body.market, body.allow_ai)
+    except tv_screener.NeedsAI as e:
+        # 结构化 detail —— 前端据此弹「AI 识别」按钮。
+        # 让前端去匹配报错文本来判断"能不能试 AI"是一种迟早会断的耦合。
+        raise HTTPException(400, {"message": str(e), "can_try_ai": True})
     except ScreenError as e:
         raise HTTPException(400, str(e))
 

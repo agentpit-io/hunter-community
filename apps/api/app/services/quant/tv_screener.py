@@ -53,6 +53,15 @@ from app.services.quant.screen_dsl import Compiled, ScreenError
 
 log = logging.getLogger(__name__)
 
+
+class NeedsAI(ScreenError):
+    """本地两条路(脚本 / 关键词)都不通 —— 可以问用户要不要花 token 叫 AI。
+
+    单独一个类型是为了让路由能把「可以试 AI」这个信号带给前端。
+    用普通 ScreenError 的话前端只能靠匹配报错文本来猜,那种耦合迟早断。
+    """
+
+
 _BASE = "https://scanner.tradingview.com"
 _TIMEOUT = 25.0
 _UA = {
@@ -354,7 +363,7 @@ def run_script(script: str, market_key: str = "us", limit: int = 100,
     }
 
 
-def parse_script(script: str, market_key: str = "us") -> dict:
+def parse_script(script: str, market_key: str = "us", allow_ai: bool = False) -> dict:
     """只解析、不拉数 —— 界面上点「生成」走这条,把脚本变成可视化条件行。
 
     和 run_script 共用同一个编译器,所以**界面上看到的条件就是真正会跑的条件**。
@@ -375,26 +384,39 @@ def parse_script(script: str, market_key: str = "us") -> dict:
         return screen_dsl.compile_script(src, has_field, meta.sma, meta.ema, meta.rsi)
 
     ai = None
+    kw = None
     original_text = script
     try:
         c: Compiled = _compile(script)
     except ScreenError:
-        # 解析不了 —— 分两种情况处理,判据是"用户有没有在写脚本"。
+        # 解析不了 —— 按"最省"的顺序往下试。
         #
-        # 写着 def/plot 却解析不过 = 他的脚本有错,把真实报错还给他。
-        # 让 LLM 去"猜他想写什么"再悄悄改成别的,是调脚本时最坏的体验。
-        #
-        # 没有 def/plot = 大白话,交给模型翻译。
-        from app.services.quant import screen_nl
+        # ① 写着 def/plot 却解析不过 = 他的脚本有错,把真实报错还给他。
+        #    让翻译器去"猜他想写什么"再悄悄改成别的,是调脚本时最坏的体验。
+        # ② 本地关键词匹配 —— **零 token**,覆盖「字段+比较符+数字」这类规整描述。
+        # ③ 都不行才轮到 AI,而且**必须 allow_ai=True**(前端弹按钮、用户点了才传)。
+        #    默认不花钱是这条链路的设计目标。
+        from app.services.quant import screen_kw, screen_nl
         if screen_nl.looks_like_script(script):
             raise
-        translated = screen_nl.translate(
-            script, md.label, meta.sma, meta.ema, meta.rsi, validate=_compile)
-        script = translated["script"]
-        c = _compile(script)             # translate 里已经 validate 过,这里必成功
-        ai = {k: translated[k] for k in ("model", "attempts", "tokens_in", "tokens_out")}
-        ai["source_text"] = original_text
-        ai["script"] = script
+        try:
+            k = screen_kw.translate(script, has_field, meta.sma, meta.ema, meta.rsi)
+            script = k["script"]
+            c = _compile(script)
+            kw = {"matched": k["matched"], "source_text": original_text,
+                  "script": script}
+        except ScreenError as kw_err:
+            if not allow_ai:
+                # 不抛普通 ScreenError —— 路由要据此告诉前端"可以试试 AI"
+                raise NeedsAI(str(kw_err)) from kw_err
+            translated = screen_nl.translate(
+                script, md.label, meta.sma, meta.ema, meta.rsi, validate=_compile)
+            script = translated["script"]
+            c = _compile(script)         # translate 里已经 validate 过,这里必成功
+            ai = {k2: translated[k2] for k2 in
+                  ("model", "attempts", "tokens_in", "tokens_out")}
+            ai["source_text"] = original_text
+            ai["script"] = script
 
     d = screen_dsl.decompose(script, c, has_field, meta.sma, meta.ema, meta.rsi)
 
@@ -408,6 +430,14 @@ def parse_script(script: str, market_key: str = "us") -> dict:
     d["market_label"] = md.label
     d["fields"] = c.fields
     d["warnings"] = warnings
+    if kw:
+        # 本地关键词匹配出来的 —— 同样要可核对:哪一句变成了哪个表达式。
+        # 规则匹配不会像模型那样瞎编,但会**理解偏**(比如把"量"当成成交量而不是量比),
+        # 所以逐句对照必须摆出来。
+        d["kw"] = kw
+        warnings.append(
+            "以上条件由本地关键词匹配得出(未使用 AI,零成本),"
+            "已通过语法与字段校验。逐句对照见上方折叠区,不对的话可直接改或改用 AI 识别。")
     if ai:
         # 让前端能明确标出"这几条是 AI 翻的",并且把生成的脚本亮出来给人核对。
         # AI 产出的东西必须可审计 —— 用户至少要能看见它到底写了什么才敢用。

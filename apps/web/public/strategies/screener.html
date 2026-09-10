@@ -81,6 +81,15 @@
     .cd-hd .mk{background:#FDF3E7;color:#A85F17;border-radius:6px;padding:2px 9px;font-size:12px;font-weight:600}
     .cd-hd .ai-badge{background:#EDE4F7;color:#7B3FA8;border-radius:6px;padding:2px 9px;
       font-size:12px;font-weight:600}
+    .cd-hd .kw-badge{background:#E4F1E8;color:#2F7A52;border-radius:6px;padding:2px 9px;
+      font-size:12px;font-weight:600}
+    .kw-row{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:4px 0;
+      border-bottom:1px dashed var(--line,#E8E0D6)}
+    .kw-row:last-of-type{border-bottom:0}
+    .kw-src{font-size:12.5px;color:var(--text);min-width:150px}
+    .kw-arrow{color:var(--soft,#B9AFA2);font-size:12px}
+    .kw-expr{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;
+      background:#fff;border:1px solid var(--line,#E8E0D6);border-radius:5px;padding:2px 7px}
     details.ai-note{width:auto;max-width:760px;border-color:#DCEBFA;background:#F7FBFF}
     .ai-script{margin:8px 0 0;padding:9px 11px;background:#fff;border:1px solid #DCEBFA;
       border-radius:7px;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;
@@ -259,6 +268,9 @@ const S = {
   editing: null,             // 正在编辑原文的条件名
   pending: '',               // 正在生成的那段原文(S.input 会被清空,按钮文案要靠它)
   ai: null,                  // 这批条件是 AI 翻的话:{model, script, source_text, ...}
+  kw: null,                  // 这批条件是本地关键词匹配出来的话:{matched, script, ...}
+  canTryAi: false,           // 本地两条路都不通 —— 弹「AI 识别」按钮问用户要不要花 token
+  aiText: '',                // 点 AI 识别时要重发的原文
   generating: false, running: false,
   genError: null, runError: null,
   result: null,
@@ -384,7 +396,20 @@ function vMagic() {
     '</div>' +
     '<div class="mg-eg" id="mg-eg">' + chips + '</div>' +
     '</div>' +
-    (S.genError ? '<div class="sc-err">' + esc(maskSrc(S.genError)) + '</div>' : '') +
+    // 本地认不出来时**不直接烧 token**,把「AI 识别」摆出来让用户自己决定。
+    // 按钮上写清「会消耗 token」—— 花钱的动作必须是用户明示的。
+    (S.genError
+      ? '<div class="sc-err">' + esc(maskSrc(S.genError)) +
+        (S.canTryAi
+          ? '<div class="sc-runbar" style="margin-top:9px">' +
+              '<button class="btn small" id="mg-ai"' + (S.generating ? ' disabled' : '') + '>' +
+                (S.generating ? '识别中…' : '✨ 用 AI 识别') + '</button>' +
+              '<span style="font-size:11.5px;color:#9B2C2C">' +
+                '本地关键词没认出来 · AI 识别会消耗 token,点了才调用</span>' +
+            '</div>'
+          : '') +
+        '</div>'
+      : '') +
     (S.metaErr ? '<div class="sc-err">读不到扫描配置:' + esc(maskSrc(S.metaErr)) +
       '\n后端可能还没部署 /api/quant/screener/*。界面骨架照常显示,但生成和扫描都会失败。</div>' : '')
 }
@@ -456,8 +481,9 @@ function vConditions() {
   return '<div class="cd-hd">股票需<b>同时满足</b>以下<b>' + onCount + '</b> 个条件' +
       (mk ? '<span class="mk">' + esc(mk.label) + '</span>' : '') +
       (S.ai ? '<span class="ai-badge">AI 翻译</span>' : '') +
+      (S.kw ? '<span class="kw-badge">本地识别</span>' : '') +
     '</div>' +
-    vAiNote() +
+    vKwNote() + vAiNote() +
     (S.combine === 'custom'
       ? '<div class="sc-warn">这个脚本的最终条件不是「若干条件全部满足」,而是自定义组合:' +
         '<code>' + esc(S.plotExpr) + '</code>。所以下面每一条不能单独停用 —— ' +
@@ -483,6 +509,24 @@ function dropSrc(list) {
 }
 function maskSrc(s) {
   return String(s == null ? '' : s).replace(/TradingView/g, SRC_ALIAS)
+}
+
+// 本地关键词匹配的可审计凭据:哪一句变成了哪个表达式。
+// 规则匹配不会像模型那样瞎编,但会**理解偏**(比如把"量"当成成交量而不是量比),
+// 所以逐句对照必须摆出来 —— 和 AI 那份一个道理。
+function vKwNote() {
+  if (!S.kw) return ''
+  const rows = (S.kw.matched || []).map(function (m) {
+    return '<div class="kw-row"><span class="kw-src">' + esc(m.text) + '</span>' +
+      '<span class="kw-arrow">→</span>' +
+      '<code class="kw-expr">' + esc(m.expr) + '</code></div>'
+  }).join('')
+  return '<details class="sc-fold ai-note"><summary>' +
+      '本地识别把「' + esc(String(S.kw.source_text || '').slice(0, 40)) +
+      '」拆成了这些条件 · 点开逐句对照' +
+    '</summary>' + rows +
+    '<div class="sc-note">关键词匹配,<b>未使用 AI、零成本</b>。' +
+    '理解偏了的话直接改下面的条件,或者换个说法重新生成。</div></details>'
 }
 
 // AI 翻译的可审计凭据:原话 + 它实际写出来的脚本。
@@ -628,7 +672,10 @@ function bind() {
     })
   }
   const gen = document.getElementById('mg-gen')
-  if (gen) gen.addEventListener('click', generate)
+  if (gen) gen.addEventListener('click', function () { generate() })
+  // 唯一会花 token 的入口
+  const aiBtn = document.getElementById('mg-ai')
+  if (aiBtn) aiBtn.addEventListener('click', function () { generate(true) })
 
   const mode = document.getElementById('mg-mode')
   if (mode) mode.addEventListener('click', function (e) {
@@ -1054,11 +1101,25 @@ function applyParsed(d) {
   // 手工改过之后就不再是"AI 那次翻译的结果"了,徽标跟着清掉 ——
   // 留着会让人以为下面展示的脚本还是当前这套条件(generate 里会再设回去)
   S.ai = d.ai || null
+  S.kw = d.kw || null
   S.combine = d.combine || 'all'
   S.plotName = d.plot_name || 'scan'
   S.plotExpr = d.combine === 'custom' ? (d.plot_expr || '') : ''
   S.notes = d.notes || []
   S.parseWarnings = d.warnings || []
+}
+
+// 后端的 detail 现在可能是对象:NeedsAI 会带 {message, can_try_ai}。
+// 老的字符串形式也还在(普通 ScreenError),两种都要认。
+function errOf(r, fallback) {
+  const d = r && r.data
+  const det = d && d.detail
+  if (det && typeof det === 'object') return det.message || fallback
+  return det || (d && d.error) || fallback
+}
+function canAi(r) {
+  const det = r && r.data && r.data.detail
+  return !!(det && typeof det === 'object' && det.can_try_ai)
 }
 
 async function reparse(script) {
@@ -1067,7 +1128,8 @@ async function reparse(script) {
   }
   const r = await post(PARSE_API, { script: script, market: S.market })
   if (!r.ok) {
-    S.genError = (r.data && (r.data.detail || r.data.error)) || ('解析失败 · HTTP ' + r.status)
+    S.genError = errOf(r, '解析失败 · HTTP ' + r.status)
+    S.canTryAi = false
     render(); return
   }
   S.genError = null
@@ -1077,8 +1139,10 @@ async function reparse(script) {
   saveDraft(); render()
 }
 
-async function generate() {
-  const text = (S.input || '').trim()
+async function generate(allowAi) {
+  // allowAi=true 只可能来自用户点「AI 识别」。生成按钮永远传 undefined,
+  // 所以正常点生成**一分钱都不花**:后端先试脚本、再试本地关键词。
+  const text = allowAi ? (S.aiText || '') : (S.input || '').trim()
   if (!text) { S.genError = '生成框是空的。把筛选脚本粘进来,或者点一个示例。'; render(); return }
   const appending = (S.mode === 'append' && S.conditions.length > 0)
 
@@ -1091,15 +1155,18 @@ async function generate() {
     render(); return
   }
 
-  S.generating = true; S.genError = null; S.pending = text; render()
+  S.generating = true; S.genError = null; S.canTryAi = false; S.pending = text; render()
   // **先单独解析新脚本**,拿到它自己的条件对象再合并 ——
   // 早先的做法是把两段脚本用字符串拼起来(还得把旧的 plot 降级成 def),
   // 实测会把脚本绞成 `def scan2 = … and scan and cond_pe;`,而且 400 之后
   // 用户完全看不出发生了什么。结构化合并没有这类惊喜。
-  const r = await post(PARSE_API, { script: text, market: S.market })
+  const r = await post(PARSE_API, { script: text, market: S.market, allow_ai: !!allowAi })
   S.generating = false
   if (!r.ok) {
-    S.genError = (r.data && (r.data.detail || r.data.error)) || ('生成失败 · HTTP ' + r.status)
+    S.genError = errOf(r, '生成失败 · HTTP ' + r.status)
+    // 后端说"本地两条路都不通,可以试 AI" → 把原文记下来,弹按钮等用户点
+    S.canTryAi = canAi(r)
+    S.aiText = S.canTryAi ? text : ''
     render(); return
   }
   const d = r.data
@@ -1119,11 +1186,13 @@ async function generate() {
     mergeAppend(fresh)
   }
   S.input = ''
+  S.canTryAi = false; S.aiText = ''
   S.result = null; S.probe = {}
   // 回写再解析一次 —— 保证 tokens / is_bool 与后端完全一致(合并后名字可能改过)。
   // reparse 送的是脚本,不会再触发 AI,所以 d.ai 要在这之后补回去。
   await reparse(buildScript())
   S.ai = d.ai || null
+  S.kw = d.kw || null
   render()
 }
 
