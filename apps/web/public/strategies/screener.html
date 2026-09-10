@@ -609,16 +609,9 @@ async function post(url, body) {
 }
 
 function applyParsed(d) {
-  // 启用状态不由前端记 —— 谁在 plot_refs 里谁就是启用的(build_script 只写启用的)。
-  // 变量(非布尔)没有启用概念,恒为 true。
-  const refs = {}
-  ;(d.plot_refs || []).forEach(function (n) { refs[n] = 1 })
-  S.conditions = (d.conditions || []).map(function (c) {
-    return {
-      name: c.name, expr: c.expr, tokens: c.tokens, is_bool: c.is_bool,
-      enabled: !c.is_bool ? true : (d.combine === 'custom' ? true : !!refs[c.name]),
-    }
-  })
+  // 启用状态不由前端记 —— 谁在 plot_refs 里谁就是启用的(buildScript 只写启用的)。
+  // 变量(非布尔)没有启用概念,恒为 true。见 condsOf。
+  S.conditions = condsOf(d)
   S.combine = d.combine || 'all'
   S.plotName = d.plot_name || 'scan'
   S.plotExpr = d.combine === 'custom' ? (d.plot_expr || '') : ''
@@ -645,48 +638,84 @@ async function reparse(script) {
 async function generate() {
   const text = (S.input || '').trim()
   if (!text) { S.genError = '生成框是空的。把筛选脚本粘进来,或者点一个示例。'; render(); return }
-  S.generating = true; S.genError = null; render()
+  const appending = (S.mode === 'append' && S.conditions.length > 0)
 
-  // 追加模式:把已有条件的脚本和新脚本拼起来,重名的自动改名。
-  // 拼在前面 —— 新条件排在下面,和"追加"这个词一致。
-  let script = text
-  if (S.mode === 'append' && S.conditions.length) {
-    script = rename(buildScript(true), text)
+  // 自定义组合下不许追加 —— 现有 plot 是 `a and (b or c)` 这类表达式,
+  // 往里塞新条件必然改变它的含义,而"改成什么"只有用户自己知道。
+  // 与其猜,不如说清楚让他用「替换」。
+  if (appending && S.combine === 'custom') {
+    S.genError = '当前条件用的是自定义组合(' + S.plotExpr + '),追加会改变它的含义。' +
+      '请切到「替换」,或先把最后一句改成 `plot scan = 条件A and 条件B;` 的形式。'
+    render(); return
   }
-  const r = await post(PARSE_API, { script: script, market: S.market })
+
+  S.generating = true; S.genError = null; render()
+  // **先单独解析新脚本**,拿到它自己的条件对象再合并 ——
+  // 早先的做法是把两段脚本用字符串拼起来(还得把旧的 plot 降级成 def),
+  // 实测会把脚本绞成 `def scan2 = … and scan and cond_pe;`,而且 400 之后
+  // 用户完全看不出发生了什么。结构化合并没有这类惊喜。
+  const r = await post(PARSE_API, { script: text, market: S.market })
   S.generating = false
   if (!r.ok) {
     S.genError = (r.data && (r.data.detail || r.data.error)) || ('生成失败 · HTTP ' + r.status)
     render(); return
   }
-  applyParsed(r.data)
+  const d = r.data
+  if (appending && d.combine === 'custom') {
+    S.genError = '新脚本的最终条件是自定义组合(' + (d.plot_expr || '') + '),' +
+      '追加进来会丢掉这层组合关系。请切到「替换」。'
+    render(); return
+  }
+
+  const fresh = condsOf(d)
+  if (!appending) {
+    S.conditions = fresh
+    S.combine = d.combine || 'all'
+    S.plotName = d.plot_name || 'scan'
+    S.plotExpr = d.combine === 'custom' ? (d.plot_expr || '') : ''
+  } else {
+    mergeAppend(fresh)
+  }
   S.input = ''
   S.result = null; S.probe = {}
-  saveDraft(); render()
+  // 回写再解析一次 —— 保证 tokens / is_bool 与后端完全一致(合并后名字可能改过)
+  await reparse(buildScript())
 }
 
-// 追加时重名会被后端判成「名字定义了两次」。这里先把新脚本里撞名的 def 改掉。
-function rename(oldScript, newScript) {
-  const taken = {}
-  const re = /\b(?:def|plot)\s+([A-Za-z_][A-Za-z0-9_]*)/g
-  let m
-  while ((m = re.exec(oldScript))) taken[m[1]] = 1
-  let out = newScript
-  const names = []
-  re.lastIndex = 0
-  while ((m = re.exec(newScript))) names.push(m[1])
-  names.forEach(function (n) {
-    if (!taken[n]) { taken[n] = 1; return }
-    let k = 2
-    while (taken[n + '_' + k]) k++
-    const nn = n + '_' + k
-    taken[nn] = 1
-    out = out.replace(new RegExp('\\b' + n + '\\b', 'g'), nn)
+// 把 /parse 的返回变成条件对象(启用状态取自 plot_refs)
+function condsOf(d) {
+  const refs = {}
+  ;(d.plot_refs || []).forEach(function (n) { refs[n] = 1 })
+  return (d.conditions || []).map(function (c) {
+    return {
+      name: c.name, expr: c.expr, tokens: c.tokens, is_bool: c.is_bool,
+      enabled: !c.is_bool ? true : (d.combine === 'custom' ? true : !!refs[c.name]),
+    }
   })
-  // 两个 plot 只能留一个 —— 后一个(新脚本的)会被改名成 scan_2,
-  // 而 parse 认最后一个 plot,所以把旧的降级成 def 更符合"追加"的语义:
-  // 旧条件继续参与,新脚本的 plot 说了算。
-  return oldScript.replace(/\bplot\s+/g, 'def ') + '\n' + out
+}
+
+// 追加合并:重名的自动改名,并把新条件内部对被改名者的引用一起改掉。
+// 两趟走 —— 先算完整张改名表再改写表达式,不然改到一半的名字会被二次替换。
+function mergeAppend(fresh) {
+  const taken = {}
+  S.conditions.forEach(function (c) { taken[c.name] = 1 })
+  const map = {}
+  fresh.forEach(function (c) {
+    if (!taken[c.name]) { taken[c.name] = 1; return }
+    let k = 2
+    while (taken[c.name + '_' + k]) k++
+    map[c.name] = c.name + '_' + k
+    taken[map[c.name]] = 1
+  })
+  fresh.forEach(function (c) {
+    Object.keys(map).forEach(function (old) {
+      c.expr = (c.expr || '').replace(new RegExp('\\b' + old + '\\b', 'g'), map[old])
+    })
+  })
+  fresh.forEach(function (c) {
+    if (map[c.name]) c.name = map[c.name]
+    S.conditions.push(c)
+  })
 }
 
 async function runScan() {
