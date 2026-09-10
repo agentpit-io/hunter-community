@@ -7,7 +7,11 @@
   <link rel="stylesheet" href="style.css" />
   <style>
     /* ── 魔法筛选(生成区) ─────────────────────────────── */
-    .mg{background:#F2F8FE;border:1px solid #DCEBFA;border-radius:10px;padding:13px 15px 11px}
+    /* 卡片也要收住:只让 .mg-ta 变窄的话,卡片仍旧铺满 2000px 的屏,
+       「生成」按钮右边空出一大片死区。1040 刚好装下
+       追加/替换 + 市场 + 输入框(560) + 生成 这一行。 */
+    .mg{background:#F2F8FE;border:1px solid #DCEBFA;border-radius:10px;padding:13px 15px 11px;
+      max-width:1040px}
     .mg-hd{display:flex;align-items:center;gap:7px;color:#2E86DE;font-size:13.5px;
       font-weight:700;letter-spacing:.04em;margin-bottom:10px}
     .mg-row{display:flex;flex-wrap:wrap;gap:9px;align-items:stretch}
