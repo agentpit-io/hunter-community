@@ -349,6 +349,50 @@ async def _api_profile(body: ProfileIn, request: Request):
         return {"type": "update_risk_profile", "error": str(e)}
 
 
+# ─────────────────────────────────────────────────────────────────────
+# 全市场扫描筛选 · 1 tool
+#
+# 真逻辑在 app/services/quant/tv_screener.py,这里只是给 MCP 的薄壳。
+# 与前端 /api/quant/screener/run 走的是同一个函数,不会出现两套行为。
+# ─────────────────────────────────────────────────────────────────────
+
+class ScreenerIn(BaseModel):
+    script: str = ""
+    preset: str | None = None
+    market: str = "us"
+    limit: int = 30
+
+
+@router.post("/quant/market_screen")
+async def _api_market_screen(body: ScreenerIn, request: Request):
+    """全市场扫描 · LLM 用 thinkScript 子集写筛选条件。
+
+    用户说『帮我扫一下美股里均线多头排列的』『A 股有哪些低 PE 超卖的』时调这个。
+    """
+    _auth(request)
+    from app.services.quant import tv_screener
+    from app.services.quant.screen_dsl import ScreenError
+
+    script = body.script or ""
+    if body.preset and not script.strip():
+        p = tv_screener.preset(body.preset)
+        if p is None:
+            return {"type": "market_screen", "error": f"没有这个示例脚本:{body.preset}"}
+        script = p["script"]
+    try:
+        # limit 压到 30 —— 这是给 LLM 读的,不是给表格渲染的。
+        # 几百行进上下文既贵又会把回答冲散。
+        r = tv_screener.run_script(script, body.market,
+                                   limit=max(1, min(body.limit, 50)),
+                                   sort_by="market_cap_basic")
+    except ScreenError as e:
+        # 把错误原样回给 LLM —— message 里写了「可用周期是哪些」,
+        # LLM 拿到就能自己改脚本重试。吞成通用错误它只会瞎猜。
+        return {"type": "market_screen", "error": str(e)}
+    r["type"] = "market_screen"
+    return r
+
+
 @router.get("/ping")
 async def _ping():
     """无鉴权健康检查 · MCP 启动时用来确认 hermes-api 可达。"""

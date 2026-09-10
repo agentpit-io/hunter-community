@@ -116,17 +116,28 @@ def main() -> int:
     # 注册了 watchlist/portfolio/uzi/hunter_user 四个,两份配置会合并 ——
     # 在这里重复写会让同一个脚本被起两次(2026-08-14 踩过,见 cd427bf)。
     extra = os.environ.get("HUNTER_EXTRA_MCP_DIR", "/opt/hunter-mcp")
-    cap = os.path.join(extra, "hunter_capability_mcp.py")
-    if os.path.exists(cap):
-        cfg["mcp"] = {
-            "hunter_cap": {
+    # (注册名, 文件名, timeout_ms)
+    #   hunter_cap · kpred 是 GPU 推理、scout 是 30-60s 主动采集,30s 默认会被掐断
+    #   screener   · 全市场扫描 · 拉全市场实测 1~3s,60s 足够(留上游抖动余量)
+    #
+    # ⚠ 只能列**镜像里没有**的。镜像自带 watchlist/portfolio/uzi/hunter_user 四个,
+    #   在这里重名注册会让同一个脚本被起两次(2026-08-14 踩过,见 cd427bf)。
+    _EXTRA_MCP = [
+        ("hunter_cap", "hunter_capability_mcp.py", 180000),
+        ("screener",   "screener_mcp.py",           60000),
+    ]
+    mcp_cfg = {}
+    for reg_name, fname, timeout_ms in _EXTRA_MCP:
+        path = os.path.join(extra, fname)
+        if os.path.exists(path):
+            mcp_cfg[reg_name] = {
                 "type": "local",
-                "command": ["python3", cap],
+                "command": ["python3", path],
                 "enabled": True,
-                # kpred 是 GPU 推理、scout 是 30-60s 主动采集,30s 默认会被掐断
-                "timeout": 180000,
+                "timeout": timeout_ms,
             }
-        }
+    if mcp_cfg:
+        cfg["mcp"] = mcp_cfg
 
     out = os.path.join(WORKSPACE, "opencode.json")
     with open(out, "w", encoding="utf-8") as f:
@@ -137,8 +148,8 @@ def main() -> int:
           f"{' (经 schema shim → ' + BASE_URL + ')' if via_shim else ''}"
           f" · model {MODEL} · apiKey {'有' if API_KEY else '无'}", file=sys.stderr)
     if "mcp" in cfg:
-        print("[gen-config]   额外注册 mcp: hunter_cap(镜像自带的 4 个不重复注册)",
-              file=sys.stderr)
+        print("[gen-config]   额外注册 mcp: " + " · ".join(sorted(cfg["mcp"]))
+              + "(镜像自带的 4 个不重复注册)", file=sys.stderr)
     else:
         print("[gen-config]   mcp / plugin 全部由镜像自带配置负责", file=sys.stderr)
     return 0

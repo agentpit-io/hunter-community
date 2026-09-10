@@ -701,9 +701,50 @@ function vLessons(d) {
     '「已落地 / 暂不落地 + 理由」是判断智能体<b>真的在迭代</b>还是<b>在写日记</b>的唯一凭据。</div>')
 }
 
+// ═══ 扫描筛选入口 ═════════════════════════════════════════════════
+// 放在「持仓与候选」之后 —— 候选池那块回答"我在看哪些票",
+// 紧接着的自然问题是"这些候选是从哪来的、我能不能自己找一批"。
+//
+// 只做**入口**,不在这一页嵌编辑器:脚本编辑 + 结果表需要的版面
+// 跟这一页的叙事节奏冲突(这一页是"看智能体在干什么",是只读的)。
+// 真正的工作台在 screener.html,那边顶栏仍高亮「小鹿智能体」。
+//
+// 这里不显示任何扫描数据 —— 没跑过就是没跑过,不摆一个假的示例结果。
+function vScreener() {
+  const presets = [
+    ['uptrend', '上升趋势', '美股'],
+    ['value_oversold', '低估值超卖', 'A股'],
+    ['breakout_volume', '放量突破', '美股'],
+    ['hk_dividend', '高股息', '港股'],
+  ].map(function (p) {
+    return '<a class="btn small" href="/strategies/screener.html?preset=' + p[0] + '">' +
+      esc(p[1]) + ' <span style="color:var(--soft)">' + esc(p[2]) + '</span></a>'
+  }).join('')
+  return panel('扫描筛选 · 找候选票',
+    '<span class="cnt">TradingView 全市场</span>',
+    '<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">' +
+      '<div style="flex:1;min-width:260px;font-size:12.5px;line-height:1.75;color:var(--muted)">' +
+        '用 thinkScript 风格的脚本从<b style="color:var(--text)">整个市场</b>里筛票 —— ' +
+        '美股 7487 · A股 5237 · 港股 2396,秒级出结果。' +
+        '写法例:<code style="background:var(--bg,#FAF7F3);border-radius:4px;padding:1px 5px;' +
+        'font-family:ui-monospace,menlo,monospace;font-size:11.5px">plot scan = close > Average(close, 50);</code>' +
+      '</div>' +
+      '<a class="btn" href="/strategies/screener.html">' +
+        '<span class="hi hi-search"></span> 打开扫描筛选</a>' +
+    '</div>' +
+    '<div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:11px">' +
+      '<span style="font-size:11.5px;color:var(--soft);align-self:center;margin-right:2px">直接跑示例</span>' +
+      presets +
+    '</div>' +
+    '<div class="ag-note" style="margin-top:11px;padding-top:10px;border-top:1px solid var(--line)">' +
+      '数据来自 TradingView,<b>延迟 15 分钟</b>,而且<b>只有当前快照、没有历史</b> —— ' +
+      '所以扫出来的是<b>候选池</b>,不能直接拿去回测,也不写进因子库。' +
+      '要验证一个想法,把候选票带到策略工作台用站内有历史的数据跑。</div>')
+}
+
 // ═══ 组装 · 顺序即产品叙事 ════════════════════════════════════════
 // 它是谁 → 按什么做 → 今天跑了吗 → 成绩 → 曲线 → 规则 →
-// 持仓与候选 → 今天做了什么 → 怎么演进过来的 → 学到了什么
+// 持仓与候选 → 从哪找候选 → 今天做了什么 → 怎么演进过来的 → 学到了什么
 function vBanner(n) {
   if (!n) return ''
   return '<div class="ag-banner ' + n.kind + '"><span class="hi ' + (n.icon || 'hi-lightbulb') + '"></span>' +
@@ -715,6 +756,7 @@ function render(d, notice) {
   const html = '<div class="ag-wrap">' + vBanner(notice) +
     vStatus(d) + vStrategy(d) + vGuard(d) + vPipeline(d) + vKpi(d) + vNav(d) + vRules(d) +
     '<div class="ag-two">' + vHoldings(d) + vWatch(d) + '</div>' +
+    vScreener() +
     vTrades(d) + vVersions(d) + vLessons(d) +
     '<div class="ag-note" style="text-align:center;padding:6px 0 0">' +
     '涨跌配色沿用站内中式惯例(<span style="color:var(--up);font-weight:650">红涨</span> · ' +

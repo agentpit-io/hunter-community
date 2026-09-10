@@ -75,6 +75,60 @@ grep -rn "mock\|_mock\|Object.assign\|writeDefault\|\|\| 0" apps/web/public apps
 688981 给 659)。用它推股本 / 市值时必须带合理性边界(`_BPS_RANGE` / `_MCAP_RANGE` / `_TURNOVER_MAX`),
 越界丢该股票,不进截面排名。
 
+## 数据坑:TradingView 扫描通道(`tv_screener`)的四个陷阱
+
+2026-09-10 接入全市场扫描(`apps/api/app/services/quant/tv_screener.py` +
+`screen_dsl.py`,前端 `strategies/screener.html`)时实测出来的。
+它是 `scanner.tradingview.com` 的**非官方内部接口**:免 key、国内直连,
+中位 583ms,连打 30 次无限流。定位是**探索性初筛**,不进 `factor_value`、不进回测、不进推送。
+
+### 1. 翻页不带 `sort` 会静默漏掉三分之一的池子(最隐蔽)
+
+不带排序分四页拉美股(每页 2000),累计 8000 条里只有 **4914 只唯一**,重叠 3086 ——
+约 2500 只票一次都没被扫到。上游默认顺序在请求之间不稳定,页与页互相错漏。
+
+**症状不是报错**:有命中、有数据、看起来完全正常,只是结果少了一大截,无从察觉。
+修法是请求里固定 `sort`(现用 `sortBy: name` 升序),之后 7487/7487 零重叠。
+`fetch_rows` 另有一层按 symbol 去重兜底。
+
+**新接任何"分页拉全量"的上游都先做这个测试**:拉两页,断言唯一数 == 累计数。
+
+### 2. `type=stock` + `is_primary` 是正确性前提,不是优化
+
+不加过滤,美股结果里会混进 ETF、权证和优先股存托份额。实测第一次就拿到
+`NASDAQ:GOOGM` / `GOOGN`(Alphabet 可转换优先股份额):**市值字段直接继承母公司
+4.12 万亿,PE 却是 2.38** —— 按市值排序时它们插在 GOOG 前面。
+加过滤后字段填充率同时好转(A 股市值 70%→100%、ROE 68%→97%)。
+
+### 3. `close|1M` **不是**一个月前的收盘价
+
+多周期后缀指的是「该周期上最新那根 K 线」。实测 NVDA 的
+`close` / `close|1W` / `close|1M` 三个值完全相同(223.67)。
+拿它算动量会得到恒等于 0 的因子。要涨跌幅用 `Perf.W` / `Perf.1M` / `Perf.Y`。
+
+**整个接口没有历史序列**,只有当前横截面快照 —— 所以扫描结果不能回测。
+
+### 4. 市值字段与国内源口径不一致,且自相矛盾
+
+A 股 10 只抽样对腾讯 `qt.gtimg.cn`:**PE / PB 对得很好**(9 只里 8 只 PE 在 ±5% 内,
+PB 全部 ≤6%),但**市值差得多**:中芯国际 -37%、比亚迪 -8%、格力 -7%(A+H 两地上市尤甚)。
+更糟的是它跟自己的股本字段也对不上 —— `close × total_shares_outstanding_current / market_cap_basic`
+在 0.36~0.63 之间且每只不同。
+
+规矩:`market_cap_basic` 只可用于排序和粗筛,**不许当市值真值展示给用户,不许写进因子**。
+返回体里 `warnings` 每次都带这句,前端不折叠、不做"下次不再提示"。
+
+### 另外两条
+
+- **全市场都是延迟 15 分钟**(`update_mode = delayed_streaming_900`,美股/港股/A 股无一例外),
+  盘中信号不能用。`lang=zh_CN` 实测**也只返回英文名**,没有中文名可拿。
+- **周期映射不上一律报错,不找"最接近的"顶替**。`Average(volume, 100)` 在 TradingView
+  只有 10/30/60/90 天均量 —— 拿 90 天冒充 100 天就是在编数字,违反本仓第一条铁律。
+  报错信息里要写清可用值,LLM 和用户才能自己改。
+- 缺字段的行求值结果是 `None`,**不计入命中也不算"不满足"**,单独计进 `skipped_incomplete`
+  并在 warnings 里说明。把 None 当 0 或当 False 会让 `close > 20` 把所有没报价的票判成
+  "不满足",结果看起来完整、实际漏了几百只。
+
 ## 铁律:db/migrations 里的 .sql **对已有部署不生效**
 
 `docker-compose.yml` 把 `./db/migrations` 挂到 postgres 的

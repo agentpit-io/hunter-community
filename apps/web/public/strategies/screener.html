@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>扫描筛选 · 猎鹿人 Hunter</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    .sc-split{display:grid;grid-template-columns:minmax(360px,.85fr) 1.15fr;gap:14px;align-items:start}
+    @media(max-width:1080px){.sc-split{grid-template-columns:1fr}}
+
+    .sc-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px}
+    .sc-bar .lb{font-size:12px;color:var(--muted)}
+    .sc-seg{display:flex;flex-wrap:wrap;gap:6px}
+    .sc-seg button{border:1px solid var(--line,#E8E0D6);background:#fff;border-radius:7px;
+      padding:5px 11px;cursor:pointer;font-size:12.5px;font-family:inherit;color:var(--text)}
+    .sc-seg button.on{border-color:var(--brand);background:#FDF3E7;color:#A85F17;font-weight:600}
+    .sc-seg button:disabled{opacity:.45;cursor:not-allowed}
+
+    .sc-ed{width:100%;box-sizing:border-box;min-height:330px;resize:vertical;
+      font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.65;
+      border:1px solid var(--line,#E8E0D6);border-radius:8px;padding:11px 12px;background:#fff;
+      color:var(--text);tab-size:2}
+    .sc-ed:focus{outline:none;border-color:var(--brand)}
+
+    .sc-err{background:#FDECEC;border:1px solid #F3C9C9;color:#9B2C2C;border-radius:8px;
+      padding:10px 13px;font-size:12.5px;line-height:1.7;margin-top:9px;white-space:pre-wrap}
+    .sc-warn{background:#FDF3E7;border:1px solid #F0DCC0;color:#8A5A1B;border-radius:8px;
+      padding:9px 12px;font-size:12px;line-height:1.7;margin-top:9px}
+    .sc-warn ul{margin:0;padding-left:17px}
+    .sc-warn li+li{margin-top:4px}
+    .sc-note{color:var(--muted);font-size:11.5px;line-height:1.7;margin-top:8px}
+
+    .sc-stat{display:flex;flex-wrap:wrap;gap:9px;margin-bottom:10px}
+    .sc-stat .s{background:var(--bg,#FAF7F3);border-radius:8px;padding:8px 12px;min-width:78px}
+    .sc-stat .s .k{color:var(--muted);font-size:11px}
+    .sc-stat .s .v{font-size:17px;font-weight:600;margin-top:1px;font-variant-numeric:tabular-nums}
+    .sc-stat .s.hit .v{color:var(--brand-dark)}
+
+    .sc-scroll{overflow-x:auto;border:1px solid var(--line,#E8E0D6);border-radius:8px;background:#fff}
+    .sc-tb{border-collapse:collapse;width:100%;font-size:12.5px;white-space:nowrap}
+    .sc-tb th,.sc-tb td{padding:7px 10px;border-bottom:1px solid var(--line,#E8E0D6);text-align:left}
+    .sc-tb th{background:var(--bg,#FAF7F3);color:var(--muted);font-weight:500;font-size:11.5px;
+      position:sticky;top:0;cursor:pointer;user-select:none}
+    .sc-tb th .ar{color:var(--brand);margin-left:3px}
+    .sc-tb td.n{text-align:right;font-family:ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
+    .sc-tb tr:last-child td{border-bottom:none}
+    .sc-tb .cd{font-family:ui-monospace,Menlo,monospace;color:var(--brand-dark);font-weight:600}
+    .sc-na{color:var(--soft,#B9AFA2)}
+
+    .sc-syn{font-size:12px;line-height:1.85;color:var(--muted)}
+    .sc-syn code{background:var(--bg,#FAF7F3);border-radius:4px;padding:1px 5px;
+      font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:var(--text)}
+    .sc-syn b{color:var(--text);font-weight:600}
+    details.sc-fold{border:1px solid var(--line,#E8E0D6);border-radius:8px;padding:9px 12px;
+      margin-top:10px;background:#fff}
+    details.sc-fold summary{cursor:pointer;font-size:12.5px;color:var(--text);font-weight:600}
+    details.sc-fold[open] summary{margin-bottom:8px}
+
+    .sc-fd{display:flex;gap:7px;margin-bottom:8px}
+    .sc-fd input{flex:1;border:1px solid var(--line,#E8E0D6);border-radius:7px;padding:6px 10px;
+      font-size:12.5px;font-family:inherit;color:var(--text);background:#fff}
+    .sc-fd input:focus{outline:none;border-color:var(--brand)}
+    .sc-fl{display:flex;flex-wrap:wrap;gap:5px;max-height:190px;overflow-y:auto}
+    .sc-fl span{background:var(--bg,#FAF7F3);border-radius:5px;padding:3px 7px;cursor:pointer;
+      font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--text)}
+    .sc-fl span:hover{background:#FDF3E7;color:#A85F17}
+  </style>
+</head>
+<body>
+<script src="app.js"></script>
+<script>
+// ═══════════════════════════════════════════════════════════════════
+// 扫描筛选 · TradingView 全市场
+//
+// 用 renderShell('agent', …) —— 顶栏高亮仍停在「小鹿智能体」。
+// 它是小鹿的**取数入口**(候选票从哪来),不是并列的第六个一级功能;
+// 单独占一个 tab 会让人以为这是另一套独立的策略体系。
+//
+// ── 这一页在产品上是什么 ──────────────────────────────────────────
+// **探索性初筛**。三条边界写死在界面上(不是只写在文档里):
+//   1. 延迟 15 分钟 —— TradingView 免订阅数据的实况
+//   2. 只有当前快照、没有历史 —— 所以结果不能回测,页面上不提供"拿去回测"的按钮
+//   3. 市值口径与站内国内源不一致 —— 只能排序粗筛
+// 后端每次返回都会带 warnings,这里**原样渲染**,不做折叠、不做"下次不再提示"。
+// 把风险藏进折叠面板等于没说。
+// ═══════════════════════════════════════════════════════════════════
+document.body.innerHTML = renderShell('agent', '策略广场 / 扫描筛选',
+  '写筛选脚本 · 扫全市场找候选票',
+  '<a class="btn small" href="/strategies/agent.html">← 回小鹿智能体</a>')
+
+const container = document.getElementById('page-content')
+const META_API = '/api/quant/screener/meta'
+const RUN_API  = '/api/quant/screener/run'
+const FIELD_API = '/api/quant/screener/fields'
+
+const NA = '<span class="sc-na">—</span>'
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+}
+// 数字一律 Number.isFinite 判据 · 不写 `v || 0`(0 看起来像个结论)
+function num(v, dg) {
+  if (!Number.isFinite(v)) return NA
+  const a = Math.abs(v)
+  if (a >= 1e8) return (v / 1e8).toFixed(2) + '亿'
+  if (a >= 1e4) return (v / 1e4).toFixed(1) + '万'
+  return v.toFixed(dg == null ? 2 : dg)
+}
+function plain(v) { return Number.isFinite(v) ? v.toFixed(2) : (v == null ? NA : esc(v)) }
+
+// ─── 状态 ─────────────────────────────────────────────────────────
+const S = {
+  meta: null,          // 后端 /meta · 拿不到就是 null,不编默认值
+  metaErr: null,
+  market: 'us',
+  script: '',
+  running: false,
+  result: null,
+  error: null,
+  // 默认按市值降序 —— 不给 sort_by 的话上游是按代码字母序返回的(翻页要稳定排序,
+  // 见 tv_screener._SORT),选股结果按字母序排没有任何意义,用户会以为命中的就是这几只。
+  // 市值口径虽然不准(warnings 里写了),但用来排序是它明确允许的用法。
+  sortBy: 'market_cap_basic',
+  desc: true,
+}
+
+const LS_SCRIPT = 'hunter_screener_script'
+const LS_MARKET = 'hunter_screener_market'
+function saveDraft() {
+  try {
+    localStorage.setItem(LS_SCRIPT, S.script)
+    localStorage.setItem(LS_MARKET, S.market)
+  } catch (e) { /* 隐私模式下 localStorage 会抛,草稿丢了不影响用 */ }
+}
+function loadDraft() {
+  try {
+    const s = localStorage.getItem(LS_SCRIPT)
+    const m = localStorage.getItem(LS_MARKET)
+    if (s) S.script = s
+    if (m) S.market = m
+  } catch (e) { /* 同上 */ }
+}
+
+// ─── 左栏 · 编辑器 ────────────────────────────────────────────────
+function vEditor() {
+  const markets = (S.meta && S.meta.markets) || []
+  const presets = (S.meta && S.meta.presets) || []
+
+  const mkBtns = markets.length
+    ? markets.map(function (m) {
+        return '<button data-mkt="' + esc(m.key) + '" class="' +
+          (m.key === S.market ? 'on' : '') + '">' + esc(m.label) + '</button>'
+      }).join('')
+    : '<span class="sc-na" style="font-size:12px">' +
+      (S.metaErr ? '市场列表没拿到' : '加载中…') + '</span>'
+
+  const psBtns = presets.length
+    ? presets.map(function (p) {
+        return '<button data-preset="' + esc(p.key) + '" title="' + esc(p.desc) + '">' +
+          esc(p.name) + '</button>'
+      }).join('')
+    : '<span class="sc-na" style="font-size:12px">' +
+      (S.metaErr ? '示例没拿到' : '加载中…') + '</span>'
+
+  const canRun = !!S.meta && !S.running
+  return '<div class="panel"><div class="p-hd">筛选脚本</div>' +
+    '<div class="sc-bar"><span class="lb">市场</span><div class="sc-seg" id="sc-mkts">' + mkBtns + '</div></div>' +
+    '<div class="sc-bar"><span class="lb">示例</span><div class="sc-seg" id="sc-presets">' + psBtns + '</div></div>' +
+    '<textarea class="sc-ed" id="sc-script" spellcheck="false" ' +
+      'placeholder="# 例:\ndef sma50 = Average(close, 50);\nplot scan = close > sma50 and volume > 1000000;">' +
+      esc(S.script) + '</textarea>' +
+    '<div class="sc-bar" style="margin-top:10px">' +
+      '<button class="btn" id="sc-run"' + (canRun ? '' : ' disabled') + '>' +
+        (S.running ? '扫描中…' : '<span class="hi hi-play"></span> 运行扫描') + '</button>' +
+      '<button class="btn small" id="sc-clear">清空</button>' +
+      '<span class="sc-na" style="font-size:11.5px;margin-left:auto">Ctrl/Cmd + Enter 运行</span>' +
+    '</div>' +
+    (S.error ? '<div class="sc-err">' + esc(S.error) + '</div>' : '') +
+    (S.metaErr ? '<div class="sc-err">读不到扫描配置:' + esc(S.metaErr) +
+      '\n后端可能还没部署 /api/quant/screener/*。界面骨架照常显示,但运行会失败。</div>' : '') +
+    vSyntax() +
+    vFields() +
+    '</div>'
+}
+
+function vSyntax() {
+  return '<details class="sc-fold"><summary>语法速查</summary><div class="sc-syn">' +
+    '<b>结构</b>　<code>#</code> 注释 · <code>def 名字 = 表达式;</code> 定义 · ' +
+    '<code>plot scan = 综合条件;</code> 最后一句就是筛选结果,必须有。<br>' +
+    '<b>运算</b>　<code>&gt; &gt;= &lt; &lt;= == !=</code> · <code>+ - * /</code> · ' +
+    '<code>and or not</code> · 括号。<br>' +
+    '<b>序列</b>　<code>close</code> <code>open</code> <code>high</code> ' +
+    '<code>low</code> <code>volume</code><br>' +
+    '<b>函数</b>　<code>Average(close, N)</code> 均线 · ' +
+    '<code>Average(volume, N)</code> 均量(<b>N 只能是 10/30/60/90</b>)· ' +
+    '<code>ExpAverage(close, N)</code> · ' +
+    '<code>Highest(high, N)</code> / <code>Lowest(low, N)</code>' +
+    '(<b>N 只能接近 5/21/63/126/252</b>)· <code>RSI()</code> 默认 14 周期<br>' +
+    '<b>字段</b>　也可以直接写 TradingView 字段名,共 3777 个,下面能搜。<br>' +
+    '<span style="color:var(--soft)">周期映射不上会直接报错并告诉你可用值 —— ' +
+    '不会拿相近的周期顶替(那等于把 90 天当 100 天用)。</span>' +
+    '</div></details>'
+}
+
+function vFields() {
+  return '<details class="sc-fold" id="sc-fd-fold"><summary>可用字段(3777 个 · 搜索)</summary>' +
+    '<div class="sc-fd"><input id="sc-fd-q" placeholder="搜字段名,如 pe / margin / volume / RSI" /></div>' +
+    '<div class="sc-fl" id="sc-fd-list"><span class="sc-na">输入关键词开始搜索</span></div>' +
+    '<div class="sc-note">点一下把字段名插进脚本光标处。</div></details>'
+}
+
+// ─── 右栏 · 结果 ──────────────────────────────────────────────────
+function vResult() {
+  if (!S.result) {
+    return '<div class="panel"><div class="p-hd">扫描结果</div>' +
+      '<div class="sc-note" style="padding:26px 4px;text-align:center">' +
+      '还没有跑过。左边写好脚本、选好市场,点「运行扫描」。<br>' +
+      '不知道从哪开始就先点一个「示例」。</div></div>'
+  }
+  const r = S.result
+  const stats = [
+    ['全市场', Number.isFinite(r.universe_total) ? r.universe_total : null, ''],
+    ['已扫描', Number.isFinite(r.scanned) ? r.scanned : null, ''],
+    ['命中', Number.isFinite(r.matched) ? r.matched : null, 'hit'],
+    ['算不出', Number.isFinite(r.skipped_incomplete) ? r.skipped_incomplete : null, ''],
+  ].map(function (s) {
+    return '<div class="s ' + s[2] + '"><div class="k">' + s[0] + '</div><div class="v">' +
+      (s[1] == null ? NA : s[1]) + '</div></div>'
+  }).join('')
+
+  const t = r.timing_ms || {}
+  const timing = (Number.isFinite(t.fetch) ? '取数 ' + t.fetch + 'ms' : '') +
+    (Number.isFinite(t.evaluate) ? ' · 求值 ' + t.evaluate + 'ms' : '')
+
+  return '<div class="panel"><div class="p-hd">扫描结果' +
+    '<span class="cnt">' + esc(r.market_label || '') +
+    (r.returned != null ? ' · 显示前 ' + r.returned + ' 只' : '') + '</span></div>' +
+    '<div class="sc-stat">' + stats + '</div>' +
+    vWarnings(r) +
+    vTable(r) +
+    '<div class="sc-bar" style="margin-top:10px">' +
+      '<button class="btn small" id="sc-copy">复制命中代码</button>' +
+      '<span class="sc-na" style="font-size:11.5px;margin-left:auto">' + esc(timing) + '</span>' +
+    '</div>' +
+    '<div class="sc-note">数据源:' + esc(r.source || '—') + '</div>' +
+    '</div>'
+}
+
+function vWarnings(r) {
+  const ws = (r.notes || []).concat(r.warnings || [])
+  if (!ws.length) return ''
+  // 不折叠、不记住"已读" —— 口径与时效是每次看结果都必须在眼前的东西
+  return '<div class="sc-warn"><ul>' +
+    ws.map(function (w) { return '<li>' + esc(w) + '</li>' }).join('') + '</ul></div>'
+}
+
+function vTable(r) {
+  const picks = r.picks || []
+  if (!picks.length) {
+    return '<div class="sc-note" style="padding:20px 4px;text-align:center">' +
+      '没有一只满足全部条件。<br>' +
+      '把条件放宽一点再试 —— 或者看看上面「算不出」的数量,' +
+      '如果它很大,说明这个市场缺你用到的字段。</div>'
+  }
+  // 列 = 代码/名称/现价 + 脚本真正用到的字段。ALWAYS_COLS 里的不重复展示。
+  const skip = { name: 1, description: 1, close: 1, currency: 1, _symbol: 1, _code: 1 }
+  const cols = (r.columns || []).filter(function (c) { return !skip[c] })
+  const head = '<tr><th data-sort="">代码</th><th>名称</th>' +
+    '<th data-sort="close" class="n">现价</th>' +
+    cols.map(function (c) {
+      return '<th data-sort="' + esc(c) + '" class="n">' + esc(c) +
+        (S.sortBy === c ? '<span class="ar">' + (S.desc ? '↓' : '↑') + '</span>' : '') + '</th>'
+    }).join('') + '</tr>'
+  const rows = picks.map(function (p) {
+    const f = p.fields || {}
+    return '<tr><td class="cd">' + esc(p.code || '') + '</td>' +
+      '<td>' + (p.name ? esc(String(p.name).slice(0, 34)) : NA) + '</td>' +
+      '<td class="n">' + plain(p.close) + ' <span class="sc-na">' + esc(p.currency || '') + '</span></td>' +
+      cols.map(function (c) {
+        const v = f[c]
+        if (v == null) return '<td class="n">' + NA + '</td>'
+        if (typeof v === 'number') return '<td class="n">' + num(v) + '</td>'
+        return '<td>' + esc(String(v).slice(0, 22)) + '</td>'
+      }).join('') + '</tr>'
+  }).join('')
+  return '<div class="sc-scroll"><table class="sc-tb"><thead>' + head +
+    '</thead><tbody>' + rows + '</tbody></table></div>'
+}
+
+// ─── 渲染 + 绑定 ──────────────────────────────────────────────────
+function render() {
+  const html = '<div class="sc-split">' + vEditor() + vResult() + '</div>'
+  container.innerHTML = html
+  bind()
+  return html
+}
+
+function bind() {
+  const ed = document.getElementById('sc-script')
+  if (ed) {
+    ed.addEventListener('input', function () { S.script = ed.value; saveDraft() })
+    ed.addEventListener('keydown', function (e) {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); run() }
+    })
+  }
+  const mkts = document.getElementById('sc-mkts')
+  if (mkts) mkts.addEventListener('click', function (e) {
+    const b = e.target && e.target.closest ? e.target.closest('button') : null
+    if (!b || !b.dataset || !b.dataset.mkt) return
+    S.market = b.dataset.mkt; saveDraft(); render()
+  })
+  const ps = document.getElementById('sc-presets')
+  if (ps) ps.addEventListener('click', function (e) {
+    const b = e.target && e.target.closest ? e.target.closest('button') : null
+    if (!b || !b.dataset || !b.dataset.preset) return
+    const p = ((S.meta && S.meta.presets) || []).filter(function (x) {
+      return x.key === b.dataset.preset
+    })[0]
+    if (!p) return
+    S.script = p.script
+    S.market = p.market || S.market
+    S.error = null
+    saveDraft(); render()
+  })
+  const runBtn = document.getElementById('sc-run')
+  if (runBtn) runBtn.addEventListener('click', run)
+  const clr = document.getElementById('sc-clear')
+  if (clr) clr.addEventListener('click', function () {
+    S.script = ''; S.error = null; saveDraft(); render()
+  })
+  const copy = document.getElementById('sc-copy')
+  if (copy) copy.addEventListener('click', function () {
+    const codes = ((S.result && S.result.picks) || []).map(function (p) { return p.code }).join('\n')
+    if (!codes) { toast('没有可复制的代码', 'warn'); return }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(codes).then(function () { toast('已复制 ' + codes.split('\n').length + ' 个代码') },
+        function () { toast('复制失败,请手动选中', 'warn') })
+    } else { toast('这个浏览器不支持一键复制', 'warn') }
+  })
+  const th = document.querySelector('.sc-tb thead')
+  if (th) th.addEventListener('click', function (e) {
+    const c = e.target && e.target.closest ? e.target.closest('th') : null
+    if (!c || !c.dataset || !c.dataset.sort) return
+    if (S.sortBy === c.dataset.sort) S.desc = !S.desc
+    else { S.sortBy = c.dataset.sort; S.desc = true }
+    run()
+  })
+  const q = document.getElementById('sc-fd-q')
+  if (q) q.addEventListener('input', debounceFields)
+}
+
+// ─── 字段搜索 ─────────────────────────────────────────────────────
+let fdTimer = null
+function debounceFields() {
+  if (fdTimer) clearTimeout(fdTimer)
+  fdTimer = setTimeout(searchFields, 220)
+}
+async function searchFields() {
+  const q = document.getElementById('sc-fd-q')
+  const list = document.getElementById('sc-fd-list')
+  if (!q || !list) return
+  const kw = (q.value || '').trim()
+  if (!kw) { list.innerHTML = '<span class="sc-na">输入关键词开始搜索</span>'; return }
+  let r
+  try {
+    r = await fetch(FIELD_API + '?market=' + encodeURIComponent(S.market) +
+      '&q=' + encodeURIComponent(kw) + '&limit=60', { headers: apiHeaders() })
+  } catch (e) { list.innerHTML = '<span class="sc-na">搜索请求没发出去</span>'; return }
+  if (!r.ok) { list.innerHTML = '<span class="sc-na">搜索失败 HTTP ' + r.status + '</span>'; return }
+  let d
+  try { d = await r.json() } catch (e) { list.innerHTML = '<span class="sc-na">返回的不是合法 JSON</span>'; return }
+  const fs = (d && d.fields) || []
+  if (!fs.length) { list.innerHTML = '<span class="sc-na">没有匹配的字段</span>'; return }
+  list.innerHTML = fs.map(function (f) { return '<span data-f="' + esc(f) + '">' + esc(f) + '</span>' }).join('')
+  list.addEventListener('click', function (e) {
+    const s = e.target && e.target.dataset ? e.target.dataset.f : null
+    if (!s) return
+    const ed = document.getElementById('sc-script')
+    if (!ed) return
+    S.script = (S.script || '') + s
+    ed.value = S.script
+    saveDraft()
+  })
+}
+
+// ─── 跑 ───────────────────────────────────────────────────────────
+async function run() {
+  if (S.running) return
+  if (!(S.script || '').trim()) { S.error = '脚本是空的。先写条件,或点上面的「示例」。'; render(); return }
+  S.running = true; S.error = null; render()
+  let r
+  try {
+    r = await fetch(RUN_API, {
+      method: 'POST',
+      headers: apiHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        script: S.script, market: S.market, limit: 100,
+        sort_by: S.sortBy || null, descending: S.desc,
+      }),
+    })
+  } catch (e) {
+    S.running = false
+    S.error = '请求没发出去 · ' + (e && e.message ? e.message : e)
+    render(); return
+  }
+  S.running = false
+  let d = null
+  try { d = await r.json() } catch (e) { /* 400 也可能不是 JSON */ }
+  if (!r.ok) {
+    // 后端把「脚本哪里写错了 / 周期可用值是哪些」写在 detail 里,原样显示。
+    // 不要替换成"扫描失败"之类的通用话术 —— 那句话对用户没有任何帮助。
+    S.error = (d && (d.detail || d.error)) || ('扫描失败 · HTTP ' + r.status)
+    S.result = null
+    render(); return
+  }
+  S.result = d
+  render()
+}
+
+// ─── 启动 ─────────────────────────────────────────────────────────
+async function boot() {
+  loadDraft()
+  render()                                  // 先把骨架画出来,不等网络
+  let r
+  try {
+    r = await fetch(META_API, { headers: apiHeaders(), cache: 'no-store' })
+  } catch (e) {
+    S.metaErr = '请求没发出去 · ' + (e && e.message ? e.message : e); render(); return
+  }
+  if (!r.ok) { S.metaErr = 'HTTP ' + r.status; render(); return }
+  try { S.meta = await r.json() } catch (e) { S.metaErr = '返回的不是合法 JSON'; render(); return }
+  // 小鹿页面的「直接跑示例」链接带 ?preset=xxx 过来 —— 它是明确的指令,
+  // 优先级高于 localStorage 里的上次草稿(否则点了示例还是看到旧脚本,像没生效)
+  let want = null
+  try { want = new URLSearchParams(location.search || '').get('preset') } catch (e) { /* 老浏览器 */ }
+  const list = S.meta.presets || []
+  const chosen = want ? list.filter(function (p) { return p.key === want })[0] : null
+  if (chosen) {
+    S.script = chosen.script
+    S.market = chosen.market || S.market
+    saveDraft()
+  } else if (!S.script) {
+    const p = list[0]
+    if (p) { S.script = p.script; S.market = p.market || S.market }
+  }
+  render()
+}
+
+boot()
+</script>
+</body>
+</html>

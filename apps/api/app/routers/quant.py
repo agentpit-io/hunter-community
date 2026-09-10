@@ -21,6 +21,8 @@ from pydantic import BaseModel
 
 from app.services.database import get_conn
 from app.services.quant import factor_defs, strategy_engine, backtest_engine, factor_engine
+from app.services.quant import tv_screener
+from app.services.quant.screen_dsl import ScreenError
 
 try:
     from psycopg2.extras import execute_values
@@ -1164,3 +1166,75 @@ def _format_orders_csv(orders: list[dict], broker: str) -> str:
         for o in orders:
             w.writerow([o["code"], o["name"], "buy", o["qty"], o["price"], o["price_type"]])
     return buf.getvalue()
+
+
+# ═══════════════════════════════════════════════════════════════
+# 全市场扫描筛选(TradingView 通道)
+#
+#   GET  /quant/screener/meta            · 市场 / 预置脚本 / 语法说明
+#   GET  /quant/screener/fields          · 字段搜索(3777 个,只能搜不能列)
+#   POST /quant/screener/run             · 跑脚本
+#
+# 端点名不能叫 /scan —— 那个已经是「按因子打分选 Top N」了,两件事:
+# /scan 走站内 factor_value(A 股 · 有历史 · 能回测),
+# /screener 走 TradingView(全球 · 只有当前快照 · 不进回测)。
+# 混在一起会让人以为扫描结果可以直接拿去跑回测。
+# ═══════════════════════════════════════════════════════════════
+
+class ScreenIn(BaseModel):
+    script: str = ""
+    preset: str | None = None
+    market: str = "us"
+    limit: int = 100
+    sort_by: str | None = None
+    descending: bool = True
+
+
+@router.get("/screener/meta")
+async def screener_meta():
+    return {
+        "markets": [
+            {"key": k, "label": tv_screener.MARKETS[k].label,
+             "currency": tv_screener.MARKETS[k].currency,
+             "note": tv_screener.MARKETS[k].note or None}
+            for k in tv_screener.MARKET_ORDER
+        ],
+        "presets": [
+            {"key": p["key"], "name": p["name"], "market": p["market"],
+             "desc": p["desc"], "script": p["script"]}
+            for p in tv_screener.PRESETS
+        ],
+        "source": "TradingView scanner(非官方接口 · 延迟 15 分钟)",
+        "limits": [
+            tv_screener.DELAY_WARN,
+            "只有当前快照,没有历史序列 —— 结果不能用于回测,也不写进因子库。",
+            tv_screener.MARKET_CAP_WARN,
+        ],
+    }
+
+
+@router.get("/screener/fields")
+async def screener_fields(market: str = "us", q: str = "", limit: int = 50):
+    try:
+        return {"market": market,
+                "fields": tv_screener.field_search(market, q, max(1, min(limit, 200)))}
+    except ScreenError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/screener/run")
+async def screener_run(body: ScreenIn):
+    script = body.script or ""
+    if body.preset and not script.strip():
+        p = tv_screener.preset(body.preset)
+        if p is None:
+            raise HTTPException(404, f"没有这个示例脚本:{body.preset}")
+        script = p["script"]
+    try:
+        return tv_screener.run_script(
+            script, body.market, limit=body.limit,
+            sort_by=body.sort_by, descending=body.descending)
+    except ScreenError as e:
+        # 脚本写错、周期映射不了、上游挂了 —— 都是 400,message 直接给用户看。
+        # 不要吞成 500 空结果:用户看到"0 只命中"会以为是市场里真的没有票满足条件。
+        raise HTTPException(400, str(e))
