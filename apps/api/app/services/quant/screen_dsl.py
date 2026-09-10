@@ -685,6 +685,9 @@ _FIELD_LABEL = {
     "number_of_employees": "员工人数",
     "relative_volume_10d_calc": "10日相对成交量",
     "Value.Traded": "成交额", "Volatility.D": "日波动率",
+    # 「成交量+变动」是两个头词,会被 heads>1 那道闸拦下,但它拼起来是对的
+    "volume_change": "成交量变动", "volume_change_abs": "成交量变动(绝对值)",
+    "price_change": "价格变动", "market_cap_diluted_calc": "稀释市值",
 }
 
 _SMA_RE = re.compile(r"^SMA(\d+)$")
