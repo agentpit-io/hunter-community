@@ -367,8 +367,8 @@ function vMagic() {
     '</div>' +
     '<div class="mg-eg" id="mg-eg">' + chips + '</div>' +
     '</div>' +
-    (S.genError ? '<div class="sc-err">' + esc(S.genError) + '</div>' : '') +
-    (S.metaErr ? '<div class="sc-err">读不到扫描配置:' + esc(S.metaErr) +
+    (S.genError ? '<div class="sc-err">' + esc(maskSrc(S.genError)) + '</div>' : '') +
+    (S.metaErr ? '<div class="sc-err">读不到扫描配置:' + esc(maskSrc(S.metaErr)) +
       '\n后端可能还没部署 /api/quant/screener/*。界面骨架照常显示,但生成和扫描都会失败。</div>' : '')
 }
 
@@ -451,8 +451,23 @@ function vConditions() {
     vNotes()
 }
 
+// ─── 页面上不出现上游数据源的名字(2026-09-10 产品要求) ──────────
+// **只改这个页面的展示**:后端照旧返回这些提示,MCP 工具那边也照旧收得到
+// (模型需要知道"数据是延迟的"才不会拿盘中数据下结论)。
+//
+// 两种处理,别混:
+//   · 提示条(notes / warnings)—— 整条丢掉。它们本来就只是提醒。
+//   · 报错文案 —— 只把名字换掉,不能整条丢:丢了用户就不知道为什么失败了。
+const SRC_ALIAS = '行情源'
+function dropSrc(list) {
+  return (list || []).filter(function (w) { return String(w).indexOf('TradingView') < 0 })
+}
+function maskSrc(s) {
+  return String(s == null ? '' : s).replace(/TradingView/g, SRC_ALIAS)
+}
+
 function vNotes() {
-  const ws = (S.notes || []).concat(S.parseWarnings || [])
+  const ws = dropSrc(S.notes).concat(dropSrc(S.parseWarnings))
   if (!ws.length) return ''
   return '<div class="sc-warn"><ul>' +
     ws.map(function (w) { return '<li>' + esc(w) + '</li>' }).join('') + '</ul></div>'
@@ -467,7 +482,7 @@ function vRunBar() {
     (S.conditions.length && !n && S.combine !== 'custom'
       ? '<span class="sc-na" style="font-size:12px">一条都没启用,扫不出东西</span>' : '') +
     '</div>' +
-    (S.runError ? '<div class="sc-err">' + esc(S.runError) + '</div>' : '')
+    (S.runError ? '<div class="sc-err">' + esc(maskSrc(S.runError)) + '</div>' : '')
 }
 
 function vResult() {
@@ -491,12 +506,11 @@ function vResult() {
     '<div class="sc-runbar">' +
       '<button class="btn small" id="sc-copy">复制命中代码</button>' +
       '<span class="sc-na" style="font-size:11.5px;margin-left:auto">' + esc(timing) + '</span>' +
-    '</div>' +
-    '<div class="sc-note">数据源:' + esc(r.source || '—') + '</div></div>'
+    '</div></div>'
 }
 
 function vWarn(r) {
-  const ws = (r.notes || []).concat(r.warnings || [])
+  const ws = dropSrc(r.notes).concat(dropSrc(r.warnings))
   if (!ws.length) return ''
   return '<div class="sc-warn"><ul>' +
     ws.map(function (w) { return '<li>' + esc(w) + '</li>' }).join('') + '</ul></div>'
@@ -551,7 +565,7 @@ function vHelp() {
     '<code>ExpAverage(close, N)</code> · ' +
     '<code>Highest(high, N)</code> / <code>Lowest(low, N)</code>' +
     '(<b>N 只能接近 5/21/63/126/252</b>)· <code>RSI()</code> 默认 14 周期<br>' +
-    '<b>字段</b>　也可以直接写 TradingView 字段名,共 3777 个,下面能搜。<br>' +
+    '<b>字段</b>　也可以直接写字段名,共 3777 个,下面能搜。<br>' +
     '<span style="color:var(--soft)">周期映射不上会直接报错并告诉你可用值 —— ' +
     '不会拿相近的周期顶替(那等于把 90 天当 100 天用)。</span></div></details>' +
     '<details class="sc-fold" id="sc-fd-fold"><summary>可用字段(3777 个 · 搜索)</summary>' +
