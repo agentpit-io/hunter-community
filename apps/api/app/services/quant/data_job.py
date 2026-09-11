@@ -784,7 +784,9 @@ def _run_us(job_id: int, job: dict, codes: list[str], start: date, end: date) ->
             _progress(job_id, done=done, skipped=skipped + bad, failed=failed,
                       phase=f"计算因子 {i}/{total} 个调仓日")
         try:
-            factors = _compute_factors(pool_codes, start, end, market="us", on_progress=_fp)
+            # 这次有新下的票 → 全部调仓日重算(截面变了);只是续跑补算 → 跳过已算好的调仓日
+            factors = _compute_factors(pool_codes, start, end, market="us", on_progress=_fp,
+                                       skip_done=(done == 0))
         except _Stop:
             _progress(job_id, phase="已暂停(算因子阶段 · 续跑会接着补算)")
             return {"paused": True, "done": done}
@@ -819,9 +821,25 @@ def _us_factors_stale(pool_codes: list[str], end: date) -> bool:
         cur.close(); conn.close()
 
 
+def _us_dates_done(pool_codes: list[str], days: list[date]) -> set[date]:
+    """美股池里哪些调仓日的因子已经算好(探针因子覆盖 ≥ 8 成池子)。
+    续跑时跳过它们 —— 全美股 180 个调仓日要算两个多小时,中断一次就从头算的话,
+    部署一频繁就永远算不完(2026-09-11 一晚上被重建打断了五次)。"""
+    if not pool_codes or not days:
+        return set()
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("""SELECT trade_date, count(*) FROM factor_value
+                        WHERE market='US' AND factor_key='vol_20d_inv' AND trade_date = ANY(%s)
+                        GROUP BY trade_date""", (days,))
+        return {d for d, n in cur.fetchall() if n >= 0.8 * len(pool_codes)}
+    finally:
+        cur.close(); conn.close()
+
+
 def _compute_factors(codes: list[str], start: date, end: date,
                      with_financial: bool = False, market: str = "a",
-                     on_progress=None) -> dict:
+                     on_progress=None, skip_done: bool = False) -> dict:
     """把因子算到每个调仓日上。
 
     **不能只算当天一个截面** —— 回测要的是每个调仓日的因子值,
@@ -841,6 +859,9 @@ def _compute_factors(codes: list[str], start: date, end: date,
                   | set(bt._rebalance_dates(start, end, "M", market=market)))
     if not days:
         return {}
+    if skip_done:
+        done_days = _us_dates_done(codes, days)
+        days = [d for d in days if d not in done_days]
     keys = list(fe.LOCAL_ONLY)
     if with_financial:
         # 只算真正落了库的那几个(_make_db_factor)。其余仍走 akshare_client
