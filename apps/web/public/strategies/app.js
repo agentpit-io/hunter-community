@@ -207,6 +207,144 @@ function apiHeaders(extra) {
   )
 }
 
+// ═════════════════════════════════════════════════════════════════
+// 登录态续期 —— 策略中心这几页自己管,因为它们**不经过主站的 AuthGuard**
+// ═════════════════════════════════════════════════════════════════
+// 2026-09-11 用户报「明明登录了,保存扫描策略却经常提示要登录」。
+//
+// 根因三层叠在一起:
+//   1. access token 只有 1 小时(auth.py JWT_ACCESS_TTL=3600),refresh token 30 天。
+//   2. 主站(/chat 等 React 页)靠 components/AuthGuard.tsx 在撞到 401 时拿
+//      refresh token 续期。**但 /strategies/*.html 是 public/ 下的纯静态页,
+//      根本不加载 AuthGuard** —— 只会拿 localStorage 里现存的 token 去请求,从不续期。
+//      所以只要距离主站上次续期超过 1 小时,这几页的所有登录态请求都失效。
+//      「经常」而不是「每次」,就是这么来的。
+//   3. **/api/quant/ 是免登录前缀,走可选身份识别**:过期 token 不被拒,
+//      而是被**静默当成匿名**。所以中间件不告警,读接口(我的策略、我的扫描策略)
+//      返回的是 200 的匿名结果 —— 不会出现 401。只有写接口在路由里判 uid 才报出来。
+//
+// 第 3 条决定了修法:**光在 401 时续期不够**,读接口压根不 401,只是悄悄变空。
+// 所以两道都要:
+//   ① 发请求**之前**:token 快过期(<60s)就先续,再把新 token 换进请求头
+//   ② 发请求**之后**:仍然 401 就续一次、重发一次
+//
+// 两个坑,都照 AuthGuard 那边踩过的来:
+//   · refresh token 是**一次性**的(后端 rotate:用一次就作废旧的)。页面同时发好几个
+//     请求会一起去续,没有单飞锁的话第一个成功、后面全拿着作废的旧 token 失败。
+//   · **跨标签页**同理:对话页和这里同时续,必有一边失败。失败时先回头看一眼
+//     localStorage —— token 已经被别的标签页换新了,就直接用它,不算失败。
+//   · 续期失败**不清 token、不跳登录页**。清掉会把用户在对话页的登录也一起踢掉,
+//     而失败很可能只是上面那个跨标签页竞态。交给调用方显示「登录已失效」即可。
+const AUTH_SKEW_SEC = 60
+
+function jwtExp(tok) {
+  try {
+    let p = String(tok).split('.')[1] || ''
+    p = p.replace(/-/g, '+').replace(/_/g, '/')
+    while (p.length % 4) p += '='
+    const exp = JSON.parse(atob(p)).exp
+    return Number.isFinite(exp) ? exp : null
+  } catch (e) { return null }
+}
+// 解不出 exp 就不猜(返回 false),交给 ② 的 401 兜底
+function tokenStale(tok) {
+  const exp = jwtExp(tok)
+  return exp != null && exp - Date.now() / 1000 < AUTH_SKEW_SEC
+}
+
+const _rawFetch = (typeof window !== 'undefined' && typeof window.fetch === 'function')
+  ? (window.__hunterOriginalFetch || window.fetch).bind(window) : null
+
+function _storeTokens(d) {
+  const tok = d && (d.access_token || d.token)
+  if (!tok) return null
+  try {
+    localStorage.setItem('hunter_token', tok)
+    if (d.refresh_token) localStorage.setItem('hunter_refresh', d.refresh_token)
+  } catch (e) { /* 隐私模式 */ }
+  return tok
+}
+
+let _refreshInflight = null
+async function refreshAuth() {
+  if (!_rawFetch) return null
+  if (_refreshInflight) return _refreshInflight
+  _refreshInflight = (async function () {
+    const before = getToken()
+    let rt = null
+    try { rt = localStorage.getItem('hunter_refresh') } catch (e) { /* 隐私模式 */ }
+    if (rt) {
+      try {
+        const r = await _rawFetch('/api/auth/refresh', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh_token: rt }), cache: 'no-store',
+        })
+        if (r.ok) { const tok = _storeTokens(await r.json()); if (tok) return tok }
+      } catch (e) { /* 网络问题,往下走 */ }
+    }
+    // 别的标签页刚续过(refresh token 已被它用掉)—— 用它存下的新 token
+    const now = getToken()
+    if (now && now !== before && !tokenStale(now)) return now
+    // 单用户模式:和 AuthGuard / localSession.ts 一样静默重取;多用户实例返回 403
+    try {
+      const r = await _rawFetch('/api/auth/local-session', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, cache: 'no-store',
+      })
+      if (r.ok) { const tok = _storeTokens(await r.json()); if (tok) return tok }
+    } catch (e) { /* ignore */ }
+    return null
+  })()
+  try { return await _refreshInflight } finally { _refreshInflight = null }
+}
+
+// 把请求头里的 Authorization 换成新 token(大小写不敏感)。
+// 只处理字符串 URL + 普通对象 / Headers / 数组三种 headers 写法 —— 本目录都是这么调的。
+function withAuth(init, tok) {
+  const i = Object.assign({}, init || {})
+  const h = i.headers
+  const v = 'Bearer ' + tok
+  if (h && typeof h.set === 'function' && typeof Headers === 'function') {
+    const hh = new Headers(h); hh.set('Authorization', v); i.headers = hh
+  } else if (Array.isArray(h)) {
+    i.headers = h.filter(function (p) { return String(p[0]).toLowerCase() !== 'authorization' })
+                 .concat([['Authorization', v]])
+  } else {
+    const o = {}
+    Object.keys(h || {}).forEach(function (k) { if (k.toLowerCase() !== 'authorization') o[k] = h[k] })
+    o['Authorization'] = v
+    i.headers = o
+  }
+  return i
+}
+
+function _isOwnApi(url) {
+  if (typeof url !== 'string') return false
+  const u = url.indexOf(location.origin) === 0 ? url.slice(location.origin.length) : url
+  return u.indexOf('/api/') === 0 && !/^\/api\/auth\/(refresh|local-session|login|register|logout)/.test(u)
+}
+
+if (_rawFetch && !window.__hunterStrategiesAuthPatched) {
+  window.__hunterStrategiesAuthPatched = true
+  window.fetch = async function (input, init) {
+    if (!_isOwnApi(input)) return _rawFetch(input, init)
+    // ① 发之前:快过期就先续
+    const cur = getToken()
+    if (cur && tokenStale(cur)) {
+      const fresh = await refreshAuth()
+      if (fresh) init = withAuth(init, fresh)
+    }
+    const r = await _rawFetch(input, init)
+    // ② 发之后:还是 401 就续一次、重发一次(只重发一次,避免死循环)
+    if (r.status === 401) {
+      const fresh = await refreshAuth()
+      if (fresh) return _rawFetch(input, withAuth(init, fresh))
+    }
+    return r
+  }
+  // 页面一打开就检查一次:过期就立刻续,别等第一个请求去撞
+  try { const t0 = getToken(); if (t0 && tokenStale(t0)) refreshAuth() } catch (e) { /* ignore */ }
+}
+
 // 前端 record 格式:{factors: [key], weights: {key: pct}}
 // 后端 API 格式:{factors: [{key, weight_pct}]}
 function strategyToApi(record) {

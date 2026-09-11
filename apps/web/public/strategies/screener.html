@@ -702,7 +702,19 @@ async function doSave(raw, modal) {
     sort_desc: S.desc,
   })
   if (btn) { btn.disabled = false; btn.textContent = '保存' }
-  if (r.status === 401) { show('登录后才能保存扫描策略'); return }
+  if (r.status === 401) {
+    // 走到这里说明 app.js 的自动续期**已经试过并失败了** —— 不是「没登录」,
+    // 是登录真的失效了(refresh token 30 天没用 / 在别处退出过)。
+    // 原来那句「登录后才能保存」会让明明登录着的用户以为是 bug(2026-09-11 就是这么报上来的)。
+    // 新窗口打开登录页:在本页跳走的话,用户会以为刚调好的条件没了(其实草稿还在)。
+    if (err) {
+      err.innerHTML = '登录已失效(超过 30 天没用,或在别处退出过)。' +
+        '<a href="/login" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline">' +
+        '在新窗口重新登录</a>,回到这里再点保存 —— 当前的条件不会丢。'
+      err.style.display = ''
+    }
+    return
+  }
   if (!r.ok) { show(errOf(r, '保存失败 · HTTP ' + r.status)); return }
   modal.remove()
   S.loadedName = name

@@ -393,6 +393,46 @@ try {
   console.log('FAIL 智能体定向断言 ·', e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e)
 }
 
+// ─── 登录态续期(app.js)─────────────────────────────────────────────
+// 策略中心这几页不经过主站 AuthGuard,续期全靠 app.js 自己。
+// 这里只验两个纯函数:判过期、换请求头。真正的续期流程要真浏览器 + 真 token 才测得了。
+try {
+  const ctx = vm.createContext(makeContext('screener.html'))
+  ctx.atob = (s) => Buffer.from(s, 'base64').toString('binary')
+  vm.runInContext(appJs, ctx, { filename: 'app.js' })
+  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64')
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  const now = Math.floor(Date.now() / 1000)
+  ctx.T_OLD  = 'h.' + b64({ sub: 'u', exp: now - 10 }) + '.s'
+  ctx.T_SOON = 'h.' + b64({ sub: 'u', exp: now + 30 }) + '.s'
+  ctx.T_NEW  = 'h.' + b64({ sub: 'u', exp: now + 3600, email: '中文邮箱@例子' }) + '.s'
+  vm.runInContext(`
+    var R_OLD = tokenStale(T_OLD), R_SOON = tokenStale(T_SOON), R_NEW = tokenStale(T_NEW)
+    var R_BAD = tokenStale('not-a-jwt')
+    var H1 = withAuth({ headers: { 'Content-Type': 'application/json', 'authorization': 'Bearer OLD' } }, 'NEW')
+    var H2 = withAuth({ method: 'POST', body: '{}' }, 'NEW')
+    var H3 = withAuth({ headers: [['authorization', 'Bearer OLD'], ['X-A', '1']] }, 'NEW')
+  `, ctx, { filename: 'assert-auth' })
+  const keysAuth = (o) => Object.keys(o).filter(k => k.toLowerCase() === 'authorization')
+  const checks = [
+    ['已过期的 token 判为要续', ctx.R_OLD === true],
+    ['60 秒内过期的也提前续', ctx.R_SOON === true],
+    ['还有 1 小时的不续(payload 里有中文也能解)', ctx.R_NEW === false],
+    ['解不出的 token 不瞎续(交给 401 兜底)', ctx.R_BAD === false],
+    ['换头:旧的小写 authorization 被替换,不是并存', keysAuth(ctx.H1.headers).length === 1 && ctx.H1.headers.Authorization === 'Bearer NEW'],
+    ['换头:其它头保留', ctx.H1.headers['Content-Type'] === 'application/json'],
+    ['换头:原来没头也能加上,method/body 保留', ctx.H2.headers.Authorization === 'Bearer NEW' && ctx.H2.method === 'POST' && ctx.H2.body === '{}'],
+    ['换头:数组写法也能换', ctx.H3.headers.filter(p => p[0].toLowerCase() === 'authorization').length === 1 && ctx.H3.headers.some(p => p[0] === 'X-A')],
+  ]
+  for (const [name, ok] of checks) {
+    if (ok) console.log('PASS 续期 ·', name)
+    else { failed++; console.log('FAIL 续期 ·', name) }
+  }
+} catch (e) {
+  failed++
+  console.log('FAIL 续期定向断言 ·', e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e)
+}
+
 // ─── 保存的扫描策略:开关状态必须能往返 ─────────────────────────────
 // 这个功能最容易悄悄写错的地方:保存时如果用了 buildScript(true)(草稿用的那个),
 // 停用的条件也会被写进 plot —— 页面一切正常、保存也成功,但加载回来
