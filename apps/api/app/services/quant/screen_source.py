@@ -369,8 +369,11 @@ def run_script(script: str, market_key: str = "us", limit: int = 100,
     if sort_by:
         if sort_by not in want and sort_by not in screen_dsl._PRICE:
             raise ScreenError(f"排序字段 {sort_by!r} 不在这次请求的列里")
-        hits.sort(key=lambda r: (r.get(sort_by) is None, r.get(sort_by) or 0),
-                  reverse=descending)
+        # 空值不论升序降序都排最后 —— 原来用 (is None, 值) 当 key 再 reverse,
+        # 降序时空值整批跑到最前面,用户点「降序」看到的第一屏全是 —
+        has = [r for r in hits if r.get(sort_by) is not None]
+        has.sort(key=lambda r: r.get(sort_by), reverse=descending)
+        hits = has + [r for r in hits if r.get(sort_by) is None]
 
     warnings = [DELAY_WARN]
     if md.note:
