@@ -323,7 +323,7 @@ def run_script(script: str, market_key: str = "us", limit: int = 100,
     fetch_ms = (time.time() - t0) * 1000
 
     t1 = time.time()
-    hits, skipped = screen_dsl.evaluate(c, rows, cache)
+    hits, skipped, missing = screen_dsl.evaluate_detail(c, rows, cache)
     eval_ms = (time.time() - t1) * 1000
 
     if sort_by:
@@ -337,10 +337,23 @@ def run_script(script: str, market_key: str = "us", limit: int = 100,
         warnings.append(md.note)
     if any("market_cap" in f for f in want):
         warnings.append(MARKET_CAP_WARN)
+    # 算不出的票具体缺哪个字段 —— 只说一个总数的话,用户没法判断
+    # 该改哪条条件(2026-09-11 用户问:「2547 只具体缺少哪个字段?」)。
+    missing_list = [
+        {"field": f, "label": screen_dsl.field_label_cn(f), "count": n,
+         "reason": screen_dsl.missing_reason(f)}
+        for f, n in sorted(missing.items(), key=lambda kv: -kv[1])
+    ]
     if skipped:
+        parts = []
+        for m in missing_list[:4]:
+            nm = m["label"] or m["field"]
+            parts.append(f"缺「{nm}」{m['count']} 只" +
+                         (f"({m['reason']})" if m["reason"] else ""))
         warnings.append(
-            f"{skipped} 只因为缺少脚本用到的字段,无法判断是否满足条件,"
-            f"已排除在结果之外 —— 是「算不出」,不是「不满足」。")
+            f"{skipped} 只满足了其余条件,但缺数据无法判断,已排除在结果之外"
+            f"(是「算不出」,不是「不满足」):" + ";".join(parts) + "。"
+            + "如果某条条件缺得特别多,可以考虑去掉或换一个覆盖更全的字段。")
 
     picks = []
     for r in hits[:limit]:
@@ -360,6 +373,7 @@ def run_script(script: str, market_key: str = "us", limit: int = 100,
         "scanned": len(rows),
         "matched": len(hits),
         "skipped_incomplete": skipped,
+        "missing_fields": missing_list,
         "returned": len(picks),
         "picks": picks,
         "columns": want,

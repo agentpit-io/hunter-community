@@ -550,12 +550,28 @@ def _eval(node, row: dict, env: dict, resolver_cache: dict):
     # 同一个脚本换个写法结果不同,排查起来极难。宁可都算。
     lv = _eval(ln, row, env, resolver_cache)
     rv = _eval(rn, row, env, resolver_cache)
+    # **三值逻辑(Kleene)**:
+    #   假 且 未知 = 假      —— 已经有一条明确不满足,缺什么都不可能命中了
+    #   真 或 未知 = 真      —— 已经有一条满足,或的另一边是什么都无所谓
+    # 其余含未知的组合才是真正的"算不出"。两边对称,与左右顺序无关,
+    # 所以和上面"不做短路"的要求不冲突。
+    #
+    # 2026-09-11 修:原来只要有一边是 None 就整体 None。实测一套 10 条的美股脚本,
+    # 页面报「2547 只算不出」,其中 2537 只(99.6%)早被别的条件判了不满足,
+    # 真正"可能命中但缺数据"的只有 10 只 —— 那个数字被放大了 250 倍,
+    # 用户据此去怀疑数据源,而问题根本不在那里。
+    # 命中集合不受影响(命中要求整体为真,改前改后都一样);`or` 脚本会多出
+    # "一边满足、另一边缺数据"的票,那本来就该算命中。
     if op == "and":
         a, b = _truthy(lv), _truthy(rv)
-        return None if (a is None or b is None) else (a and b)
+        if a is False or b is False:
+            return False
+        return None if (a is None or b is None) else True
     if op == "or":
         a, b = _truthy(lv), _truthy(rv)
-        return None if (a is None or b is None) else (a or b)
+        if a is True or b is True:
+            return True
+        return None if (a is None or b is None) else False
     if lv is None or rv is None:
         return None
     if op == "+":
@@ -612,8 +628,20 @@ def build_resolver_cache(c: Compiled, has_field, sma_periods, ema_periods,
 
 def evaluate(c: Compiled, rows: list[dict], resolver_cache: dict) -> tuple[list[dict], int]:
     """→ (命中的行, 因缺字段无法判断的行数)"""
+    hits, skipped, _ = evaluate_detail(c, rows, resolver_cache)
+    return hits, skipped
+
+
+def evaluate_detail(c: Compiled, rows: list[dict],
+                    resolver_cache: dict) -> tuple[list[dict], int, dict[str, int]]:
+    """→ (命中的行, 算不出的行数, {字段: 在算不出的行里为空的次数})
+
+    只报"算不出"那部分行里缺的字段 —— 已经被别的条件判不满足的行,
+    缺什么都无关紧要,统计进来只会误导用户去怀疑一个与结果无关的字段。
+    """
     hits: list[dict] = []
     skipped = 0
+    missing: dict[str, int] = {}
     for row in rows:
         env: dict = {}
         for st in c.stmts:
@@ -621,9 +649,32 @@ def evaluate(c: Compiled, rows: list[dict], resolver_cache: dict) -> tuple[list[
         verdict = _truthy(env.get(c.plot_name))
         if verdict is None:
             skipped += 1
+            for f in c.fields:
+                if row.get(f) is None:
+                    missing[f] = missing.get(f, 0) + 1
         elif verdict:
             hits.append(row)
-    return hits, skipped
+    return hits, skipped, missing
+
+
+def missing_reason(field: str) -> str:
+    """字段为空的**常见**原因。只写有把握的,拿不准就不写。"""
+    m = re.match(r"^(?:SMA|EMA)(\d+)$", field)
+    if m:
+        return f"上市不足 {m.group(1)} 个交易日,均线算不出来"
+    m = re.match(r"^average_volume_(\d+)d_calc$", field)
+    if m:
+        return f"上市不足 {m.group(1)} 天"
+    if field in ("price_52_week_high", "price_52_week_low"):
+        return "上市不足一年"
+    if field.startswith("price_earnings"):
+        return "亏损公司没有市盈率"
+    if field.startswith("return_on_equity"):
+        return "股东权益为负(此时 ROE 无意义)或小盘股未披露"
+    if re.search(r"_(ttm|fq|fy|fh)$", field) or field.startswith(
+            ("total_", "net_", "gross_", "dividend", "debt_", "earnings_")):
+        return "财报数据未披露"
+    return ""
 
 
 # ═══════════════════════════════════════════════════════════════
