@@ -731,7 +731,11 @@ _FIELD_LABEL = {
     "MACD.macd": "MACD", "MACD.signal": "MACD信号线", "MACD.hist": "MACD柱",
     "Perf.W": "近1周涨幅", "Perf.1M": "近1月涨幅", "Perf.3M": "近3月涨幅",
     "Perf.6M": "近6月涨幅", "Perf.Y": "近1年涨幅", "Perf.YTD": "年初至今涨幅",
-    "Volatility.D": "日波动率", "Volatility.W": "周波动率", "Volatility.M": "月波动率",
+    # 2026-09-11 实测(拿自家日线反推 6 只票):Volatility.* 是**日均振幅**
+    # (每天最高最低价差占股价的 %,再对窗口取平均),不是这段时间的价格区间。
+    # 原来叫「月波动率」,用户照字面写 `Volatility.M < 20` 想筛「一个月波动不超过 20%」,
+    # 实际全市场 90% 都满足(中位数 3.8%),等于没筛。要一个月的价格区间用 High.1M / Low.1M。
+    "Volatility.D": "当日振幅", "Volatility.W": "近1周日均振幅", "Volatility.M": "近1月日均振幅",
     "sector": "板块", "industry": "行业", "currency": "币种",
     "rs_rating": "RS相对强度评级", "rs_raw": "RS原始分",
     "rs_line_up_days": "RS线上涨天数",
@@ -757,7 +761,7 @@ _FIELD_LABEL = {
     "float_shares_outstanding": "流通股本",
     "number_of_employees": "员工人数",
     "relative_volume_10d_calc": "10日相对成交量",
-    "Value.Traded": "成交额", "Volatility.D": "日波动率",
+    "Value.Traded": "成交额", "Volatility.D": "当日振幅",
     # 「成交量+变动」是两个头词,会被 heads>1 那道闸拦下,但它拼起来是对的
     "volume_change": "成交量变动", "volume_change_abs": "成交量变动(绝对值)",
     "price_change": "价格变动", "market_cap_diluted_calc": "稀释市值",
