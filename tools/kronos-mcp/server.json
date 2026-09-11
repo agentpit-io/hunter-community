@@ -2,19 +2,19 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.hangeaiagent/kronos-mcp",
   "title": "Kronos",
-  "description": "Stock price forecasting for A-shares, US and HK equities — K-line time-series model",
+  "description": "Stock price forecasting for China A-shares — Kronos K-line time-series model",
   "repository": {
     "url": "https://github.com/agentpit-io/hunter-community",
     "source": "github",
     "subfolder": "tools/kronos-mcp"
   },
-  "version": "0.1.1",
+  "version": "0.1.2",
   "packages": [
     {
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "kronos-mcp",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"

@@ -2,11 +2,15 @@
 
 <!-- mcp-name: io.github.hangeaiagent/kronos-mcp -->
 
-**Stock price forecasting for your AI agent — A-shares, US and HK equities.**
+**Stock price forecasting for your AI agent — China A-shares.**
 
 An [MCP](https://modelcontextprotocol.io) server wrapping **Kronos**, a K-line
 time-series model. Ask it for a symbol, get the next N daily candles predicted:
 open / high / low / close / volume.
+
+> **Coverage is China A-shares only.** Verified 2026-09-10: `AAPL`, `AAPL.US`,
+> `NASDAQ:AAPL`, `00700` and `0700.HK` all return 404 — the upstream has no
+> K-line data for them. This is a data limitation, not a symbol-format issue.
 
 [![License](https://img.shields.io/badge/license-Apache_2.0-blue)](https://github.com/agentpit-io/hunter-community/blob/main/LICENSE)
 
@@ -116,7 +120,7 @@ drift badly in unusual conditions. Treat the output as one input among many.
 | `missing_api_key` | `KRONOS_API_KEY` not set — see [API key](#api-key) |
 | `invalid_api_key` (401) | Key wrong, incomplete or revoked. Revocation takes up to 5 min to propagate |
 | `wrong_key_type` (403) | Key is valid but isn't a **KRONOS** key — you may have applied for KPRED or FIN_R1 |
-| `symbol_not_found` (404) | A-shares `600519` / `600519.SH`, US tickers `AAPL`, HK `00700` |
+| `symbol_not_found` (404) | Use `600519` or `600519.SH`. **A-shares only** — US and HK tickers land here |
 | `rate_limited` (429) | Per-IP cap on invalid keys, or your quota is exhausted |
 | `upstream_down` (502/504) | GPU service restarting. If it lasts more than a few minutes, please open an issue |
 

@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "kronos-mcp"
-version = "0.1.1"
-description = "MCP server for Kronos stock price forecasting — A-shares, US and HK equities"
+version = "0.1.2"
+description = "MCP server for Kronos stock price forecasting — China A-shares"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }

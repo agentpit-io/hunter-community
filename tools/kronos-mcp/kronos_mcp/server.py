@@ -4,7 +4,11 @@
 ## 它做什么
 
 Kronos 是一个 K 线时序模型:给它一个股票代码,它预测未来 N 根 K 线的
-开高低收和成交量。A 股 / 美股 / 港股都能问。
+开高低收和成交量。
+
+⚠️ **目前只覆盖 A 股。** 2026-09-10 实测:AAPL / AAPL.US / NASDAQ:AAPL /
+00700 / 0700.HK 全部 404,上游报「未找到 K 线数据」—— 是数据没有,不是
+代码格式不对。
 
 这个 MCP 把它包成两个工具,让 Claude / Cursor 这类客户端能直接调:
 
@@ -120,8 +124,8 @@ def _http_error(status: int, body: str) -> str:
               f"key 本身有效,但它的类型不是 KRONOS(可能申请成了 KPRED / FIN_R1)。"
               f"到 {APPLY_URL} 重新申请一把 KRONOS 类型的。"),
         404: ("symbol_not_found",
-              "找不到这个代码。A 股用 600519 或 600519.SH,美股用 ticker(AAPL),"
-              "港股用 5 位数字(00700)。"),
+              "上游没有这个代码的 K 线数据。A 股用 600519 或 600519.SH。"
+              "**Kronos 目前只覆盖 A 股** —— 美股 ticker 和港股代码都会落到这里。"),
         429: ("rate_limited",
               "触发速率限制。无效 key 每 IP 每分钟有硬顶(防洪水);"
               "如果你的 key 是有效的,大概率是 quota 打完了(默认 1000 次)。"),
@@ -199,7 +203,7 @@ def kronos_health() -> str:
 def kronos_predict(symbol: str, pred_len: int = 10) -> str:
     """预测一只股票未来 N 根日 K 线。
 
-    symbol    A 股 `600519` / `600519.SH`,美股 `AAPL`,港股 `00700`
+    symbol    A 股代码,`600519` 或 `600519.SH` 两种写法都认
     pred_len  预测多少根,1~30。默认 10
 
     返回每根预测 K 线的 date / open / high / low / close / volume,
@@ -208,6 +212,8 @@ def kronos_predict(symbol: str, pred_len: int = 10) -> str:
 
     ⚠️ **一次调用要 30-70 秒**(GPU 推理),这是正常的,不要因为慢就重试。
     要问多只票就依次调用,不要指望批量 —— 上游一次只接受一个代码。
+
+    ⚠️ **只有 A 股有数据。** 问美股或港股会返回 symbol_not_found。
 
     ⚠️ 这是模型的**统计外推,不是投资建议**。它没有读新闻、不知道停牌和财报,
     极端行情下会显著偏离。把它当成一个参考信号,不要当结论。
