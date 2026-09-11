@@ -1227,7 +1227,7 @@ class ScreenParseIn(BaseModel):
 
 
 @router.post("/screener/parse")
-async def screener_parse(body: ScreenParseIn):
+async def screener_parse(body: ScreenParseIn, request: Request):
     """脚本 → 可视化条件行。界面上点「生成」走这条,不拉行情。"""
     script = body.script or ""
     if body.preset and not script.strip():
@@ -1238,8 +1238,11 @@ async def screener_parse(body: ScreenParseIn):
     try:
         # to_thread 不能省:自然语言那条分支要调 LLM(秒级、同步阻塞),
         # 直接在 async 路由里跑会把整个事件循环卡住,别的用户的请求全在排队。
+        # user_id 只用来记「这条对照表是谁用 AI 学出来的」,不影响识别本身。
+        # /api/quant/ 是免登录前缀,匿名时这里是 None,照样能学。
         return await asyncio.to_thread(
-            screen_source.parse_script, script, body.market, body.allow_ai)
+            screen_source.parse_script, script, body.market, body.allow_ai,
+            getattr(request.state, "user_id", None))
     except screen_source.NeedsAI as e:
         # 结构化 detail —— 前端据此弹「AI 识别」按钮。
         # 让前端去匹配报错文本来判断"能不能试 AI"是一种迟早会断的耦合。
@@ -1325,4 +1328,18 @@ async def screener_saved_delete(preset_id: int, request: Request):
     if not ok:
         # 不区分「不存在」和「不是你的」—— 区分的话等于告诉别人这个 id 存在
         raise HTTPException(404, "没有这个扫描策略(可能已经删过了)")
+    return {"ok": True}
+
+
+# ─── 对照表:忘掉一条学错的 ─────────────────────────────────────────
+# 对照表全站共享(见 services/quant/screen_learned.py),学错一条会被所有人反复用。
+# 所以命中时前端常驻显示「这条不对,忘掉它」。要登录 —— 匿名能一键清空全站的学习成果不合适。
+# 软删:行留着备查,下次这句话会重新交给 AI,新结果会重新启用它。
+@router.delete("/screener/learned/{entry_id}")
+async def screener_learned_forget(entry_id: int, request: Request):
+    uid = _need_uid(request)
+    from app.services.quant import screen_learned
+    ok = await asyncio.to_thread(screen_learned.forget, entry_id, uid)
+    if not ok:
+        raise HTTPException(404, "对照表里没有这条(可能已经被忘掉了)")
     return {"ok": True}

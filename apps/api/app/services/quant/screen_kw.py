@@ -29,6 +29,7 @@
 from __future__ import annotations
 
 import re
+from itertools import combinations
 
 from app.services.quant.screen_dsl import ScreenError
 
@@ -172,14 +173,37 @@ _AVGVOL_RE = re.compile(r"(\d+)\s*(?:日|天)\s*(?:均量|平均成交量|均成
 _RSI_N_RE = re.compile(r"rsi\s*\(?\s*(\d+)\s*\)?", re.I)
 
 
+# 用户直接写的**字段原名**:rs_line_up_days / market_cap_basic / Perf.Y / MACD.hist / close|1W
+# 字母或下划线开头,段与段之间可以用 . 或 | 连接。两头都不许紧挨着标识符字符 ——
+# 否则会从「rs_line_up_days」中间切出一个「line」来。
+_IDENT_RE = re.compile(
+    r"(?<![A-Za-z0-9_.|])[A-Za-z_][A-Za-z0-9_]*(?:[.|][A-Za-z0-9_]+)*(?![A-Za-z0-9_])")
+
+
+def _looks_like_field_name(tok: str) -> bool:
+    """像字段原名(带 _ . |),而不是普通英文单词(above / below / and)。"""
+    return any(ch in tok for ch in "_.|")
+
+
 class _Vocab:
     """把可用周期带进来 —— 能不能用 SMA37 由扫描源说了算,不在这里硬编码。"""
 
-    def __init__(self, has_field, sma, ema, rsi):
+    def __init__(self, has_field, sma, ema, rsi, names=None):
         self.has_field = has_field
         self.sma, self.ema, self.rsi = set(sma), set(ema), set(rsi)
         # 按长度倒序,保证「市盈率ttm」先于「市盈率」、「52周最高」先于「最高价」
         self.words = sorted(_FIELD_WORDS.items(), key=lambda kv: -len(kv[0]))
+        # 字段原名不分大小写:用户写 perf.y、RS_LINE_UP_DAYS 也要认。
+        # 扫描源的名字大小写混用(Perf.Y / RSI / rs_rating),没有全集就只能精确匹配。
+        self._lc = {n.lower(): n for n in names} if names else None
+
+    def canon(self, tok: str) -> str | None:
+        """字段原名 → 规范写法;不是可用字段返回 None。"""
+        if self.has_field(tok):
+            return tok
+        if self._lc is not None:
+            return self._lc.get(tok.lower())
+        return None
 
     def _candidates(self, text: str) -> list[tuple[int, int, str, str, str]]:
         """文本里所有可能的字段命中 → [(起点, -长度, 字段名, 原文, 错误)]。
@@ -218,7 +242,10 @@ class _Vocab:
             if w.isascii():
                 # 纯英文词必须按**词边界**匹配。裸 `in` 会让 "RSI below 30"
                 # 里的 "be(low)" 命中字段 low —— 实测真踩到,产出 `low < 30`。
-                m = re.search(r"(?<![a-z0-9])" + re.escape(w) + r"(?![a-z0-9])", low)
+                #
+                # 边界里必须有 `_` `.` `|`(2026-09-11):原来只挡字母数字,
+                # 「rs_line_up_days」开头的 rs 被认成 RS 评级,差一点静默产出 rs_rating > 50。
+                m = re.search(r"(?<![a-z0-9_.|])" + re.escape(w) + r"(?![a-z0-9_]|[.|][a-z0-9])", low)
                 if m:
                     out.append((m.start(), -len(w), fld, w, ""))
             else:
@@ -229,6 +256,26 @@ class _Vocab:
                     # 原文里夹了空格(「市 盈 率」)。位置没法精确还原,
                     # 排到最后 —— 只在没有别的候选时才用它。
                     out.append((len(text), -len(w), fld, w, ""))
+
+        # ── 字段原名(2026-09-11)────────────────────────────────
+        # 词表只收了常用说法,而用户能直接写的字段有 3777 个。写原名的一律直接认 ——
+        # 这是最没有歧义的写法,认不出来反而说不过去。
+        # 同时记下**不认识**的标识符:落在它内部的候选全部作废。
+        # 「rs_score」「close_price」「ema20_slope」都不是字段,里面的 rs / close / ema20
+        # 不能拿出来猜 —— 那正是本模块最要避免的「静默理解错」。
+        unknown: list[tuple[int, int]] = []
+        for m in _IDENT_RE.finditer(text):
+            tok = m.group(0)
+            c = self.canon(tok)
+            if c:
+                out.append((m.start(), -len(tok), c, tok, ""))
+            else:
+                unknown.append((m.start(), m.end()))
+        if unknown:
+            out = [cd for cd in out
+                   if cd[0] >= len(text) or not any(
+                       a <= cd[0] and cd[0] + (-cd[1]) <= b and (b - a) > (-cd[1])
+                       for a, b in unknown)]
         return out
 
     def field(self, text: str) -> tuple[str, str] | None:
@@ -297,6 +344,9 @@ def _unit(fld: str) -> str | None:
         return "MACD"
     if fld.startswith("Stoch."):
         return "随机指标"
+    # 「大于50天」里的天是阈值单位 —— 只对这类字段成立(见 _clause_to_expr 末尾)
+    if fld == "rs_line_up_days" or fld.endswith("_days"):
+        return "天数"
     return None
 
 
@@ -398,6 +448,14 @@ def _clause_to_expr(clause: str, vocab: _Vocab, notes: list[str] | None = None) 
     if not t:
         return None
     low = t.lower()
+
+    # ── 像字段原名、却不是可用字段(拼错 / 不存在)—— 整句拒绝 ──────
+    # 不能忽略它、拿句子里剩下的部分去猜:「rs_line_up_day大于50天」少打一个 s,
+    # 用户以为自己写的是 RS 线天数,拿剩下的去猜只会得到一个别的意思。
+    for m in _IDENT_RE.finditer(t):
+        tok = m.group(0)
+        if _looks_like_field_name(tok) and not vocab.canon(tok):
+            return None
 
     # ── RS 线上涨天数 —— 必须排在所有规则前面 ──────────────
     # 提到 RS 线的句子只走这个模板;认不全就返回 None,**不许落到下面的通用规则**:
@@ -504,9 +562,27 @@ def _clause_to_expr(clause: str, vocab: _Vocab, notes: list[str] | None = None) 
     a = left[1] + mnum.start()
     b = left[1] + mnum.end()
     before = t[a - 1] if a > 0 else ""
-    after = t[b] if b < len(t) else ""
-    if re.match(r"[A-Za-z(]", before) or re.match(r"[日天周线均]", after):
+    if re.match(r"[A-Za-z(_]", before):
         return None
+    # 数字后面跟的是什么,决定它是不是阈值(2026-09-11 重写这段):
+    #
+    #   「大于50天」「大于50个交易日」—— 天是**阈值的单位**。只对「天数」类字段成立,
+    #       且后面不能再接东西(接了「均线」就说明 50日 是别的指标的周期)。
+    #   「收盘价大于50日均线」—— 50 是均线周期,不是阈值(这条原来就挡着)。
+    #   「大于50周」「大于50月」—— 周/月不按 5/21 天换算(有节假日),不猜。
+    #
+    # 原来是「数字后跟 日/天 就一律拒绝」,把「rs_line_up_days大于50天」也挡掉了。
+    rest = t[b:]
+    days_field = _unit(left[2]) == "天数"
+    mu = re.match(r"\s*(个交易日|交易日|天|日)", rest)
+    if mu:
+        if not days_field or not re.fullmatch(
+                r"\s*(?:及以上|以上|及以下|以下|以内|之内|内|左右)?\s*", rest[mu.end():]):
+            return None
+    elif re.match(r"\s*[周线均月年]", rest):
+        return None
+    if days_field and mnum.group(2):
+        return None          # 天数字段带 % / 万 / 亿:单位对不上,不猜
     return f"{left[2]} {op[0]} {_fmt(_parse_number(mnum))}"
 
 
@@ -527,7 +603,7 @@ def _split(text: str) -> list[str]:
 # ═══════════════════════════════════════════════════════════════
 
 def translate(text: str, has_field, sma: list[int], ema: list[int],
-              rsi: list[int]) -> dict:
+              rsi: list[int], names=None, learned: dict | None = None) -> dict:
     """关键词匹配。→ {script, matched:[(原文, 表达式)]}
 
     有任何一段没认出来就抛 ScreenError(带上没认出来的原文),**不产出半份脚本**。
@@ -536,20 +612,37 @@ def translate(text: str, has_field, sma: list[int], ema: list[int],
     if not text:
         raise ScreenError("生成框是空的")
 
-    vocab = _Vocab(has_field, sma, ema, rsi)
+    # names = 可用字段全集,用来让字段原名不分大小写(perf.y → Perf.Y)。不传也能跑,只是要写对大小写
+    vocab = _Vocab(has_field, sma, ema, rsi, names)
     clauses = _split(text)
     if not clauses:
         raise ScreenError("没有可识别的内容")
 
-    matched: list[tuple[str, str]] = []
-    unmatched: list[str] = []
     notes: list[str] = []
-    for c in clauses:
-        expr = _clause_to_expr(c, vocab, notes)
-        if expr:
-            matched.append((c, expr))
+    # (原文, 表达式或 None, 来源) —— 来源 None = 本地规则;{id, key} = 对照表(之前的 AI 识别)
+    rows: list[tuple[str, str | None, dict | None]] = [
+        (c, _clause_to_expr(c, vocab, notes), None) for c in clauses]
+
+    # ── 规则认不出的,再查对照表 ──────────────────────────────
+    # 规则永远优先:它是逐条测过的(tests/test_screen_kw.py),对照表只补它的缺。
+    if learned and any(e is None for _c, e, _m in rows):
+        whole = learned_lookup(text, learned)
+        if whole:
+            # 整句命中 —— 之前整句问过 AI、又没法逐句对齐的复杂说法
+            rows = [(text, e, whole[1]) for e in whole[0]]
         else:
-            unmatched.append(c)
+            filled: list[tuple[str, str | None, dict | None]] = []
+            for c, e, m in rows:
+                if e is None:
+                    h = learned_lookup(c, learned)
+                    if h:
+                        filled.extend((c, e2, h[1]) for e2 in h[0])
+                        continue
+                filled.append((c, e, m))
+            rows = filled
+
+    unmatched = [c for c, e, _m in rows if e is None]
+    matched = [(c, e, m) for c, e, m in rows if e is not None]
 
     if unmatched:
         raise ScreenError(
@@ -559,14 +652,15 @@ def translate(text: str, has_field, sma: list[int], ema: list[int],
         raise ScreenError("没认出任何筛选条件")
 
     lines, names = [], []
-    for i, (src, expr) in enumerate(matched, 1):
+    for i, (src, expr, _m) in enumerate(matched, 1):
         # 名字用序号,不用中文 —— DSL 的标识符只允许英文
         name = f"cond_{i}"
         lines.append(f"def {name} = {expr};")
         names.append(name)
     lines.append("plot scan = " + " and ".join(names) + ";")
     return {"script": "\n".join(lines),
-            "matched": [{"text": s, "expr": e} for s, e in matched],
+            "matched": [dict({"text": s, "expr": e}, **({"learned": m} if m else {}))
+                        for s, e, m in matched],
             "notes": notes}
 
 
@@ -610,3 +704,211 @@ def _normalize(text: str) -> str:
     t = _CN_NUM_RE.sub(lambda m: str(_cn2int(m.group(1))), t)
     t = _CN_CHENG_RE.sub(lambda m: str(_cn2int(m.group(1)) * 10) + "%", t)
     return t
+
+
+# ═══════════════════════════════════════════════════════════════
+# 对照表 —— 从 AI 识别里学来的说法(2026-09-11)
+# ═══════════════════════════════════════════════════════════════
+# 用户点过「AI 识别」之后,把结果记下来,下次同样的说法直接本地识别、零 token。
+# 存储在 services/screen_learned.py;这里只放纯逻辑,不连库,tests/ 里能直接跑。
+#
+# 三条原则:
+#   1. **按句学,数字做成空位。** 学「RS线连涨超过50天 → rs_line_up_days > 50」,
+#      存成「rs线连涨超过{0}天 → rs_line_up_days > {0}」。下次「超过60天」也能认。
+#      **重放时的数字永远取用户这次输入的,不取 AI 当时写的** —— 与「LLM 不许产数字」同一条线。
+#   2. **单位留在模板里。** 「市值大于{0}亿」只配得上「亿」,「市值大于50万」对不上就不命中,
+#      绝不拿亿的模板去套万。
+#   3. **对不齐就不拆。** 一段话好几句、AI 给了好几个条件,只有「句数 = 条件数」且
+#      每一句的数字都能在对应条件里找到,才逐句记;否则只记整句。对错了一句,
+#      以后这句话就永远翻错 —— 宁可少学。
+
+# 表达式里的**独立**数字(不含标识符里的 20:EMA20、SMA50)
+_LIT_RE = re.compile(r"(?<![A-Za-z0-9_.])-?\d+(?:\.\d+)?(?![A-Za-z0-9_.])")
+_MAX_SLOTS = 6
+
+
+def _key_base(text: str) -> str:
+    """对照表的 key 用这个归一化:小写、去掉所有空白。学和查必须走同一个函数。"""
+    return re.sub(r"\s+", "", _normalize(text or "").lower())
+
+
+def _num_matches(t: str) -> list:
+    """t 里**可能是阈值**的数字。紧跟在字母/下划线后面的(ema20、rs_20)是标识符的一部分,不算。"""
+    out = []
+    for m in _NUM_RE.finditer(t):
+        a = m.start(1)
+        if a > 0 and re.match(r"[a-z_]", t[a - 1]):
+            continue
+        out.append(m)
+    return out[:_MAX_SLOTS]
+
+
+def _same(a: float, b: float) -> bool:
+    return abs(a - b) <= 1e-9 * max(1.0, abs(a), abs(b))
+
+
+def _tmpl(t: str, ms: list, slot_idx: list[int]) -> str:
+    """把 t 里第 slot_idx 个数字(只换数字本身,单位留着)换成 {0}{1}…"""
+    out, last = [], 0
+    for k, i in enumerate(slot_idx):
+        m = ms[i]
+        out.append(t[last:m.start(1)])
+        out.append("{%d}" % k)
+        last = m.end(1)
+    out.append(t[last:])
+    return "".join(out)
+
+
+def _fill(expr: str, vals: list[str]) -> str | None:
+    bad = []
+
+    def rep(m):
+        k = int(m.group(1))
+        if k >= len(vals):
+            bad.append(k)
+            return ""
+        return vals[k]
+    out = re.sub(r"\{(\d+)\}", rep, expr)
+    return None if bad else out
+
+
+def learned_lookup(text: str, table: dict | None) -> tuple[list[str], dict] | None:
+    """查对照表。命中 → (填好数字的表达式列表, {id, key});没有 → None。
+
+    `table` 是 {key: {"id":…, "exprs":[模板,…]}} 的快照。
+    先试最具体的(一个数字都不挖空),再逐步挖空 —— 同一句话既有原样记录又有模板时,原样的优先。
+    """
+    if not table:
+        return None
+    t = _key_base(text)
+    if not t:
+        return None
+    ms = _num_matches(t)
+    idx = list(range(len(ms)))
+    for size in range(0, len(idx) + 1):
+        for combo in combinations(idx, size):
+            key = _tmpl(t, ms, list(combo))
+            ent = table.get(key)
+            if not ent:
+                continue
+            vals = [_fmt(_parse_number(ms[i])) for i in combo]
+            exprs = [_fill(e, vals) for e in ent.get("exprs") or []]
+            if not exprs or any(e is None for e in exprs):
+                continue
+            return exprs, {"id": ent.get("id"), "key": key}
+    return None
+
+
+def _entry(text: str, exprs: list[str]) -> list[tuple[str, list[str]]]:
+    """一句话 + 它对应的表达式 → [(key, 表达式模板)]。能对上的数字挖成空位。"""
+    t = _key_base(text)
+    if not t or not exprs:
+        return []
+    ms = _num_matches(t)
+    lits = [(ei, lm) for ei, e in enumerate(exprs) for lm in _LIT_RE.finditer(e)]
+    vals = [_parse_number(m) for m in ms]
+    used: set[int] = set()
+    slots: list[tuple[int, int]] = []          # (文本里第几个数字, lits 里第几个)
+    for i, v in enumerate(vals):
+        # 文本里同一个值出现不止一次 —— 分不清哪个对哪个,都不挖空
+        if sum(1 for v2 in vals if _same(v, v2)) != 1:
+            continue
+        cands = [j for j, (_ei, lm) in enumerate(lits)
+                 if j not in used and _same(float(lm.group(0)), v)]
+        if len(cands) == 1:
+            used.add(cands[0])
+            slots.append((i, cands[0]))
+    key = _tmpl(t, ms, [i for i, _j in slots])
+    out = list(exprs)
+    by_expr: dict[int, list[tuple[int, int, int]]] = {}
+    for k, (_i, j) in enumerate(slots):
+        ei, lm = lits[j]
+        by_expr.setdefault(ei, []).append((lm.start(), lm.end(), k))
+    for ei, reps in by_expr.items():
+        e = out[ei]
+        for a, b, k in sorted(reps, reverse=True):
+            e = e[:a] + "{%d}" % k + e[b:]
+        out[ei] = e
+    return [(key, out)]
+
+
+def _consistent(clause: str, expr: str) -> bool:
+    """这一句的每个数字,都能在这个条件里找到 —— 用来确认逐句对齐没有对错位。
+
+    句子里一个数字都没有(「均线多头排列」)就无从确认,判 False,整段退回只记整句。
+    """
+    ms = _num_matches(_key_base(clause))
+    if not ms:
+        return False
+    lits = [float(x) for x in _LIT_RE.findall(expr)]
+    digits = [float(x) for x in re.findall(r"\d+(?:\.\d+)?", expr)]   # 含标识符里的(SMA50 的 50)
+    for m in ms:
+        v, raw = _parse_number(m), float(m.group(1))
+        if not any(_same(x, v) for x in lits) and not any(_same(x, raw) for x in digits):
+            return False
+    return True
+
+
+def learn_entries(text: str, exprs: list[str], rule_ok) -> list[tuple[str, list[str]]]:
+    """AI 翻译成功之后 → 该往对照表里记的 [(key, 表达式模板列表)]。
+
+    exprs:   AI 脚本里 plot 引用的布尔条件,已内联成自包含表达式(见 inline_conditions),按 plot 顺序
+    rule_ok: rule_ok(句子) → 本地规则认不认得。认得的不学 —— 规则逐条测过,对照表只补缺
+    """
+    t = _normalize(text or "")
+    clauses = _split(t)
+    if not clauses or not exprs:
+        return []
+    if len(clauses) == 1:
+        return [] if rule_ok(clauses[0]) else _entry(clauses[0], exprs)
+    if len(clauses) == len(exprs) and all(_consistent(c, e) for c, e in zip(clauses, exprs)):
+        out: list[tuple[str, list[str]]] = []
+        for c, e in zip(clauses, exprs):
+            if not rule_ok(c):
+                out += _entry(c, [e])
+        return out
+    return _entry(t, exprs)             # 对不齐:只记整句
+
+
+def inline_conditions(conditions: list[dict], plot_refs: list[str]) -> list[str] | None:
+    """AI 的脚本(中间变量 + 条件 + plot)→ 每个条件一条**自包含**的表达式。
+
+    对照表里存的东西下次要单独拿出来用,那时没有 AI 当时起的中间变量名
+    (def sma50 = Average(close, 50) 里的 sma50),所以必须把它们展开进去。
+    展不开(引用了不存在的名字 / 套娃太深)就返回 None,这次不学。
+    """
+    defs = {c["name"]: c["expr"] for c in conditions if c.get("name") and c.get("expr")}
+    if not plot_refs:
+        return None
+
+    def expand(e: str, depth: int = 0) -> str | None:
+        if depth > 6:
+            return None
+        hit = []
+
+        def rep(m):
+            tok = m.group(0)
+            if tok in defs:
+                hit.append(tok)
+                return "(" + defs[tok] + ")"
+            return tok
+        out = _IDENT_RE.sub(rep, e)
+        return expand(out, depth + 1) if hit else out
+
+    res = []
+    for n in plot_refs:
+        if n not in defs:
+            return None
+        x = expand(defs[n])
+        if x is None:
+            return None
+        res.append(x)
+    return res
+
+
+def rule_match(clause: str, has_field, sma, ema, rsi, names=None) -> str | None:
+    """只用本地规则认一句(不查对照表)。给学习环节判断「这句要不要学」。"""
+    try:
+        return _clause_to_expr(clause, _Vocab(has_field, sma, ema, rsi, names), [])
+    except ScreenError:
+        return None

@@ -433,6 +433,38 @@ try {
   console.log('FAIL 续期定向断言 ·', e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e)
 }
 
+// ─── 对照表命中:「忘掉它」必须在折叠区外面、常驻可见 ────────────────
+// 对照表全站共享、AI 学来的。学错一条所有人反复用到,纠错入口藏进折叠区等于没有。
+try {
+  const ctx = vm.createContext(makeContext('screener.html'))
+  vm.runInContext(appJs, ctx, { filename: 'app.js' })
+  const sc = inlineScripts(fs.readFileSync(path.join(DIR, 'screener.html'), 'utf8'))
+  sc.forEach((src, i) => vm.runInContext(src, ctx, { filename: `screener#${i + 1}` }))
+  vm.runInContext(`
+    S.kw = { source_text: 'x', notes: [], matched: [
+      { text: '成交量大于100万', expr: 'volume > 1000000' },
+      { text: '市盈率大于10小于20', expr: 'price_earnings_ttm > 10', learned: { id: 7, key: 'k' } },
+      { text: '市盈率大于10小于20', expr: 'price_earnings_ttm < 20', learned: { id: 7, key: 'k' } },
+    ] }
+    var KWN = vKwNote()
+  `, ctx, { filename: 'assert-learned' })
+  const h = ctx.KWN
+  const fold = h.indexOf('<details')
+  const btn = h.indexOf('data-forget="7"')
+  const checks = [
+    ['「忘掉它」在折叠区外面(排在 <details> 前)', btn >= 0 && fold >= 0 && btn < fold],
+    ['一条对照表记录展开成两个条件,只出一个按钮', (h.match(/data-forget="7"/g) || []).length === 1],
+    ['规则识别的句子没有「忘掉它」', !/data-forget="[^7]/.test(h)],
+  ]
+  for (const [name, ok] of checks) {
+    if (ok) console.log('PASS 对照表 ·', name)
+    else { failed++; console.log('FAIL 对照表 ·', name) }
+  }
+} catch (e) {
+  failed++
+  console.log('FAIL 对照表定向断言 ·', e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e)
+}
+
 // ─── 保存的扫描策略:开关状态必须能往返 ─────────────────────────────
 // 这个功能最容易悄悄写错的地方:保存时如果用了 buildScript(true)(草稿用的那个),
 // 停用的条件也会被写进 plot —— 页面一切正常、保存也成功,但加载回来

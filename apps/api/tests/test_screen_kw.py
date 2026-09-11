@@ -200,12 +200,60 @@ SHOULD_REJECT = [
 ]
 
 
+# ── 2026-09-11 · 直接写字段原名 ──────────────────────────────────────
+# 用户报「rs_line_up_days大于50天」本地识别不出来。查下来是一整类:
+#   1. 词表只收了中文说法,**字段原名**(3777 个里没被收录的)一律不认
+#   2. 英文词的词边界没把 `_` `.` 算进去 —— 「rs_line_up_days」开头的 rs
+#      被认成了 RS 评级。只是碰巧被下面第 3 条挡住,否则会静默产出 rs_rating > 50
+#   3. 「数字后跟 天/日」被一刀切拒掉(本意是挡「50日均线」),
+#      但「大于50天」结尾的天是阈值单位
+SHOULD_MATCH += [
+    ("rs_line_up_days大于50天", "rs_line_up_days > 50"),          # ← 用户原话
+    ("rs_line_up_days > 50", "rs_line_up_days > 50"),
+    ("rs_line_up_days>=50", "rs_line_up_days >= 50"),
+    ("rs_line_up_days 大于 50 个交易日", "rs_line_up_days > 50"),
+    ("rs_line_up_days不低于30天", "rs_line_up_days >= 30"),
+    ("rs_line_up_days大于50天以上", "rs_line_up_days > 50"),
+    ("RS_LINE_UP_DAYS大于50天", "rs_line_up_days > 50"),          # 大小写不敏感
+    ("rs_rating >= 80", "rs_rating >= 80"),
+    ("market_cap_basic大于100亿", "market_cap_basic > 10000000000"),
+    ("price_earnings_ttm小于15", "price_earnings_ttm < 15"),
+    ("return_on_equity > 15", "return_on_equity > 15"),
+    ("Perf.Y大于20%", "Perf.Y > 20"),
+    ("perf.y大于20%", "Perf.Y > 20"),                               # 带点的也不分大小写
+    ("MACD.hist大于0", "MACD.hist > 0"),
+    ("average_volume_90d_calc大于1000000", "average_volume_90d_calc > 1000000"),
+    ("relative_volume_10d_calc大于2", "relative_volume_10d_calc > 2"),
+    ("close > SMA50", "close > SMA50"),
+    ("EMA20 > EMA50", "EMA20 > EMA50"),
+    ("rs_line_up_days大于50天，市盈率小于20",
+     "rs_line_up_days > 50 AND price_earnings_ttm < 20"),
+]
+SHOULD_REJECT += [
+    # 不认识的标识符里藏着认识的词 —— 绝不能拿里面那个词去猜
+    "rs_score大于50",                  # 不能变成 rs_rating > 50
+    "close_price大于20",               # 不能变成 close > 20
+    "volume_ratio大于2",               # 不能变成 volume > 2
+    "ema20_slope大于0",                # 不能变成 EMA20 > 0
+    "rs_line_up_day大于50天",          # 拼错一个字母:报不认识,别猜
+    "Perf.Z大于20",
+    "foo_bar大于5",
+    # 「天」单位只对「天数」类字段成立
+    "收盘价大于50天",                  # 价格字段后面跟天,说不通
+    "rs_line_up_days大于50日均线",     # 天数去比均线
+    "rs_line_up_days大于50周",         # 周不按 5 天换算
+    "rs_line_up_days大于50%",          # 天数字段带百分号
+    "rs_line_up_days大于5万",          # 天数字段带万
+    "rs_line_up_days大于50天小于100天",  # 区间,本地不拆
+]
+
+
 def _run(sd, kw) -> list[str]:
     has = lambda n: n in FIELDS                          # noqa: E731
     fails: list[str] = []
     for text, want in SHOULD_MATCH:
         try:
-            r = kw.translate(text, has, SMA, EMA, RSI)
+            r = kw.translate(text, has, SMA, EMA, RSI, names=FIELDS)
             got = " AND ".join(m["expr"] for m in r["matched"])
         except sd.ScreenError as e:
             got = f"(拒绝: {e})"
@@ -213,7 +261,7 @@ def _run(sd, kw) -> list[str]:
             fails.append(f"应识别  {text!r}\n        期望 {want}\n        实得 {got}")
     for text in SHOULD_REJECT:
         try:
-            r = kw.translate(text, has, SMA, EMA, RSI)
+            r = kw.translate(text, has, SMA, EMA, RSI, names=FIELDS)
             got = " AND ".join(m["expr"] for m in r["matched"])
             fails.append(f"应拒绝  {text!r}\n        却产出 {got}   ← 静默错误")
         except sd.ScreenError:

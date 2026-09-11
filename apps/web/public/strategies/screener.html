@@ -30,6 +30,14 @@
     .kc-ft{font-size:10.5px;color:var(--soft,#a2a49d);margin-top:3px;display:flex;gap:10px}
     .kc-ft .r{margin-left:auto}
     /* 代码列:提示这里能悬停 */
+    /* 对照表命中:常驻显示在折叠区外面(新功能入口不许藏进二级面板 —— 仓内铁律) */
+    .kw-learned{border:1px solid #e6cbaa;background:#fdf8f2;border-radius:10px;
+      padding:10px 12px;margin:10px 0;font-size:12.5px;line-height:1.7}
+    .kw-learned-hd{color:var(--brand-dark,#8f4f1d);margin-bottom:6px}
+    .kw-learned .kw-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:3px 0}
+    .kw-learned .kw-forget{margin-left:auto;font-size:11.5px;height:24px;padding:0 9px}
+    .kw-learned-tag{font-size:10.5px;color:var(--brand-dark,#8f4f1d);background:#f6eee7;
+      border-radius:4px;padding:0 5px;margin-left:6px}
     .sc-tb .cd2[data-kchart]{cursor:crosshair;border-bottom:1px dotted var(--line-strong,#cfcbbf)}
     .sc-tb .cd2[data-kchart]:hover{background:var(--brand-pale,#f6eee7)}
   </style>
@@ -559,8 +567,32 @@ function vKwNote() {
   const rows = (S.kw.matched || []).map(function (m) {
     return '<div class="kw-row"><span class="kw-src">' + esc(m.text) + '</span>' +
       '<span class="kw-arrow">→</span>' +
-      '<code class="kw-expr">' + esc(m.expr) + '</code></div>'
+      '<code class="kw-expr">' + esc(m.expr) + '</code>' +
+      (m.learned ? '<span class="kw-learned-tag">来自对照表</span>' : '') + '</div>'
   }).join('')
+  // 来自对照表(之前的 AI 识别)的句子 —— **放在折叠区外面、常驻可见**。
+  // 对照表是全站共享、AI 学来的,学错一条所有人都会反复用到,
+  // 所以「这条不对,忘掉它」必须一眼能看见,不能让用户先去点开折叠区才发现。
+  // 一句话可能展开成好几个条件(整句学的那种),按对照表条目归并,每条一个按钮。
+  const groups = []
+  const byId = {}
+  ;(S.kw.matched || []).forEach(function (m) {
+    if (!m.learned || !m.learned.id) return
+    let g = byId[m.learned.id]
+    if (!g) { g = byId[m.learned.id] = { id: m.learned.id, text: m.text, exprs: [] }; groups.push(g) }
+    g.exprs.push(m.expr)
+  })
+  const learnedBox = groups.length
+    ? '<div class="kw-learned"><div class="kw-learned-hd"><span class="hi hi-book"></span> ' +
+        '这 ' + groups.length + ' 句是从之前的 AI 识别里学来的(对照表),<b>这次没花 token</b>。' +
+        '对照表是 AI 学的,请核对:</div>' +
+      groups.map(function (g) {
+        return '<div class="kw-row"><span class="kw-src">' + esc(g.text) + '</span>' +
+          '<span class="kw-arrow">→</span>' +
+          '<code class="kw-expr">' + esc(g.exprs.join(' 且 ')) + '</code>' +
+          '<button class="btn small kw-forget" data-forget="' + g.id + '">这条不对,忘掉它</button></div>'
+      }).join('') + '</div>'
+    : ''
   // 有损近似(「上穿」只能按"当前在上方"判断)**不能**放进折叠区,也不能走
   // parseWarnings —— 生成之后前端会再 reparse 一次脚本,脚本走不到关键词分支,
   // warnings 会被覆盖成没有这条(2026-09-11 实测:接口返回了,页面上没有)。
@@ -570,7 +602,7 @@ function vKwNote() {
         return '<li>' + esc(maskSrc(n)).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>') + '</li>'
       }).join('') + '</ul></div>'
     : ''
-  return lossy + '<details class="sc-fold ai-note"><summary>' +
+  return lossy + learnedBox + '<details class="sc-fold ai-note"><summary>' +
       '本地识别把「' + esc(String(S.kw.source_text || '').slice(0, 40)) +
       '」拆成了这些条件 · 点开逐句对照' +
     '</summary>' + rows +
@@ -590,7 +622,11 @@ function vAiNote() {
     '<div class="sc-note">模型 ' + esc(S.ai.model || '') +
       (S.ai.attempts > 1 ? ' · 第 ' + S.ai.attempts + ' 次才通过校验' : '') +
       ' · 脚本已通过语法与字段校验,但<b>是否符合你的本意要你自己确认</b>。' +
-      '不对的话直接改下面的条件,或者换个说法重新生成。</div></details>'
+      '不对的话直接改下面的条件,或者换个说法重新生成。</div></details>' +
+    (S.ai.learned > 0
+      ? '<div class="sc-note" style="margin:6px 0 0"><span class="hi hi-book"></span> ' +
+        '已记进对照表 —— 下次同样的说法(数字可以不同)直接本地识别,不再花 token。</div>'
+      : '')
 }
 
 function vNotes() {
@@ -971,6 +1007,7 @@ function bind() {
   const fl = document.getElementById('sc-fd-list')
   if (fl) fl.addEventListener('click', insertField)
   bindKChart()
+  bindForget()
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1228,6 +1265,39 @@ function bindKChart() {
   window.addEventListener('scroll', function () {
     if (KC.el && KC.el.classList.contains('on')) { KC.cur = null; KC.el.classList.remove('on') }
   }, true)
+}
+
+// ─── 对照表:忘掉一条学错的 ─────────────────────────────────────────
+let _forgetBound = false
+function bindForget() {
+  if (_forgetBound) return
+  _forgetBound = true
+  document.addEventListener('click', async function (e) {
+    const b = e.target && e.target.closest ? e.target.closest('[data-forget]') : null
+    if (!b) return
+    const id = +b.dataset.forget
+    if (!confirm('忘掉这条对照表记录?\n\n下次这句话会重新交给 AI 识别(会花 token),' +
+                 '新的结果会重新记进来。这条影响所有用户。')) return
+    b.disabled = true
+    let r
+    try {
+      r = await fetch('/api/quant/screener/learned/' + encodeURIComponent(id),
+                      { method: 'DELETE', headers: apiHeaders() })
+    } catch (err) { b.disabled = false; toast('没忘掉:请求没发出去', 'warn'); return }
+    if (!r.ok) {
+      b.disabled = false
+      let d = null
+      try { d = await r.json() } catch (err) { /* 非 JSON */ }
+      toast(r.status === 401 ? '登录后才能改对照表' : ((d && d.detail) || ('没忘掉 · HTTP ' + r.status)), 'warn')
+      return
+    }
+    // 界面上这几句仍然保留(用户可能已经在改了),只是不再标成「来自对照表」
+    if (S.kw && S.kw.matched) S.kw.matched.forEach(function (m) {
+      if (m.learned && m.learned.id === id) delete m.learned
+    })
+    render()
+    toast('已忘掉 · 下次这句会重新交给 AI', 'success')
+  })
 }
 
 function copyText(txt, what) {

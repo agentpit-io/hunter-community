@@ -440,7 +440,8 @@ def run_script(script: str, market_key: str = "us", limit: int = 100,
     }
 
 
-def parse_script(script: str, market_key: str = "us", allow_ai: bool = False) -> dict:
+def parse_script(script: str, market_key: str = "us", allow_ai: bool = False,
+                 user_id: str | None = None) -> dict:
     """只解析、不拉数 —— 界面上点「生成」走这条,把脚本变成可视化条件行。
 
     和 run_script 共用同一个编译器,所以**界面上看到的条件就是真正会跑的条件**。
@@ -476,13 +477,23 @@ def parse_script(script: str, market_key: str = "us", allow_ai: bool = False) ->
         from app.services.quant import screen_kw, screen_nl
         if screen_nl.looks_like_script(script):
             raise
+        from app.services.quant import screen_learned
         try:
-            k = screen_kw.translate(script, has_field, meta.sma, meta.ema, meta.rsi)
+            # names:字段原名不分大小写(perf.y → Perf.Y)。learned:之前 AI 识别学来的对照表,
+            # 只补规则认不出的句子。表读不到时是空 dict,本地规则照常工作。
+            k = screen_kw.translate(script, has_field, meta.sma, meta.ema, meta.rsi,
+                                    names=meta.names, learned=screen_learned.table())
             script = k["script"]
+            # 对照表里的表达式可能已经过时(字段下线、周期不支持)—— 这一步编译不过
+            # 就整体落回 AI,AI 的新结果会覆盖掉那条旧的
             c = _compile(script)
             kw = {"matched": k["matched"], "notes": k.get("notes") or [],
                   "source_text": original_text,
                   "script": script}
+            hit_ids = sorted({m["learned"]["id"] for m in k["matched"]
+                              if m.get("learned") and m["learned"].get("id")})
+            if hit_ids:
+                screen_learned.record_hits(hit_ids)
         except ScreenError as kw_err:
             if not allow_ai:
                 # 不抛普通 ScreenError —— 路由要据此告诉前端"可以试试 AI"
@@ -516,10 +527,38 @@ def parse_script(script: str, market_key: str = "us", allow_ai: bool = False) ->
         # 有损近似(上穿按"当前在上方"处理)要单独亮出来 —— 混在条件里用户看不出来
         for n in kw.get("notes") or []:
             warnings.append(n)
+        n_learned = sum(1 for m in kw.get("matched") or [] if m.get("learned"))
+        if n_learned:
+            warnings.append(
+                f"其中 {n_learned} 句来自之前的 AI 识别(已记在对照表里,这次没花 token)。"
+                "对照表是 AI 学来的,**请核对**;不对的话点那句旁边的「忘掉它」。")
         warnings.append(
             "以上条件由本地关键词匹配得出(未使用 AI,零成本),"
             "已通过语法与字段校验。逐句对照见上方折叠区,不对的话可直接改或改用 AI 识别。")
     if ai:
+        # ── 学:把这次 AI 识别记进对照表(2026-09-11 用户要求)──────────
+        # 下次同样的说法(数字可以不同)直接本地识别、零 token。
+        # 学失败只记日志,绝不影响这次的结果 —— 用户要的是条件,不是对照表。
+        ai["learned"] = 0
+        try:
+            exprs = screen_kw.inline_conditions(
+                d.get("conditions") or [],
+                d.get("plot_refs") or [] if d.get("combine") == "all" else [])
+            if exprs:
+                # 每条都得能**单独**编译 —— 下次是拆开、换了数字再用的
+                for e in exprs:
+                    _compile(f"def c_ = {e};\nplot scan = c_;")
+                def _rule_ok(cl: str) -> bool:
+                    return screen_kw.rule_match(cl, has_field, meta.sma, meta.ema, meta.rsi,
+                                                meta.names) is not None
+                entries = screen_kw.learn_entries(original_text, exprs, _rule_ok)
+                ai["learned"] = screen_learned.learn(
+                    entries, original_text, ai.get("model"), md.key, user_id)
+        except Exception as e:                                    # noqa: BLE001
+            # 本模块用标准库 logging(第 54 行 log),不是 loguru —— 写成 logger 的话
+            # except 里会再抛 NameError,把这次 AI 识别的结果整个打成 500
+            log.warning("[screen_learned] 这次 AI 识别没记进对照表: %s", e)
+
         # 让前端能明确标出"这几条是 AI 翻的",并且把生成的脚本亮出来给人核对。
         # AI 产出的东西必须可审计 —— 用户至少要能看见它到底写了什么才敢用。
         d["ai"] = ai
