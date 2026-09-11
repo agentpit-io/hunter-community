@@ -731,6 +731,9 @@ plot scan = cond_rs and cond_line and cond_liq;
 
 # 2026-09-11 用户给的五条 VCP 规则,逐条对应。字段口径见 services/quant/vcp.py。
 # 阈值里只有「最低点量比 ≤ 0.6」是我们定的(用户原话「相对非常小」没给数),脚本里写明了。
+# 「收缩到低点时成交量减小」**不要**写成「最低点量比 < 最后一次收缩量比」:最后一次收缩常常只有
+# 四五天,低点那 3 天几乎就是整次收缩,两个数差不多,比出来是抛硬币(实测 STT 整次 0.53、
+# 低点 0.56,量能明显枯竭却被卡掉)。用「最后一次收缩量比 < 1」。
 PRESETS.append({
     "key": "vcp",
     "name": "VCP 波动收缩",
@@ -747,10 +750,10 @@ def cond_first = vcp_first_depth <= 50;
 # 2. 后一次比前一次浅,至少 3 次(逐次变浅已包含在收缩次数的数法里)
 def cond_count = vcp_contractions >= 3;
 
-# 3. 最后一次收缩在 10% 以内;越接近低点量越小;
+# 3. 最后一次收缩在 10% 以内;这次收缩期间在缩量(日均量低于收缩前 50 天);
 #    低点(当天及前 2 天)的日均量不到收缩前 50 天日均量的 6 成(「相对非常小」,可按需调)
 def cond_last    = vcp_last_depth <= 10;
-def cond_dryup   = vcp_low_vol_ratio < vcp_last_vol_ratio;
+def cond_dryup   = vcp_last_vol_ratio < 1;
 def cond_low_vol = vcp_low_vol_ratio <= 0.6;
 
 # 4. 近 20 个交易日:上涨日的日均量大于下跌日,上涨天数多于下跌天数
