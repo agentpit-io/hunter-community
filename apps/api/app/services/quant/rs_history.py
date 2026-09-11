@@ -643,7 +643,7 @@ def compute_market(market: str) -> dict:
                      vs.get("last_depth"), vs.get("vol_declining"), vs.get("last_vol_ratio"),
                      vs.get("pivot"), vs.get("pivot_dist"), vs.get("base_days"),
                      vs.get("low_vol_ratio"), pv["up_days"], pv["down_days"], pv["ud_vol_ratio"])
-                    + tuple(ws[w] for w in vcp.WINDOW_FIELDS))
+                    + tuple(ws[w] for w in _WIN))
         split["vcp"] += vs.get("contractions") is not None
 
     # 服务端游标逐只流式算 —— 美股一个市场就是 4000 只 × 320 天 ≈ 130 万行,
@@ -676,7 +676,7 @@ def compute_market(market: str) -> dict:
                        "vcp_first_depth, vcp_last_depth, vcp_vol_declining, vcp_last_vol_ratio, "
                        "vcp_pivot, vcp_pivot_dist, vcp_base_days, vcp_low_vol_ratio, up_days_20d, "
                        "down_days_20d, ud_vol_ratio_20d, "
-                       + ", ".join(vcp.WINDOW_FIELDS) + ") VALUES %s", rows)
+                       + ", ".join(_WIN) + ") VALUES %s", rows)
     conn.commit()
     cur.close()
     conn.close()
@@ -692,7 +692,9 @@ def compute_market(market: str) -> dict:
 
 
 _ddl_checked = False
-# 与 vcp.WINDOW_FIELDS 一致;写在这里是因为 load_stats 不 import vcp(本文件的惯例:tests/ 能不带 app 包加载)
+# 与 vcp.WINDOW_FIELDS 一致(test_vcp 有用例盯着)。写在模块级,是因为 vcp 只在 flush 里按惯例函数内 import,
+# compute_market 的写库语句和 load_stats 都拿不到它 —— 2026-09-11 在写库那行用了 vcp.WINDOW_FIELDS,
+# 部署后重算当场 NameError(每晚任务会整轮失败,RS 线天数跟着过期)
 _WIN = ("high_5d", "low_5d", "high_21d", "low_21d", "high_63d", "low_63d")
 
 
