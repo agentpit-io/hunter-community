@@ -303,7 +303,7 @@ def _impact_excess_frac(recs: list["TradeRecord"], preset,
 PERIODS_PER_YEAR = {"W": 52, "M": 12, "Q": 4, "H": 2}
 
 
-def _rebalance_dates(start: date, end: date, freq: str = "M") -> list[date]:
+def _rebalance_dates(start: date, end: date, freq: str = "M", market: str = "a") -> list[date]:
     """生成 rebalance 日期 —— 支持 W / M / Q / H(`_17` §3)。
 
     旧版是 `if freq != "M": freq = "M"` —— 而前端下拉给了四个选项。
@@ -312,18 +312,34 @@ def _rebalance_dates(start: date, end: date, freq: str = "M") -> list[date]:
 
     取每个周期内的**第一个交易日**。用 klines 里真实存在的日期,
     不自己造交易日历 —— 造出来的日历遇到调休就错,而错了没人发现。
+
+    **交易日历按市场分开**(2026-09-11 加美股时改)。原来取的是 klines 全表日期并集:
+    美股数据一进来,国庆、春节这些"美股开市、A 股休市"的日子就成了 A 股的调仓日,
+    **已有的 A 股回测结果会悄悄变,而结果缓存的键里不含数据版本**。
+      A   纯数字代码的日期(上线前库里全是 A 股,结果与改动前逐字节相同)
+      US  标普500(.INX)的日期 = 纽交所真实交易日。不取美股个股的并集 ——
+          个股偶有错日期的脏数据,指数最干净。美股下载时 .INX 总是第一个下
     """
+    from app.services.quant import market as mk
     freq = (freq or "M").upper()
     if freq not in PERIODS_PER_YEAR:
         freq = "M"
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute(
-        """SELECT DISTINCT ts FROM klines
-           WHERE period='daily' AND ts >= %s AND ts <= %s
-           ORDER BY ts""",
-        (start, end),
-    )
+    if market == mk.US:
+        cur.execute(
+            """SELECT DISTINCT ts FROM klines
+               WHERE period='daily' AND code = %s AND ts >= %s AND ts <= %s
+               ORDER BY ts""",
+            (mk.US_BENCH, start, end),
+        )
+    else:
+        cur.execute(
+            """SELECT DISTINCT ts FROM klines
+               WHERE period='daily' AND ts >= %s AND ts <= %s AND """ + mk.SQL_IS_A + """
+               ORDER BY ts""",
+            (start, end),
+        )
     all_days = [r[0] for r in cur.fetchall()]
     cur.close()
     conn.close()
@@ -502,31 +518,39 @@ def _calc_turnover(prev: list[str], curr: list[str]) -> float:
     return total / 2.0
 
 
-def factor_data_report(keys: list[str], start: date, end: date) -> list[dict]:
+def factor_data_report(keys: list[str], start: date, end: date,
+                       market: str | None = None) -> list[dict]:
     """每个因子在 [start, end] 里到底有没有数据。
 
     回测选不出票时,用户只会看到"没有持仓",而真正需要知道的是
     **哪几个因子没数据、最近一次有数据是什么时候**。没有这个,
     他只能怀疑是自己的权重配错了。
+
+    `market` 给了就只看这个市场的行 —— 否则美股池会因为 A 股有 ROE 数据,
+    而看不到「美股没有 ROE」的提示(2026-09-11 加美股时改;A 股的行全是 'A',结果不变)。
     """
     if not keys:
         return []
+    from app.services.quant import market as mk
+    mcond, mparam = "", ()
+    if market:
+        mcond, mparam = " AND market = %s", ("US" if market == mk.US else "A",)
     conn = get_conn()
     cur = conn.cursor()
     try:
         cur.execute(
             """SELECT factor_key, count(*), min(trade_date), max(trade_date)
                  FROM factor_value
-                WHERE factor_key = ANY(%s) AND trade_date BETWEEN %s AND %s
+                WHERE factor_key = ANY(%s) AND trade_date BETWEEN %s AND %s""" + mcond + """
                 GROUP BY factor_key""",
-            (keys, start, end))
+            (keys, start, end) + mparam)
         in_range = {r[0]: r for r in cur.fetchall()}
         # 区间内没有的,再看它**全表**有没有 —— 「从来没算过」和
         # 「算过但不覆盖这段时间」是两个完全不同的问题,给的建议也不同
         cur.execute(
             """SELECT factor_key, count(*), min(trade_date), max(trade_date)
-                 FROM factor_value WHERE factor_key = ANY(%s) GROUP BY factor_key""",
-            (keys,))
+                 FROM factor_value WHERE factor_key = ANY(%s)""" + mcond + """ GROUP BY factor_key""",
+            (keys,) + mparam)
         ever = {r[0]: r for r in cur.fetchall()}
     finally:
         cur.close(); conn.close()
@@ -556,7 +580,10 @@ def run_backtest(strategy: dict, start: date, end: date, user_id: str | None = N
     if freq not in PERIODS_PER_YEAR:
         freq = "M"
     ppy = PERIODS_PER_YEAR[freq]
-    schedule = _rebalance_dates(start, end, freq)
+    # 股票池决定市场 → 交易日历、因子覆盖报告都只看这个市场(见 market.py)
+    from app.services.quant import market as _mk
+    mkt = _mk.market_of_universe(strategy["config"].get("universe", "hs300"))
+    schedule = _rebalance_dates(start, end, freq, market=mkt)
     if len(schedule) < 2:
         return {"error": "no_dates", "message": f"起止时间内无 rebalance 日 · start={start} end={end}"}
 
@@ -647,7 +674,7 @@ def run_backtest(strategy: dict, start: date, end: date, user_id: str | None = N
         return {
             "error": "no_holdings",
             "message": "整个回测区间一只股票都没选出来 —— 所选因子在这段时间没有数据。",
-            "factors": factor_data_report(keys, start, end),
+            "factors": factor_data_report(keys, start, end, market=mkt),
             "start": start.isoformat(), "end": end.isoformat(),
             "n_periods": len(schedule) - 1,
         }
@@ -700,7 +727,7 @@ def run_backtest(strategy: dict, start: date, end: date, user_id: str | None = N
     # 而这里是"少了几个",同样不能不说 —— 尤其当缺的那几个占了大半权重时,
     # 用户会拿一份三因子的成绩单去判断他的五因子策略。
     req_keys = [f["key"] for f in strategy["factors"] if f.get("weight_pct", 0) > 0]
-    freport = factor_data_report(req_keys, start, end)
+    freport = factor_data_report(req_keys, start, end, market=mkt)
     missing = [f for f in freport if not f["ok"]]
     if missing:
         wmap = {f["key"]: f.get("weight_pct", 0) for f in strategy["factors"]}
@@ -828,7 +855,8 @@ def compute_quantile_returns(
     if end is None: end = date.today()
     if start is None: start = end - timedelta(days=365)
 
-    schedule = _rebalance_dates(start, end)
+    from app.services.quant.market import market_of_universe
+    schedule = _rebalance_dates(start, end, market=market_of_universe(universe))
     if len(schedule) < 2:
         return {"factor": factor_key, "error": "no_dates", "quantiles": {}}
 

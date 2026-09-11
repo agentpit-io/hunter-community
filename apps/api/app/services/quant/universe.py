@@ -279,7 +279,7 @@ SUPPORTED_UNIVERSES = {"hs300", "zz500", "my_watchlist"}
 COVERED_INDEXES = ["000300", "000905"]
 
 
-def covered_codes() -> list[str]:
+def covered_codes(market: str = "a") -> list[str]:
     """定时任务该更新哪些票 —— **以用户下过什么为准**。
 
     原来这里返回沪深300 ∪ 中证500(写死的 800 只),也就是说不管用户
@@ -289,11 +289,19 @@ def covered_codes() -> list[str]:
     现在读 `data_coverage`:用户在「数据」页下过哪些,就更新哪些。
     一只都没下过的实例,这里返回空列表,定时任务什么都不做 ——
     **这才是正确的默认行为**。
+
+    **默认只返回 A 股**(2026-09-11 加美股时改)。17:10 本地流水线、package_import、
+    各 backfill 脚本都不传参 —— 它们用 A 股的取数通道(sh/sz 前缀)重下日线、
+    并把这批票放进一个截面算 z-score。美股混进来的话:AAPL 被拼成 sz00AAPL 去打腾讯
+    (每晚几千次无效请求,打的正是 2026-09-11 被 WAF 封过的域名),截面也跟着混。
+    美股要显式传 market='us',而且美股指数(.INX)不算股票,不返回。
     """
+    from app.services.quant import market as mk
     conn = get_conn(); cur = conn.cursor()
     try:
-        cur.execute("SELECT DISTINCT code FROM data_coverage WHERE data_type='kline'")
-        return [r[0] for r in cur.fetchall()]
+        cur.execute("SELECT DISTINCT code FROM data_coverage WHERE data_type='kline' AND "
+                    + mk.sql_filter(market))
+        return [r[0] for r in cur.fetchall() if not mk.is_benchmark(r[0])]
     except Exception as e:                                    # noqa: BLE001
         log.warning("[universe] 读 data_coverage 失败: %s", e)
         return []

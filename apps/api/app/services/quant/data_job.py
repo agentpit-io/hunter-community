@@ -659,7 +659,8 @@ def run(job_id: int) -> dict:
 
 
 def _compute_factors(codes: list[str], start: date, end: date,
-                     with_financial: bool = False) -> dict:
+                     with_financial: bool = False, market: str = "a",
+                     on_progress=None) -> dict:
     """把因子算到每个调仓日上。
 
     **不能只算当天一个截面** —— 回测要的是每个调仓日的因子值,
@@ -674,8 +675,9 @@ def _compute_factors(codes: list[str], start: date, end: date,
     **下载成功和因子可用之间断了一环**。
     """
     from app.services.quant import backtest_engine as bt, factor_engine as fe
-    days = sorted(set(bt._rebalance_dates(start, end, "W"))
-                  | set(bt._rebalance_dates(start, end, "M")))
+    # 调仓日按市场取(美股用纽交所交易日,见 backtest_engine._rebalance_dates)
+    days = sorted(set(bt._rebalance_dates(start, end, "W", market=market))
+                  | set(bt._rebalance_dates(start, end, "M", market=market)))
     if not days:
         return {}
     keys = list(fe.LOCAL_ONLY)
@@ -685,7 +687,10 @@ def _compute_factors(codes: list[str], start: date, end: date,
         # 会让任务从几分钟变成几十小时
         keys += [k for k in fe.AKSHARE_ONLY if k in _DB_BACKED]
     out: dict[str, int] = {}
-    for d in days:
+    for i, d in enumerate(days, 1):
+        # 美股全池 × 几年的调仓日要算很久,不报进度的话用户只看到「计算因子」一动不动
+        if on_progress:
+            on_progress(i, len(days))
         for k in keys:
             try:
                 out[k] = out.get(k, 0) + fe.compute_and_store(k, codes, d)

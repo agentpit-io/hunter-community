@@ -661,8 +661,11 @@ def _shares_traded(code: str, volume: float) -> float:
     说明腾讯源对 **688 给的是「股」,其他板块给的是「手」**。local_kline 没做归一。
     不归一的后果:688 的换手率被高估 100 倍(实测中芯国际日换手 1112%),
     Amihud 被低估 100 倍。这里统一换成股,在因子层修正,不动 klines 存量。
+
+    美股(2026-09-11 起)腾讯给的就是「股」,不乘 —— 倍数统一由 market.lot_multiplier 给。
     """
-    return volume if code.startswith("688") else volume * _LOT
+    from app.services.quant.market import lot_multiplier
+    return volume * lot_multiplier(code)
 
 
 # 估算股本 / 市值 / 换手的合理性边界 —— 越界说明上游财务字段错了(实测 600941 的 bps 给成 3.02,
@@ -853,18 +856,31 @@ def _compute_size_inv(codes, trade_date, params=None):
 
 
 def _compute_beta_60(codes, trade_date, params=None):
-    """市场贝塔 · 个股日收益对沪深 300(klines code='000300')日收益的回归斜率 · N 日窗口
+    """市场贝塔 · 个股日收益对**本市场基准**日收益的回归斜率 · N 日窗口
 
-    指数历史不足 N+1 日 → 整个因子返回空(界面标灰),不用别的指数凑。
+    A 股对沪深 300(klines code='000300'),美股对标普 500(code='.INX')。
+    2026-09-11 前只有沪深 300 —— 美股进来会拿 AAPL 去对沪深 300 回归,
+    而且两地交易日、时区都不同(A 股 D 日收盘早于美股 D 日开盘),算出来是噪音,却照样出数。
+
+    指数历史不足 N+1 日 → 该市场这组返回空(界面标灰),不用别的指数凑。
     个股与指数按 ts 对齐,只用两边都有的交易日。
     """
+    from app.services.quant import market as mk
+    out = {}
+    for m, group in mk.split_by_market(codes).items():
+        out.update(_beta_vs(group, mk.bench_for(m), trade_date, params))
+    return out
+
+
+def _beta_vs(codes, bench, trade_date, params=None):
     import numpy as np
     n = int(params_of("beta_60", params)["window"])
-    idx = _fetch_klines_ohlcv(["000300"], trade_date, back_days=int(n * 1.6)).get("000300", [])
+    idx = _fetch_klines_ohlcv([bench], trade_date, back_days=int(n * 1.6)).get(bench, [])
     idx_close = {ts: c for ts, _, c, _ in idx if c is not None and c > 0}
     if len(idx_close) < n + 1:
-        log.warning("[factor_engine] beta_60: 沪深 300 只有 %d 日 K 线(需 ≥ %d)· 本次不产出"
-                    " · 跑 index_kline.backfill('000300', ...) 补指数历史", len(idx_close), n + 1)
+        log.warning("[factor_engine] beta_60: 基准 %s 只有 %d 日 K 线(需 ≥ %d)· 本次不产出"
+                    " · A 股跑 index_kline.backfill('000300', ...) 补指数历史,美股随美股下载一起下",
+                    bench, len(idx_close), n + 1)
         return {}
     kl = _fetch_klines_ohlcv(codes, trade_date, back_days=int(n * 1.6))
     out = {}
@@ -1068,22 +1084,28 @@ def _bulk_upsert(trade_date: date, factor_key: str,
                  raw: dict[str, float], z: dict[str, float], rank: dict[str, float]) -> int:
     if not raw:
         return 0
+    from psycopg2.extras import execute_values
+    from app.services.quant.market import US, market_of_code
     conn = get_conn()
     cur = conn.cursor()
     # float() 转 np.float64/np.int64 · psycopg2 不认 numpy 类型
-    rows = [(trade_date, factor_key, c, "A",
+    # market 列原来写死 "A";2026-09-11 起按代码写真实市场(美股 'US')
+    rows = [(trade_date, factor_key, c, "US" if market_of_code(c) == US else "A",
              float(raw[c]),
              float(z[c]) if c in z else None,
              float(rank[c]) if c in rank else None) for c in raw]
-    cur.executemany(
+    # execute_values 而不是 executemany:写入的行一模一样,但 executemany 是逐行往返,
+    # 美股全池 5 年(约 4000 只 × 15 因子 × 265 个调仓日)会慢到不可用
+    execute_values(
+        cur,
         """INSERT INTO factor_value (trade_date, factor_key, code, market, raw_value, z_score, pct_rank)
-           VALUES (%s, %s, %s, %s, %s, %s, %s)
+           VALUES %s
            ON CONFLICT (trade_date, factor_key, code) DO UPDATE
              SET raw_value = EXCLUDED.raw_value,
                  z_score = EXCLUDED.z_score,
                  pct_rank = EXCLUDED.pct_rank,
                  updated_at = NOW()""",
-        rows,
+        rows, page_size=1000,
     )
     conn.commit()
     n = len(rows)
@@ -1097,7 +1119,14 @@ def _bulk_upsert(trade_date: date, factor_key: str,
 # ═══════════════════════════════════════════════════════════════
 
 def compute_and_store(factor_key: str, codes: list[str], trade_date: date) -> int:
-    """计算单因子 + 落库 · 返回 upsert 行数"""
+    """计算单因子 + 落库 · 返回 upsert 行数
+
+    **按市场分批,各自标准化。** z-score 是在传进来的这批票里算的 ——
+    A 股和美股混在一批,两边的收益率分布、成交量单位、交易日都不同,
+    截面排名就成了"美股 vs A 股"而不是"这只 vs 同市场的别人"。
+    2026-09-11 前每日流水线就是把 data_coverage 全体一次传进来,美股一下载就会混。
+    指数代码(.INX)不是股票,不参与。只有 A 股时与改动前完全相同。
+    """
     fd = get_factor(factor_key)
     if not fd or not fd.enabled:
         log.warning("[factor_engine] 因子 %s 未启用 · 跳过", factor_key)
@@ -1106,14 +1135,18 @@ def compute_and_store(factor_key: str, codes: list[str], trade_date: date) -> in
     if not computer:
         log.warning("[factor_engine] 因子 %s 无 computer · 跳过", factor_key)
         return 0
-    raw = computer(codes, trade_date)
-    if not raw:
-        log.warning("[factor_engine] 因子 %s 无数据 · 可能上游未准备好", factor_key)
-        return 0
-    z, rank = _winsorize_zscore(raw)
-    n = _bulk_upsert(trade_date, factor_key, raw, z, rank)
-    log.info("[factor_engine] %s @ %s · upsert %d 行", factor_key, trade_date, n)
-    return n
+    from app.services.quant import market as mk
+    total = 0
+    for m, group in mk.split_by_market([c for c in codes if not mk.is_benchmark(c)]).items():
+        raw = computer(group, trade_date)
+        if not raw:
+            log.warning("[factor_engine] 因子 %s 无数据(%s)· 可能上游未准备好", factor_key, m)
+            continue
+        z, rank = _winsorize_zscore(raw)
+        n = _bulk_upsert(trade_date, factor_key, raw, z, rank)
+        log.info("[factor_engine] %s @ %s · upsert %d 行", factor_key, trade_date, n)
+        total += n
+    return total
 
 
 def compute_daily(codes: list[str], trade_date: date) -> dict[str, int]:
