@@ -99,6 +99,16 @@ _FIELD_WORDS: dict[str, str] = {
     "vwap": "VWAP", "成交量加权均价": "VWAP", "均价线": "VWAP",
     "近1周涨幅": "Perf.W", "近1月涨幅": "Perf.1M", "近3月涨幅": "Perf.3M",
     "近6月涨幅": "Perf.6M", "近1年涨幅": "Perf.Y", "年初至今涨幅": "Perf.YTD",
+
+    # VCP(2026-09-11)。**光秃秃的「收缩深度」不收** —— 第一次还是最后一次?
+    # 两种理解数值差好几倍,猜哪个都可能静默出错,交给用户说清楚或走 AI
+    "vcp收缩次数": "vcp_contractions", "收缩次数": "vcp_contractions",
+    "第一次收缩深度": "vcp_first_depth", "首次收缩深度": "vcp_first_depth",
+    "最后一次收缩深度": "vcp_last_depth", "最后收缩深度": "vcp_last_depth",
+    "末次收缩深度": "vcp_last_depth",
+    "最后一次收缩量比": "vcp_last_vol_ratio", "收缩量比": "vcp_last_vol_ratio",
+    "距枢轴点": "vcp_pivot_dist", "距离枢轴": "vcp_pivot_dist", "距枢轴": "vcp_pivot_dist",
+    "离枢轴": "vcp_pivot_dist", "底部天数": "vcp_base_days",
 }
 
 # 比较符。**长的必须排在短的前面**:「大于等于」不能被「大于」先吃掉。
@@ -464,6 +474,14 @@ def _clause_to_expr(clause: str, vocab: _Vocab, notes: list[str] | None = None) 
         return _rs_line_expr(t, vocab)
 
     # ── 成句的行话,先于通用规则 ──────────────────────────
+    # VCP「量能逐次递减」是个是非判断,不是字段比大小。
+    # 只认带「量能」的说法 ——「成交量递减」可能是说近几天缩量,不一定是指每次收缩的量能,
+    # 两者不是一回事;否定句(量能没有递减)本地不拆,交给用户或 AI
+    if re.search(r"量能(?:逐次|依次|逐步)?递减", t):
+        if re.search(r"不|没|未|非", t) or not vocab.has_field("vcp_vol_declining"):
+            return None
+        return "vcp_vol_declining == 1"
+
     if re.search(r"多头排列|均线多头|多头趋势", t):
         for n in (20, 50, 200):
             if n not in vocab.sma:
@@ -495,7 +513,10 @@ def _clause_to_expr(clause: str, vocab: _Vocab, notes: list[str] | None = None) 
     if len(re.findall(r"大于|小于|高于|低于|超过|不到|不低于|不高于|不超过|[<>]=?", t)) >= 2 \
             and len(fs) <= 1:
         return None                     # 一个字段两个比较 = 区间,本地不拆
-    if re.search(r"之间|区间|介于|到\s*\d", t):
+    # 「到」前面必须是数字才是区间(10到20、10%到20%)。原来写的是 `到\s*\d`,
+    # 把「不到5」也当成区间拒掉了 ——「市盈率不到15」「股价不到20」一直识别不了,
+    # 「不到」明明在比较符表里却从来走不到(2026-09-11 加 VCP 距枢轴时查出)
+    if re.search(r"之间|区间|介于|\d\s*(?:%|％|万亿|亿|万)?\s*到\s*-?\d", t):
         return None
 
     # 「A比B高/低/大/小」—— 中文最常见的比较句式,比较符在句尾

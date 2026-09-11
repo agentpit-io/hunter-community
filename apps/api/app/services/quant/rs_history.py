@@ -126,6 +126,21 @@ CREATE TABLE IF NOT EXISTS rs_line_stat (
     computed_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (market, code)
 );
+-- 2026-09-11 · VCP 字段要用最高/最低/成交量。腾讯每根 K 线本来就带着
+-- [日期, 开, 收, 高, 低, 量],原来只存了收盘 —— 同一次响应多存三列,**零新增请求**。
+-- 老行这三列为空,今晚那一轮整窗重拉后自然补齐(_upsert 是整窗覆盖)。
+ALTER TABLE rs_daily ADD COLUMN IF NOT EXISTS high   DOUBLE PRECISION;
+ALTER TABLE rs_daily ADD COLUMN IF NOT EXISTS low    DOUBLE PRECISION;
+ALTER TABLE rs_daily ADD COLUMN IF NOT EXISTS volume DOUBLE PRECISION;
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS vcp_contractions   INT;
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS vcp_depths         TEXT;
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS vcp_first_depth    DOUBLE PRECISION;
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS vcp_last_depth     DOUBLE PRECISION;
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS vcp_vol_declining  SMALLINT;
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS vcp_last_vol_ratio DOUBLE PRECISION;
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS vcp_pivot          DOUBLE PRECISION;
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS vcp_pivot_dist     DOUBLE PRECISION;
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS vcp_base_days      INT;
 """
 
 
@@ -343,6 +358,25 @@ def repair_splits(series: list[tuple], anchors: list[tuple[date, float]],
     return None, fixed
 
 
+def adjust_bars(raw: dict, series: list[tuple]) -> list[tuple]:
+    """把拆股修正同步到最高/最低/成交量 → [(日期, 收, 高, 低, 量)]。
+
+    raw    = {日期: (原始收, 原始高, 原始低, 原始量)}
+    series = repair_splits 修好的 [(日期, 收)](可能截掉了开头一段)
+
+    收盘被乘了 k 的那段,高低也乘 k、成交量除以 k。不同步的话,拆股那天
+    高低还是拆股前的价、收盘已经是拆股后的,VCP 会凭空算出一次「暴跌收缩」;
+    量不反向调整,拆股前后的量能对比也是错的。
+    """
+    out = []
+    for d, c in series:
+        c0, h0, l0, v0 = raw[d]
+        f = c / c0 if c0 else 1.0
+        out.append((d, c, h0 * f if h0 else None, l0 * f if l0 else None,
+                    v0 / f if (v0 and f) else None))
+    return out
+
+
 # ═══════════════════════════════════════════════════════════════
 # 取数
 # ═══════════════════════════════════════════════════════════════
@@ -378,7 +412,9 @@ def _session():
 
 
 def fetch_bars(sym: str, n: int = _BARS) -> list[tuple] | None:
-    """→ [(trade_date, close), …];None = 请求失败(与"确实没数据"区分开,后者返回 [])
+    """→ [(trade_date, close, high, low, volume), …];None = 请求失败(与"确实没数据"区分开,后者返回 [])
+
+    high / low / volume 某根缺了就是 None —— 下游 VCP 算不出就给空,不拿收盘价顶替。
 
     注意:腾讯对**代码写错**的请求不返回空,而是返回 1–2 根(2026-09-11 实测
     AAPL 配 .N 后缀给 1 根)。所以后缀必须按交易所映射(tx_symbol),不能靠试。
@@ -407,7 +443,8 @@ def fetch_bars(sym: str, n: int = _BARS) -> list[tuple] | None:
             for b in bars:
                 try:
                     # [日期, 开, 收, 高, 低, 量] —— b[2] 才是收盘价
-                    out.append((date.fromisoformat(str(b[0])[:10]), float(b[2])))
+                    out.append((date.fromisoformat(str(b[0])[:10]), float(b[2]),
+                                _num(b, 3), _num(b, 4), _num(b, 5)))
                 except (ValueError, IndexError, TypeError):
                     continue
             return out
@@ -415,6 +452,14 @@ def fetch_bars(sym: str, n: int = _BARS) -> list[tuple] | None:
             log.warning("[rs_history] %s 返回体解析失败:%s · %r", sym, e, r.text[:120])
             return None
     return None
+
+
+def _num(b, i: int) -> float | None:
+    try:
+        v = float(b[i])
+        return v if v > 0 else None
+    except (ValueError, IndexError, TypeError):
+        return None
 
 
 def universe(market: str) -> list[tuple[str, str]]:
@@ -443,9 +488,10 @@ def _upsert(conn, market: str, code: str, bars: list[tuple]) -> None:
         cur.execute("DELETE FROM rs_daily WHERE market=%s AND code=%s AND trade_date >= %s",
                     (market, code, bars[0][0]))
         execute_values(cur,
-                       "INSERT INTO rs_daily (market, code, trade_date, close) VALUES %s "
-                       "ON CONFLICT (market, code, trade_date) DO UPDATE SET close=EXCLUDED.close",
-                       [(market, code, d, c) for d, c in bars])
+                       "INSERT INTO rs_daily (market, code, trade_date, close, high, low, volume) VALUES %s "
+                       "ON CONFLICT (market, code, trade_date) DO UPDATE SET close=EXCLUDED.close, "
+                       "high=EXCLUDED.high, low=EXCLUDED.low, volume=EXCLUDED.volume",
+                       [(market, code) + tuple(b[:5]) + (None,) * (5 - len(b)) for b in bars])
     conn.commit()
     cur.close()
 
@@ -550,15 +596,17 @@ def compute_market(market: str) -> dict:
     rows = []
     fresh = 0
     total = 0
-    split = {"fixed": 0, "bad": 0, "no_anchor": 0}
+    split = {"fixed": 0, "bad": 0, "no_anchor": 0, "vcp": 0}
     bad_eg: list[str] = []
 
-    def flush(code, series):
+    def flush(code, full):
         nonlocal fresh
         p = perf.get(code)
         if p is None:
             split["no_anchor"] += 1            # 扫描源里已经没有这只(退市/改代码)—— 没法核对,不给
             return
+        raw = {d: (c, h, lo, v) for d, c, h, lo, v in full}
+        series = [(d, c) for d, c, _h, _l, _v in full]
         series, n_fix = repair_splits(series, perf_anchors(series[-1][0], p))
         if series is None:
             split["bad"] += 1
@@ -571,25 +619,32 @@ def compute_market(market: str) -> dict:
             return
         if st["as_of"] == bench_last:
             fresh += 1
+        bars = adjust_bars(raw, series)
+        from app.services.quant import vcp     # 函数内 import:本文件的惯例,tests/ 能不带 app 包单独加载
+        vs = vcp.vcp_stats(bars) or {}
         rows.append((market, code, st["as_of"], st["n_days"], st["rs_line"],
                      st["rs_ma21"], st["up_days"], st["up_days_censored"],
-                     rs_raw_exact([c for _, c in series])))
+                     rs_raw_exact([c for _, c in series]),
+                     vs.get("contractions"), vs.get("depths") or None, vs.get("first_depth"),
+                     vs.get("last_depth"), vs.get("vol_declining"), vs.get("last_vol_ratio"),
+                     vs.get("pivot"), vs.get("pivot_dist"), vs.get("base_days")))
+        split["vcp"] += vs.get("contractions") is not None
 
     # 服务端游标逐只流式算 —— 美股一个市场就是 4000 只 × 320 天 ≈ 130 万行,
     # 一次 fetchall 进内存要两三百 MB,和 api 进程抢同一个容器的内存
     scan = conn.cursor(name="rs_scan")
     scan.itersize = 20000
-    scan.execute("SELECT code, trade_date, close FROM rs_daily "
+    scan.execute("SELECT code, trade_date, close, high, low, volume FROM rs_daily "
                  "WHERE market=%s AND code<>%s ORDER BY code, trade_date",
                  (market, BENCH_CODE))
     cur_code, series = None, []
-    for code, d, c in scan:
+    for code, d, c, h, lo, v in scan:
         if code != cur_code:
             if cur_code is not None:
                 flush(cur_code, series)
                 total += 1
             cur_code, series = code, []
-        series.append((d, c))
+        series.append((d, c, h, lo, v))
     if cur_code is not None:
         flush(cur_code, series)
         total += 1
@@ -601,7 +656,9 @@ def compute_market(market: str) -> dict:
     if rows:
         execute_values(cur,
                        "INSERT INTO rs_line_stat (market, code, as_of, n_days, rs_line, rs_ma21, "
-                       "up_days, up_days_censored, rs_raw_exact) VALUES %s", rows)
+                       "up_days, up_days_censored, rs_raw_exact, vcp_contractions, vcp_depths, "
+                       "vcp_first_depth, vcp_last_depth, vcp_vol_declining, vcp_last_vol_ratio, "
+                       "vcp_pivot, vcp_pivot_dist, vcp_base_days) VALUES %s", rows)
     conn.commit()
     cur.close()
     conn.close()
@@ -611,21 +668,37 @@ def compute_market(market: str) -> dict:
     log.info("[rs_history] %s 拆股校验:修正 %d 只 · 对不上不给数 %d 只 %s · 扫描源已无 %d 只",
              market, split["fixed"], split["bad"], bad_eg, split["no_anchor"])
     return {"market": market, "codes": total, "computed": len(rows), "active": active,
-            "split_fixed": split["fixed"], "split_bad": split["bad"],
+            "split_fixed": split["fixed"], "split_bad": split["bad"], "vcp_computed": split["vcp"],
             "fresh_on_bench_last": fresh, "bench_last": str(bench_last),
             "completeness": (fresh / active) if active else 0.0}
 
 
+_ddl_checked = False
+
+
 def load_stats(market: str) -> tuple[dict, dict]:
     """扫描时用:→ ({code: 统计行}, 概况 {as_of, n, stale_days})。表不存在返回空。"""
+    global _ddl_checked
     from app.services.database import get_conn
     try:
         conn = get_conn()
+        if not _ddl_checked:
+            # 2026-09-11 加了 VCP 列。部署之后、今晚任务第一次跑之前,老库上还没有这些列 ——
+            # 不先补的话下面的 SELECT 直接报错,被 except 吞成「没有统计」,
+            # **连本来好好的 RS 线天数也一起变空**。每个进程只补一次:ALTER 要拿表锁,
+            # 每次扫描都跑会和每晚的写入互相等
+            _ensure_tables(conn)
+            _ddl_checked = True
         cur = conn.cursor()
-        cur.execute("SELECT code, as_of, up_days, up_days_censored, rs_raw_exact, rs_line, rs_ma21 "
+        cur.execute("SELECT code, as_of, up_days, up_days_censored, rs_raw_exact, rs_line, rs_ma21, "
+                    "vcp_contractions, vcp_depths, vcp_first_depth, vcp_last_depth, "
+                    "vcp_vol_declining, vcp_last_vol_ratio, vcp_pivot_dist, vcp_base_days "
                     "FROM rs_line_stat WHERE market=%s", (market,))
         out = {r[0]: {"as_of": r[1], "up_days": r[2], "censored": r[3],
-                      "rs_raw_exact": r[4], "rs_line": r[5], "rs_ma21": r[6]}
+                      "rs_raw_exact": r[4], "rs_line": r[5], "rs_ma21": r[6],
+                      "vcp_contractions": r[7], "vcp_depths": r[8], "vcp_first_depth": r[9],
+                      "vcp_last_depth": r[10], "vcp_vol_declining": r[11],
+                      "vcp_last_vol_ratio": r[12], "vcp_pivot_dist": r[13], "vcp_base_days": r[14]}
                for r in cur.fetchall()}
         cur.close()
         conn.close()

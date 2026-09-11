@@ -48,7 +48,7 @@ import time
 
 import httpx
 
-from app.services.quant import screen_dsl, screen_rs
+from app.services.quant import screen_dsl, screen_rs, vcp
 from app.services.quant.screen_dsl import Compiled, ScreenError
 
 log = logging.getLogger(__name__)
@@ -188,6 +188,9 @@ def get_meta(market_key: str) -> _Meta:
     # RS 相对强度是我们在全市场快照上自己算的(screen_rs),扫描源没有这两个字段。
     # 放进白名单才能在脚本里写、在「可用字段」里搜到。
     names.update(screen_rs.RS_FIELDS)
+    # VCP 字段同理:每晚用全市场日线算好(rs_history + vcp.py),扫描源没有。
+    # vcp_depths 是展示用的文字,不进白名单 —— 写进条件里拿文字比大小没有意义
+    names.update(vcp.FIELDS)
 
     def periods(prefix: str) -> list[int]:
         rx = _PERIOD_RE[prefix]
@@ -324,7 +327,11 @@ def run_script(script: str, market_key: str = "us", limit: int = 100,
     # RS 字段**不能**原样发给扫描源(它没有这两列,会整批报错),
     # 换成算 RS 需要的四个来源列,拉回来之后在全市场上算好再补进每一行。
     uses_rs = any(f in screen_rs.RS_FIELDS for f in c.fields)
-    req_cols = [f for f in want if f not in screen_rs.RS_FIELDS]
+    uses_vcp = any(f in vcp.FIELDS for f in c.fields)
+    if uses_vcp and vcp.DISPLAY not in want:
+        want.append(vcp.DISPLAY)      # 结果表里顺带显示「25.7→13.0→6.0」,一眼看出每次多深
+    ours = set(screen_rs.RS_FIELDS) | set(vcp.FIELDS) | {vcp.DISPLAY}
+    req_cols = [f for f in want if f not in ours]
     if uses_rs:
         for col in screen_rs.RS_SOURCE_COLS:
             if col not in req_cols:
@@ -335,13 +342,25 @@ def run_script(script: str, market_key: str = "us", limit: int = 100,
     fetch_ms = (time.time() - t0) * 1000
 
     rs_stat = None
-    if uses_rs:
-        # 每晚落库的全市场日线统计(RS 线上涨天数、精确 RS Raw)。读的是一张
-        # 每市场几千行的小表,不是逐日明细;表还没建 / 读失败 → 空,inject 自动退回快照法
+    vcp_stat = None
+    hist = None
+    if uses_rs or uses_vcp:
+        # 每晚落库的全市场日线统计(RS 线上涨天数、精确 RS Raw、VCP)。读的是一张
+        # 每市场几千行的小表,不是逐日明细;表还没建 / 读失败 → 空
         from app.services.quant import rs_history
         hist, _ = rs_history.load_stats(md.key)
+    if uses_rs:
         # **在求值之前**、对全市场算 —— 评级的分母是全市场,不是命中结果
         rs_stat = screen_rs.inject(rows, md.key, hist)
+    if uses_vcp:
+        # 与 RS 线同一套新鲜度规则:超过 HIST_STALE_DAYS 天没更新就整批给空,
+        # 拿一周前的形态判断「现在是不是在收缩」会给错答案
+        from datetime import date as _date
+        v_as_of = max((v["as_of"] for v in (hist or {}).values()), default=None)
+        v_stale = v_as_of is None or (_date.today() - v_as_of).days > screen_rs.HIST_STALE_DAYS
+        fresh_n = sum(1 for v in (hist or {}).values() if v["as_of"] == v_as_of)
+        vcp_stat = {"as_of": v_as_of, "stale": v_stale, "fresh": fresh_n,
+                    "n": vcp.inject(rows, hist, v_stale)}
 
     t1 = time.time()
     hits, skipped, missing = screen_dsl.evaluate_detail(c, rows, cache)
@@ -390,6 +409,22 @@ def run_script(script: str, market_key: str = "us", limit: int = 100,
                 msg += (f";其中 {rs_stat['young']} 只上市不足 250 个交易日的次新股"
                         f"没有评级(没有真正的 12 个月涨幅,和别人不可比)")
             warnings.append(msg + "。")
+    if vcp_stat is not None:
+        a = vcp_stat["as_of"]
+        if a is None:
+            warnings.append(f"{md.label}的全市场日线还没建好,VCP 字段这次全部为空"
+                            f"(算不出,不是不满足)。日线由每晚的定时任务拉取。")
+        elif vcp_stat["stale"]:
+            warnings.append(f"{md.label}的日线停在 {a},已超过 {screen_rs.HIST_STALE_DAYS} 天没更新"
+                            f"(每晚的定时任务可能坏了)—— 用过期的形态判断「现在是不是在收缩」"
+                            f"会给错答案,所以这次 VCP 字段全部为空。")
+        elif vcp_stat["n"] < vcp_stat["fresh"] * 0.5:
+            # 2026-09-11 上线当天就是这种情况:老日线只存了收盘价,没有最高/最低/成交量
+            warnings.append(f"VCP 字段要用日线里的最高价、最低价和成交量。这次只有 {vcp_stat['n']} 只"
+                            f"算得出(日线里带着这三项的),其余 {vcp_stat['fresh'] - vcp_stat['n']} 只"
+                            f"要等下一轮每晚定时任务整窗重拉之后才有 —— 它们是「算不出」,不是「不满足」。")
+        else:
+            warnings.append(vcp.NOTE.format(as_of=a))
     if any("market_cap" in f for f in want):
         warnings.append(MARKET_CAP_WARN)
     # 算不出的票具体缺哪个字段 —— 只说一个总数的话,用户没法判断

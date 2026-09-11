@@ -56,7 +56,9 @@ price_book_fq return_on_equity dividends_yield_current debt_to_equity gross_marg
 total_revenue_yoy_growth_ttm relative_volume_10d_calc current_ratio beta_1_year
 earnings_per_share_diluted_ttm price_52_week_high price_52_week_low all_time_high
 RSI ADX ATR VWAP MACD.macd MACD.signal MACD.hist Stoch.K Stoch.D BB.upper BB.lower BB.basis
-Perf.W Perf.1M Perf.3M Perf.6M Perf.Y Perf.YTD rs_rating rs_raw rs_line_up_days""".split())
+Perf.W Perf.1M Perf.3M Perf.6M Perf.Y Perf.YTD rs_rating rs_raw rs_line_up_days
+vcp_contractions vcp_first_depth vcp_last_depth vcp_vol_declining vcp_last_vol_ratio
+vcp_pivot_dist vcp_base_days""".split())
 FIELDS |= {f"SMA{n}" for n in SMA} | {f"EMA{n}" for n in EMA} | {f"RSI{n}" for n in RSI}
 FIELDS |= {f"average_volume_{n}d_calc" for n in (10, 30, 60, 90)}
 
@@ -245,6 +247,35 @@ SHOULD_REJECT += [
     "rs_line_up_days大于50%",          # 天数字段带百分号
     "rs_line_up_days大于5万",          # 天数字段带万
     "rs_line_up_days大于50天小于100天",  # 区间,本地不拆
+]
+
+
+# ── 2026-09-11 · VCP 字段(每晚日线算出,见 services/quant/vcp.py)────────
+SHOULD_MATCH += [
+    ("收缩次数大于等于3", "vcp_contractions >= 3"),
+    ("VCP收缩次数不少于3次", "vcp_contractions >= 3"),
+    ("最后一次收缩深度小于8%", "vcp_last_depth < 8"),
+    ("首次收缩深度不超过35%", "vcp_first_depth <= 35"),
+    ("收缩量比小于0.7", "vcp_last_vol_ratio < 0.7"),       # 不能被里面的「量比」截胡
+    ("距枢轴不到5%", "vcp_pivot_dist < 5"),
+    ("底部天数大于30天", "vcp_base_days > 30"),
+    ("量能逐次递减", "vcp_vol_declining == 1"),
+    ("收缩次数大于等于3，量能递减，最后一次收缩深度小于8%",
+     "vcp_contractions >= 3 AND vcp_vol_declining == 1 AND vcp_last_depth < 8"),
+    ("vcp_contractions >= 3", "vcp_contractions >= 3"),
+    # 「不到」曾被区间规则误拒(`到\s*\d` 把「不到5」当成了「10到20」)
+    ("市盈率不到15", "price_earnings_ttm < 15"),
+    ("股价不到20", "close < 20"),
+    ("涨跌幅不到3%", "change < 3"),
+]
+SHOULD_REJECT += [
+    "收缩深度小于10%",          # 第一次还是最后一次?差好几倍,不猜
+    "量能没有递减",             # 否定句本地不拆
+    "成交量逐日递减",           # 近几天缩量 ≠ 每次收缩量能递减
+    "VCP形态",                 # 太笼统
+    "收缩次数大于3周",          # 单位对不上
+    "市盈率10%到20%",          # 区间,不带「之间」也要认出来
+    "市盈率从10到20",
 ]
 
 
