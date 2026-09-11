@@ -498,6 +498,51 @@ try {
   console.log('FAIL 对照表定向断言 ·', e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e)
 }
 
+// ─── 系统示例可以对自己隐藏:✕ 常驻、隐藏后能恢复 ─────────────────────
+// 示例是全站共用的,只能对自己隐藏。最怕的两件事:入口藏进 hover(没人发现),
+// 以及隐藏了找不回来(一个都不剩时连恢复入口也跟着没了)。
+try {
+  const ctx = vm.createContext(makeContext('screener.html'))
+  vm.runInContext(appJs, ctx, { filename: 'app.js' })
+  const sc = inlineScripts(fs.readFileSync(path.join(DIR, 'screener.html'), 'utf8'))
+  sc.forEach((src, i) => vm.runInContext(src, ctx, { filename: `screener#${i + 1}` }))
+  vm.runInContext(`
+    S.meta = Object.assign({}, S.meta || {}, { presets: [
+      { key: 'uptrend', name: '上升趋势', desc: 'd1', script: 'x' },
+      { key: 'vcp',     name: 'VCP 波动收缩', desc: 'd2', script: 'y' },
+      { key: 'hk_div',  name: '港股高股息', desc: 'd3', script: 'z' },
+    ] })
+    var ALL = vPresetChips()
+    setHiddenPresets(['vcp', 'gone_key'])        // gone_key:后端已删掉的示例,不能让计数虚高
+    var SOME = vPresetChips()
+    setHiddenPresets(['uptrend', 'vcp', 'hk_div'])
+    var NONE = vPresetChips()
+    localStorage.setItem(LS_HIDE, '{坏掉的 json')
+    var BROKEN = vPresetChips()
+    setHiddenPresets([])
+    var STORED = localStorage.getItem(LS_HIDE)
+  `, ctx, { filename: 'assert-hide-preset' })
+  const checks = [
+    ['每个示例都有常驻的隐藏 ✕', (ctx.ALL.match(/data-hide="/g) || []).length === 3],
+    ['✕ 不靠 hover 出现(不写 opacity:0 / display:none)',
+      !/\.mg-sys \.hide\{[^}]*(opacity:\s*0[;}]|display:\s*none)/.test(fs.readFileSync(path.join(DIR, 'screener.html'), 'utf8'))],
+    ['没隐藏时不出恢复入口', !/data-restore/.test(ctx.ALL)],
+    ['隐藏的那个不再渲染', !/data-preset="vcp"/.test(ctx.SOME) && /data-preset="uptrend"/.test(ctx.SOME)],
+    ['恢复入口只数还存在的示例(1 个,不是 2 个)', /已隐藏 1 个/.test(ctx.SOME)],
+    ['⭐全部隐藏时恢复入口还在', /data-restore/.test(ctx.NONE) && /已隐藏 3 个/.test(ctx.NONE)
+      && !/data-preset=/.test(ctx.NONE)],
+    ['localStorage 写坏了照常渲染全部示例', (ctx.BROKEN.match(/data-preset="/g) || []).length === 3],
+    ['全部恢复后不留空键', ctx.STORED === null],
+  ]
+  for (const [name, ok] of checks) {
+    if (ok) console.log('PASS 隐藏示例 ·', name)
+    else { failed++; console.log('FAIL 隐藏示例 ·', name) }
+  }
+} catch (e) {
+  failed++
+  console.log('FAIL 隐藏示例定向断言 ·', e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e)
+}
+
 // ─── 保存的扫描策略:开关状态必须能往返 ─────────────────────────────
 // 这个功能最容易悄悄写错的地方:保存时如果用了 buildScript(true)(草稿用的那个),
 // 停用的条件也会被写进 plot —— 页面一切正常、保存也成功,但加载回来

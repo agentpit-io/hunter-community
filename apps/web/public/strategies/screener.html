@@ -81,6 +81,17 @@
       font-size:12.5px;font-family:inherit;color:var(--text)}
     .mg-eg button:hover{border-color:#2E86DE;color:#2E86DE}
     .mg-eg .ar{color:#2E86DE;font-size:12px}
+    /* 系统示例:按钮 + 一个很淡的小 ✕(隐藏)。边框挪到外层,两个按钮看起来是一个整体 */
+    .mg-eg .mg-sys{display:inline-flex;align-items:stretch;border:1px solid #DCEBFA;
+      border-radius:8px;overflow:hidden;background:#fff}
+    .mg-eg .mg-sys:hover{border-color:#2E86DE}
+    .mg-eg .mg-sys button{border:0;border-radius:0;background:transparent;margin:0}
+    .mg-eg .mg-sys .nm{padding:6px 5px 6px 12px}
+    .mg-eg .mg-sys .hide{padding:0 7px 0 2px;font-size:10px;line-height:1;color:#c9d4e0;gap:0}
+    .mg-eg .mg-sys .hide:hover{color:var(--danger,#b34b43);background:#fbeceb}
+    .mg-eg .mg-restore{border:0;background:transparent;padding:6px 4px;font-size:11.5px;
+      color:var(--soft,#a2a49d);text-decoration:underline dotted;text-underline-offset:3px}
+    .mg-eg .mg-restore:hover{color:#2E86DE;border:0}
     /* 我保存的扫描策略 —— 用站内品牌棕,和系统示例的蓝色一眼能分开。
        ✕ 删除按钮**常驻可见**,不藏 hover(仓内铁律:新功能入口不许藏在 hover 里)。 */
     .mg-eg .mg-sep{width:1px;background:#DCEBFA;margin:4px 2px}
@@ -388,15 +399,50 @@ function pruneVars() {
 function rebuild() { pruneVars(); return reparse(buildScript()) }
 
 // ═══ 魔法筛选(生成区) ═══════════════════════════════════════════
-function vMagic() {
+// ─── 系统示例:对自己隐藏 ─────────────────────────────────────────
+// 2026-09-11 用户:「系统预设的选股器比较多,要能删,按钮做得小巧隐蔽一些」。
+//   1. 示例是全站共用的(后端 screen_source.PRESETS),**不能真删,只能对自己隐藏**。
+//   2. 存 localStorage 不存后端:没登录也能用;丢了(换浏览器 / 清缓存)的代价只是示例重新出现。
+//   3. ✕ 做得小、颜色淡(用户要的「隐蔽」),但**常驻可见、不藏 hover** —— 仓内铁律
+//      「新功能入口不许藏在 hover 里」。
+//   4. 隐藏了就必须找得回来:行尾常驻「已隐藏 N 个 · 恢复」。只数**当前还存在**的示例 ——
+//      后端哪天删了某个示例,它的 key 留在列表里也不该让计数虚高。
+const LS_HIDE = 'hunter_screener_hidden_presets'
+function hiddenPresets() {
+  try {
+    const v = JSON.parse(localStorage.getItem(LS_HIDE) || '[]')
+    return Array.isArray(v) ? v : []
+  } catch (e) { return [] }
+}
+function setHiddenPresets(keys) {
+  try {
+    if (keys.length) localStorage.setItem(LS_HIDE, JSON.stringify(keys))
+    else localStorage.removeItem(LS_HIDE)
+  } catch (e) { /* 存不了就只在这次页面里生效 */ }
+}
+function vPresetChips() {
   const presets = (S.meta && S.meta.presets) || []
-  const chips = presets.length
-    ? presets.map(function (p) {
-        return '<button data-preset="' + esc(p.key) + '" title="' + esc(p.desc) + '">' +
-          esc(p.name) + '<span class="ar">↵</span></button>'
-      }).join('')
-    : '<span class="sc-na" style="font-size:12px">' +
+  if (!presets.length) {
+    return '<span class="sc-na" style="font-size:12px">' +
       (S.metaErr ? '示例没拿到' : '加载中…') + '</span>'
+  }
+  const hid = hiddenPresets()
+  const shown = presets.filter(function (p) { return hid.indexOf(p.key) < 0 })
+  const n = presets.length - shown.length
+  return shown.map(function (p) {
+    return '<span class="mg-sys">' +
+      '<button class="nm" data-preset="' + esc(p.key) + '" title="' + esc(p.desc) + '">' +
+        esc(p.name) + '<span class="ar">↵</span></button>' +
+      '<button class="hide" data-hide="' + esc(p.key) + '" title="隐藏「' + esc(p.name) +
+        '」· 只对你自己生效,随时可恢复" aria-label="隐藏示例 ' + esc(p.name) + '">✕</button>' +
+    '</span>'
+  }).join('') +
+    (n ? '<button class="mg-restore" data-restore="1" title="把隐藏的系统示例全部恢复">' +
+         '已隐藏 ' + n + ' 个 · 恢复</button>' : '')
+}
+
+function vMagic() {
+  const chips = vPresetChips()
 
   const markets = (S.meta && S.meta.markets) || []
   const mkBtns = markets.length
@@ -948,6 +994,12 @@ function bind() {
     if (!b) return
     if (b.dataset.del) { deleteSaved(+b.dataset.del); return }
     if (b.dataset.saved) { loadSavedPreset(+b.dataset.saved); return }
+    if (b.dataset.hide) {
+      const h = hiddenPresets()
+      if (h.indexOf(b.dataset.hide) < 0) h.push(b.dataset.hide)
+      setHiddenPresets(h); render(); return
+    }
+    if (b.dataset.restore) { setHiddenPresets([]); render(); return }
     if (!b.dataset.preset) return
     S.loadedName = ''         // 换成系统示例了,就不再是「基于我那个策略」
     const p = ((S.meta && S.meta.presets) || []).filter(function (x) {
