@@ -410,7 +410,8 @@ def parse_script(script: str, market_key: str = "us", allow_ai: bool = False) ->
             k = screen_kw.translate(script, has_field, meta.sma, meta.ema, meta.rsi)
             script = k["script"]
             c = _compile(script)
-            kw = {"matched": k["matched"], "source_text": original_text,
+            kw = {"matched": k["matched"], "notes": k.get("notes") or [],
+                  "source_text": original_text,
                   "script": script}
         except ScreenError as kw_err:
             if not allow_ai:
@@ -442,6 +443,9 @@ def parse_script(script: str, market_key: str = "us", allow_ai: bool = False) ->
         # 规则匹配不会像模型那样瞎编,但会**理解偏**(比如把"量"当成成交量而不是量比),
         # 所以逐句对照必须摆出来。
         d["kw"] = kw
+        # 有损近似(上穿按"当前在上方"处理)要单独亮出来 —— 混在条件里用户看不出来
+        for n in kw.get("notes") or []:
+            warnings.append(n)
         warnings.append(
             "以上条件由本地关键词匹配得出(未使用 AI,零成本),"
             "已通过语法与字段校验。逐句对照见上方折叠区,不对的话可直接改或改用 AI 识别。")

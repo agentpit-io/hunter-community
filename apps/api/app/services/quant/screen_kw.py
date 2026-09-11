@@ -71,6 +71,19 @@ _FIELD_WORDS: dict[str, str] = {
     "历史最高": "all_time_high", "历史新高": "all_time_high",
 
     "rsi": "RSI", "adx": "ADX", "atr": "ATR",
+
+    # 常用技术指标的中文/缩写说法(2026-09-11 补;之前一个都不认)
+    "macd柱": "MACD.hist", "macd红柱": "MACD.hist", "macd绿柱": "MACD.hist",
+    "macd柱状": "MACD.hist", "macd": "MACD.macd",
+    "dif": "MACD.macd", "diff": "MACD.macd", "dea": "MACD.signal",
+    "macd信号线": "MACD.signal",
+    # KDJ 的 K/D 必须带「值」或「线」—— 裸 k 会和「100k」这类单位撞车
+    "k值": "Stoch.K", "d值": "Stoch.D", "k线值": "Stoch.K",
+    "kdj的k": "Stoch.K", "kdj的d": "Stoch.D",
+    "布林上轨": "BB.upper", "布林带上轨": "BB.upper", "boll上轨": "BB.upper",
+    "布林中轨": "BB.basis", "布林带中轨": "BB.basis", "boll中轨": "BB.basis",
+    "布林下轨": "BB.lower", "布林带下轨": "BB.lower", "boll下轨": "BB.lower",
+    "vwap": "VWAP", "成交量加权均价": "VWAP", "均价线": "VWAP",
     "近1周涨幅": "Perf.W", "近1月涨幅": "Perf.1M", "近3月涨幅": "Perf.3M",
     "近6月涨幅": "Perf.6M", "近1年涨幅": "Perf.Y", "年初至今涨幅": "Perf.YTD",
 }
@@ -124,8 +137,20 @@ _SPLIT_RE = re.compile(r"[,，;；。、\n]|(?:\s+and\s+)|并且|而且|同时|�
 # 「且」单独切一刀 —— 但不能切「而且」(上面已经处理),也不能切在词中间
 _AND_RE = re.compile(r"且")
 
-_MA_RE = re.compile(r"(\d+)\s*(?:日|天)?\s*(?:均线|线|ma|sma|移动平均)", re.I)
-_EMA_RE = re.compile(r"(\d+)\s*(?:日|天)?\s*ema", re.I)
+# 均线要认**两种语序**:
+#   中文习惯  数字在前  20日均线 / 20日线 / 20日MA
+#   技术分析  数字在后  MA20 / SMA20 / EMA20 / MA(20)
+# 2026-09-11 之前只认前一种,「EMA20大于EMA50」整句识别不了;更糟的是
+# 「收盘价大于MA20」会把 MA20 里的 20 当成阈值,静默产出 `close > 20`。
+#
+# `(?<![a-z])s?ma(?![a-z])` 两侧的断言不能省:
+#   左边 —— 挡住 EMA 里的 ma(否则 EMA20 会同时被当成 SMA20)
+#   右边 —— 挡住 MACD 里的 ma
+_MA_RE = re.compile(
+    r"(?:(\d+)\s*(?:日|天)?\s*(?:均线|线|(?<![a-z])s?ma(?![a-z])|移动平均))"
+    r"|(?:(?<![a-z])s?ma\s*\(?\s*(\d+)\s*\)?)", re.I)
+_EMA_RE = re.compile(
+    r"(?:(\d+)\s*(?:日|天)?\s*ema)|(?:ema\s*\(?\s*(\d+)\s*\)?)", re.I)
 _AVGVOL_RE = re.compile(r"(\d+)\s*(?:日|天)\s*(?:均量|平均成交量|均成交量)", re.I)
 _RSI_N_RE = re.compile(r"rsi\s*\(?\s*(\d+)\s*\)?", re.I)
 
@@ -156,7 +181,7 @@ class _Vocab:
             out.append((m.start(), -len(m.group(0)),
                         f"average_volume_{n}d_calc", m.group(0), err))
         for m in _EMA_RE.finditer(text):
-            n = int(m.group(1))
+            n = int(m.group(1) or m.group(2))     # 两种语序,数字在不同分组
             err = "" if n in self.ema else f"没有 {n} 日 EMA"
             out.append((m.start(), -len(m.group(0)), f"EMA{n}", m.group(0), err))
         for m in _RSI_N_RE.finditer(text):
@@ -165,7 +190,7 @@ class _Vocab:
             err = "" if (n == 14 or n in self.rsi) else f"没有 RSI({n})"
             out.append((m.start(), -len(m.group(0)), fld, m.group(0), err))
         for m in _MA_RE.finditer(text):
-            n = int(m.group(1))
+            n = int(m.group(1) or m.group(2))
             err = "" if n in self.sma else \
                 f"「{m.group(0)}」映射不了 —— 扫描源没有 SMA{n}"
             out.append((m.start(), -len(m.group(0)), f"SMA{n}", m.group(0), err))
@@ -218,6 +243,61 @@ class _Vocab:
                 return fld
         return None
 
+    def fields_in(self, text: str) -> list[tuple[int, int, str, str]]:
+        """句子里**全部**字段,从左到右、互不重叠 → [(起, 止, 字段, 原文)]。
+
+        贪心取最左最长:「macd柱」与「macd」同在 0 位时取前者,
+        然后跳到它的末尾再找下一个。重叠的候选(EMA20 里的 ma)自然被跳过。
+        """
+        cands = sorted(self._candidates(text), key=lambda c: (c[0], c[1]))
+        out: list[tuple[int, int, str, str]] = []
+        pos = -1
+        for start, neg, fld, word, err in cands:
+            if start < pos:
+                continue
+            if err:
+                raise ScreenError(err)
+            end = start + (-neg)
+            out.append((start, end, fld, word))
+            pos = end
+        return out
+
+
+# 字段的"单位"。字段对字段比较时两边必须同单位,否则就是在比苹果和橘子。
+#
+# 2026-09-11 实测:「成交量大于50日均线」产出 `volume > SMA50` ——
+# 成交量是股数(千万量级),均线是价格(几十块),这个比较对所有股票都成立,
+# 等于一条废条件混进了筛选里,而且看起来还挺像回事。
+def _unit(fld: str) -> str | None:
+    if fld in ("close", "open", "high", "low", "VWAP", "price_52_week_high",
+               "price_52_week_low", "all_time_high", "all_time_low") \
+            or fld.startswith(("SMA", "EMA", "BB.", "High.", "Low.",
+                               "KltChnl.", "DonchCh", "HullMA")):
+        return "价格"
+    if fld == "volume" or fld.startswith("average_volume_"):
+        return "成交量"
+    if fld.startswith("MACD."):
+        return "MACD"
+    if fld.startswith("Stoch."):
+        return "随机指标"
+    return None
+
+
+def _check_comparable(a: tuple, b: tuple) -> None:
+    """字段对字段:单位不同 / 单位未知 → 拒绝,并尽量给出"你是不是想写…"。"""
+    ua, ub = _unit(a[2]), _unit(b[2])
+    if ua and ua == ub:
+        return
+    hint = ""
+    # 最常见的手误:把「均量」写成「均线」
+    if {ua, ub} == {"成交量", "价格"}:
+        ma = a if ua == "价格" else b
+        n = re.search(r"\d+", ma[3] or "")
+        hint = (f"是不是想写「{n.group(0)}日均量」?" if n else "")
+    raise ScreenError(
+        f"「{a[3]}」和「{b[3]}」不能直接比较"
+        f"({ua or '单位未知'} 对 {ub or '单位未知'})。{hint}")
+
 
 def _find_op(text: str) -> tuple[str, str] | None:
     low = text.lower()
@@ -232,8 +312,14 @@ def _find_op(text: str) -> tuple[str, str] | None:
     return (best[1], best[2]) if best else None
 
 
-def _clause_to_expr(clause: str, vocab: _Vocab) -> str | None:
-    """一小句 → 表达式。认不出来返回 None(**不猜**)。"""
+def _clause_to_expr(clause: str, vocab: _Vocab, notes: list[str] | None = None) -> str | None:
+    """一小句 → 表达式。认不出来返回 None(**不猜**)。
+
+    `notes` 收集"认出来了但有损"的说明(如上穿按"当前在上方"处理),
+    最终会进返回体给用户看。
+    """
+    if notes is None:
+        notes = []
     t = clause.strip()
     if not t:
         return None
@@ -257,43 +343,91 @@ def _clause_to_expr(clause: str, vocab: _Vocab) -> str | None:
             return ("(price_52_week_high - close) / price_52_week_high <= "
                     + _fmt(pct))
 
-    # 站上 / 跌破 均线 —— **只收成句的行话**。
-    #
-    # 「高于」「低于」这类通用比较符**绝不能**放进来:它们两边是什么由句子决定,
-    # 不一定是"收盘价 vs 均线"。2026-09-10 实测,「50日均线高于150日均线」
-    # 因为 `高于` 在这张表里,整句被这条模板吞掉,产出 `收盘价 大于 50日均线` ——
-    # 和用户想要的完全是两回事。通用比较符一律走下面的三段式。
-    #
-    # 另外这里必须用 ma_field 而不是 field:「收盘价站上50日均线」里
-    # `收盘价` 出现得更靠左,field() 会优先返回它。
-    if re.search(r"(站上|站稳|升破|突破|上穿)", t) and re.search(r"均线|ma|ema|线", low):
-        ma = vocab.ma_field(t)
-        if ma:
-            return f"close > {ma}"
-    if re.search(r"(跌破|下穿|失守|跌穿)", t) and re.search(r"均线|ma|ema|线", low):
-        ma = vocab.ma_field(t)
-        if ma:
-            return f"close < {ma}"
+    fs = vocab.fields_in(t)
 
-    # ── 通用三段式:字段 + 比较符 + 数字 ─────────────────
-    got = vocab.field(t)
-    op = _find_op(t)
-    if not got or not op:
+    # ── 本地处理不了的句型:直接拒绝,交给用户或 AI ─────────────
+    #
+    # 这些句型**认得出字段和比较符**,所以不拦的话会走到下面的通用分支,
+    # 产出一个"少了一半意思"的条件 —— 比拒绝危险得多(2026-09-11 对抗测试实测):
+    #   「收盘价大于20日均线的1.05倍」 → close > SMA20       (1.05 倍被静默丢掉)
+    #   「市盈率大于10小于20」         → pe > 10             (上限被静默丢掉)
+    # 用户看到的是一个看起来很正常的条件,完全不会意识到少了东西。
+    if re.search(r"\d\s*倍|倍数|百分之", t):
         return None
-    fld, word = got
-    # 数字要取**字段词之后**的那个,否则「50日均线大于20」会把 50 当阈值
-    tail_start = t.lower().find(word.lower())
-    tail = t[tail_start + len(word):] if tail_start >= 0 else t
-    # **先试字段,再试数字。** 反过来的话「20日均线大于50日均线」的尾巴
-    # 「大于50日均线」会先被 _NUM_RE 抓到 50,产出 `SMA20 > 50` —— 阈值和均线
-    # 完全是两回事,而且看起来还挺像对的(实测踩到)。
-    got2 = vocab.field(tail)
-    if got2:
-        return f"{fld} {op[0]} {got2[0]}"
+    if len(re.findall(r"大于|小于|高于|低于|超过|不到|不低于|不高于|不超过|[<>]=?", t)) >= 2 \
+            and len(fs) <= 1:
+        return None                     # 一个字段两个比较 = 区间,本地不拆
+    if re.search(r"之间|区间|介于|到\s*\d", t):
+        return None
+
+    # 「A比B高/低/大/小」—— 中文最常见的比较句式,比较符在句尾
+    m = re.search(r"比.+?(高|低|大|小|多|少)\s*$", t)
+    if m and len(fs) >= 2:
+        _check_comparable(fs[0], fs[1])
+        op = ">" if m.group(1) in ("高", "大", "多") else "<"
+        return f"{fs[0][2]} {op} {fs[1][2]}"
+
+    # ── 上穿 / 下穿 / 金叉 / 死叉 / 站上 / 跌破 ────────────────
+    #
+    # 两种句型,**按句中字段个数区分**,不能按关键词区分:
+    #   一个字段  「站上50日均线」          主语省略 = 收盘价 vs 那条线
+    #   两个字段  「5日均线上穿20日均线」    就是这两条线互相比
+    #
+    # 2026-09-10 修过一次同类 bug(「高于」被当成站上),当时只把「高于」挪出去,
+    # 没有堵住句型本身 —— 于是「5日均线上穿20日均线」仍然被当成一个字段的句型,
+    # 产出 `close > SMA5`,和用户说的毫无关系。这次按字段个数分流,整类封死。
+    #
+    # 快照没有历史,**判断不了"刚刚交叉"**,只能判"现在在上方/下方"。
+    # 这是有损近似,必须写进 notes 让用户看见,不能静默当成金叉处理。
+    up = re.search(r"站上|站稳|升破|突破|上穿|金叉", t)
+    dn = re.search(r"跌破|下穿|失守|跌穿|死叉", t)
+    if up or dn:
+        word = (up or dn).group(0)
+        op = ">" if up else "<"
+        if len(fs) >= 2:
+            _check_comparable(fs[0], fs[1])
+            # 「股价突破52周新高」同样要 >=(见下方单字段分支的说明)
+            if up and fs[1][2] in ("price_52_week_high", "all_time_high"):
+                op = ">="
+            if word in ("上穿", "下穿", "金叉", "死叉"):
+                notes.append(f"「{t}」按「{fs[0][3]} 当前在 {fs[1][3]} "
+                             f"{'之上' if up else '之下'}」处理 —— "
+                             f"快照数据判断不了是不是**刚刚**发生交叉")
+            return f"{fs[0][2]} {op} {fs[1][2]}"
+        if len(fs) == 1 and _unit(fs[0][2]) == "价格" \
+                and fs[0][2] not in ("close", "open", "high", "low"):
+            tgt = fs[0][2]
+            # 「突破 52 周新高」要用 >=:收盘价**等于**52 周最高正是创新高的那一天,
+            # 写成 > 永远是 0 只 —— 一条静默失效的条件
+            if up and tgt in ("price_52_week_high", "all_time_high"):
+                op = ">="
+            return f"close {op} {tgt}"
+        return None
+
+    # ── 通用:字段 + 比较符 + (字段 | 数字) ─────────────────
+    op = _find_op(t)
+    if not fs or not op:
+        return None
+    left = fs[0]
+    if len(fs) >= 2:
+        # 右边也是字段(「20日均线大于50日均线」)—— 必须同单位
+        _check_comparable(left, fs[1])
+        return f"{left[2]} {op[0]} {fs[1][2]}"
+
+    tail = t[left[1]:]
     mnum = _NUM_RE.search(tail)
     if not mnum:
         return None
-    return f"{fld} {op[0]} {_fmt(_parse_number(mnum))}"
+    # **标识符里的数字绝不能当阈值。**
+    # 「收盘价大于MA20」在 MA20 还不认识的年代产出了 `close > 20` ——
+    # 词表总有漏的(CCI20、MA(20) 的各种变体),漏认时宁可拒绝也别编一个阈值。
+    a = left[1] + mnum.start()
+    b = left[1] + mnum.end()
+    before = t[a - 1] if a > 0 else ""
+    after = t[b] if b < len(t) else ""
+    if re.match(r"[A-Za-z(]", before) or re.match(r"[日天周线均]", after):
+        return None
+    return f"{left[2]} {op[0]} {_fmt(_parse_number(mnum))}"
 
 
 def _split(text: str) -> list[str]:
@@ -318,7 +452,7 @@ def translate(text: str, has_field, sma: list[int], ema: list[int],
 
     有任何一段没认出来就抛 ScreenError(带上没认出来的原文),**不产出半份脚本**。
     """
-    text = (text or "").strip()
+    text = _normalize(text)
     if not text:
         raise ScreenError("生成框是空的")
 
@@ -329,8 +463,9 @@ def translate(text: str, has_field, sma: list[int], ema: list[int],
 
     matched: list[tuple[str, str]] = []
     unmatched: list[str] = []
+    notes: list[str] = []
     for c in clauses:
-        expr = _clause_to_expr(c, vocab)
+        expr = _clause_to_expr(c, vocab, notes)
         if expr:
             matched.append((c, expr))
         else:
@@ -351,4 +486,47 @@ def translate(text: str, has_field, sma: list[int], ema: list[int],
         names.append(name)
     lines.append("plot scan = " + " and ".join(names) + ";")
     return {"script": "\n".join(lines),
-            "matched": [{"text": s, "expr": e} for s, e in matched]}
+            "matched": [{"text": s, "expr": e} for s, e in matched],
+            "notes": notes}
+
+
+# ═══════════════════════════════════════════════════════════════
+# 输入归一化 —— 在任何匹配之前做
+# ═══════════════════════════════════════════════════════════════
+
+# 中文数字 → 阿拉伯数字。只转**后面紧跟周期/单位**的,
+# 「统一」「一致」这类词里的"一"不能碰。
+_CN_DIG = {"零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4,
+           "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+_CN_NUM_RE = re.compile(
+    r"([零〇一二两三四五六七八九十百]+)(?=\s*(?:日|天|周|个交易日|年|月|倍))")
+# 「涨幅超过三成」—— 成 = 10%
+_CN_CHENG_RE = re.compile(r"([一二两三四五六七八九十]+)成")
+
+
+def _cn2int(s: str) -> int:
+    total = cur = 0
+    for ch in s:
+        if ch in _CN_DIG:
+            cur = _CN_DIG[ch]
+        elif ch == "十":
+            total += (cur or 1) * 10
+            cur = 0
+        elif ch == "百":
+            total += (cur or 1) * 100
+            cur = 0
+    return total + cur
+
+
+def _normalize(text: str) -> str:
+    """全角转半角 + 中文数字转阿拉伯数字。
+
+    · NFKC:中文输入法打出来的 `＞` `２０` `ＲＳＩ` 全是全角,
+      不归一的话一个比较符都认不出(2026-09-11 实测,三条全角用例全挂)。
+    · 中文数字:「五日均线」「二十日均线」在中文里很常见。
+    """
+    import unicodedata
+    t = unicodedata.normalize("NFKC", text or "").strip()
+    t = _CN_NUM_RE.sub(lambda m: str(_cn2int(m.group(1))), t)
+    t = _CN_CHENG_RE.sub(lambda m: str(_cn2int(m.group(1)) * 10) + "%", t)
+    return t
