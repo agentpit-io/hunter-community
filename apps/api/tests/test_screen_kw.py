@@ -56,7 +56,7 @@ price_book_fq return_on_equity dividends_yield_current debt_to_equity gross_marg
 total_revenue_yoy_growth_ttm relative_volume_10d_calc current_ratio beta_1_year
 earnings_per_share_diluted_ttm price_52_week_high price_52_week_low all_time_high
 RSI ADX ATR VWAP MACD.macd MACD.signal MACD.hist Stoch.K Stoch.D BB.upper BB.lower BB.basis
-Perf.W Perf.1M Perf.3M Perf.6M Perf.Y Perf.YTD rs_rating rs_raw""".split())
+Perf.W Perf.1M Perf.3M Perf.6M Perf.Y Perf.YTD rs_rating rs_raw rs_line_up_days""".split())
 FIELDS |= {f"SMA{n}" for n in SMA} | {f"EMA{n}" for n in EMA} | {f"RSI{n}" for n in RSI}
 FIELDS |= {f"average_volume_{n}d_calc" for n in (10, 30, 60, 90)}
 
@@ -147,6 +147,24 @@ SHOULD_MATCH = [
     # 中文里 RSI 就叫「相对强弱指数」—— 不能被映射成 RS 评级
     ("相对强弱指数小于30", "RSI < 30"),
     ("相对强度指数大于70", "RSI > 70"),
+    # ── 2026-09-11 · 带否定的比较符(曾命中里面的「少于」「超过」,意思整个反过来)──
+    ("成交量不少于100万", "volume >= 1000000"),
+    ("市盈率未超过20", "price_earnings_ttm <= 20"),
+    ("市盈率没有超过20", "price_earnings_ttm <= 20"),
+    ("市值不多于100亿", "market_cap_basic <= 10000000000"),
+    # ── 2026-09-11 · RS 线上涨天数(用户原话:「RS线上涨时间大于50天」)──
+    # 走通用规则会错两次:开头的 rs 被认成 RS 评级 → rs_rating > 50;
+    # 「50天」的「天」又会触发"标识符里的数字不当阈值"的保护 → 整句拒绝
+    ("RS线上涨时间大于50天", "rs_line_up_days > 50"),
+    ("RS线上涨天数不少于60天", "rs_line_up_days >= 60"),
+    ("RS线连续上涨超过50个交易日", "rs_line_up_days > 50"),
+    ("RS线向上超过五十天", "rs_line_up_days > 50"),
+    ("rs线上涨天数>=30", "rs_line_up_days >= 30"),
+    ("RS线站上21日均线超过50天", "rs_line_up_days > 50"),   # 均线里的 21 不是阈值
+    ("RS线上涨50天以上", "rs_line_up_days >= 50"),
+    ("RS line up more than 50 days", "rs_line_up_days > 50"),
+    ("相对强度线上涨时间大于40天", "rs_line_up_days > 40"),
+    ("RS大于80，RS线上涨时间大于50天", "rs_rating > 80 AND rs_line_up_days > 50"),
 ]
 
 SHOULD_REJECT = [
@@ -172,6 +190,13 @@ SHOULD_REJECT = [
     # 光秃秃的「相对强度/相对强弱」有歧义(RS 评级 还是 RSI?)—— 不猜
     "相对强度大于80",
     "相对强弱小于30",
+    # RS 线:认不全就拒绝,**绝不能**落到通用规则变成 rs_rating > N
+    "RS线向上",                         # 没有天数
+    "RS线大于50天",                     # 没说向上还是向下
+    "RS线下跌超过20天",                 # 只有上涨天数这个字段
+    "RS线站上50日均线超过30天",          # 口径定死 21 日均线
+    "RS线上涨超过10周",                 # 周 ≠ 5 个交易日(节假日),不换算
+    "RS线大于80",
 ]
 
 

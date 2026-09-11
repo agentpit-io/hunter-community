@@ -336,8 +336,12 @@ def run_script(script: str, market_key: str = "us", limit: int = 100,
 
     rs_stat = None
     if uses_rs:
+        # 每晚落库的全市场日线统计(RS 线上涨天数、精确 RS Raw)。读的是一张
+        # 每市场几千行的小表,不是逐日明细;表还没建 / 读失败 → 空,inject 自动退回快照法
+        from app.services.quant import rs_history
+        hist, _ = rs_history.load_stats(md.key)
         # **在求值之前**、对全市场算 —— 评级的分母是全市场,不是命中结果
-        rs_stat = screen_rs.inject(rows, md.key)
+        rs_stat = screen_rs.inject(rows, md.key, hist)
 
     t1 = time.time()
     hits, skipped, missing = screen_dsl.evaluate_detail(c, rows, cache)
@@ -353,8 +357,25 @@ def run_script(script: str, market_key: str = "us", limit: int = 100,
     if md.note:
         warnings.append(md.note)
     if rs_stat is not None:
-        warnings.append(screen_rs.METHOD_NOTE)
-        if rs_stat["gated"]:
+        uses_rating = any(f in ("rs_rating", "rs_raw") for f in c.fields)
+        uses_line = "rs_line_up_days" in c.fields
+        as_of = rs_stat["hist_as_of"]
+        if uses_line:
+            if as_of is None:
+                warnings.append(
+                    f"{md.label}的全市场日线还没建好,「RS线上涨天数」这次全部为空"
+                    f"(算不出,不是不满足)。日线由每晚的定时任务拉取。")
+            elif rs_stat["hist_stale"]:
+                warnings.append(
+                    f"{md.label}的日线停在 {as_of},已超过 {screen_rs.HIST_STALE_DAYS} 天没更新"
+                    f"(每晚的定时任务可能坏了)—— 用过期的数据判断「连续上涨多少天」会给错答案,"
+                    f"所以这次「RS线上涨天数」全部为空。")
+            else:
+                warnings.append(screen_rs.line_note(md.key, as_of))
+        if uses_rating:
+            warnings.append(screen_rs.METHOD_NOTE_EXACT.format(as_of=as_of)
+                            if rs_stat["method"] == "exact" else screen_rs.METHOD_NOTE)
+        if uses_rating and rs_stat["gated"]:
             warnings.append(
                 f"本次全市场只有 {rs_stat['coverage']:.0%} 的股票能算出 RS,"
                 f"低于 {screen_rs.RS_UNIVERSE_THRESHOLD:.0%} 的门槛 —— 在残缺的股票池里"
@@ -365,7 +386,7 @@ def run_script(script: str, market_key: str = "us", limit: int = 100,
             msg = (f"RS 排名池:{pool_desc}的 {rs_stat['universe']} 只"
                    f"(与原项目口径一致,剔除 {rs_stat['excluded']} 只微盘股"
                    + ("与 OTC" if md.key == "us" else "") + ")")
-            if rs_stat["young"]:
+            if uses_rating and rs_stat["young"]:
                 msg += (f";其中 {rs_stat['young']} 只上市不足 250 个交易日的次新股"
                         f"没有评级(没有真正的 12 个月涨幅,和别人不可比)")
             warnings.append(msg + "。")
@@ -611,6 +632,21 @@ def cond_ma    = Average(close, 50) > Average(close, 200);
 def cond_liq   = Average(volume, 30) > 500000;
 
 plot scan = cond_rs and cond_trend and cond_ma and cond_liq;
+""",
+})
+
+PRESETS.append({
+    "key": "rs_line_up",
+    "name": "RS线持续向上",
+    "market": "us",
+    "desc": "RS 评级 ≥80,且 RS 线(个股 ÷ 标普500)已连续 50 个交易日以上站在自身 21 日均线之上。",
+    "script": """# ===== 强势且持续跑赢大盘 =====
+# RSLineUpDays():RS 线(收盘 ÷ 基准指数)连续站在自身 21 日均线之上的交易日数
+def cond_rs   = RS() >= 80;
+def cond_line = RSLineUpDays() > 50;
+def cond_liq  = Average(volume, 30) > 500000;
+
+plot scan = cond_rs and cond_line and cond_liq;
 """,
 })
 

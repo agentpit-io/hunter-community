@@ -68,6 +68,8 @@ _SYNTAX = (
     "  RSI()                  14 周期;RSI(N) 支持 2/3/4/5/7/9/10/20/21/30\n"
     "  RS()                   IBD 口径 RS 相对强度评级 1~99,在全市场里排名\n"
     "                         (跑赢全市场 80% 的股票 = 80;次新股与美股 OTC 没有评级)\n"
+    "  RSLineUpDays()         RS 线(收盘 ÷ 基准指数)连续站在自身 21 日均线之上的交易日数,\n"
+    "                         截至上一交易日收盘;例:RSLineUpDays() > 50\n"
     "\n"
     "也可以直接写扫描源字段名(共 3777 个),常用的:\n"
     "  market_cap_basic  price_earnings_ttm  price_book_fq  return_on_equity\n"
@@ -107,11 +109,12 @@ async def list_tools():
                 "不用自己写脚本时可以传 preset:\n"
                 "  uptrend(上升趋势·美股) · value_oversold(低估值超卖·A股)\n"
                 "  breakout_volume(放量突破·美股) · hk_dividend(港股高股息)\n"
-                "  rs_leaders(强势股 RS≥80·美股)\n"
+                "  rs_leaders(强势股 RS≥80·美股) · rs_line_up(RS线持续向上·美股)\n"
                 "\n"
                 "重要边界,回答用户时必须一并说明:\n"
                 "  1. 数据延迟 15 分钟,不能用于盘中决策。\n"
                 "  2. 只有当前快照、没有历史,结果**不能用于回测**,也不写进因子库。\n"
+                "     (RSLineUpDays 例外:来自每晚的全市场日线,截至上一交易日收盘。)\n"
                 "  3. market_cap_basic 与站内国内源口径不一致(A/H 两地上市股实测差 8~37%),\n"
                 "     只可用于排序粗筛,不要当市值真值报给用户。\n"
                 "  4. 返回体里的 skipped_incomplete 是『因缺字段算不出』的只数,\n"
@@ -130,7 +133,7 @@ async def list_tools():
                     "preset": {
                         "type": "string",
                         "enum": ["uptrend", "value_oversold", "breakout_volume", "hk_dividend",
-                                 "rs_leaders"],
+                                 "rs_leaders", "rs_line_up"],
                         "description": "预置脚本 · 只在 script 为空时生效",
                     },
                     "market": {

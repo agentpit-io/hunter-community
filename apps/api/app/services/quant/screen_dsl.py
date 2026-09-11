@@ -442,6 +442,14 @@ class _FieldResolver:
                 raise ScreenError("RS() 不带参数:它的回看窗口(3/6/9/12 个月)是固定的")
             return "rs_rating"
 
+        if f in ("rslineupdays", "rsline_up_days", "rs_line_up_days", "rslinedays"):
+            # RS 线(收盘 ÷ 基准指数)连续站在自身 21 日均线之上的交易日数,
+            # 来自每晚更新的全市场日线(rs_history)。口径 2026-09-11 用户选定,不开放参数 ——
+            # 开放了就得为每个周期每晚多算一遍,而且"均线周期"一变,和别人说的 RS 线上涨就不是一回事
+            if args:
+                raise ScreenError("RSLineUpDays() 不带参数:口径固定为 RS 线站上自身 21 日均线")
+            return "rs_line_up_days"
+
         if f == "rsi":
             if len(args) == 0:
                 return "RSI"
@@ -457,7 +465,7 @@ class _FieldResolver:
 
         raise ScreenError(
             f"不支持的函数 {fn}()。"
-            f"目前支持:Average(close|volume, N) · ExpAverage(close, N) · RS() · "
+            f"目前支持:Average(close|volume, N) · ExpAverage(close, N) · RS() · RSLineUpDays() · "
             f"Highest(high, N) · Lowest(low, N) · RSI(N)。"
             f"其它指标可以直接写扫描源字段名,例如 MACD.hist、ADX、Perf.Y、"
             f"market_cap_basic —— 在「可用字段」里搜。")
@@ -668,6 +676,9 @@ def missing_reason(field: str) -> str:
     """字段为空的**常见**原因。只写有把握的,拿不准就不写。"""
     if field in ("rs_rating", "rs_raw"):
         return "次新股(不足 250 个交易日)或不在 RS 排名池里(美股 OTC、市值约 5000 万美元以下)"
+    if field == "rs_line_up_days":
+        return ("不在 RS 排名池里、上市不足 21 个交易日、停牌,"
+                "或这个市场的日线还没建好 / 已过期(见上方提示)")
     m = re.match(r"^(?:SMA|EMA)(\d+)$", field)
     if m:
         return f"上市不足 {m.group(1)} 个交易日,均线算不出来"
@@ -723,6 +734,7 @@ _FIELD_LABEL = {
     "Volatility.D": "日波动率", "Volatility.W": "周波动率", "Volatility.M": "月波动率",
     "sector": "板块", "industry": "行业", "currency": "币种",
     "rs_rating": "RS相对强度评级", "rs_raw": "RS原始分",
+    "rs_line_up_days": "RS线上涨天数",
 
     # 固定搭配 —— 这些**不能**靠词素拼,必须逐条给准确译名。
     # (price_to_book 拼出来是「价格账面」,free_cash_flow 是「自由现金流量」,

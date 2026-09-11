@@ -101,9 +101,14 @@ _FIELD_WORDS: dict[str, str] = {
 }
 
 # 比较符。**长的必须排在短的前面**:「大于等于」不能被「大于」先吃掉。
+#
+# 带否定的说法必须**逐个**列出来 —— 漏一个,它就会被里面的肯定词命中,意思整个反过来。
+# 2026-09-11 查出:「不少于」不在表里,「成交量不少于100万」命中「少于」→ volume < 1000000;
+# 「未超过」「没超过」同理命中「超过」→ >。
 _OP_WORDS: list[tuple[str, str]] = [
-    ("大于等于", ">="), ("不小于", ">="), ("不低于", ">="), ("至少", ">="),
+    ("大于等于", ">="), ("不小于", ">="), ("不低于", ">="), ("不少于", ">="), ("至少", ">="),
     ("小于等于", "<="), ("不大于", "<="), ("不高于", "<="), ("不超过", "<="), ("最多", "<="),
+    ("不多于", "<="), ("没有超过", "<="), ("未超过", "<="), ("没超过", "<="),
     ("大于", ">"), ("高于", ">"), ("超过", ">"), ("多于", ">"), ("超出", ">"),
     ("小于", "<"), ("低于", "<"), ("少于", "<"), ("不到", "<"), ("低过", "<"),
     ("等于", "=="),
@@ -324,6 +329,63 @@ def _find_op(text: str) -> tuple[str, str] | None:
     return (best[1], best[2]) if best else None
 
 
+# RS 线(个股收盘 ÷ 基准指数)。「相对强度线」是 IBD 文章的中文译法;
+# 「相对强弱线」不收 —— 和 RSI(相对强弱指数)太近,同上面「相对强弱」不收的理由。
+_RSL_RE = re.compile(r"rs\s*线|rs\s*line|相对强度线", re.I)
+_RSL_UP_RE = re.compile(r"上涨|向上|上升|上行|走高|走强|站上|站稳|(?<![a-z])(?:up|rising|uptrend)(?![a-z])", re.I)
+_RSL_DN_RE = re.compile(r"下跌|向下|下降|下行|走低|走弱|跌破|(?<![a-z])(?:down|falling)(?![a-z])", re.I)
+_RSL_NUM_RE = re.compile(
+    r"(?<![\d.])(\d+(?:\.\d+)?)(?![\d.])\s*"
+    r"(个交易日|交易日|天|日|trading\s*days?|days?|个星期|星期|周|个月|月|年|%)?", re.I)
+
+
+def _rs_line_expr(t: str, vocab: _Vocab) -> str | None:
+    """「RS线上涨时间大于50天」→ `rs_line_up_days > 50`。认不全返回 None。
+
+    口径(2026-09-11 用户选定):RS 线连续站在自身 21 日均线之上的交易日数。
+    所以句子里提到别的均线周期、提到下跌、单位是周/月 —— 一律不认,
+    宁可让用户改写,也不能静默换成另一个意思。
+    """
+    if not vocab.has_field("rs_line_up_days"):
+        return None
+    if _RSL_DN_RE.search(t) or not _RSL_UP_RE.search(t):
+        return None
+    # 句子里的均线周期:只接受 21(我们的口径);均线里的数字不是阈值,先挖掉
+    for m in _MA_RE.finditer(t):
+        if int(m.group(1) or m.group(2)) != 21:
+            return None
+    t2 = _MA_RE.sub("〔均线〕", t)
+    nums = list(_RSL_NUM_RE.finditer(t2))
+    if len(nums) != 1:
+        return None                                   # 没有天数,或者不止一个数 —— 不猜
+    m = nums[0]
+    unit = (m.group(2) or "").lower()
+    if "." in m.group(1) or unit in ("个星期", "星期", "周", "个月", "月", "年", "%"):
+        return None                                   # 周/月不按 5/21 天换算(节假日)
+    n = int(m.group(1))
+
+    # 比较符取离数字**最近**的那个(结束位置最靠后,同位置取更长)——
+    # 「RS线高于21日均线超过50天」里真正的比较符是「超过」,不是「高于」
+    head = t2[:m.start()].lower()
+    best = None
+    for w, op in _OP_WORDS:
+        i = head.rfind(w)
+        if i < 0:
+            continue
+        key = (i + len(w), len(w))
+        if best is None or key > best[0]:
+            best = (key, op)
+    if best is None:
+        rest = t2[m.end():].lower()
+        if re.match(r"\s*(?:及以上|以上|or\s*more)", rest):
+            best = (None, ">=")
+        elif re.match(r"\s*(?:及以下|以下|以内|or\s*less)", rest):
+            best = (None, "<=")
+        else:
+            return None
+    return f"rs_line_up_days {best[1]} {n}"
+
+
 def _clause_to_expr(clause: str, vocab: _Vocab, notes: list[str] | None = None) -> str | None:
     """一小句 → 表达式。认不出来返回 None(**不猜**)。
 
@@ -336,6 +398,12 @@ def _clause_to_expr(clause: str, vocab: _Vocab, notes: list[str] | None = None) 
     if not t:
         return None
     low = t.lower()
+
+    # ── RS 线上涨天数 —— 必须排在所有规则前面 ──────────────
+    # 提到 RS 线的句子只走这个模板;认不全就返回 None,**不许落到下面的通用规则**:
+    # 通用规则会把开头的 rs 认成 RS 评级,「RS线上涨时间大于50天」就成了 rs_rating > 50。
+    if _RSL_RE.search(t):
+        return _rs_line_expr(t, vocab)
 
     # ── 成句的行话,先于通用规则 ──────────────────────────
     if re.search(r"多头排列|均线多头|多头趋势", t):

@@ -14,7 +14,13 @@ ROC(n) 是近 n 个交易日的涨幅。四个窗口约等于近 3 / 6 / 9 / 12 
 最近一个季度的有效权重是最早那个的 5 倍 —— 偏爱**正在加速**的票。
 RS 是**相对**的:股价涨了评级也可能掉,只要别的票涨得更多。
 
-## 我们和原项目的一处差别 —— 9 个月涨幅是插值出来的
+## 2026-09-11 起:有全市场日线时用原版精确公式(见 inject 与 rs_history)
+
+下面这节讲的插值法现在是**退路**:日线新鲜且覆盖 ≥90% 时用 ROC(63/126/189/252) 精确算,
+与原项目对照平均差从 3.9 分降到 1.7 分(数字见 METHOD_NOTE_EXACT 下方注释)。
+日线还没建、过期或残缺时,整批退回插值法。
+
+## 退路:9 个月涨幅是插值出来的
 
 扫描源只给当前快照里的 `Perf.3M / Perf.6M / Perf.Y`,**没有 9 个月**。
 全市场 A 股 5237 / 港股 2399 / 美股 7389 只,本地有 252 天以上日线的只有 556 只,
@@ -66,9 +72,16 @@ from __future__ import annotations
 RS_WEIGHTS = {63: 0.4, 126: 0.2, 189: 0.2, 252: 0.2}
 RS_UNIVERSE_THRESHOLD = 0.90
 
-# 脚本里可以写的两个字段名 —— 与原项目代码里的命名一致(它的文档明确要求统一叫
-# rs_raw / rs_rating,不叫 score / percentile / rank,免得和别的概念混)
-RS_FIELDS = ("rs_rating", "rs_raw")
+# 脚本里可以写的字段名 —— rs_raw / rs_rating 与原项目代码里的命名一致(它的文档明确要求
+# 统一叫这两个名字,不叫 score / percentile / rank,免得和别的概念混)。
+# rs_line_up_days 是我们加的(2026-09-11 用户要求):RS 线连续站上自身 21 日均线的交易日数,
+# 需要逐日历史,扫描源快照给不了,来自每晚的全市场日线(rs_history)。
+RS_FIELDS = ("rs_rating", "rs_raw", "rs_line_up_days")
+
+# 日线统计超过这么多**自然日**没更新就当过期:不给 RS 线天数、评级退回快照插值。
+# 6 天 = 跨一个周末再加一个假日还能容忍;再长就是每晚的任务坏了,
+# 用一周前的"连续上涨 N 天"去筛今天的票是在给错答案。
+HIST_STALE_DAYS = 6
 
 # 算 RS 需要向扫描源额外请求的列
 RS_SOURCE_COLS = ("Perf.3M", "Perf.6M", "Perf.Y", "SMA250", "exchange", "market_cap_basic")
@@ -119,6 +132,28 @@ METHOD_NOTE = (
 )
 
 
+BENCH_LABEL = {"us": "标普500", "a": "沪深300", "hk": "恒生指数"}
+
+# 日线齐全时的评级说明。准确度数字 = 2026-09-11 与原项目公布值逐只对照的结果,见 rs_history
+METHOD_NOTE_EXACT = (
+    "RS 相对强度评级按 IBD-RS-Rating(MIT)的原版公式计算:近 63/126/189/252 个交易日涨幅"
+    "(前复权日线)按 0.4/0.2/0.2/0.2 加权,在全市场排百分位(1–99),"
+    "日线不足 253 个交易日的次新股不给评级。截至 {as_of} 收盘(每晚更新,不含今天盘中)。"
+    "与原项目公布值逐只对照(美股 3501 只):平均差 1.7 分,96% 在 ±5 分内;"
+    "这里判为 RS≥80 的,99.4% 在原项目里也是。"
+    "评级是在全市场里排名,不是在命中结果里排名。"
+)
+# ↑ 数字来源:2026-09-11 美股全量入库 + 拆股校验后,与原项目同一交易日(2026-09-10)对照。
+#   同一批对照里快照插值版是 3.9 分 / 79% / 95.0%。改算法或数据源要重新对照再改这里。
+
+
+def line_note(market_key: str, as_of) -> str:
+    return (f"RS 线 = 收盘价 ÷ {BENCH_LABEL.get(market_key, '基准指数')};"
+            f"「RS线上涨天数」= RS 线连续站在自身 21 日均线之上的交易日数"
+            f"(今天在均线下方就是 0)。截至 {as_of} 收盘,每晚更新,不含今天盘中。"
+            f"日线最多回看约 300 个交易日,连续更久的也只记到这么多。")
+
+
 def rs_raw_from_perf(p3: float | None, p6: float | None,
                      p12: float | None) -> float | None:
     """扫描源的 Perf.3M/6M/Y(百分数,2.5 表示 2.5%)→ RS Raw(小数,0.166 表示 16.6%)。
@@ -167,36 +202,83 @@ def rs_ratings(raw: dict, universe_size: int,
     return out, coverage
 
 
-def inject(rows: list[dict], market_key: str = "us") -> dict:
-    """给扫描源返回的每一行补上 rs_raw / rs_rating(没有资格的补 None)。
+def inject(rows: list[dict], market_key: str = "us", hist: dict | None = None,
+           today=None) -> dict:
+    """给扫描源返回的每一行补上 rs_raw / rs_rating / rs_line_up_days(没有资格的补 None)。
 
-    → 统计信息 {universe, excluded, young, eligible, coverage, gated}
+    hist  rs_history.load_stats 的结果 {代码: {as_of, up_days, rs_raw_exact, …}};
+          None 或空 = 这个市场的日线还没建 → 评级用快照插值,RS 线天数全空。
+
+    评级算法**二选一,不混用**:
+      exact     日线新鲜、且排名池里 ≥90% 的票有精确 RS Raw → 用原项目原版公式
+      snapshot  否则 → 扫描源快照 + 9 个月插值(模块开头那套)
+    同一次排名里一半精确一半插值,两种数不可比,排出来的百分位没有意义。
+
+    → 统计信息 {universe, excluded, young, eligible, coverage, gated, method,
+               hist_as_of, hist_stale, line_n}
       universe  排名池只数(覆盖率的分母,含次新股)
       excluded  不在排名池里的(美股 OTC、微盘股、市值缺失)
     """
-    raw: dict = {}
-    young = excluded = 0
-    pool: list[int] = []
-    for idx, r in enumerate(rows):
-        if not in_population(r, market_key):
-            excluded += 1
-            continue
-        pool.append(idx)
-        if r.get("SMA250") is None:
-            # 次新股:Perf.Y 是"上市以来"涨幅,不是真正的一年 —— 在池子里但不给评级
-            young += 1
-            raw[idx] = None
-            continue
-        raw[idx] = rs_raw_from_perf(r.get("Perf.3M"), r.get("Perf.6M"), r.get("Perf.Y"))
+    from datetime import date as _date
+    today = today or _date.today()
 
-    ratings, coverage = rs_ratings(raw, len(pool))
+    pool: list[int] = []
+    excluded = 0
+    for idx, r in enumerate(rows):
+        if in_population(r, market_key):
+            pool.append(idx)
+        else:
+            excluded += 1
+
+    # ── 日线统计:只认"最新那一天"的 ───────────────────────
+    # 某只票的 as_of 早于全市场最新日 = 它停牌了或者昨晚没拉到;
+    # 拿它几天前的 RS 线状态去和别人今天的比,不是一回事 → 当作没有
+    hist = hist or {}
+    hist_as_of = max((v["as_of"] for v in hist.values()), default=None)
+    hist_stale = hist_as_of is None or (today - hist_as_of).days > HIST_STALE_DAYS
+    fresh: dict = {}
+    if not hist_stale:
+        fresh = {c: v for c, v in hist.items() if v["as_of"] == hist_as_of}
+
+    # ── 精确 RS Raw 覆盖率够不够 ─────────────────────────
+    raw_exact = {idx: (fresh.get(rows[idx].get("_code")) or {}).get("rs_raw_exact")
+                 for idx in pool}
+    ratings, coverage = ({}, 0.0)
+    method = "snapshot"
+    young = 0
+    if fresh:
+        ratings, coverage = rs_ratings(raw_exact, len(pool))
+        if ratings:
+            method = "exact"
+            raw = raw_exact
+            # 精确法的"次新股"= 日线不足 253 根(原项目 warm-up);统计口径跟着换
+            young = sum(1 for idx in pool if raw_exact[idx] is None)
+    if method == "snapshot":
+        raw = {}
+        for idx in pool:
+            r = rows[idx]
+            if r.get("SMA250") is None:
+                # 次新股:Perf.Y 是"上市以来"涨幅,不是真正的一年 —— 在池子里但不给评级
+                young += 1
+                raw[idx] = None
+                continue
+            raw[idx] = rs_raw_from_perf(r.get("Perf.3M"), r.get("Perf.6M"), r.get("Perf.Y"))
+        ratings, coverage = rs_ratings(raw, len(pool))
+
+    in_pool = set(pool)
+    line_n = 0
     for idx, r in enumerate(rows):
         r["rs_raw"] = raw.get(idx)
         r["rs_rating"] = ratings.get(idx)
+        st = fresh.get(r.get("_code")) if idx in in_pool else None
+        r["rs_line_up_days"] = st.get("up_days") if st else None
+        line_n += r["rs_line_up_days"] is not None
     eligible = sum(1 for v in raw.values() if v is not None)
     return {"universe": len(pool), "excluded": excluded, "young": young,
             "eligible": eligible, "coverage": coverage,
-            "gated": not ratings and eligible > 0}
+            "gated": not ratings and eligible > 0, "method": method,
+            "hist_as_of": str(hist_as_of) if hist_as_of else None, "hist_stale": hist_stale and hist_as_of is not None,
+            "line_n": line_n}
 
 
 # ─────────────────────────────────────────────────────────────────────
