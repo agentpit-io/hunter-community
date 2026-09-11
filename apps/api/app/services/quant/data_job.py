@@ -121,10 +121,16 @@ def get(job_id: int) -> dict | None:
         # 用固定速率的话遇到限流会一直显示"还要 5 分钟"而实际越来越慢
         if d["started_at"] and d["status"] == "running" and d["done_count"] > 0:
             el = (r[14].timestamp() and (time.time() - r[14].timestamp())) or 0
-            per = el / max(1, d["done_count"] + d["skipped_count"])
-            left = max(0, d["total"] - d["done_count"] - d["skipped_count"])
+            # 速度只按**真正处理过**的票算(成功 + 失败)。原来分母里带着「跳过」——
+            # 跳过是瞬间完成的,开头跳过 204 只就把速度算快了几十倍:
+            # 美股任务实测显示"预计还要 3 分钟",实际要 3 个多小时(2026-09-11)
+            per = el / max(1, d["done_count"] + d["failed_count"])
+            left = max(0, d["total"] - d["done_count"] - d["skipped_count"] - d["failed_count"])
             d["elapsed_sec"] = int(el)
-            d["eta_sec"] = int(per * left)
+            # 算因子阶段剩余只数是 0,但还要跑很久(美股全池约 2 小时)—— 不给剩余时间,
+            # 让阶段文字「计算因子 i/n 个调仓日」自己说进度,不显示一个假的"还要 0 秒"
+            if not (d["phase"] or "").startswith("计算因子"):
+                d["eta_sec"] = int(per * left)
         return d
     finally:
         cur.close(); conn.close()
