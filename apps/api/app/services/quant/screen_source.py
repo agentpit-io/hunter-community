@@ -48,7 +48,7 @@ import time
 
 import httpx
 
-from app.services.quant import screen_dsl
+from app.services.quant import screen_dsl, screen_rs
 from app.services.quant.screen_dsl import Compiled, ScreenError
 
 log = logging.getLogger(__name__)
@@ -185,6 +185,9 @@ def get_meta(market_key: str) -> _Meta:
     # name / description 不在 metainfo 里但实际可用(实测能取到值),补进白名单,
     # 否则脚本里写 description 会被判成"不认识的字段"
     names.update(ALWAYS_COLS)
+    # RS 相对强度是我们在全市场快照上自己算的(screen_rs),扫描源没有这两个字段。
+    # 放进白名单才能在脚本里写、在「可用字段」里搜到。
+    names.update(screen_rs.RS_FIELDS)
 
     def periods(prefix: str) -> list[int]:
         rx = _PERIOD_RE[prefix]
@@ -318,9 +321,23 @@ def run_script(script: str, market_key: str = "us", limit: int = 100,
         if extra not in want and has_field(extra):
             want.append(extra)
 
+    # RS 字段**不能**原样发给扫描源(它没有这两列,会整批报错),
+    # 换成算 RS 需要的四个来源列,拉回来之后在全市场上算好再补进每一行。
+    uses_rs = any(f in screen_rs.RS_FIELDS for f in c.fields)
+    req_cols = [f for f in want if f not in screen_rs.RS_FIELDS]
+    if uses_rs:
+        for col in screen_rs.RS_SOURCE_COLS:
+            if col not in req_cols:
+                req_cols.append(col)
+
     t0 = time.time()
-    rows, total = fetch_rows(market_key, want)
+    rows, total = fetch_rows(market_key, req_cols)
     fetch_ms = (time.time() - t0) * 1000
+
+    rs_stat = None
+    if uses_rs:
+        # **在求值之前**、对全市场算 —— 评级的分母是全市场,不是命中结果
+        rs_stat = screen_rs.inject(rows, md.key)
 
     t1 = time.time()
     hits, skipped, missing = screen_dsl.evaluate_detail(c, rows, cache)
@@ -335,6 +352,23 @@ def run_script(script: str, market_key: str = "us", limit: int = 100,
     warnings = [DELAY_WARN]
     if md.note:
         warnings.append(md.note)
+    if rs_stat is not None:
+        warnings.append(screen_rs.METHOD_NOTE)
+        if rs_stat["gated"]:
+            warnings.append(
+                f"本次全市场只有 {rs_stat['coverage']:.0%} 的股票能算出 RS,"
+                f"低于 {screen_rs.RS_UNIVERSE_THRESHOLD:.0%} 的门槛 —— 在残缺的股票池里"
+                f"排出来的 1–99 没有意义,所以这次 RS 评级全部不给。稍后重试。")
+        else:
+            pool_desc = ("交易所上市(不含 OTC 场外)、市值 ≥5000 万美元" if md.key == "us"
+                         else "市值约 5000 万美元以上")
+            msg = (f"RS 排名池:{pool_desc}的 {rs_stat['universe']} 只"
+                   f"(与原项目口径一致,剔除 {rs_stat['excluded']} 只微盘股"
+                   + ("与 OTC" if md.key == "us" else "") + ")")
+            if rs_stat["young"]:
+                msg += (f";其中 {rs_stat['young']} 只上市不足 250 个交易日的次新股"
+                        f"没有评级(没有真正的 12 个月涨幅,和别人不可比)")
+            warnings.append(msg + "。")
     if any("market_cap" in f for f in want):
         warnings.append(MARKET_CAP_WARN)
     # 算不出的票具体缺哪个字段 —— 只说一个总数的话,用户没法判断
@@ -374,6 +408,7 @@ def run_script(script: str, market_key: str = "us", limit: int = 100,
         "matched": len(hits),
         "skipped_incomplete": skipped,
         "missing_fields": missing_list,
+        "rs": rs_stat,
         "returned": len(picks),
         "picks": picks,
         "columns": want,
@@ -561,6 +596,23 @@ plot scan = cond_div and cond_debt and cond_roe and cond_liq;
 """,
     },
 ]
+
+
+PRESETS.append({
+    "key": "rs_leaders",
+    "name": "强势股 RS≥80",
+    "market": "us",
+    "desc": "IBD 口径 RS 相对强度评级 ≥80(跑赢全市场 80% 的股票)+ 站上 50 日线 + 均线多头。",
+    "script": """# ===== 强势股:RS 相对强度 + 趋势 =====
+# RS() 是 IBD 口径的相对强度评级(1–99),在全市场里排名
+def cond_rs    = RS() >= 80;
+def cond_trend = close > Average(close, 50);
+def cond_ma    = Average(close, 50) > Average(close, 200);
+def cond_liq   = Average(volume, 30) > 500000;
+
+plot scan = cond_rs and cond_trend and cond_ma and cond_liq;
+""",
+})
 
 
 def preset(key: str) -> dict | None:

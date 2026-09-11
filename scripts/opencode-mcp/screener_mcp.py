@@ -66,6 +66,8 @@ _SYNTAX = (
     "  Highest(high, N)       N 只能接近 5 / 21 / 63 / 126 / 252(固定窗口)\n"
     "  Lowest(low, N)         同上\n"
     "  RSI()                  14 周期;RSI(N) 支持 2/3/4/5/7/9/10/20/21/30\n"
+    "  RS()                   IBD 口径 RS 相对强度评级 1~99,在全市场里排名\n"
+    "                         (跑赢全市场 80% 的股票 = 80;次新股与美股 OTC 没有评级)\n"
     "\n"
     "也可以直接写扫描源字段名(共 3777 个),常用的:\n"
     "  market_cap_basic  price_earnings_ttm  price_book_fq  return_on_equity\n"
@@ -105,6 +107,7 @@ async def list_tools():
                 "不用自己写脚本时可以传 preset:\n"
                 "  uptrend(上升趋势·美股) · value_oversold(低估值超卖·A股)\n"
                 "  breakout_volume(放量突破·美股) · hk_dividend(港股高股息)\n"
+                "  rs_leaders(强势股 RS≥80·美股)\n"
                 "\n"
                 "重要边界,回答用户时必须一并说明:\n"
                 "  1. 数据延迟 15 分钟,不能用于盘中决策。\n"
@@ -126,7 +129,8 @@ async def list_tools():
                     },
                     "preset": {
                         "type": "string",
-                        "enum": ["uptrend", "value_oversold", "breakout_volume", "hk_dividend"],
+                        "enum": ["uptrend", "value_oversold", "breakout_volume", "hk_dividend",
+                                 "rs_leaders"],
                         "description": "预置脚本 · 只在 script 为空时生效",
                     },
                     "market": {

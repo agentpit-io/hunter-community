@@ -56,7 +56,7 @@ price_book_fq return_on_equity dividends_yield_current debt_to_equity gross_marg
 total_revenue_yoy_growth_ttm relative_volume_10d_calc current_ratio beta_1_year
 earnings_per_share_diluted_ttm price_52_week_high price_52_week_low all_time_high
 RSI ADX ATR VWAP MACD.macd MACD.signal MACD.hist Stoch.K Stoch.D BB.upper BB.lower BB.basis
-Perf.W Perf.1M Perf.3M Perf.6M Perf.Y Perf.YTD""".split())
+Perf.W Perf.1M Perf.3M Perf.6M Perf.Y Perf.YTD rs_rating rs_raw""".split())
 FIELDS |= {f"SMA{n}" for n in SMA} | {f"EMA{n}" for n in EMA} | {f"RSI{n}" for n in RSI}
 FIELDS |= {f"average_volume_{n}d_calc" for n in (10, 30, 60, 90)}
 
@@ -136,6 +136,17 @@ SHOULD_MATCH = [
     # ── 2026-09-11 · 「A比B高」句式 ───────────────────────
     ("收盘价比50日均线高", "close > SMA50"),
     ("20日均线比60日均线低", "SMA20 < SMA60"),
+    # ── 2026-09-11 · RS 相对强度评级 ──────────────────────
+    ("RS大于80", "rs_rating > 80"),
+    ("RS评级不低于90", "rs_rating >= 90"),
+    ("相对强度评级大于85", "rs_rating > 85"),
+    ("RS大于80，收盘价站上50日均线", "rs_rating > 80 AND close > SMA50"),
+    # rs 与 rsi 不能互相吃掉
+    ("RSI小于30", "RSI < 30"),
+    ("RS大于80且RSI小于70", "rs_rating > 80 AND RSI < 70"),
+    # 中文里 RSI 就叫「相对强弱指数」—— 不能被映射成 RS 评级
+    ("相对强弱指数小于30", "RSI < 30"),
+    ("相对强度指数大于70", "RSI > 70"),
 ]
 
 SHOULD_REJECT = [
@@ -158,6 +169,9 @@ SHOULD_REJECT = [
     "成交量是30日均量的2倍以上",
     "市盈率在10到20之间",
     "市盈率大于10小于20",               # 曾产出 pe > 10
+    # 光秃秃的「相对强度/相对强弱」有歧义(RS 评级 还是 RSI?)—— 不猜
+    "相对强度大于80",
+    "相对强弱小于30",
 ]
 
 

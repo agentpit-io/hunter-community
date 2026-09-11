@@ -71,6 +71,18 @@ _FIELD_WORDS: dict[str, str] = {
     "历史最高": "all_time_high", "历史新高": "all_time_high",
 
     "rsi": "RSI", "adx": "ADX", "atr": "ATR",
+    # RS 相对强度评级(IBD 口径,1–99,见 screen_rs)。
+    # "rs" 走英文词边界匹配,所以不会吃掉 "rsi" 里的 rs。
+    #
+    # **光秃秃的「相对强度」「相对强弱」不收**:中文里 RSI 就叫「相对强弱指数」,
+    # 也常译作「相对强度指数」。「相对强度大于80」—— 80 既是常见的 RS 门槛,
+    # 也是常见的 RSI 超买线,两种理解都说得通,猜哪个都可能静默出错。
+    # 只收带「评级」「指数/指标」后缀、没有歧义的说法;光秃秃的交给用户改写或 AI。
+    "rs": "rs_rating", "rs_rating": "rs_rating", "rs评级": "rs_rating",
+    "rs值": "rs_rating", "ibd rs": "rs_rating", "rs rating": "rs_rating",
+    "相对强度评级": "rs_rating", "rs相对强度": "rs_rating",
+    "相对强弱指数": "RSI", "相对强弱指标": "RSI",
+    "相对强度指数": "RSI", "相对强度指标": "RSI",
 
     # 常用技术指标的中文/缩写说法(2026-09-11 补;之前一个都不认)
     "macd柱": "MACD.hist", "macd红柱": "MACD.hist", "macd绿柱": "MACD.hist",

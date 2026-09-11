@@ -435,6 +435,13 @@ class _FieldResolver:
                 f"只有 5 日 / 1 月(≈21) / 3 月(≈63) / 6 月(≈126) / 52 周(≈252)。"
                 f"请把周期改成接近这几个的值。")
 
+        if f in ("rs", "rsrating", "rs_rating"):
+            # IBD 口径的 RS 相对强度评级(1–99),在全市场快照上现算,见 screen_rs。
+            # 不带参数 —— 它的回看窗口(3/6/9/12 月)是方法本身定死的
+            if args:
+                raise ScreenError("RS() 不带参数:它的回看窗口(3/6/9/12 个月)是固定的")
+            return "rs_rating"
+
         if f == "rsi":
             if len(args) == 0:
                 return "RSI"
@@ -450,7 +457,7 @@ class _FieldResolver:
 
         raise ScreenError(
             f"不支持的函数 {fn}()。"
-            f"目前支持:Average(close|volume, N) · ExpAverage(close, N) · "
+            f"目前支持:Average(close|volume, N) · ExpAverage(close, N) · RS() · "
             f"Highest(high, N) · Lowest(low, N) · RSI(N)。"
             f"其它指标可以直接写扫描源字段名,例如 MACD.hist、ADX、Perf.Y、"
             f"market_cap_basic —— 在「可用字段」里搜。")
@@ -659,6 +666,8 @@ def evaluate_detail(c: Compiled, rows: list[dict],
 
 def missing_reason(field: str) -> str:
     """字段为空的**常见**原因。只写有把握的,拿不准就不写。"""
+    if field in ("rs_rating", "rs_raw"):
+        return "次新股(不足 250 个交易日)或不在 RS 排名池里(美股 OTC、市值约 5000 万美元以下)"
     m = re.match(r"^(?:SMA|EMA)(\d+)$", field)
     if m:
         return f"上市不足 {m.group(1)} 个交易日,均线算不出来"
@@ -713,6 +722,7 @@ _FIELD_LABEL = {
     "Perf.6M": "近6月涨幅", "Perf.Y": "近1年涨幅", "Perf.YTD": "年初至今涨幅",
     "Volatility.D": "日波动率", "Volatility.W": "周波动率", "Volatility.M": "月波动率",
     "sector": "板块", "industry": "行业", "currency": "币种",
+    "rs_rating": "RS相对强度评级", "rs_raw": "RS原始分",
 
     # 固定搭配 —— 这些**不能**靠词素拼,必须逐条给准确译名。
     # (price_to_book 拼出来是「价格账面」,free_cash_flow 是「自由现金流量」,
