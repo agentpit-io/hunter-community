@@ -1,7 +1,7 @@
-"""TradingView 全市场扫描 —— 取数通道 + 护栏。
+"""全市场扫描 —— 取数通道 + 护栏。
 
-对接 `scanner.tradingview.com/{market}/scan`,TradingView 网页版筛选器自己调的
-那个接口。免 key、免登录,国内 IP 直连可用(2026-09-10 本机实测:中位 583ms,
+对接上游扫描服务的内部端点(地址见 _BASE,那是它网页版筛选器自己调的接口)。
+免 key、免登录,国内 IP 直连可用(2026-09-10 本机实测:中位 583ms,
 连打 30 次全 200)。
 
 ## 定位:探索性初筛工具,不是数据源
@@ -12,7 +12,7 @@
    收盘价",而是"月线周期上最新那根的收盘",实测 NVDA 的 close / close|1W /
    close|1M 三个值完全相同(223.67)。拿它算动量会得到恒等于 0 的因子。
    要涨跌幅得用 `Perf.W` / `Perf.1M` / `Perf.Y` 这类预算好的字段。
-2. **不是官方 API,没有 SLA。** 反向工程来的内部端点,TradingView 的服务条款
+2. **不是官方 API,没有 SLA。** 反向工程来的内部端点,上游的服务条款
    禁止自动化访问。随时可能改字段或封 IP,不能让生产链路依赖它。
 3. **口径与站内数据源不一致。** 见下面 MARKET_CAP_WARN。
 
@@ -53,6 +53,19 @@ from app.services.quant.screen_dsl import Compiled, ScreenError
 
 log = logging.getLogger(__name__)
 
+
+class NeedsAI(ScreenError):
+    """本地两条路(脚本 / 关键词)都不通 —— 可以问用户要不要花 token 叫 AI。
+
+    单独一个类型是为了让路由能把「可以试 AI」这个信号带给前端。
+    用普通 ScreenError 的话前端只能靠匹配报错文本来猜,那种耦合迟早断。
+    """
+
+
+# ⚠️ 下面三个值是**上游要求的**,不是可配项:换掉 Origin / Referer 会被直接拒。
+# 对外文案、报错、注释一律不再点名上游是谁(2026-09-10 产品要求),
+# 但这三行藏不住 —— 本仓是公开仓,谁都读得到。真要隐藏得把整个通道
+# 做成可插拔的私有实现,那是另一件事。
 _BASE = "https://scanner.tradingview.com"
 _TIMEOUT = 25.0
 _UA = {
@@ -88,7 +101,7 @@ class MarketDef:
 
 # 只开 A 股 / 港股 / 美股(2026-09-10 用户指定)。
 #
-# TradingView 那边日/韩/印/英股同样能扫(实测都是 200,覆盖 4386 / 4302 / 8659 / 9447 只),
+# 上游那边日/韩/印/英股同样能扫(实测都是 200,覆盖 4386 / 4302 / 8659 / 9447 只),
 # 但站内没有任何配套能力去接:代码归一化(market_source.market_of)只认
 # A/港/美三种形态,自选、K线、财报、深度分析全都不支持别的市场。
 # 扫得出来却什么也做不了,只会让人以为站内支持这些市场。
@@ -120,10 +133,13 @@ BASE_FILTER = [
 # description 是股票名 —— 只给代码的结果没法看。
 ALWAYS_COLS = ["name", "description", "close", "currency", "volume"]
 
-DELAY_WARN = "TradingView 免订阅数据延迟 15 分钟(update_mode=delayed_streaming_900),盘中信号请勿依赖。"
+# ⚠️ 这两条的**开头几个字**被前端 screener.html 的 DROP_PREFIX 用来过滤显示
+# (产品要求这两条不出现在筛选器页面上)。改文案要同步改那里,
+# 否则它们会悄悄冒回页面。MCP 与 API 响应仍然带着它们 —— 模型需要知道数据是延迟的。
+DELAY_WARN = "免订阅通道数据延迟 15 分钟,盘中信号请勿依赖。"
 
 MARKET_CAP_WARN = (
-    "market_cap_basic 是 TradingView 口径,与站内国内源实测有系统性差异:"
+    "market_cap_basic 是扫描源口径,与站内国内源实测有系统性差异:"
     "A 股 10 只抽样里中芯国际差 -37%、比亚迪 -8%、格力 -7%(A+H 两地上市股尤其大);"
     "且它与 total_shares_outstanding_current 自身对不上(close×股本 / 市值 = 0.36~0.63)。"
     "可以用来排序和粗筛,不要当作市值真值,更不要写进因子。"
@@ -163,7 +179,7 @@ def get_meta(market_key: str) -> _Meta:
             r.raise_for_status()
             raw = r.json().get("fields") or []
     except Exception as e:                                        # noqa: BLE001
-        raise ScreenError(f"拉 TradingView 字段表失败:{type(e).__name__} · {e}") from e
+        raise ScreenError(f"拉扫描源字段表失败:{type(e).__name__} · {e}") from e
 
     names = {f.get("n") for f in raw if f.get("n")}
     # name / description 不在 metainfo 里但实际可用(实测能取到值),补进白名单,
@@ -195,10 +211,10 @@ def _market(key: str) -> MarketDef:
 # ═══════════════════════════════════════════════════════════════
 
 def _normalize_code(tv_symbol: str, market_key: str, name: str) -> str:
-    """TradingView 符号 → 站内代码格式。
+    """上游符号 → 站内代码格式。
 
     站内格式见 market_source.market_of:6 位纯数字 = A 股,5 位 = 港股,
-    含字母 = 美股。港股 TradingView 给的是 `HKEX:700`,站内要 `00700` ——
+    含字母 = 美股。港股上游给的是 `HKEX:700`,站内要 `00700` ——
     **必须补零到 5 位**,否则 market_of('700') 会判成 A 股然后去深交所找。
     """
     bare = tv_symbol.split(":", 1)[-1] if ":" in tv_symbol else tv_symbol
@@ -212,7 +228,7 @@ def fetch_rows(market_key: str, columns: list[str], limit_scan: int = _MAX_ROWS,
                extra_filter: list | None = None) -> tuple[list[dict], int]:
     """拉全市场。→ (行, 上游 totalCount)
 
-    行是 dict:TradingView 字段名 → 值,外加 `_symbol` / `_code`。
+    行是 dict:上游字段名 → 值,外加 `_symbol` / `_code`。
     """
     md = _market(market_key)
     cols: list[str] = []
@@ -239,11 +255,11 @@ def fetch_rows(market_key: str, columns: list[str], limit_scan: int = _MAX_ROWS,
                 r = cli.post(f"{_BASE}/{md.tv}/scan", json=body)
             except Exception as e:                                # noqa: BLE001
                 raise ScreenError(
-                    f"连 TradingView 失败:{type(e).__name__} · {e}。"
+                    f"连扫描源失败:{type(e).__name__} · {e}。"
                     f"这是免费的非官方通道,没有 SLA —— 稍后重试,或改用站内数据源。") from e
             if r.status_code != 200:
                 raise ScreenError(
-                    f"TradingView 返回 HTTP {r.status_code}。"
+                    f"扫描源返回 HTTP {r.status_code}。"
                     + ("被限流了,等一会儿再试。" if r.status_code == 429 else
                        f"响应片段:{r.text[:200]}"))
             data = r.json()
@@ -307,7 +323,7 @@ def run_script(script: str, market_key: str = "us", limit: int = 100,
     fetch_ms = (time.time() - t0) * 1000
 
     t1 = time.time()
-    hits, skipped = screen_dsl.evaluate(c, rows, cache)
+    hits, skipped, missing = screen_dsl.evaluate_detail(c, rows, cache)
     eval_ms = (time.time() - t1) * 1000
 
     if sort_by:
@@ -321,10 +337,23 @@ def run_script(script: str, market_key: str = "us", limit: int = 100,
         warnings.append(md.note)
     if any("market_cap" in f for f in want):
         warnings.append(MARKET_CAP_WARN)
+    # 算不出的票具体缺哪个字段 —— 只说一个总数的话,用户没法判断
+    # 该改哪条条件(2026-09-11 用户问:「2547 只具体缺少哪个字段?」)。
+    missing_list = [
+        {"field": f, "label": screen_dsl.field_label_cn(f), "count": n,
+         "reason": screen_dsl.missing_reason(f)}
+        for f, n in sorted(missing.items(), key=lambda kv: -kv[1])
+    ]
     if skipped:
+        parts = []
+        for m in missing_list[:4]:
+            nm = m["label"] or m["field"]
+            parts.append(f"缺「{nm}」{m['count']} 只" +
+                         (f"({m['reason']})" if m["reason"] else ""))
         warnings.append(
-            f"{skipped} 只因为缺少脚本用到的字段,无法判断是否满足条件,"
-            f"已排除在结果之外 —— 是「算不出」,不是「不满足」。")
+            f"{skipped} 只满足了其余条件,但缺数据无法判断,已排除在结果之外"
+            f"(是「算不出」,不是「不满足」):" + ";".join(parts) + "。"
+            + "如果某条条件缺得特别多,可以考虑去掉或换一个覆盖更全的字段。")
 
     picks = []
     for r in hits[:limit]:
@@ -344,17 +373,18 @@ def run_script(script: str, market_key: str = "us", limit: int = 100,
         "scanned": len(rows),
         "matched": len(hits),
         "skipped_incomplete": skipped,
+        "missing_fields": missing_list,
         "returned": len(picks),
         "picks": picks,
         "columns": want,
         "notes": c.notes,
         "warnings": warnings,
-        "source": "TradingView scanner(非官方接口 · 延迟 15 分钟)",
+        "source": "全市场扫描源(非官方接口 · 延迟 15 分钟)",
         "timing_ms": {"fetch": round(fetch_ms), "evaluate": round(eval_ms)},
     }
 
 
-def parse_script(script: str, market_key: str = "us") -> dict:
+def parse_script(script: str, market_key: str = "us", allow_ai: bool = False) -> dict:
     """只解析、不拉数 —— 界面上点「生成」走这条,把脚本变成可视化条件行。
 
     和 run_script 共用同一个编译器,所以**界面上看到的条件就是真正会跑的条件**。
@@ -375,26 +405,40 @@ def parse_script(script: str, market_key: str = "us") -> dict:
         return screen_dsl.compile_script(src, has_field, meta.sma, meta.ema, meta.rsi)
 
     ai = None
+    kw = None
     original_text = script
     try:
         c: Compiled = _compile(script)
     except ScreenError:
-        # 解析不了 —— 分两种情况处理,判据是"用户有没有在写脚本"。
+        # 解析不了 —— 按"最省"的顺序往下试。
         #
-        # 写着 def/plot 却解析不过 = 他的脚本有错,把真实报错还给他。
-        # 让 LLM 去"猜他想写什么"再悄悄改成别的,是调脚本时最坏的体验。
-        #
-        # 没有 def/plot = 大白话,交给模型翻译。
-        from app.services.quant import screen_nl
+        # ① 写着 def/plot 却解析不过 = 他的脚本有错,把真实报错还给他。
+        #    让翻译器去"猜他想写什么"再悄悄改成别的,是调脚本时最坏的体验。
+        # ② 本地关键词匹配 —— **零 token**,覆盖「字段+比较符+数字」这类规整描述。
+        # ③ 都不行才轮到 AI,而且**必须 allow_ai=True**(前端弹按钮、用户点了才传)。
+        #    默认不花钱是这条链路的设计目标。
+        from app.services.quant import screen_kw, screen_nl
         if screen_nl.looks_like_script(script):
             raise
-        translated = screen_nl.translate(
-            script, md.label, meta.sma, meta.ema, meta.rsi, validate=_compile)
-        script = translated["script"]
-        c = _compile(script)             # translate 里已经 validate 过,这里必成功
-        ai = {k: translated[k] for k in ("model", "attempts", "tokens_in", "tokens_out")}
-        ai["source_text"] = original_text
-        ai["script"] = script
+        try:
+            k = screen_kw.translate(script, has_field, meta.sma, meta.ema, meta.rsi)
+            script = k["script"]
+            c = _compile(script)
+            kw = {"matched": k["matched"], "notes": k.get("notes") or [],
+                  "source_text": original_text,
+                  "script": script}
+        except ScreenError as kw_err:
+            if not allow_ai:
+                # 不抛普通 ScreenError —— 路由要据此告诉前端"可以试试 AI"
+                raise NeedsAI(str(kw_err)) from kw_err
+            translated = screen_nl.translate(
+                script, md.label, meta.sma, meta.ema, meta.rsi, validate=_compile)
+            script = translated["script"]
+            c = _compile(script)         # translate 里已经 validate 过,这里必成功
+            ai = {k2: translated[k2] for k2 in
+                  ("model", "attempts", "tokens_in", "tokens_out")}
+            ai["source_text"] = original_text
+            ai["script"] = script
 
     d = screen_dsl.decompose(script, c, has_field, meta.sma, meta.ema, meta.rsi)
 
@@ -408,6 +452,17 @@ def parse_script(script: str, market_key: str = "us") -> dict:
     d["market_label"] = md.label
     d["fields"] = c.fields
     d["warnings"] = warnings
+    if kw:
+        # 本地关键词匹配出来的 —— 同样要可核对:哪一句变成了哪个表达式。
+        # 规则匹配不会像模型那样瞎编,但会**理解偏**(比如把"量"当成成交量而不是量比),
+        # 所以逐句对照必须摆出来。
+        d["kw"] = kw
+        # 有损近似(上穿按"当前在上方"处理)要单独亮出来 —— 混在条件里用户看不出来
+        for n in kw.get("notes") or []:
+            warnings.append(n)
+        warnings.append(
+            "以上条件由本地关键词匹配得出(未使用 AI,零成本),"
+            "已通过语法与字段校验。逐句对照见上方折叠区,不对的话可直接改或改用 AI 识别。")
     if ai:
         # 让前端能明确标出"这几条是 AI 翻的",并且把生成的脚本亮出来给人核对。
         # AI 产出的东西必须可审计 —— 用户至少要能看见它到底写了什么才敢用。
@@ -430,7 +485,7 @@ PRESETS = [
         "desc": "均线多头排列 + 逼近 52 周高点 + 有量。thinkorswim 经典 Stock Hacker 脚本。",
         "script": """# ===== 上升趋势 =====
 # 均量条件(90 日均量 > 100 万股)
-# 注:TradingView 只有 10/30/60/90 天均量,原脚本的 Average(volume,100) 映射不了
+# 注:扫描源只有 10/30/60/90 天均量,原脚本的 Average(volume,100) 映射不了
 def avgVol90 = Average(volume, 90);
 def cond_avgVol = avgVol90 > 1000000;
 
@@ -515,15 +570,76 @@ def preset(key: str) -> dict | None:
     return None
 
 
-def field_search(market_key: str, q: str, limit: int = 50) -> list[str]:
-    """字段搜索 —— 前端「可用字段」用。3777 个字段不可能列全,只能搜。"""
+def field_search(market_key: str, q: str, limit: int = 50) -> list[dict]:
+    """字段搜索 —— 前端「可用字段」用。3777 个字段不可能列全,只能搜。
+
+    返回 [{name, label}]:
+      · name  字段名(英文)。**脚本里要写的就是它**,点击插入的也是它。
+      · label 中文名,拿不准时为 None —— 界面上就显示英文原名。
+              半吊子翻译比不翻更误导,详见 screen_dsl.field_label_cn。
+
+    中文名也参与搜索:用户搜「成交量」应该能找到 volume。
+    """
     meta = get_meta(market_key)
     q = (q or "").strip().lower()
     base = sorted(n for n in meta.names
                   if isinstance(n, str) and "|" not in n and "[" not in n)
+    labels = {n: screen_dsl.field_label_cn(n) for n in base}
+
+    def pack(names):
+        return _collapse([{"name": n, "label": labels.get(n)} for n in names], limit)
+
     if not q:
-        return base[:limit]
+        return pack(base)
     exact = [n for n in base if n.lower() == q]
     prefix = [n for n in base if n.lower().startswith(q) and n.lower() != q]
     sub = [n for n in base if q in n.lower() and not n.lower().startswith(q)]
-    return (exact + prefix + sub)[:limit]
+    hit = exact + prefix + sub
+    # 中文命中排在英文子串命中之后 —— 搜英文时不希望被中文结果挤掉
+    seen = set(hit)
+    cn = [n for n in base if n not in seen and (labels.get(n) or "").lower().find(q) >= 0]
+    return pack(hit + cn)
+
+
+# 同族折叠 —— 只有**数字**不同的字段算一族(EMA10/EMA12/…/EMA300 共 31 个)。
+#
+# 不折叠的话搜一个 "e" 就被 31 个 EMA 刷满整屏,别的字段一个都看不见。
+#
+# **判据只看数字**,这一点是刻意的:`return_on_equity_fq / _fy / _ttm` 差的是
+# 报告期字母,它们是三个**真正不同**的字段(最近季 / 最近年 / 滚动12个月),
+# 折叠掉就没法选了。而 EMA10 与 EMA20 只是同一个指标的参数不同,
+# 收起来让用户点开再挑周期,信息一点没少。
+_FAMILY_MIN = 3
+
+
+def _collapse(items: list[dict], limit: int) -> list[dict]:
+    import re as _re
+    groups: dict[str, list[dict]] = {}
+    order: list[str] = []
+    for it in items:
+        key = _re.sub(r"\d+", "#", it["name"])
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(it)
+
+    out: list[dict] = []
+    for key in order:
+        g = groups[key]
+        if len(g) < _FAMILY_MIN:
+            out.extend(g)
+            continue
+        # 族标签:拿成员标签把数字换成 N(10日EMA → N日EMA)。
+        # 成员没有中文名时退回族键(EMA# → EMA#),照旧是英文。
+        first = g[0]
+        fam_label = None
+        if first.get("label"):
+            fam_label = _re.sub(r"\d+", "N", first["label"])
+        out.append({
+            "name": first["name"],          # 代表项 · 前端不会直接插它
+            "label": fam_label,
+            "family": key.replace("#", "N"),
+            "count": len(g),
+            "members": g,
+        })
+    return out[:limit]

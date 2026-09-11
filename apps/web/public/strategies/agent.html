@@ -722,7 +722,7 @@ function vScreener() {
       esc(p[1]) + ' <span style="color:var(--soft)">' + esc(p[2]) + '</span></a>'
   }).join('')
   return panel('扫描筛选 · 找候选票',
-    '<span class="cnt">TradingView 全市场</span>',
+    '<span class="cnt">全市场扫描</span>',
     '<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">' +
       '<div style="flex:1;min-width:260px;font-size:12.5px;line-height:1.75;color:var(--muted)">' +
         '用 thinkScript 风格的脚本从<b style="color:var(--text)">整个市场</b>里筛票 —— ' +
@@ -738,7 +738,7 @@ function vScreener() {
       presets +
     '</div>' +
     '<div class="ag-note" style="margin-top:11px;padding-top:10px;border-top:1px solid var(--line)">' +
-      '数据来自 TradingView,<b>延迟 15 分钟</b>,而且<b>只有当前快照、没有历史</b> —— ' +
+      '数据<b>延迟 15 分钟</b>,而且<b>只有当前快照、没有历史</b> —— ' +
       '所以扫出来的是<b>候选池</b>,不能直接拿去回测,也不写进因子库。' +
       '要验证一个想法,把候选票带到策略工作台用站内有历史的数据跑。</div>')
 }

@@ -1,7 +1,7 @@
 """screener-mcp · 全市场扫描筛选
 
 一个 tool:`market_screen` —— 让 LLM 用 thinkScript 子集写筛选条件,
-扫 TradingView 的全市场快照(美股 7487 / A 股 5237 / 港股 2396 只,秒级)。
+扫全市场快照(美股 7487 / A 股 5237 / 港股 2396 只,秒级)。
 
 ## 为什么值得单独一个 MCP
 
@@ -13,9 +13,9 @@ LLM 手上一个工具都没有:`watchlist_*` 只能看已经在自选里的,
 
 ## 边界(description 里也写了,这里说为什么)
 
-TradingView 的 scanner 只返回**当前横截面快照**,没有历史序列。
+扫描源只返回**当前横截面快照**,没有历史序列。
 `close|1M` 不是"一个月前的收盘",实测它等于 close 本身。
-所以扫描结果只能当候选池,不能拿去回测、不能写进因子库 —— 后端 tv_screener.py
+所以扫描结果只能当候选池,不能拿去回测、不能写进因子库 —— 后端 screen_source.py
 不提供任何写入路径,这里也不要给 LLM 留想象空间。
 
 ## 部署
@@ -67,7 +67,7 @@ _SYNTAX = (
     "  Lowest(low, N)         同上\n"
     "  RSI()                  14 周期;RSI(N) 支持 2/3/4/5/7/9/10/20/21/30\n"
     "\n"
-    "也可以直接写 TradingView 字段名(共 3777 个),常用的:\n"
+    "也可以直接写扫描源字段名(共 3777 个),常用的:\n"
     "  market_cap_basic  price_earnings_ttm  price_book_fq  return_on_equity\n"
     "  dividends_yield_current  debt_to_equity  gross_margin_ttm\n"
     "  total_revenue_yoy_growth_ttm  relative_volume_10d_calc  change\n"

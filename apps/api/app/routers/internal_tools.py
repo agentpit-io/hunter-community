@@ -352,7 +352,7 @@ async def _api_profile(body: ProfileIn, request: Request):
 # ─────────────────────────────────────────────────────────────────────
 # 全市场扫描筛选 · 1 tool
 #
-# 真逻辑在 app/services/quant/tv_screener.py,这里只是给 MCP 的薄壳。
+# 真逻辑在 app/services/quant/screen_source.py,这里只是给 MCP 的薄壳。
 # 与前端 /api/quant/screener/run 走的是同一个函数,不会出现两套行为。
 # ─────────────────────────────────────────────────────────────────────
 
@@ -370,19 +370,19 @@ async def _api_market_screen(body: ScreenerIn, request: Request):
     用户说『帮我扫一下美股里均线多头排列的』『A 股有哪些低 PE 超卖的』时调这个。
     """
     _auth(request)
-    from app.services.quant import tv_screener
+    from app.services.quant import screen_source
     from app.services.quant.screen_dsl import ScreenError
 
     script = body.script or ""
     if body.preset and not script.strip():
-        p = tv_screener.preset(body.preset)
+        p = screen_source.preset(body.preset)
         if p is None:
             return {"type": "market_screen", "error": f"没有这个示例脚本:{body.preset}"}
         script = p["script"]
     try:
         # limit 压到 30 —— 这是给 LLM 读的,不是给表格渲染的。
         # 几百行进上下文既贵又会把回答冲散。
-        r = tv_screener.run_script(script, body.market,
+        r = screen_source.run_script(script, body.market,
                                    limit=max(1, min(body.limit, 50)),
                                    sort_by="market_cap_basic")
     except ScreenError as e:

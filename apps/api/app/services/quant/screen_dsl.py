@@ -1,12 +1,12 @@
-"""筛选脚本 DSL —— thinkScript 子集 → TradingView scanner 字段。
+"""筛选脚本 DSL —— thinkScript 子集 → 扫描源字段。
 
 用户拿来的是 thinkorswim 的 Stock Hacker 脚本(`def x = ...; plot scan = ...`)。
-这里把那套语法解析成 AST,把函数调用映射成 TradingView 的字段名,
+这里把那套语法解析成 AST,把函数调用映射成扫描源的字段名,
 拉一次全市场数据,然后**在本地逐行求值**。
 
-## 为什么本地求值,而不是翻译成 TradingView 的 filter
+## 为什么本地求值,而不是翻译成上游的 filter
 
-TradingView 的 `filter` 只支持「字段 op 常量/字段」,做不了算术。而 thinkScript
+上游的 `filter` 只支持「字段 op 常量/字段」,做不了算术。而 thinkScript
 脚本里最常见的一类条件恰恰是算术:
 
     (high52 - close) / high52 <= 0.10        # 距 52 周高点 10% 以内
@@ -14,7 +14,7 @@ TradingView 的 `filter` 只支持「字段 op 常量/字段」,做不了算术�
 翻译不过去。而全市场一次拉全的代价实测很低(A 股 5237 只 · 205KB · 594ms),
 拉回来自己算反而**又快又不受 filter 表达能力限制**。
 `type=stock` / `is_primary` 这类纯常量条件仍然下推,那是为了把
-ETF、优先股份额这些噪音在服务端就去掉(见 tv_screener 的 BASE_FILTER)。
+ETF、优先股份额这些噪音在服务端就去掉(见 screen_source 的 BASE_FILTER)。
 
 ## 缺数据的行怎么处理 —— 不猜,也不当成 False
 
@@ -27,12 +27,12 @@ False —— 那样 `close > 20` 会把所有没有报价的票判成"不满足"
 
 ## 周期映射是近似的,必须说出来
 
-TradingView 没有"任意窗口最高价"字段,只有 `price_52_week_high` / `High.3M`
+扫描源没有"任意窗口最高价"字段,只有 `price_52_week_high` / `High.3M`
 这些固定窗口。`Highest(high, 252)` 只能映射到 52 周高点 —— 252 个交易日
 和 52 个日历周不是同一个东西。这类近似一律写进返回体的 `notes`,不静默替换。
 
 **映射不上的直接报错,不找"最接近的"顶上。** `Average(volume, 100)` 在
-TradingView 只有 10/30/60/90 天均量,拿 90 天冒充 100 天就是在编数字。
+扫描源只有 10/30/60/90 天均量,拿 90 天冒充 100 天就是在编数字。
 """
 from __future__ import annotations
 
@@ -62,7 +62,7 @@ class Stmt:
 # 词法
 # ═══════════════════════════════════════════════════════════════
 
-# 标识符允许带点:TradingView 字段名本身就长这样(MACD.hist / High.All / Perf.Y)
+# 标识符允许带点:上游字段名本身就长这样(MACD.hist / High.All / Perf.Y)
 _TOKEN_RE = re.compile(r"""
     (?P<ws>\s+)
   | (?P<comment>\#[^\n]*)
@@ -291,14 +291,14 @@ class _Parser:
 
 
 # ═══════════════════════════════════════════════════════════════
-# 函数 → TradingView 字段
+# 函数 → 扫描源字段
 # ═══════════════════════════════════════════════════════════════
 
-# thinkScript 的价格序列名 → TradingView 当日字段
+# thinkScript 的价格序列名 → 扫描源当日字段
 _PRICE = {"close": "close", "open": "open", "high": "high", "low": "low",
           "volume": "volume", "hlc3": None, "ohlc4": None}
 
-# Highest/Lowest 的窗口:交易日数 → TradingView 固定窗口字段。
+# Highest/Lowest 的窗口:交易日数 → 扫描源固定窗口字段。
 # 键是**允许的交易日区间**(闭区间),因为 252/250/251 说的都是"一年"。
 _HIGH_WINDOWS = [
     ((4, 6),     "High.5D",            "近 5 日最高"),
@@ -315,7 +315,7 @@ _LOW_WINDOWS = [
     ((248, 254), "price_52_week_low", "52 周最低"),
 ]
 
-# Average(volume, N) 能映射的天数 —— TradingView 只有这四个
+# Average(volume, N) 能映射的天数 —— 扫描源只有这四个
 _VOL_AVG_DAYS = (10, 30, 60, 90)
 
 
@@ -339,10 +339,10 @@ def _price_arg(node, fn: str) -> str:
 
 
 class _FieldResolver:
-    """把 AST 里的名字和函数调用解析成 TradingView 字段名。
+    """把 AST 里的名字和函数调用解析成扫描源字段名。
 
-    `has_field` 由 tv_screener 注入(来自 metainfo 实拉),所以周期支持范围
-    是**跟着 TradingView 走**的,不用在代码里维护一份会过期的白名单。
+    `has_field` 由 screen_source 注入(来自 metainfo 实拉),所以周期支持范围
+    是**跟着扫描源走**的,不用在代码里维护一份会过期的白名单。
     """
 
     def __init__(self, has_field, sma_periods: list[int], ema_periods: list[int],
@@ -362,12 +362,12 @@ class _FieldResolver:
         low = name.lower()
         if low in _PRICE and _PRICE[low]:
             return _PRICE[low]
-        # 直接写 TradingView 字段名也放行 —— 3777 个字段,不可能都包成函数
+        # 直接写扫描源字段名也放行 —— 3777 个字段,不可能都包成函数
         if self.has_field(name):
             return name
         raise ScreenError(
             f"不认识 {name!r}。它既不是 close/open/high/low/volume,"
-            f"也不是 TradingView 的字段名。"
+            f"也不是扫描源的字段名。"
             f"如果想用自定义变量,要先 `def {name} = ...;` 定义。")
 
     # ── 函数 ────────────────────────────────────────────────
@@ -382,18 +382,18 @@ class _FieldResolver:
             if src == "volume":
                 if n not in _VOL_AVG_DAYS:
                     raise ScreenError(
-                        f"{fn}(volume, {n}) 映射不了 —— TradingView 只提供 "
+                        f"{fn}(volume, {n}) 映射不了 —— 扫描源只提供 "
                         f"{'/'.join(map(str, _VOL_AVG_DAYS))} 天的均量字段。"
                         f"请把周期改成这四个之一。"
                         f"(不拿 90 天冒充 {n} 天:那是在编数字)")
                 return f"average_volume_{n}d_calc"
             if src != "close":
                 raise ScreenError(
-                    f"{fn}({src}, {n}):TradingView 的均线只基于收盘价,"
+                    f"{fn}({src}, {n}):扫描源的均线只基于收盘价,"
                     f"没有 {src} 的均线字段")
             if n not in self.sma_periods:
                 raise ScreenError(
-                    f"{fn}(close, {n}) 映射不了 —— TradingView 没有 SMA{n}。"
+                    f"{fn}(close, {n}) 映射不了 —— 扫描源没有 SMA{n}。"
                     f"可用周期:{', '.join(map(str, self.sma_periods))}")
             return f"SMA{n}"
 
@@ -426,12 +426,12 @@ class _FieldResolver:
                     if n not in (5, 21, 63, 126, 252):
                         self._note(
                             f"{fn}({src}, {n}) → {fld}({label})· "
-                            f"TradingView 只有固定窗口,交易日数与日历窗口存在口径差异")
+                            f"扫描源只有固定窗口,交易日数与日历窗口存在口径差异")
                     else:
                         self._note(f"{fn}({src}, {n}) → {fld}({label})")
                     return fld
             raise ScreenError(
-                f"{fn}({src}, {n}) 映射不了 —— TradingView 没有任意窗口的最高/最低价,"
+                f"{fn}({src}, {n}) 映射不了 —— 扫描源没有任意窗口的最高/最低价,"
                 f"只有 5 日 / 1 月(≈21) / 3 月(≈63) / 6 月(≈126) / 52 周(≈252)。"
                 f"请把周期改成接近这几个的值。")
 
@@ -440,7 +440,7 @@ class _FieldResolver:
                 return "RSI"
             n = _int_arg(args[0], fn, 1)
             if n == 14:
-                self._note("RSI(14) → RSI(TradingView 的默认 RSI 就是 14 周期)")
+                self._note("RSI(14) → RSI(扫描源的默认 RSI 就是 14 周期)")
                 return "RSI"
             if n not in self.rsi_periods:
                 raise ScreenError(
@@ -452,7 +452,7 @@ class _FieldResolver:
             f"不支持的函数 {fn}()。"
             f"目前支持:Average(close|volume, N) · ExpAverage(close, N) · "
             f"Highest(high, N) · Lowest(low, N) · RSI(N)。"
-            f"其它指标可以直接写 TradingView 字段名,例如 MACD.hist、ADX、Perf.Y、"
+            f"其它指标可以直接写扫描源字段名,例如 MACD.hist、ADX、Perf.Y、"
             f"market_cap_basic —— 在「可用字段」里搜。")
 
 
@@ -464,13 +464,13 @@ class _FieldResolver:
 class Compiled:
     stmts: list[Stmt]
     plot_name: str
-    fields: list[str]                     # 需要向 TradingView 请求的字段
+    fields: list[str]                     # 需要向扫描源请求的字段
     notes: list[str] = _dc_field(default_factory=list)
 
 
 def compile_script(src: str, has_field, sma_periods: list[int],
                    ema_periods: list[int], rsi_periods: list[int]) -> Compiled:
-    """解析脚本 + 解析出需要哪些 TradingView 字段。不发网络请求。"""
+    """解析脚本 + 解析出需要哪些扫描源字段。不发网络请求。"""
     stmts, plot_name = _Parser(src).parse()
     rs = _FieldResolver(has_field, sma_periods, ema_periods, rsi_periods)
     fields: list[str] = []
@@ -550,12 +550,28 @@ def _eval(node, row: dict, env: dict, resolver_cache: dict):
     # 同一个脚本换个写法结果不同,排查起来极难。宁可都算。
     lv = _eval(ln, row, env, resolver_cache)
     rv = _eval(rn, row, env, resolver_cache)
+    # **三值逻辑(Kleene)**:
+    #   假 且 未知 = 假      —— 已经有一条明确不满足,缺什么都不可能命中了
+    #   真 或 未知 = 真      —— 已经有一条满足,或的另一边是什么都无所谓
+    # 其余含未知的组合才是真正的"算不出"。两边对称,与左右顺序无关,
+    # 所以和上面"不做短路"的要求不冲突。
+    #
+    # 2026-09-11 修:原来只要有一边是 None 就整体 None。实测一套 10 条的美股脚本,
+    # 页面报「2547 只算不出」,其中 2537 只(99.6%)早被别的条件判了不满足,
+    # 真正"可能命中但缺数据"的只有 10 只 —— 那个数字被放大了 250 倍,
+    # 用户据此去怀疑数据源,而问题根本不在那里。
+    # 命中集合不受影响(命中要求整体为真,改前改后都一样);`or` 脚本会多出
+    # "一边满足、另一边缺数据"的票,那本来就该算命中。
     if op == "and":
         a, b = _truthy(lv), _truthy(rv)
-        return None if (a is None or b is None) else (a and b)
+        if a is False or b is False:
+            return False
+        return None if (a is None or b is None) else True
     if op == "or":
         a, b = _truthy(lv), _truthy(rv)
-        return None if (a is None or b is None) else (a or b)
+        if a is True or b is True:
+            return True
+        return None if (a is None or b is None) else False
     if lv is None or rv is None:
         return None
     if op == "+":
@@ -612,8 +628,20 @@ def build_resolver_cache(c: Compiled, has_field, sma_periods, ema_periods,
 
 def evaluate(c: Compiled, rows: list[dict], resolver_cache: dict) -> tuple[list[dict], int]:
     """→ (命中的行, 因缺字段无法判断的行数)"""
+    hits, skipped, _ = evaluate_detail(c, rows, resolver_cache)
+    return hits, skipped
+
+
+def evaluate_detail(c: Compiled, rows: list[dict],
+                    resolver_cache: dict) -> tuple[list[dict], int, dict[str, int]]:
+    """→ (命中的行, 算不出的行数, {字段: 在算不出的行里为空的次数})
+
+    只报"算不出"那部分行里缺的字段 —— 已经被别的条件判不满足的行,
+    缺什么都无关紧要,统计进来只会误导用户去怀疑一个与结果无关的字段。
+    """
     hits: list[dict] = []
     skipped = 0
+    missing: dict[str, int] = {}
     for row in rows:
         env: dict = {}
         for st in c.stmts:
@@ -621,9 +649,32 @@ def evaluate(c: Compiled, rows: list[dict], resolver_cache: dict) -> tuple[list[
         verdict = _truthy(env.get(c.plot_name))
         if verdict is None:
             skipped += 1
+            for f in c.fields:
+                if row.get(f) is None:
+                    missing[f] = missing.get(f, 0) + 1
         elif verdict:
             hits.append(row)
-    return hits, skipped
+    return hits, skipped, missing
+
+
+def missing_reason(field: str) -> str:
+    """字段为空的**常见**原因。只写有把握的,拿不准就不写。"""
+    m = re.match(r"^(?:SMA|EMA)(\d+)$", field)
+    if m:
+        return f"上市不足 {m.group(1)} 个交易日,均线算不出来"
+    m = re.match(r"^average_volume_(\d+)d_calc$", field)
+    if m:
+        return f"上市不足 {m.group(1)} 天"
+    if field in ("price_52_week_high", "price_52_week_low"):
+        return "上市不足一年"
+    if field.startswith("price_earnings"):
+        return "亏损公司没有市盈率"
+    if field.startswith("return_on_equity"):
+        return "股东权益为负(此时 ROE 无意义)或小盘股未披露"
+    if re.search(r"_(ttm|fq|fy|fh)$", field) or field.startswith(
+            ("total_", "net_", "gross_", "dividend", "debt_", "earnings_")):
+        return "财报数据未披露"
+    return ""
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -662,6 +713,32 @@ _FIELD_LABEL = {
     "Perf.6M": "近6月涨幅", "Perf.Y": "近1年涨幅", "Perf.YTD": "年初至今涨幅",
     "Volatility.D": "日波动率", "Volatility.W": "周波动率", "Volatility.M": "月波动率",
     "sector": "板块", "industry": "行业", "currency": "币种",
+
+    # 固定搭配 —— 这些**不能**靠词素拼,必须逐条给准确译名。
+    # (price_to_book 拼出来是「价格账面」,free_cash_flow 是「自由现金流量」,
+    #  price_target_high 是「价格目标价最高价」—— 都不是中文里的说法。)
+    "free_cash_flow": "自由现金流", "free_cash_flow_ttm": "自由现金流TTM",
+    "operating_cash_flow_ttm": "经营现金流TTM",
+    "price_target_high": "目标价上限", "price_target_low": "目标价下限",
+    "price_target_average": "目标价均值", "price_target_median": "目标价中位",
+    "price_book_ratio": "市净率", "price_sales_ratio": "市销率",
+    "price_free_cash_flow_ttm": "市现率TTM",
+    "price_earnings_growth_ttm": "PEG(TTM)",
+    "enterprise_value_ebitda_ttm": "EV/EBITDA(TTM)",
+    "enterprise_value_current": "企业价值",
+    "gross_margin": "毛利率", "operating_margin": "营业利润率",
+    "net_margin": "净利率", "pre_tax_margin": "税前利润率",
+    "after_tax_margin": "税后利润率",
+    "dividend_payout_ratio_ttm": "股息支付率TTM",
+    "dividends_per_share_fq": "每股股息(最近季)",
+    "total_shares_outstanding_current": "总股本",
+    "float_shares_outstanding": "流通股本",
+    "number_of_employees": "员工人数",
+    "relative_volume_10d_calc": "10日相对成交量",
+    "Value.Traded": "成交额", "Volatility.D": "日波动率",
+    # 「成交量+变动」是两个头词,会被 heads>1 那道闸拦下,但它拼起来是对的
+    "volume_change": "成交量变动", "volume_change_abs": "成交量变动(绝对值)",
+    "price_change": "价格变动", "market_cap_diluted_calc": "稀释市值",
 }
 
 _SMA_RE = re.compile(r"^SMA(\d+)$")
@@ -678,7 +755,7 @@ _OP_LABEL = {
 
 
 def field_label(name: str) -> str:
-    """TradingView 字段名 → 中文标签(查不到就原样返回)。"""
+    """扫描源字段名 → 中文标签(查不到就原样返回)。"""
     if name in _FIELD_LABEL:
         return _FIELD_LABEL[name]
     m = _SMA_RE.match(name)
@@ -851,3 +928,303 @@ def build_script(conditions: list[dict], plot_name: str = "scan",
         # 让调用方拿到一个能解析、但注定 0 命中的脚本,前端好给提示
         lines.append(f"plot {plot_name} = false;")
     return "\n".join(lines)
+
+
+# ═══════════════════════════════════════════════════════════════
+# 字段中文名 —— 词素拼装
+#
+# 扫描源的字段名是高度组合化的:
+#   average_volume_10d_calc = average + volume + 10d + calc
+#   postmarket_volume       = postmarket + volume
+#   total_revenue_yoy_growth_ttm = total + revenue + yoy + growth + ttm
+# 所以不用逐个翻 3777 个,按词素拼既准又不用维护。
+#
+# **只在所有词素都认识时才拼**。有一个不认识就整体返回 None,界面上照旧显示
+# 英文原名 —— 半吊子翻译(「盘后 volume」「average 成交量」)比不翻更误导,
+# 而且会让人以为这个字段的含义已经被确认过了。
+# ═══════════════════════════════════════════════════════════════
+
+# 修饰词(可多个,按出现顺序拼在头词前面)
+_MOR_MOD = {
+    "average": "平均", "avg": "平均", "relative": "相对", "total": "总",
+    "net": "净", "gross": "毛", "operating": "经营", "free": "自由",
+    "premarket": "盘前", "postmarket": "盘后", "after": "盘后", "pre": "盘前",
+    "basic": "基本", "diluted": "稀释", "forward": "预期", "fwd": "预期",
+    "enterprise": "企业", "book": "账面",
+    "continuing": "持续经营", "discontinued": "终止经营",
+    "common": "普通", "preferred": "优先", "long": "长期", "short": "短期",
+    "tangible": "有形", "intangible": "无形", "goodwill": "商誉",
+    # 「每股」「人均」是修饰,要拼在头词**前面**(每股收益),
+    # 当后缀会拼出「盈利(每股)」这种不像话的中文
+    "share": "每股", "employee": "人均",
+}
+
+# 头词(必须至少命中一个,否则不拼)
+_MOR_HEAD = {
+    "volume": "成交量", "price": "价格", "close": "收盘价", "open": "开盘价",
+    "high": "最高价", "low": "最低价", "change": "变动", "cap": "市值",
+    "earnings": "盈利", "revenue": "营收", "income": "利润", "profit": "利润",
+    "margin": "利润率", "yield": "收益率", "debt": "负债", "equity": "权益",
+    "assets": "资产", "liabilities": "负债", "cash": "现金", "flow": "流量",
+    "dividends": "股息", "dividend": "股息", "shares": "股本",
+    "eps": "每股收益", "ebitda": "EBITDA", "ebit": "EBIT",
+    "employees": "员工数", "sales": "销售额", "inventory": "存货",
+    "receivables": "应收款", "payables": "应付款", "capex": "资本开支",
+    "buyback": "回购", "float": "流通股", "beta": "贝塔",
+    "volatility": "波动率", "turnover": "换手率",
+    "ratio": "比率", "value": "价值", "rating": "评级", "target": "目标价",
+    "gap": "跳空", "range": "区间", "performance": "涨幅", "perf": "涨幅",
+}
+
+# 后缀/限定(拼在括号里或直接接在后面)
+_MOR_SUF = {
+    "ttm": "TTM", "fq": "最近季", "fy": "最近年", "fh": "最近半年",
+    "yoy": "同比", "qoq": "环比", "abs": "绝对值", "percent": "百分比",
+    "pct": "百分比", "usd": "美元",
+    # growth 总是附着在别的科目上(净利润**同比增长**),当头词会让
+    # heads 变成 2 个而整体放弃 —— 它是后缀不是核心概念
+    "growth": "增长",
+}
+
+# 纯噪音,翻译时直接跳过(不影响"是否全部认识"的判定)
+_MOR_SKIP = {"calc", "per", "the"}
+
+_PERIOD_RE2 = re.compile(r"^(\d+)([dwmy])$")
+_MOR_UNIT = {"d": "日", "w": "周", "m": "月", "y": "年"}
+
+
+def field_label_cn(name: str) -> str | None:
+    """字段名 → 中文标签。**拿不准就返回 None**(界面照旧显示英文)。"""
+    if not name or not isinstance(name, str):
+        return None
+    exact = field_label(name)
+    if exact != name:            # 精选表 / 技术指标模式已经认得
+        return exact
+    if name in _TECH_LABEL:      # 技术指标是专有名词,不参与拼装
+        return _TECH_LABEL[name]
+    cand = _candle_label(name)
+    if cand:
+        return cand
+    if not re.fullmatch(r"[A-Za-z0-9_.+\-]+", name):
+        return None
+
+    mods: list[str] = []
+    periods: list[str] = []
+    heads: list[str] = []
+    sufs: list[str] = []
+    toks = [t for t in re.split(r"[_.]", name.lower()) if t]
+
+    # 多词词干优先(取最长)。金融术语大多是固定搭配,
+    # return_on_equity 逐词素拼是「回报权益」,整体才是「净资产收益率」。
+    stem_at = stem_len = -1
+    stem_cn = ""
+    for i in range(len(toks)):
+        for j in range(len(toks), i, -1):
+            key = "_".join(toks[i:j])
+            if key in _MOR_STEM and (j - i) > stem_len:
+                stem_at, stem_len, stem_cn = i, j - i, _MOR_STEM[key]
+                break
+    if stem_at >= 0:
+        heads.append(stem_cn)
+        toks = toks[:stem_at] + toks[stem_at + stem_len:]
+
+    for idx, tok in enumerate(toks):
+        # `current` 位置不同意思不同,不能一概而论:
+        #   total_current_liabilities → 流动负债(会计科目)
+        #   dividends_yield_current   → 最新一期
+        # 词中当「流动」、结尾当「最新」。一律译成「当前」会得到
+        # 「总当前负债」这种既不是流动负债、也没人这么说的东西。
+        if tok == "current":
+            if idx == len(toks) - 1:
+                sufs.append("最新")
+            else:
+                mods.append("流动")
+            continue
+        if tok in _MOR_SKIP:
+            continue
+        m = _PERIOD_RE2.match(tok)
+        if m:
+            periods.append(m.group(1) + _MOR_UNIT[m.group(2)])
+            continue
+        if tok in _MOR_MOD:
+            mods.append(_MOR_MOD[tok]); continue
+        if tok in _MOR_HEAD:
+            heads.append(_MOR_HEAD[tok]); continue
+        if tok in _MOR_SUF:
+            sufs.append(_MOR_SUF[tok]); continue
+        return None              # 有一个词素不认识 → 整体放弃
+    if len(heads) != 1:
+        # 0 个头词 = 没认出核心概念;**2 个以上 = 固定搭配**,不能逐词拼。
+        # 实测反例:price_target_high 三个头词拼出「价格目标价最高价」,
+        # price_free_cash_flow_current 拼出「自由当前价格现金流量」——
+        # 每个词素都认识,拼起来却是胡话。认识词素 ≠ 拼得对。
+        # 这类术语要么进上面的精选表,要么就老老实实显示英文。
+        return None
+
+    # 「每股」「人均」在中文里是最外层的量词,必须排在其它修饰之前:
+    # total + 每股 + 负债 逐字拼是「总每股负债」,正确语序是「每股总负债」。
+    _OUTER = ("每股", "人均")
+    mods.sort(key=lambda w: 0 if w in _OUTER else 1)
+    core = "".join(periods) + "".join(mods) + "".join(heads)
+    # 同比 + 增长 合成一个词 —— 拆开写成「(同比·增长)」不像中文
+    if "同比" in sufs and "增长" in sufs:
+        sufs = ["同比增长"] + [x for x in sufs if x not in ("同比", "增长")]
+    elif "环比" in sufs and "增长" in sufs:
+        sufs = ["环比增长"] + [x for x in sufs if x not in ("环比", "增长")]
+    if sufs:
+        core += "(" + "·".join(sufs) + ")"
+    return core
+
+
+# ── 多词词干 ───────────────────────────────────────────────────
+#
+# 金融术语大多是固定搭配,逐词素拼必错(free + cash + flow 拼出「自由现金流量」,
+# return + on + equity 拼出「回报权益」)。这里把它们**整体**给译名,
+# 剩下的修饰/周期/后缀照旧由拼装逻辑处理 —— 于是
+#   free_cash_flow_per_share_fq → 每股 + 自由现金流 + (最近季)
+# 不用为每个周期变体单独列一条。
+#
+# 键是下划线连接的 token 序列,匹配时**取最长**。
+_MOR_STEM = {
+    # 利润表
+    "total_revenue": "营业总收入", "net_revenue": "营业收入净额",
+    "gross_profit": "毛利润", "oper_income": "营业利润",
+    "net_income": "净利润", "cost_of_goods": "营业成本",
+    "sell_gen_admin_exp_total": "销售管理费用",
+    "research_and_dev": "研发支出", "income_from_cont_ops": "持续经营利润",
+    "net_revenue_after_provision": "拨备后营业收入",
+    "pre_tax_income": "税前利润", "after_tax_income": "税后利润",
+    # 现金流
+    "free_cash_flow": "自由现金流", "operating_cash_flow": "经营现金流",
+    "cash_f_operating_activities": "经营活动现金流",
+    "cash_f_investing_activities": "投资活动现金流",
+    "cash_f_financing_activities": "筹资活动现金流",
+    "capital_expenditures": "资本开支",
+    "total_cash_dividends_paid": "现金分红总额",
+    # 资产负债表
+    "total_assets": "总资产", "total_debt": "总负债",
+    "total_liabilities": "负债合计", "total_equity": "股东权益",
+    "long_term_debt": "长期负债", "net_debt": "净负债",
+    "total_current_assets": "流动资产合计",
+    "total_current_liabilities": "流动负债合计",
+    "cash_n_equivalents": "现金及等价物",
+    "cash_n_short_term_invest": "现金及短期投资",
+    "working_capital": "营运资金", "book_value_per_share": "每股净资产",
+    "book_tangible_per_share": "每股有形净资产",
+    # 比率
+    "quick_ratio": "速动比率", "current_ratio": "流动比率",
+    "debt_to_equity": "产权比率", "debt_to_asset": "资产负债率",
+    "debt_to_revenue": "负债收入比",
+    "long_term_debt_to_assets": "长期负债资产比",
+    "return_on_equity": "净资产收益率", "return_on_assets": "总资产收益率",
+    "return_on_invested_capital": "投入资本回报率",
+    "return_on_capital_employed": "已动用资本回报率",
+    "return_on_common_equity": "普通股权益回报率",
+    "return_on_tang_equity": "有形权益回报率",
+    "return_on_tang_assets": "有形资产回报率",
+    "return_on_total_capital": "总资本回报率",
+    "asset_turnover": "总资产周转率", "fixed_assets_turnover": "固定资产周转率",
+    "invent_turnover": "存货周转率", "receivables_turnover": "应收账款周转率",
+    "interst_cover": "利息保障倍数",
+    "ebitda_interst_cover": "EBITDA利息保障倍数",
+    "ebitda_less_capex_interst_cover": "EBITDA减资本开支利息保障倍数",
+    "net_debt_to_ebitda": "净负债/EBITDA",
+    "effective_interest_rate_on_debt": "债务实际利率",
+    "research_and_dev_ratio": "研发费用率",
+    "dividend_payout_ratio": "股息支付率",
+    "cash_dividend_coverage_ratio": "现金股息保障倍数",
+    "ebitda_margin": "EBITDA利润率", "free_cash_flow_margin": "自由现金流利润率",
+    # 每股 / 股本 / 股东
+    "earnings_per_share_diluted": "稀释每股收益",
+    "earnings_per_share_basic": "基本每股收益",
+    "eps_diluted_growth_percent": "稀释每股收益增长率",
+    "dps_common_stock_prim_issue": "普通股每股股息",
+    "number_of_shareholders": "股东户数", "number_of_employees": "员工人数",
+    "dividends_yield": "股息率",
+    # 估值 / 评分
+    "price_sales": "市销率", "altman_z_score": "Altman Z 值",
+    "piotroski_f_score": "Piotroski F 值", "graham_numbers": "格雷厄姆数",
+    "ncavps_ratio": "净流动资产每股比",
+    # 预测
+    "earnings_per_share_forecast": "每股收益预测", "revenue_forecast": "营收预测",
+}
+
+# 技术指标 —— 这些是专有名词,不参与拼装,逐条给名
+_TECH_LABEL = {
+    "ADX": "ADX 趋向指标", "ADX+DI": "ADX +DI", "ADX-DI": "ADX -DI",
+    "ADR": "平均日波幅ADR", "ADRP": "平均日波幅%",
+    "ATR": "真实波幅ATR", "ATRP": "真实波幅%",
+    "AO": "动量震荡AO", "BBPower": "牛熊力量",
+    "CCI20": "CCI(20)", "ChaikinMoneyFlow": "蔡金资金流",
+    "MoneyFlow": "资金流MFI", "Mom": "动量", "Mom_14": "动量(14)",
+    "ROC": "变动率ROC", "UO": "终极震荡UO",
+    "VWAP": "成交量加权均价VWAP", "VWMA": "成交量加权均线VWMA",
+    "W.R": "威廉指标%R",
+    "HullMA9": "赫尔均线(9)", "HullMA20": "赫尔均线(20)", "HullMA200": "赫尔均线(200)",
+    "BB.upper": "布林带上轨", "BB.lower": "布林带下轨", "BB.basis": "布林带中轨",
+    "BB.upper_50": "布林带上轨(50)", "BB.lower_50": "布林带下轨(50)",
+    "BB.basis_50": "布林带中轨(50)",
+    "KltChnl.upper": "肯特纳通道上轨", "KltChnl.lower": "肯特纳通道下轨",
+    "KltChnl.basis": "肯特纳通道中轨",
+    "DonchCh20.Upper": "唐奇安通道上轨", "DonchCh20.Lower": "唐奇安通道下轨",
+    "DonchCh20.Middle": "唐奇安通道中轨",
+    "Stoch.K": "随机指标K", "Stoch.D": "随机指标D",
+    "Stoch.RSI.K": "随机RSI K", "Stoch.RSI.D": "随机RSI D",
+    "Aroon.Up": "Aroon 上升", "Aroon.Down": "Aroon 下降",
+    "P.SAR": "抛物线SAR",
+    "Ichimoku.CLine": "一目均衡·转换线", "Ichimoku.BLine": "一目均衡·基准线",
+    "Ichimoku.Lead1": "一目均衡·先行带A", "Ichimoku.Lead2": "一目均衡·先行带B",
+    "Recommend.All": "综合技术评级", "Recommend.MA": "均线评级",
+    "Recommend.Other": "震荡指标评级",
+    "High.All": "历史最高", "Low.All": "历史最低",
+    "High.All.Calc": "历史最高(计算)", "Low.All.Calc": "历史最低(计算)",
+    "Perf.All": "上市以来涨幅", "Perf.5D": "近5日涨幅",
+    "Value.Traded": "成交额",
+    "AvgValue.Traded_10d": "10日均成交额", "AvgValue.Traded_30d": "30日均成交额",
+    "AvgValue.Traded_60d": "60日均成交额", "AvgValue.Traded_90d": "90日均成交额",
+}
+
+# K 线形态 —— Candle.<形态>[.Bullish|.Bearish]
+_CANDLE = {
+    "3blackcrows": "三只乌鸦", "3whitesoldiers": "红三兵",
+    "abandonedbaby": "弃婴", "darkcloudcover": "乌云盖顶",
+    "doji": "十字星", "doji.dragonfly": "蜻蜓十字", "doji.gravestone": "墓碑十字",
+    "dojistar": "十字星孕育", "downsidetasukigap": "下降跳空并列阴线",
+    "upsidetasukigap": "上升跳空并列阳线",
+    "engulfing": "吞没形态", "eveningdojistar": "黄昏十字星",
+    "eveningstar": "黄昏之星", "morningdojistar": "早晨十字星",
+    "morningstar": "早晨之星",
+    "fallingthreemethods": "下降三法", "risingthreemethods": "上升三法",
+    "fallingwindow": "向下跳空缺口", "risingwindow": "向上跳空缺口",
+    "hammer": "锤子线", "hangingman": "上吊线", "invertedhammer": "倒锤子线",
+    "shootingstar": "流星线",
+    "harami": "孕线", "haramicross": "十字孕线",
+    "kicking": "反冲形态", "longshadow.lower": "长下影线",
+    "longshadow.upper": "长上影线",
+    "marubozu.black": "光头光脚阴线", "marubozu.white": "光头光脚阳线",
+    "onneck": "颈上线", "piercing": "刺透形态",
+    "spinningtop.black": "纺锤线(阴)", "spinningtop.white": "纺锤线(阳)",
+    "tristar": "三星形态", "tweezerbottom": "平底", "tweezertop": "平顶",
+}
+_DIR = {"bullish": "看涨", "bearish": "看跌"}
+
+
+def _candle_label(name: str) -> str | None:
+    """`Candle.Engulfing.Bullish` → 「K线·吞没形态(看涨)」。
+
+    形态名后面可能跟 Bullish/Bearish,也可能没有(Doji、Hammer 这类不分方向)。
+    形态本身认不出来就返回 None —— 不硬翻,免得把「三只乌鸦」译成别的东西。
+    """
+    if not name.startswith("Candle."):
+        return None
+    rest = name[len("Candle."):].lower()
+    direction = ""
+    for d, cn in _DIR.items():
+        if rest.endswith("." + d):
+            direction = cn
+            rest = rest[: -(len(d) + 1)]
+            break
+    cn = _CANDLE.get(rest)
+    if not cn:
+        return None
+    return "K线·" + cn + (f"({direction})" if direction else "")

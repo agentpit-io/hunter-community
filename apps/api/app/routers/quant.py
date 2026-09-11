@@ -22,7 +22,7 @@ from pydantic import BaseModel
 
 from app.services.database import get_conn
 from app.services.quant import factor_defs, strategy_engine, backtest_engine, factor_engine
-from app.services.quant import tv_screener
+from app.services.quant import screen_source
 from app.services.quant.screen_dsl import ScreenError
 
 try:
@@ -1170,7 +1170,7 @@ def _format_orders_csv(orders: list[dict], broker: str) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════
-# 全市场扫描筛选(TradingView 通道)
+# 全市场扫描筛选(外部扫描源通道)
 #
 #   GET  /quant/screener/meta            · 市场 / 预置脚本 / 语法说明
 #   GET  /quant/screener/fields          · 字段搜索(3777 个,只能搜不能列)
@@ -1178,7 +1178,7 @@ def _format_orders_csv(orders: list[dict], broker: str) -> str:
 #
 # 端点名不能叫 /scan —— 那个已经是「按因子打分选 Top N」了,两件事:
 # /scan 走站内 factor_value(A 股 · 有历史 · 能回测),
-# /screener 走 TradingView(全球 · 只有当前快照 · 不进回测)。
+# /screener 走外部扫描源(全球 · 只有当前快照 · 不进回测)。
 # 混在一起会让人以为扫描结果可以直接拿去跑回测。
 # ═══════════════════════════════════════════════════════════════
 
@@ -1195,21 +1195,21 @@ class ScreenIn(BaseModel):
 async def screener_meta():
     return {
         "markets": [
-            {"key": k, "label": tv_screener.MARKETS[k].label,
-             "currency": tv_screener.MARKETS[k].currency,
-             "note": tv_screener.MARKETS[k].note or None}
-            for k in tv_screener.MARKET_ORDER
+            {"key": k, "label": screen_source.MARKETS[k].label,
+             "currency": screen_source.MARKETS[k].currency,
+             "note": screen_source.MARKETS[k].note or None}
+            for k in screen_source.MARKET_ORDER
         ],
         "presets": [
             {"key": p["key"], "name": p["name"], "market": p["market"],
              "desc": p["desc"], "script": p["script"]}
-            for p in tv_screener.PRESETS
+            for p in screen_source.PRESETS
         ],
-        "source": "TradingView scanner(非官方接口 · 延迟 15 分钟)",
+        "source": "全市场扫描源(非官方接口 · 延迟 15 分钟)",
         "limits": [
-            tv_screener.DELAY_WARN,
+            screen_source.DELAY_WARN,
             "只有当前快照,没有历史序列 —— 结果不能用于回测,也不写进因子库。",
-            tv_screener.MARKET_CAP_WARN,
+            screen_source.MARKET_CAP_WARN,
         ],
     }
 
@@ -1218,6 +1218,9 @@ class ScreenParseIn(BaseModel):
     script: str = ""
     preset: str | None = None
     market: str = "us"
+    # 默认 False:脚本解析和本地关键词匹配都不花钱,AI 要用户点了「AI 识别」才走。
+    # 默认打开的话每一次手滑都在烧 token。
+    allow_ai: bool = False
 
 
 @router.post("/screener/parse")
@@ -1225,14 +1228,19 @@ async def screener_parse(body: ScreenParseIn):
     """脚本 → 可视化条件行。界面上点「生成」走这条,不拉行情。"""
     script = body.script or ""
     if body.preset and not script.strip():
-        p = tv_screener.preset(body.preset)
+        p = screen_source.preset(body.preset)
         if p is None:
             raise HTTPException(404, f"没有这个示例脚本:{body.preset}")
         script = p["script"]
     try:
         # to_thread 不能省:自然语言那条分支要调 LLM(秒级、同步阻塞),
         # 直接在 async 路由里跑会把整个事件循环卡住,别的用户的请求全在排队。
-        return await asyncio.to_thread(tv_screener.parse_script, script, body.market)
+        return await asyncio.to_thread(
+            screen_source.parse_script, script, body.market, body.allow_ai)
+    except screen_source.NeedsAI as e:
+        # 结构化 detail —— 前端据此弹「AI 识别」按钮。
+        # 让前端去匹配报错文本来判断"能不能试 AI"是一种迟早会断的耦合。
+        raise HTTPException(400, {"message": str(e), "can_try_ai": True})
     except ScreenError as e:
         raise HTTPException(400, str(e))
 
@@ -1241,7 +1249,7 @@ async def screener_parse(body: ScreenParseIn):
 async def screener_fields(market: str = "us", q: str = "", limit: int = 50):
     try:
         return {"market": market,
-                "fields": tv_screener.field_search(market, q, max(1, min(limit, 200)))}
+                "fields": screen_source.field_search(market, q, max(1, min(limit, 200)))}
     except ScreenError as e:
         raise HTTPException(400, str(e))
 
@@ -1250,14 +1258,14 @@ async def screener_fields(market: str = "us", q: str = "", limit: int = 50):
 async def screener_run(body: ScreenIn):
     script = body.script or ""
     if body.preset and not script.strip():
-        p = tv_screener.preset(body.preset)
+        p = screen_source.preset(body.preset)
         if p is None:
             raise HTTPException(404, f"没有这个示例脚本:{body.preset}")
         script = p["script"]
     try:
         # 同上 —— 拉全市场实测 1~3s,同步 httpx,不能占着事件循环
         return await asyncio.to_thread(
-            tv_screener.run_script,
+            screen_source.run_script,
             script, body.market, body.limit, body.sort_by, body.descending)
     except ScreenError as e:
         # 脚本写错、周期映射不了、上游挂了 —— 都是 400,message 直接给用户看。

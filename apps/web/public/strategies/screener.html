@@ -81,6 +81,15 @@
     .cd-hd .mk{background:#FDF3E7;color:#A85F17;border-radius:6px;padding:2px 9px;font-size:12px;font-weight:600}
     .cd-hd .ai-badge{background:#EDE4F7;color:#7B3FA8;border-radius:6px;padding:2px 9px;
       font-size:12px;font-weight:600}
+    .cd-hd .kw-badge{background:#E4F1E8;color:#2F7A52;border-radius:6px;padding:2px 9px;
+      font-size:12px;font-weight:600}
+    .kw-row{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:4px 0;
+      border-bottom:1px dashed var(--line,#E8E0D6)}
+    .kw-row:last-of-type{border-bottom:0}
+    .kw-src{font-size:12.5px;color:var(--text);min-width:150px}
+    .kw-arrow{color:var(--soft,#B9AFA2);font-size:12px}
+    .kw-expr{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;
+      background:#fff;border:1px solid var(--line,#E8E0D6);border-radius:5px;padding:2px 7px}
     details.ai-note{width:auto;max-width:760px;border-color:#DCEBFA;background:#F7FBFF}
     .ai-script{margin:8px 0 0;padding:9px 11px;background:#fff;border:1px solid #DCEBFA;
       border-radius:7px;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;
@@ -184,6 +193,16 @@
     .sc-fl span{background:var(--bg,#FAF7F3);border-radius:5px;padding:3px 7px;cursor:pointer;
       font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--text)}
     .sc-fl span:hover{background:#FDF3E7;color:#A85F17}
+    /* 有中文名的用正文字体(等宽体排中文很丑),并留一点标记表示可悬停看英文 */
+    .sc-fl span.cn{font-family:inherit;font-size:12px;border-bottom:1px dotted var(--soft,#B9AFA2)}
+    /* 族标签:一眼看出这是一组,右上角是周期个数 */
+    .sc-fl span.fam{font-family:inherit;font-size:12px;background:#EDE4F7;color:#7B3FA8;
+      border-bottom:0;font-weight:600}
+    .sc-fl span.fam b{margin-left:5px;font-size:10px;background:#7B3FA8;color:#fff;
+      border-radius:8px;padding:0 5px;font-weight:600}
+    .sc-fl span.fam.on{background:#7B3FA8;color:#fff}
+    .sc-fl span.fam.on b{background:#fff;color:#7B3FA8}
+    .sc-fl span.sub{margin-left:2px;background:#F6F1FB}
 
     .sc-runbar{display:flex;flex-wrap:wrap;gap:9px;align-items:center;margin-top:14px}
     /* 左右留边 —— 与 agent.html 的 .ag-wrap 同一套(padding:0 20px 40px)。
@@ -259,6 +278,11 @@ const S = {
   editing: null,             // 正在编辑原文的条件名
   pending: '',               // 正在生成的那段原文(S.input 会被清空,按钮文案要靠它)
   ai: null,                  // 这批条件是 AI 翻的话:{model, script, source_text, ...}
+  kw: null,                  // 这批条件是本地关键词匹配出来的话:{matched, script, ...}
+  fieldRows: [],             // 字段搜索结果(含折叠的族)
+  fieldOpen: {},             // 哪些族被点开了
+  canTryAi: false,           // 本地两条路都不通 —— 弹「AI 识别」按钮问用户要不要花 token
+  aiText: '',                // 点 AI 识别时要重发的原文
   generating: false, running: false,
   genError: null, runError: null,
   result: null,
@@ -314,7 +338,7 @@ function referenced(name, exceptIdx) {
 // 清掉没人引用的中间变量。
 //
 // 变量在界面上不显示,所以一旦没人引用就成了**看不见又删不掉**的死代码:
-// 它还会白白多请求一列 TradingView 字段。删条件/改表达式之后必须跑一次。
+// 它还会白白多请求一列扫描源字段。删条件/改表达式之后必须跑一次。
 // 循环到不动为止 —— 变量可以引用变量(def a = …; def b = a * 2;),
 // 删掉 b 之后 a 才变成孤儿。
 //
@@ -384,7 +408,20 @@ function vMagic() {
     '</div>' +
     '<div class="mg-eg" id="mg-eg">' + chips + '</div>' +
     '</div>' +
-    (S.genError ? '<div class="sc-err">' + esc(maskSrc(S.genError)) + '</div>' : '') +
+    // 本地认不出来时**不直接烧 token**,把「AI 识别」摆出来让用户自己决定。
+    // 按钮上写清「会消耗 token」—— 花钱的动作必须是用户明示的。
+    (S.genError
+      ? '<div class="sc-err">' + esc(maskSrc(S.genError)) +
+        (S.canTryAi
+          ? '<div class="sc-runbar" style="margin-top:9px">' +
+              '<button class="btn small" id="mg-ai"' + (S.generating ? ' disabled' : '') + '>' +
+                (S.generating ? '识别中…' : '✨ 用 AI 识别') + '</button>' +
+              '<span style="font-size:11.5px;color:#9B2C2C">' +
+                '本地关键词没认出来 · AI 识别会消耗 token,点了才调用</span>' +
+            '</div>'
+          : '') +
+        '</div>'
+      : '') +
     (S.metaErr ? '<div class="sc-err">读不到扫描配置:' + esc(maskSrc(S.metaErr)) +
       '\n后端可能还没部署 /api/quant/screener/*。界面骨架照常显示,但生成和扫描都会失败。</div>' : '')
 }
@@ -456,8 +493,9 @@ function vConditions() {
   return '<div class="cd-hd">股票需<b>同时满足</b>以下<b>' + onCount + '</b> 个条件' +
       (mk ? '<span class="mk">' + esc(mk.label) + '</span>' : '') +
       (S.ai ? '<span class="ai-badge">AI 翻译</span>' : '') +
+      (S.kw ? '<span class="kw-badge">本地识别</span>' : '') +
     '</div>' +
-    vAiNote() +
+    vKwNote() + vAiNote() +
     (S.combine === 'custom'
       ? '<div class="sc-warn">这个脚本的最终条件不是「若干条件全部满足」,而是自定义组合:' +
         '<code>' + esc(S.plotExpr) + '</code>。所以下面每一条不能单独停用 —— ' +
@@ -478,11 +516,47 @@ function vConditions() {
 //   · 提示条(notes / warnings)—— 整条丢掉。它们本来就只是提醒。
 //   · 报错文案 —— 只把名字换掉,不能整条丢:丢了用户就不知道为什么失败了。
 const SRC_ALIAS = '行情源'
+// 要挡掉的提示,按**内容前缀**匹配 —— 不能再按厂商名匹配了:
+// 2026-09-10 后端把文案里的厂商名换成中性词之后,按名字过滤的规则当场失效,
+// 这两条提示又冒回页面上。用前缀是脆的,所以规则写在这里、并在后端那两个
+// 常量(DELAY_WARN / MARKET_CAP_WARN)旁边留了指向本处的注释:改文案要同步改这里。
+const DROP_PREFIX = ['免订阅通道数据延迟', 'market_cap_basic 是']
 function dropSrc(list) {
-  return (list || []).filter(function (w) { return String(w).indexOf('TradingView') < 0 })
+  return (list || []).filter(function (w) {
+    const t = String(w)
+    if (t.indexOf('TradingView') >= 0) return false          // 兜底:万一哪里漏改
+    return !DROP_PREFIX.some(function (p) { return t.indexOf(p) === 0 })
+  })
 }
 function maskSrc(s) {
   return String(s == null ? '' : s).replace(/TradingView/g, SRC_ALIAS)
+}
+
+// 本地关键词匹配的可审计凭据:哪一句变成了哪个表达式。
+// 规则匹配不会像模型那样瞎编,但会**理解偏**(比如把"量"当成成交量而不是量比),
+// 所以逐句对照必须摆出来 —— 和 AI 那份一个道理。
+function vKwNote() {
+  if (!S.kw) return ''
+  const rows = (S.kw.matched || []).map(function (m) {
+    return '<div class="kw-row"><span class="kw-src">' + esc(m.text) + '</span>' +
+      '<span class="kw-arrow">→</span>' +
+      '<code class="kw-expr">' + esc(m.expr) + '</code></div>'
+  }).join('')
+  // 有损近似(「上穿」只能按"当前在上方"判断)**不能**放进折叠区,也不能走
+  // parseWarnings —— 生成之后前端会再 reparse 一次脚本,脚本走不到关键词分支,
+  // warnings 会被覆盖成没有这条(2026-09-11 实测:接口返回了,页面上没有)。
+  // 挂在 S.kw 上,reparse 之后 generate 会把它补回来。
+  const lossy = (S.kw.notes || []).length
+    ? '<div class="sc-warn"><ul>' + S.kw.notes.map(function (n) {
+        return '<li>' + esc(maskSrc(n)).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>') + '</li>'
+      }).join('') + '</ul></div>'
+    : ''
+  return lossy + '<details class="sc-fold ai-note"><summary>' +
+      '本地识别把「' + esc(String(S.kw.source_text || '').slice(0, 40)) +
+      '」拆成了这些条件 · 点开逐句对照' +
+    '</summary>' + rows +
+    '<div class="sc-note">关键词匹配,<b>未使用 AI、零成本</b>。' +
+    '理解偏了的话直接改下面的条件,或者换个说法重新生成。</div></details>'
 }
 
 // AI 翻译的可审计凭据:原话 + 它实际写出来的脚本。
@@ -628,7 +702,10 @@ function bind() {
     })
   }
   const gen = document.getElementById('mg-gen')
-  if (gen) gen.addEventListener('click', generate)
+  if (gen) gen.addEventListener('click', function () { generate() })
+  // 唯一会花 token 的入口
+  const aiBtn = document.getElementById('mg-ai')
+  if (aiBtn) aiBtn.addEventListener('click', function () { generate(true) })
 
   const mode = document.getElementById('mg-mode')
   if (mode) mode.addEventListener('click', function (e) {
@@ -712,7 +789,7 @@ function bind() {
 // 那个端点内部按代码形态分派(A 股走 finance-data,港美股走免费通道),
 // 2026-09-10 实测三个市场都能拿到 250 根:600519 / 00700 / NVDA。
 // 筛选结果的 code 与 market_source.market_of 的格式是**有意对齐**的
-// (见 tv_screener._normalize_code 的注释),所以能直接喂,不用转换。
+// (见 screen_source._normalize_code 的注释),所以能直接喂,不用转换。
 //
 // 四个体验点,少一个都不像样:
 //   1. 悬停 180ms 才请求 —— 否则鼠标扫过一列会连打几十个请求
@@ -1054,11 +1131,25 @@ function applyParsed(d) {
   // 手工改过之后就不再是"AI 那次翻译的结果"了,徽标跟着清掉 ——
   // 留着会让人以为下面展示的脚本还是当前这套条件(generate 里会再设回去)
   S.ai = d.ai || null
+  S.kw = d.kw || null
   S.combine = d.combine || 'all'
   S.plotName = d.plot_name || 'scan'
   S.plotExpr = d.combine === 'custom' ? (d.plot_expr || '') : ''
   S.notes = d.notes || []
   S.parseWarnings = d.warnings || []
+}
+
+// 后端的 detail 现在可能是对象:NeedsAI 会带 {message, can_try_ai}。
+// 老的字符串形式也还在(普通 ScreenError),两种都要认。
+function errOf(r, fallback) {
+  const d = r && r.data
+  const det = d && d.detail
+  if (det && typeof det === 'object') return det.message || fallback
+  return det || (d && d.error) || fallback
+}
+function canAi(r) {
+  const det = r && r.data && r.data.detail
+  return !!(det && typeof det === 'object' && det.can_try_ai)
 }
 
 async function reparse(script) {
@@ -1067,7 +1158,8 @@ async function reparse(script) {
   }
   const r = await post(PARSE_API, { script: script, market: S.market })
   if (!r.ok) {
-    S.genError = (r.data && (r.data.detail || r.data.error)) || ('解析失败 · HTTP ' + r.status)
+    S.genError = errOf(r, '解析失败 · HTTP ' + r.status)
+    S.canTryAi = false
     render(); return
   }
   S.genError = null
@@ -1077,8 +1169,10 @@ async function reparse(script) {
   saveDraft(); render()
 }
 
-async function generate() {
-  const text = (S.input || '').trim()
+async function generate(allowAi) {
+  // allowAi=true 只可能来自用户点「AI 识别」。生成按钮永远传 undefined,
+  // 所以正常点生成**一分钱都不花**:后端先试脚本、再试本地关键词。
+  const text = allowAi ? (S.aiText || '') : (S.input || '').trim()
   if (!text) { S.genError = '生成框是空的。把筛选脚本粘进来,或者点一个示例。'; render(); return }
   const appending = (S.mode === 'append' && S.conditions.length > 0)
 
@@ -1091,15 +1185,18 @@ async function generate() {
     render(); return
   }
 
-  S.generating = true; S.genError = null; S.pending = text; render()
+  S.generating = true; S.genError = null; S.canTryAi = false; S.pending = text; render()
   // **先单独解析新脚本**,拿到它自己的条件对象再合并 ——
   // 早先的做法是把两段脚本用字符串拼起来(还得把旧的 plot 降级成 def),
   // 实测会把脚本绞成 `def scan2 = … and scan and cond_pe;`,而且 400 之后
   // 用户完全看不出发生了什么。结构化合并没有这类惊喜。
-  const r = await post(PARSE_API, { script: text, market: S.market })
+  const r = await post(PARSE_API, { script: text, market: S.market, allow_ai: !!allowAi })
   S.generating = false
   if (!r.ok) {
-    S.genError = (r.data && (r.data.detail || r.data.error)) || ('生成失败 · HTTP ' + r.status)
+    S.genError = errOf(r, '生成失败 · HTTP ' + r.status)
+    // 后端说"本地两条路都不通,可以试 AI" → 把原文记下来,弹按钮等用户点
+    S.canTryAi = canAi(r)
+    S.aiText = S.canTryAi ? text : ''
     render(); return
   }
   const d = r.data
@@ -1119,11 +1216,13 @@ async function generate() {
     mergeAppend(fresh)
   }
   S.input = ''
+  S.canTryAi = false; S.aiText = ''
   S.result = null; S.probe = {}
   // 回写再解析一次 —— 保证 tokens / is_bool 与后端完全一致(合并后名字可能改过)。
   // reparse 送的是脚本,不会再触发 AI,所以 d.ai 要在这之后补回去。
   await reparse(buildScript())
   S.ai = d.ai || null
+  S.kw = d.kw || null
   render()
 }
 
@@ -1217,13 +1316,51 @@ async function searchFields() {
   if (!fs.length) { list.innerHTML = '<span class="sc-na">没有匹配的字段</span>'; return }
   // 只写内容,不挂监听 —— 监听在 bind() 里挂一次(2026-09-10:原来每次搜完都再挂一个,
   // 连搜三次后点一个字段会插三份)
-  list.innerHTML = fs.map(function (f) {
-    return '<span data-f="' + esc(f) + '">' + esc(f) + '</span>'
+  // 显示中文名、鼠标悬停出英文原名;**插进脚本的永远是英文字段名**
+  // (DSL 只认英文,插中文进去必然解析失败)。
+  // 后端拿不准时 label 为 null,这里就照旧显示英文 —— 半吊子翻译更误导。
+  S.fieldRows = fs
+  S.fieldOpen = {}          // 换了关键词就把展开状态清掉
+  paintFields()
+}
+
+// 把搜索结果画出来。只有数字不同的字段(EMA10…EMA300)后端已经折叠成一族,
+// 这里画成一个可点开的族标签 —— 不折叠的话搜个 "e" 就被 31 个 EMA 刷满整屏。
+function paintFields() {
+  const list = document.getElementById('sc-fd-list')
+  if (!list) return
+  const rows = S.fieldRows || []
+  const html = rows.map(function (f) {
+    const name = (typeof f === 'string') ? f : (f && f.name)
+    if (!name) return ''
+    if (f.members && f.members.length) {
+      const open = !!S.fieldOpen[f.family]
+      const head = '<span class="fam' + (open ? ' on' : '') + '" data-fam="' + esc(f.family) + '"' +
+        ' title="' + esc(f.family) + ' · ' + f.count + ' 个周期,点开选">' +
+        esc(f.label || f.family) + '<b>' + f.count + '</b></span>'
+      if (!open) return head
+      return head + f.members.map(function (m) {
+        return '<span data-f="' + esc(m.name) + '" title="' + esc(m.name) + '"' +
+          (m.label ? ' class="cn sub"' : ' class="sub"') + '>' + esc(m.label || m.name) + '</span>'
+      }).join('')
+    }
+    const label = f.label || ''
+    return '<span data-f="' + esc(name) + '" title="' + esc(name) + '"' +
+      (label ? ' class="cn"' : '') + '>' + esc(label || name) + '</span>'
   }).join('')
+  list.innerHTML = html || '<span class="sc-na">没有匹配的字段</span>'
 }
 
 function insertField(e) {
-  const s = e.target && e.target.dataset ? e.target.dataset.f : null
+  const t = e.target
+  // 族标签:点开/收起,不插入。族里的周期各不相同,替用户挑一个是瞎猜。
+  const fam = t && t.dataset ? t.dataset.fam : null
+  if (fam) {
+    S.fieldOpen[fam] = !S.fieldOpen[fam]
+    paintFields()
+    return
+  }
+  const s = t && t.dataset ? t.dataset.f : null
   if (!s) return
   const ed = document.getElementById('mg-input')
   if (!ed) return
