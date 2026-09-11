@@ -105,7 +105,9 @@ def collect() -> dict:
                                          || coalesce(raw_value::text,'') || coalesce(z_score::text,'')
                                          || coalesce(pct_rank::text,''),
                                          '|' ORDER BY trade_date, factor_key, code)), count(*)
-                     FROM factor_value WHERE trade_date <= %s""", (END,))
+                     FROM factor_value WHERE trade_date <= %s AND market = 'A'""", (END,))
+    # market='A':美股因子行(2026-09-11 起写 'US')不能算进 A 股校验和,否则一下美股就误报。
+    # 基线是在库里还只有 A 股时录的(那时全表都是 'A'),加这个条件后基线值不变
     md5, n = cur.fetchone()
     res["aux"]["factor_value"] = {"md5": md5, "rows": n}
     cur.close()

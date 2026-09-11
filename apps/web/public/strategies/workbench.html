@@ -153,6 +153,9 @@ function renderMiddlePanel() {
               <option value="hs300"        ${cfg.universe==='hs300'?'selected':''}>沪深 300（推荐）</option>
               <option value="zz500"        ${cfg.universe==='zz500'?'selected':''}>中证 500</option>
               <option value="my_watchlist" ${cfg.universe==='my_watchlist'?'selected':''}>我的自选</option>
+              <!-- 美股(2026-09-11):= 用户在数据页下过的全美股。没下载时置灰并指路,
+                   不让人选了之后才被告知"股票池是空的" -->
+              <option value="us_all" id="opt-us-all" ${cfg.universe==='us_all'?'selected':''}>美股 · 全美股(已下载)</option>
             </select>
           </div>
           <div class="field" style="margin:0">
@@ -181,6 +184,7 @@ function renderMiddlePanel() {
           <div class="field" style="margin:0">
             <div class="lbl">单边成本</div>
             <select data-cfg="cost_bps">
+              <option value="5" ${cfg.cost_bps===5?'selected':''}>5 bps(美股推荐)</option>
               <option value="10" ${cfg.cost_bps===10?'selected':''}>10 bps</option>
               <option value="15" ${cfg.cost_bps===15?'selected':''}>15 bps（推荐）</option>
               <option value="25" ${cfg.cost_bps===25?'selected':''}>25 bps</option>
@@ -189,11 +193,7 @@ function renderMiddlePanel() {
         </div>
         <div class="field" style="margin-top:12px;margin-bottom:0">
           <div class="lbl">基准</div>
-          <select data-cfg="benchmark">
-            <option value="000300" ${cfg.benchmark==='000300'?'selected':''}>沪深 300（000300）</option>
-            <option value="000905" ${cfg.benchmark==='000905'?'selected':''}>中证 500（000905）</option>
-            <option value="399006" ${cfg.benchmark==='399006'?'selected':''}>创业板指（399006）</option>
-          </select>
+          <select data-cfg="benchmark" id="sel-benchmark">${benchOptions(cfg)}</select>
         </div>
       </div>
 
@@ -437,7 +437,7 @@ async function refreshPicks() {
       <thead><tr><th class="rk">#</th><th>股票</th><th class="num">综合分</th></tr></thead>
       <tbody>${picks.map((p, i) => `
         <tr><td class="rk">${i+1}</td>
-            <td><b>${p.name || p.code}</b><div class="cd">${p.code} · A 股</div></td>
+            <td><b>${p.name || p.code}</b><div class="cd">${p.code} · ${isUsCode(p.code) ? '美股' : 'A 股'}</div></td>
             <td class="num score">${p.score.toFixed(3)}</td>
         </tr>`).join('')}</tbody>
     </table>`
@@ -556,6 +556,16 @@ bindLeft()
   bindLeft()
 })()
 
+// 基准选项跟着股票池走:美股池只给标普 500,A 股池只给 A 股指数。
+// 混着给的话,美股策略对沪深 300 算超额 —— 数字照样出,但两地交易日都对不上,毫无意义
+// (后端也会拒绝给基准并说明,这里是不让人选错)
+function benchOptions(cfg) {
+  const list = cfg.universe === 'us_all'
+    ? [['.INX', '标普 500(美股)']]
+    : [['000300', '沪深 300（000300）'], ['000905', '中证 500（000905）'], ['399006', '创业板指（399006）']]
+  return list.map(([v, t]) => `<option value="${v}" ${cfg.benchmark === v ? 'selected' : ''}>${t}</option>`).join('')
+}
+
 // 配置 select
 document.querySelectorAll('select[data-cfg]').forEach(sel => {
   sel.addEventListener('change', e => {
@@ -563,10 +573,35 @@ document.querySelectorAll('select[data-cfg]').forEach(sel => {
     let val = sel.value
     if (key === 'top_n' || key === 'cost_bps') val = parseInt(val, 10)
     draft.config[key] = val
+    // 换股票池跨了市场 → 基准和成本一起换成该市场的默认(美股费率约 5 bps,A 股 15 bps)
+    if (key === 'universe') {
+      const us = val === 'us_all'
+      if (us && draft.config.benchmark !== '.INX') { draft.config.benchmark = '.INX'; draft.config.cost_bps = 5 }
+      if (!us && draft.config.benchmark === '.INX') { draft.config.benchmark = '000300'; draft.config.cost_bps = 15 }
+      const bs = document.getElementById('sel-benchmark')
+      if (bs) bs.innerHTML = benchOptions(draft.config)
+      const cs = document.querySelector('select[data-cfg="cost_bps"]')
+      if (cs) cs.value = String(draft.config.cost_bps)
+    }
     saveDraft(draft)
     toast(`已切换 · ${sel.options[sel.selectedIndex].text}`)
   })
 })
+
+// 美股池的只数 —— 没下载就置灰并指路到数据页
+;(async function markUsOption() {
+  try {
+    const o = await fetch('/api/quant/data/overview').then(r => r.json())
+    const opt = document.getElementById('opt-us-all')
+    if (!opt) return
+    const n = (o.us && o.us.stocks) || 0
+    if (n) opt.textContent = `美股 · 全美股(已下载 ${n} 只)`
+    else if (draft.config.universe !== 'us_all') {
+      opt.disabled = true
+      opt.textContent = '美股 · 还没下载(到「数据」页选美股下载)'
+    }
+  } catch (e) { /* 拿不到就保持原样,后端会在回测时说明池子是空的 */ }
+})()
 
 // 顶部 · 问 Hunter
 document.getElementById('btn-ask').addEventListener('click', askHunterFromWorkbench)
@@ -737,7 +772,7 @@ async function refreshCorrelation() {
       w.innerHTML = `⚠ 高相关(>0.7):${pairs} · 建议保留其一 · 权重合并`
     } else {
       w.style.background = 'var(--tag-ok-bg)'; w.style.color = 'var(--tag-ok-fg)'
-      w.innerHTML = `✓ 因子分散良好 · 无高相关对 · 覆盖 ${d.n_codes} 只 hs300`
+      w.innerHTML = `✓ 因子分散良好 · 无高相关对 · 覆盖 ${d.n_codes} 只 ${UNIVERSE_NAME[draft.config.universe] || draft.config.universe || ''}`
     }
   } catch (e) {
     console.warn('[corr] fetch failed', e)

@@ -466,7 +466,9 @@ async def scan(body: ScanIn, request: Request):
         return {"trade_date": trade_date.isoformat(), "picks": [],
                 "reason": _uv.describe_universe(ukey, 0, str(uid) if uid else None)}
     keys = [f["key"] for f in body.factors if f.get("weight_pct", 0) > 0]
-    rep = backtest_engine.factor_data_report(keys, trade_date - timedelta(days=45), trade_date)
+    from app.services.quant.market import market_of_universe
+    rep = backtest_engine.factor_data_report(keys, trade_date - timedelta(days=45), trade_date,
+                                             market=market_of_universe(ukey))
     miss = [f["name"] for f in rep if not f["ok"]]
     return {"trade_date": trade_date.isoformat(), "picks": [],
             "reason": (f"股票池有 {len(pool)} 只,但这些因子没有数据:"
@@ -1115,6 +1117,7 @@ async def generate_orders(body: OrdersGenIn):
 
     name_map = strategy_engine.fetch_stock_names(codes)
 
+    from app.services.quant.market import US, market_of_code
     orders = []
     for p in positions:
         code = p.get("code")
@@ -1123,8 +1126,11 @@ async def generate_orders(body: OrdersGenIn):
         if not price or price <= 0 or weight <= 0:
             continue
         amount = body.total_capital * weight
-        qty = int(amount / price / 100) * 100
-        if qty < 100:
+        # 一手股数:A 股 100 股,美股 1 股(2026-09-11)。按 100 取整的话,
+        # 几百美元一股的票小资金直接被取整成 0 股、整笔消失
+        lot = 1 if market_of_code(code) == US else 100
+        qty = int(amount / price / lot) * lot
+        if qty < lot:
             continue
         orders.append({
             "code": code,

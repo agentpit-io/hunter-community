@@ -369,7 +369,8 @@ container.innerHTML = `
     </div>
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:12px">
       <div class="field">
-        <div class="lbl" style="font-size:11px;color:var(--muted);margin-bottom:4px">总资金(元)</div>
+        <!-- 美股池:金额是美元、1 股起买(后端 orders/generate 按市场取整) -->
+        <div class="lbl" style="font-size:11px;color:var(--muted);margin-bottom:4px">总资金(${cfg.universe === 'us_all' ? '美元 · 1 股起买' : '元'})</div>
         <input type="number" id="ord-capital" class="input" value="100000" step="1000" min="1000" />
       </div>
       <div class="field">

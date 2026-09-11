@@ -63,6 +63,15 @@ INDEX_CODES: dict[str, tuple[str, str]] = {
 }
 
 
+
+# 美股基准(2026-09-11)。**不放进 INDEX_CODES** —— A 股的每日指数任务遍历 INDEX_CODES,
+# 按 sh/sz 前缀去 web.ifzq 取数,.INX 混进去会被拼成 sh.INX。
+# .INX 由 us_kline 随美股下载 / 每晚刷新写进 klines(code='.INX'),见 market.py。
+US_INDEX_CODES: dict[str, tuple[str, str]] = {".INX": ("us.INX", "标普 500")}
+# 回测能选的全部基准
+BENCHMARKS: dict[str, tuple[str, str]] = {**INDEX_CODES, **US_INDEX_CODES}
+
+
 def is_index(code: str) -> bool:
     return code in INDEX_CODES
 

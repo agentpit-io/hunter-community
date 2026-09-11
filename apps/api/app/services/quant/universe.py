@@ -266,7 +266,9 @@ def reconcile_current(index_code: str) -> dict:
 # 而回落是**不吭声**的:用户以为自己在测全市场,实际测的是那 301 只。
 # 这和回测空仓时照样出成绩单是同一类问题 —— 宁可说"这个池子还没有数据",
 # 也不要给一份看不出是错的结果。
-SUPPORTED_UNIVERSES = {"hs300", "zz500", "my_watchlist"}
+SUPPORTED_UNIVERSES = {"hs300", "zz500", "my_watchlist", "us_all"}
+# us_all(2026-09-11)= 用户在数据页下过的美股全体。不是一个指数 —— 没有历史成分,
+# 用的是下载那天的上市名单,见 quality_at 里的幸存者偏差说明。
 
 # 定时任务和回填要覆盖的全集 —— **必须和 SUPPORTED_UNIVERSES 对得上**。
 #
@@ -344,6 +346,9 @@ def resolve(universe_key: str, on_date: date | None = None, user_id: str | None 
         finally:
             cur.close(); conn.close()
 
+    if universe_key == "us_all":
+        return covered_codes("us")
+
     if universe_key in INDEX_MAP:
         index_code, _ = INDEX_MAP[universe_key]
         codes = query_active_at(index_code, on_date) if on_date else query_current(index_code)
@@ -381,10 +386,12 @@ def describe_universe(universe_key: str, n: int, user_id: str | None = None) -> 
         # 现在自选股是对话页左侧的第二个 tab。指向一个不存在的入口比不指路更糟。
         return ("「我的自选」是空的 —— 先到对话页左侧「⭐ 自选股」加几只股票,"
                 "或者换成沪深 300 / 中证 500。") if user_id else "「我的自选」需要先登录。"
+    if universe_key == "us_all":
+        return "还没有下载美股数据 —— 到「数据」页选「美股 · 全美股」下载后再回测。"
     if universe_key in SUPPORTED_UNIVERSES:
         return f"{universe_key} 的成分股还没有同步 —— 稍后再试。"
     return (f"暂不支持「{universe_key}」这个股票池。"
-            f"目前支持:沪深 300、中证 500、我的自选。")
+            f"目前支持:沪深 300、中证 500、我的自选、美股(已下载)。")
 
 
 def quality_at(universe_key: str, on_date: date) -> dict:
@@ -402,6 +409,12 @@ def quality_at(universe_key: str, on_date: date) -> dict:
 
     返回给回测结果带上,前端据此显示一句提示。
     """
+    if universe_key == "us_all":
+        # 美股池是**下载那天**的名单(交易所上市、市值 ≥5000 万美元)。回测期间退市、
+        # 被收购、跌破门槛的票都不在里面 —— 收益会偏乐观,必须让用户知道
+        return {"survivorship_ok": False, "source": "us_download",
+                "note": ("美股池用的是下载当天仍在上市、市值 ≥5000 万美元的股票 —— "
+                         "回测期间退市、被收购或跌破门槛的票不在里面,回测收益会偏高(幸存者偏差)。")}
     if universe_key not in INDEX_MAP:
         # 自选股/全 A —— 本来就没有历史成分的概念,不存在这个问题
         return {"survivorship_ok": True, "source": "stocks",

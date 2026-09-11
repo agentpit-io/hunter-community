@@ -156,6 +156,39 @@ for (const page of PAGES) {
   }
 }
 
+// ─── 美股池(2026-09-11)────────────────────────────────────────
+// 美股策略对沪深300 算超额 = 数字照出、毫无意义。基准选项必须跟着股票池走
+try {
+  const ctx = vm.createContext(makeContext('workbench.html'))
+  vm.runInContext(appJs, ctx, { filename: 'app.js' })
+  inlineScripts(fs.readFileSync(path.join(DIR, 'workbench.html'), 'utf8'))
+    .forEach((src, i) => vm.runInContext(src, ctx, { filename: `workbench#${i + 1}` }))
+  vm.runInContext(`
+    var US_OPTS = benchOptions({ universe: 'us_all', benchmark: '.INX' })
+    var A_OPTS = benchOptions({ universe: 'hs300', benchmark: '000300' })
+    draft.config = { universe: 'us_all', top_n: 20, rebalance: 'M', cost_bps: 5, benchmark: '.INX' }
+    var US_PANEL = renderMiddlePanel()
+    var MKT = [isUsCode('AAPL'), isUsCode('BRK.A'), isUsCode('600519'), isUsCode('.INX')]
+    var NAMES_OK = !!UNIVERSE_NAME.us_all && BENCHMARK_NAME['.INX'] === '标普 500'
+  `, ctx, { filename: 'assert-us' })
+  // ↑ app.js 里的 const 不会挂到 vm 的全局对象上,只能在脚本里面取值再用 var 带出来
+  const checks = [
+    ['美股池的基准只有标普500', /\.INX/.test(ctx.US_OPTS) && !/000300/.test(ctx.US_OPTS)],
+    ['A 股池的基准里没有标普500', /000300/.test(ctx.A_OPTS) && !/\.INX/.test(ctx.A_OPTS)],
+    ['美股池配置面板能渲染、选中美股池', /value="us_all"[^>]*selected/.test(ctx.US_PANEL)],
+    ['美股池默认 5 bps 被选中', /value="5" selected/.test(ctx.US_PANEL)],
+    ['代码判市场与后端同口径', JSON.stringify(ctx.MKT) === '[true,true,false,true]'],
+    ['名称表有美股池与标普500', ctx.NAMES_OK === true],
+  ]
+  for (const [name, ok] of checks) {
+    if (ok) console.log('PASS 美股池 ·', name)
+    else { failed++; console.log('FAIL 美股池 ·', name) }
+  }
+} catch (e) {
+  failed++
+  console.log('FAIL 美股池 · 断言脚本本身出错 ·', e && e.stack ? e.stack.split('\n')[0] : e)
+}
+
 // ─── 针对因子参数的定向断言 ───────────────────────────────────────
 // 光"跑起来了"不够:参数区是这次改动的重点,要确认它真的渲染出了输入框。
 // 后端接口在这里是不通的,所以直接把一份 spec 塞进去,验证渲染分支。

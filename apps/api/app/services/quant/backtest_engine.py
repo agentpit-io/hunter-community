@@ -64,7 +64,11 @@ class TradeRecord:
 
 
 def _suffix_code(code: str) -> str:
-    """裸 code 补市场后缀 · 与 daily_close view 同一套规则(6 开头 → 沪 · 余 → 深)"""
+    """裸 code 补市场后缀 · 与 daily_close view 同一套规则(6 开头 → 沪 · 余 → 深)。
+    美股(2026-09-11)补 .US —— 原来一律按 A 股规则,AAPL 会被记成 AAPL.SZ 存进交易记录"""
+    from app.services.quant.market import US, market_of_code
+    if market_of_code(code) == US:
+        return code + ".US"
     return code + (".SH" if code.startswith("6") else ".SZ")
 
 
@@ -155,25 +159,48 @@ def _price_and_adv(codes: list[str], dt: date) -> dict:
     返回 {code: (price, adv_20d)} · price/adv 可能为 None(停牌/新股/数据缺)。
     直接算 amount = close × volume × 100(volume 单位是手)· 与 daily_close view 同口径。
     拿不到就给 None —— 上层跳过这笔 · 不编造价格。
+
+    美股(2026-09-11)volume 本来就是股,**不乘 100**,单独一条查询 ——
+    乘了的话日均成交额大 100 倍,sqrt 冲击成本小 10 倍。A 股那条 SQL 原样不动
+    (科创板 688 其实也是股、这里照乘 100,是已知的老问题,改了会让 A 股 sqrt_impact 回测结果变)。
     """
     if not codes:
         return {}
+    from app.services.quant import market as _mk
+    groups = _mk.split_by_market(codes)
+    rows = []
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute(
-        """SELECT c.code,
-             (SELECT close FROM klines k WHERE k.code=c.code AND k.period='daily'
-                AND k.ts <= %s AND k.close IS NOT NULL
-              ORDER BY k.ts DESC LIMIT 1) AS px,
-             (SELECT AVG(close * volume * 100) FROM (
-                SELECT close, volume FROM klines k WHERE k.code=c.code AND k.period='daily'
-                  AND k.ts <= %s AND k.close IS NOT NULL AND k.volume IS NOT NULL
-                ORDER BY k.ts DESC LIMIT 20
-              ) s) AS adv
-           FROM (SELECT unnest(%s::text[]) AS code) c""",
-        (dt, dt, codes),
-    )
-    rows = cur.fetchall()
+    if groups.get(_mk.A):
+        cur.execute(
+            """SELECT c.code,
+                 (SELECT close FROM klines k WHERE k.code=c.code AND k.period='daily'
+                    AND k.ts <= %s AND k.close IS NOT NULL
+                  ORDER BY k.ts DESC LIMIT 1) AS px,
+                 (SELECT AVG(close * volume * 100) FROM (
+                    SELECT close, volume FROM klines k WHERE k.code=c.code AND k.period='daily'
+                      AND k.ts <= %s AND k.close IS NOT NULL AND k.volume IS NOT NULL
+                    ORDER BY k.ts DESC LIMIT 20
+                  ) s) AS adv
+               FROM (SELECT unnest(%s::text[]) AS code) c""",
+            (dt, dt, groups[_mk.A]),
+        )
+        rows += cur.fetchall()
+    if groups.get(_mk.US):
+        cur.execute(
+            """SELECT c.code,
+                 (SELECT close FROM klines k WHERE k.code=c.code AND k.period='daily'
+                    AND k.ts <= %s AND k.close IS NOT NULL
+                  ORDER BY k.ts DESC LIMIT 1) AS px,
+                 (SELECT AVG(close * volume) FROM (
+                    SELECT close, volume FROM klines k WHERE k.code=c.code AND k.period='daily'
+                      AND k.ts <= %s AND k.close IS NOT NULL AND k.volume IS NOT NULL
+                    ORDER BY k.ts DESC LIMIT 20
+                  ) s) AS adv
+               FROM (SELECT unnest(%s::text[]) AS code) c""",
+            (dt, dt, groups[_mk.US]),
+        )
+        rows += cur.fetchall()
     cur.close()
     conn.close()
     out = {}
@@ -592,7 +619,12 @@ def run_backtest(strategy: dict, start: date, end: date, user_id: str | None = N
     # 塞给引擎;显式给了 cost_bps 就沿用旧口径(向后兼容 · 用户可覆盖)
     from app.services.quant.broker import defaults as _broker_defaults
     preset_key = strategy["config"].get("broker_preset")
-    preset = _broker_defaults.resolve(preset_key)
+    if mkt == _mk.US and not preset_key:
+        # 美股池没指定券商预设 → 美股费率(1 股起、无印花税)。
+        # 原来一律回落 A 股预设:按 100 股一手取整(BRK.A 这类高价股整笔被丢),还收卖出印花税
+        preset = _broker_defaults.resolve("us_default")
+    else:
+        preset = _broker_defaults.resolve(preset_key)
     _explicit_bps = strategy["config"].get("cost_bps")
     if _explicit_bps is None or preset_key:
         cost_bps = preset.total_bps_per_side
@@ -701,7 +733,12 @@ def run_backtest(strategy: dict, start: date, end: date, user_id: str | None = N
     #
     # **同一套调仓日**:基准和策略在完全相同的时点取值,否则超额收益里
     # 会混进日期错配带来的噪音。
-    bench = _benchmark_nav(strategy["config"].get("benchmark", "000300"), schedule, ppy)
+    # 美股池默认对标普500。**基准和股票池不是同一个市场时不给基准**并在成色里说明 ——
+    # 美股策略对沪深300 算超额,数字照样出、但毫无意义(两地交易日都不一样)
+    bench_code = (strategy["config"].get("benchmark") or _mk.bench_for(mkt)) if mkt == _mk.US \
+        else strategy["config"].get("benchmark", "000300")
+    bench_mismatch = bool(bench_code) and _mk.market_of_code(bench_code) != mkt
+    bench = None if bench_mismatch else _benchmark_nav(bench_code, schedule, ppy)
     if bench:
         # 超额 = 策略每期收益 − 基准每期收益。IR = 超额均值 / 超额标准差(年化)
         # 用 _nav(含起点)而不是 nav_series —— 后者为了跟策略曲线对齐
@@ -726,6 +763,10 @@ def run_backtest(strategy: dict, start: date, end: date, user_id: str | None = N
     # 指标是真的,但它描述的不是用户配的那个策略。B1 拦的是"一个因子都没有",
     # 而这里是"少了几个",同样不能不说 —— 尤其当缺的那几个占了大半权重时,
     # 用户会拿一份三因子的成绩单去判断他的五因子策略。
+    if bench_mismatch:
+        quality = {**quality, "benchmark_note":
+                   f"所选基准 {bench_code} 和股票池不是同一个市场,没有对比基准 —— "
+                   f"{'美股请选标普 500' if mkt == _mk.US else 'A 股请选沪深 300 / 中证 500 等'}。"}
     req_keys = [f["key"] for f in strategy["factors"] if f.get("weight_pct", 0) > 0]
     freport = factor_data_report(req_keys, start, end, market=mkt)
     missing = [f for f in freport if not f["ok"]]
@@ -992,7 +1033,7 @@ def _benchmark_nav(bench_code: str, schedule: list, ppy: int = 12) -> dict | Non
     """
     from app.services.quant import index_kline as ik
 
-    if not bench_code or bench_code not in ik.INDEX_CODES:
+    if not bench_code or bench_code not in ik.BENCHMARKS:
         return None
     closes = [ik.close_on_or_before(bench_code, d) for d in schedule]
     if any(c is None for c in closes):
@@ -1017,7 +1058,7 @@ def _benchmark_nav(bench_code: str, schedule: list, ppy: int = 12) -> dict | Non
               for i in range(len(nav) - 1)]
     return {
         "code": bench_code,
-        "name": ik.INDEX_CODES[bench_code][1],
+        "name": ik.BENCHMARKS[bench_code][1],
         "nav_series": series,
         # 原始 nav(含起点)· 算超额收益时要用,前端不看
         "_nav": nav,

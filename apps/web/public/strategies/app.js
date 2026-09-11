@@ -113,10 +113,14 @@ const OFFICIAL_STRATEGIES = [
 // 股票池名字
 const UNIVERSE_NAME = {
   hs300: '沪深 300', zz500: '中证 500', hs800: '沪深 800',
-  a_all: 'A 股全市场 · 剔 ST/次新', hk_all: '港股通', my_watchlist: '我的自选'
+  a_all: 'A 股全市场 · 剔 ST/次新', hk_all: '港股通', my_watchlist: '我的自选',
+  us_all: '美股 · 全美股(已下载)'
 }
 const REBALANCE_NAME = { W: '周度', M: '月度', Q: '季度', H: '半年' }
-const BENCHMARK_NAME = { '000300': '沪深 300', '000905': '中证 500', '399006': '创业板指', 'HSI': '恒生指数' }
+const BENCHMARK_NAME = { '000300': '沪深 300', '000905': '中证 500', '399006': '创业板指', 'HSI': '恒生指数',
+                         '.INX': '标普 500' }
+// 代码 → 市场(和后端 quant/market.py 同一口径:纯数字 = A 股,含字母 = 美股)
+const isUsCode = c => !/^[0-9]+$/.test(String(c || ''))
 
 // ═════════════════════════════════════════════════════════════════
 // localStorage 存取
