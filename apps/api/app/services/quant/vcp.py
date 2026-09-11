@@ -41,7 +41,21 @@
    ⚠ 别拿它和「最后一次收缩的量比」比大小来判断「越接近低点量越小」:最后一次收缩常常只有
    四五天,低点那 3 天几乎就是整次收缩,两个数差不多,比出来是抛硬币。「收缩时缩量」用量比 < 1。
 9. **枢轴点** = 最后一次收缩的起点高点(Minervini 的买点)。距枢轴 = (枢轴 − 收盘) ÷ 枢轴,
-   负数表示已经突破。
+   负数表示已经突破。「枢轴附近」写 `vcp_pivot_dist >= -3 and vcp_pivot_dist <= 5`。
+   ⚠ 别拿「近 1 月最高价」当枢轴:今天的收盘一定在近 1 月的区间里,
+   「收盘 ≤ 枢轴 × 1.03」就永远成立,那条上限等于没写。
+10. **低点抬高不单独给字段 —— 收缩次数 ≥ 2 已经保证了。** 相邻两次收缩,后一次低点更低只有两种情况:
+   高点也更低 → 第 2 条当成中途反抽,并成同一次;高点更高 → 后一次反而更深,第 4 条的序列在这里断开。
+   所以序列里的低点一定逐次抬高(2026-09-11 本想加 `vcp_higher_lows`,写用例时发现它恒为 1)。
+   **改第 2 条的合并规则或第 4 条的断开条件时,这条保证可能失效**,tests/test_vcp.py 里有用例盯着。
+
+## 精确交易日窗口(不属于形态本身,搭同一份日线)
+
+`high_5d / low_5d / high_21d / low_21d / high_63d / low_63d` = 最近 5 / 21 / 63 根日线的最高 / 最低。
+扫描源的 `High.5D / High.1M / High.3M` 是按日历往回数的固定窗口,**不是这么多个交易日**:
+2026-09-11(那周一劳动节休市)拿 16 只票逐个窗口长度比对,5D 实测是最近 **4** 根、
+1M 是 21 根、3M 是 **61** 根。脚本里写 `Highest(high, 63)` 也还是映射到 `High.3M`,改写法不改数据。
+要严格按交易日算,用这几个字段。
 
 ## 量价(不属于形态本身,搭同一份日线)
 
@@ -70,11 +84,13 @@ VOL_BASE = 50            # 量比的分母:收缩开始前 50 天的日均量
 VOL_BASE_MIN = 20        # 前面不足 20 天就不算量比
 LOW_VOL_DAYS = 3         # 最低点量比:低点当天及之前 2 天
 PV_DAYS = 20             # 涨跌天数 / 涨跌日均量比的窗口(约 4 周)
+WINDOWS = (5, 21, 63)    # 精确交易日窗口的最高 / 最低
 
 # 能直接筛选的字段(数字)。vcp_depths 是展示用的文字(「24.1→11.3→5.0」),不能拿来比大小
+WINDOW_FIELDS = tuple(f"{hl}_{n}d" for n in WINDOWS for hl in ("high", "low"))
 FIELDS = ("vcp_contractions", "vcp_first_depth", "vcp_last_depth", "vcp_vol_declining",
           "vcp_last_vol_ratio", "vcp_pivot_dist", "vcp_base_days", "vcp_low_vol_ratio",
-          "up_days_20d", "down_days_20d", "ud_vol_ratio_20d")
+          "up_days_20d", "down_days_20d", "ud_vol_ratio_20d") + WINDOW_FIELDS
 DISPLAY = "vcp_depths"
 
 # 扫描结果里给用户看的口径说明 —— 字段是算出来的,用户得知道它是怎么数的才能判断信不信
@@ -218,6 +234,17 @@ def pv_stats(bars: list[tuple], days: int = PV_DAYS) -> dict:
     uv, dv = _mean([vols[i] for i in up]), _mean([vols[i] for i in dn])
     if uv is not None and dv:
         out["ud_vol_ratio"] = round(uv / dv, 3)
+    return out
+
+
+def window_stats(bars: list[tuple]) -> dict:
+    """最近 5 / 21 / 63 根日线的最高 / 最低 → {high_5d, low_5d, …};根数不够或缺高低的窗口为 None。"""
+    out: dict = {}
+    for n in WINDOWS:
+        seg = bars[-n:] if bars and len(bars) >= n else []
+        ok = bool(seg) and all(len(b) > 3 and b[2] and b[3] for b in seg)
+        out[f"high_{n}d"] = max(b[2] for b in seg) if ok else None
+        out[f"low_{n}d"] = min(b[3] for b in seg) if ok else None
     return out
 
 

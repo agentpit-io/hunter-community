@@ -763,8 +763,59 @@ def cond_ud_days = up_days_20d > down_days_20d;
 # 5. 底部 3~12 个月(按交易日算:63~252 天)
 def cond_base = vcp_base_days >= 63 and vcp_base_days <= 252;
 
+# 6. 在枢轴附近:最后一次收缩的高点下方 5% 以内,或刚突破不超过 3%
+#    (低点逐次抬高不用另写 —— 收缩次数的数法已经保证了)
+def cond_pivot = vcp_pivot_dist >= -3 and vcp_pivot_dist <= 5;
+
 plot scan = cond_first and cond_count and cond_last and cond_dryup
-        and cond_low_vol and cond_ud_vol and cond_ud_days and cond_base;
+        and cond_low_vol and cond_ud_vol and cond_ud_days and cond_base and cond_pivot;
+""",
+})
+
+# 2026-09-11 用户对快照版 VCP 脚本(git log --grep=VCP 那份)提的四点,改好的版本。
+# 1) 扫描源的 High.5D / High.3M 实测是 4 / 61 根,不是 5 / 63 —— 换成自家日线的精确窗口;
+# 2) 区间分母用最高价(= 回撤深度,和 vcp_*_depth 同一口径,最大 100%)。
+#    用户建议用收盘价,理由是「低价股会失真」—— 比值与股价高低无关,这条理由不成立;
+#    真正的问题是除以最低价在大回调时会放大(跌 50% 显示成 100%)。除以收盘价会让同一个区间
+#    随今天收在区间哪里而变,所以取最高价;
+# 3) 加低点抬高;4) 枢轴用 vcp_pivot_dist —— 拿近 1 月最高当枢轴,「≤ 枢轴 × 1.03」恒成立。
+PRESETS.append({
+    "key": "vcp_range",
+    "name": "VCP 区间收缩",
+    "market": "us",
+    "desc": "3 个月 → 1 个月 → 5 天价格区间逐级收紧 + 低点抬高 + 在枢轴附近。"
+            "窗口严格按最近 63 / 21 / 5 个交易日(自家日线),趋势模板与流动性来自扫描源。",
+    "script": """# ===== VCP 区间收缩 · 精确交易日窗口 =====
+# high_/low_Nd 严格是最近 N 根日线(扫描源的 High.5D / High.3M 实测只有 4 / 61 根)
+# 区间 = (最高 - 最低) ÷ 最高 = 从高点回撤的深度,和 VCP 收缩深度同一口径
+def rng3m = (high_63d - low_63d) / high_63d;
+def rng1m = (high_21d - low_21d) / high_21d;
+def rng5d = (high_5d - low_5d) / high_5d;
+
+# 一、流动性与趋势模板
+def c_price = close > 10;
+def c_liq   = average_volume_30d_calc > 500000;
+def c_trend = close > SMA50 and SMA50 > SMA150 and SMA150 > SMA200;
+def c_rs    = rs_rating >= 70;
+
+# 二、波动逐级收紧:前面有过像样回调 → 近 1 月收紧(但不是被收购锁价)→ 近 5 天更紧
+def c_depth   = rng3m >= 0.15;
+def c_tight1m = rng1m <= 0.10 and rng1m >= 0.02;
+def c_shrink  = rng1m <= rng3m * 0.5;
+def c_tight5d = rng5d <= rng1m * 0.6;
+
+# 三、低点抬高:3 个月的最低点在一个月以前,最近一个月的低点至少高 2%
+def c_higher_low = low_21d > low_63d * 1.02;
+
+# 四、在枢轴附近:最后一次收缩的高点下方 5% 以内,或刚突破不超过 3%
+def c_pivot = vcp_pivot_dist >= -3 and vcp_pivot_dist <= 5;
+
+# 五、量能萎缩
+def c_vdry = average_volume_10d_calc < average_volume_90d_calc;
+
+plot scan = c_price and c_liq and c_trend and c_rs
+        and c_depth and c_tight1m and c_shrink and c_tight5d
+        and c_higher_low and c_pivot and c_vdry;
 """,
 })
 

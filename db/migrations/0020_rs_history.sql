@@ -46,3 +46,10 @@ ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS vcp_low_vol_ratio  DOUBLE PREC
 ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS up_days_20d        INT;
 ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS down_days_20d      INT;
 ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS ud_vol_ratio_20d   DOUBLE PRECISION;
+-- 精确交易日窗口的最高/最低(扫描源的 5D/3M 实测不是 5/63 根,见 vcp.py)
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS high_5d            DOUBLE PRECISION;
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS low_5d             DOUBLE PRECISION;
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS high_21d           DOUBLE PRECISION;
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS low_21d            DOUBLE PRECISION;
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS high_63d           DOUBLE PRECISION;
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS low_63d            DOUBLE PRECISION;

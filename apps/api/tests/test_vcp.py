@@ -163,6 +163,26 @@ rows2 = [{"_code": "AAA"}]
 check("补字段 · 只用涨跌天数时按它数覆盖", vcp.inject(rows2, hist2, False, ["up_days_20d"]) == 1)
 check("补字段 · 用了收缩次数就按收缩次数数", vcp.inject(rows2, hist2, False, ["up_days_20d", "vcp_contractions"]) == 0)
 
+# ─── 第三批:低点抬高 / 精确交易日窗口
+
+# 低点抬高由收缩次数保证(vcp.py 口径第 10 条):后一次低点更低的,要么并成同一次,要么序列断开
+# 100→92 (8%),反弹 91(没过前高)再跌到 86.5(破前低):是同一次 14% 的下跌,不能数成 8%→5% 两次
+s = vcp.vcp_stats(path([UP, (8, 92.0, 900.0), (8, 91.0, 800.0), (6, 86.5, 500.0), (6, 88.0, 500.0)]))
+check("低点抬高 · ⭐低点更低、高点也更低 → 并成一次,不会数成「逐次变浅 2 次」",
+      s and s["contractions"] == 1 and 13 < s["first_depth"] < 16, str(s))
+# 后一次高点更高、低点更低 → 后一次更深,序列断开
+s = vcp.vcp_stats(path([UP, (8, 92.0, 900.0), (8, 103.0, 800.0), (8, 90.0, 700.0), (6, 100.0, 600.0)]))
+check("低点抬高 · ⭐高点更高、低点更低 → 后一次更深,只剩 1 次", s and s["contractions"] == 1, str(s))
+
+wb = [(date(2026, 8, 1) + timedelta(days=i), 100.0 + i, 101.0 + i, 99.0 + i, 1000.0) for i in range(70)]
+w = vcp.window_stats(wb)
+check("窗口 · 最近 5 根的最高 / 最低", w["high_5d"] == 170.0 and w["low_5d"] == 164.0, str(w))
+check("窗口 · 最近 63 根(不是 61 根)", w["low_63d"] == 106.0 and w["high_63d"] == 170.0, str(w))
+check("窗口 · 根数不够 → 空", vcp.window_stats(wb[:40])["low_63d"] is None
+      and vcp.window_stats(wb[:40])["low_21d"] == 118.0)
+check("窗口 · ⭐老数据没有最高最低 → 空,不拿收盘顶替",
+      vcp.window_stats([(d, c, None, None, None) for d, c, _h, _l, _v in wb])["high_5d"] is None)
+
 # 算不出就是空
 check("数据 · 不足 60 根 → 空", vcp.vcp_stats(path([(50, 80.0, 1000.0)])) is None)
 old = [(d, c, None, None, None) for d, c, _h, _l, _v in path(TEXTBOOK)]
@@ -204,6 +224,9 @@ hi, lo = max(x[2] for x in b), min(x[3] for x in b)
 check("拆股 · ⭐不会凭空多出一次 50% 的「收缩」", (hi - lo) / hi < 0.05, f"{hi} {lo}")
 cut = rh.adjust_bars(raw, fixed[2:])
 check("拆股 · repair_splits 截掉开头时只按留下的日期出", [x[0] for x in cut] == D[2:])
+
+check("窗口 · rs_history 读库用的列表与 vcp.WINDOW_FIELDS 一致", tuple(rh._WIN) == vcp.WINDOW_FIELDS,
+      f"{rh._WIN} vs {vcp.WINDOW_FIELDS}")
 
 total = passed + len(fails)
 print(f"VCP 用例 {total} 条")

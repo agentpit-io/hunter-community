@@ -361,7 +361,8 @@ class _Vocab:
 # 等于一条废条件混进了筛选里,而且看起来还挺像回事。
 def _unit(fld: str) -> str | None:
     if fld in ("close", "open", "high", "low", "VWAP", "price_52_week_high",
-               "price_52_week_low", "all_time_high", "all_time_low") \
+               "price_52_week_low", "all_time_high", "all_time_low",
+               "high_5d", "low_5d", "high_21d", "low_21d", "high_63d", "low_63d") \
             or fld.startswith(("SMA", "EMA", "BB.", "High.", "Low.",
                                "KltChnl.", "DonchCh", "HullMA")):
         return "价格"

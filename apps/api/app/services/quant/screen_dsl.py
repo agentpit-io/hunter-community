@@ -423,12 +423,14 @@ class _FieldResolver:
                 if lo <= n <= hi:
                     if not self.has_field(fld):
                         raise ScreenError(f"这个市场没有 {fld} 字段")
-                    if n not in (5, 21, 63, 126, 252):
-                        self._note(
-                            f"{fn}({src}, {n}) → {fld}({label})· "
-                            f"扫描源只有固定窗口,交易日数与日历窗口存在口径差异")
-                    else:
-                        self._note(f"{fn}({src}, {n}) → {fld}({label})")
+                    # 2026-09-11 逐个窗口长度实测(那周一休市):5D 是最近 4 根、1M 21 根、3M 61 根 ——
+                    # 扫描源按日历往回数,**写 5 / 63 也不是 5 / 63 个交易日**。原来对这几个整数不提示,
+                    # 用户会以为自己拿到的就是精确窗口
+                    exact = f"{want}_{n}d" if n in (5, 21, 63) else None
+                    self._note(
+                        f"{fn}({src}, {n}) → {fld}({label})· 扫描源按日历往回数的固定窗口,"
+                        f"不一定正好 {n} 个交易日(碰上节假日会少几根)"
+                        + (f";要严格 {n} 个交易日,改用 {exact}(自家日线,每晚更新)" if exact else ""))
                     return fld
             raise ScreenError(
                 f"{fn}({src}, {n}) 映射不了 —— 扫描源没有任意窗口的最高/最低价,"
@@ -676,6 +678,9 @@ def missing_reason(field: str) -> str:
     """字段为空的**常见**原因。只写有把握的,拿不准就不写。"""
     if field in ("rs_rating", "rs_raw"):
         return "次新股(不足 250 个交易日)或不在 RS 排名池里(美股 OTC、市值约 5000 万美元以下)"
+    if field in ("high_5d", "low_5d", "high_21d", "low_21d", "high_63d", "low_63d"):
+        return ("日线里还没有最高/最低价(老数据只存了收盘,每晚任务整窗重拉后才有)、"
+                "日线根数不够、不在 RS 排名池里,或这个市场的日线已过期")
     if field in ("up_days_20d", "down_days_20d"):
         return "日线不足 21 根、不在 RS 排名池里,或这个市场的日线已过期"
     if field == "ud_vol_ratio_20d":
@@ -754,6 +759,9 @@ _FIELD_LABEL = {
     "vcp_base_days": "VCP底部天数", "vcp_depths": "VCP各次深度%",
     "vcp_low_vol_ratio": "VCP最低点量比", "up_days_20d": "近20日上涨天数",
     "down_days_20d": "近20日下跌天数", "ud_vol_ratio_20d": "近20日涨跌日均量比",
+    "high_5d": "近5个交易日最高", "low_5d": "近5个交易日最低",
+    "high_21d": "近21个交易日最高", "low_21d": "近21个交易日最低",
+    "high_63d": "近63个交易日最高", "low_63d": "近63个交易日最低",
 
     # 固定搭配 —— 这些**不能**靠词素拼,必须逐条给准确译名。
     # (price_to_book 拼出来是「价格账面」,free_cash_flow 是「自由现金流量」,

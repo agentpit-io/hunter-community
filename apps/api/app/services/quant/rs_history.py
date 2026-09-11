@@ -146,6 +146,13 @@ ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS vcp_low_vol_ratio  DOUBLE PREC
 ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS up_days_20d        INT;
 ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS down_days_20d      INT;
 ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS ud_vol_ratio_20d   DOUBLE PRECISION;
+-- 精确交易日窗口的最高/最低(扫描源的 5D/3M 实测不是 5/63 根,见 vcp.py)
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS high_5d            DOUBLE PRECISION;
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS low_5d             DOUBLE PRECISION;
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS high_21d           DOUBLE PRECISION;
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS low_21d            DOUBLE PRECISION;
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS high_63d           DOUBLE PRECISION;
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS low_63d            DOUBLE PRECISION;
 """
 
 
@@ -628,13 +635,15 @@ def compute_market(market: str) -> dict:
         from app.services.quant import vcp     # 函数内 import:本文件的惯例,tests/ 能不带 app 包单独加载
         vs = vcp.vcp_stats(bars) or {}
         pv = vcp.pv_stats(bars)                # 只要收盘就能数涨跌天数,不跟着形态一起为空
+        ws = vcp.window_stats(bars)
         rows.append((market, code, st["as_of"], st["n_days"], st["rs_line"],
                      st["rs_ma21"], st["up_days"], st["up_days_censored"],
                      rs_raw_exact([c for _, c in series]),
                      vs.get("contractions"), vs.get("depths") or None, vs.get("first_depth"),
                      vs.get("last_depth"), vs.get("vol_declining"), vs.get("last_vol_ratio"),
                      vs.get("pivot"), vs.get("pivot_dist"), vs.get("base_days"),
-                     vs.get("low_vol_ratio"), pv["up_days"], pv["down_days"], pv["ud_vol_ratio"]))
+                     vs.get("low_vol_ratio"), pv["up_days"], pv["down_days"], pv["ud_vol_ratio"])
+                    + tuple(ws[w] for w in vcp.WINDOW_FIELDS))
         split["vcp"] += vs.get("contractions") is not None
 
     # 服务端游标逐只流式算 —— 美股一个市场就是 4000 只 × 320 天 ≈ 130 万行,
@@ -666,7 +675,8 @@ def compute_market(market: str) -> dict:
                        "up_days, up_days_censored, rs_raw_exact, vcp_contractions, vcp_depths, "
                        "vcp_first_depth, vcp_last_depth, vcp_vol_declining, vcp_last_vol_ratio, "
                        "vcp_pivot, vcp_pivot_dist, vcp_base_days, vcp_low_vol_ratio, up_days_20d, "
-                       "down_days_20d, ud_vol_ratio_20d) VALUES %s", rows)
+                       "down_days_20d, ud_vol_ratio_20d, "
+                       + ", ".join(vcp.WINDOW_FIELDS) + ") VALUES %s", rows)
     conn.commit()
     cur.close()
     conn.close()
@@ -682,6 +692,8 @@ def compute_market(market: str) -> dict:
 
 
 _ddl_checked = False
+# 与 vcp.WINDOW_FIELDS 一致;写在这里是因为 load_stats 不 import vcp(本文件的惯例:tests/ 能不带 app 包加载)
+_WIN = ("high_5d", "low_5d", "high_21d", "low_21d", "high_63d", "low_63d")
 
 
 def load_stats(market: str) -> tuple[dict, dict]:
@@ -701,7 +713,8 @@ def load_stats(market: str) -> tuple[dict, dict]:
         cur.execute("SELECT code, as_of, up_days, up_days_censored, rs_raw_exact, rs_line, rs_ma21, "
                     "vcp_contractions, vcp_depths, vcp_first_depth, vcp_last_depth, "
                     "vcp_vol_declining, vcp_last_vol_ratio, vcp_pivot_dist, vcp_base_days, "
-                    "vcp_low_vol_ratio, up_days_20d, down_days_20d, ud_vol_ratio_20d "
+                    "vcp_low_vol_ratio, up_days_20d, down_days_20d, ud_vol_ratio_20d, "
+                    ", ".join(_WIN) + " "
                     "FROM rs_line_stat WHERE market=%s", (market,))
         out = {r[0]: {"as_of": r[1], "up_days": r[2], "censored": r[3],
                       "rs_raw_exact": r[4], "rs_line": r[5], "rs_ma21": r[6],
@@ -709,7 +722,8 @@ def load_stats(market: str) -> tuple[dict, dict]:
                       "vcp_last_depth": r[10], "vcp_vol_declining": r[11],
                       "vcp_last_vol_ratio": r[12], "vcp_pivot_dist": r[13], "vcp_base_days": r[14],
                       "vcp_low_vol_ratio": r[15], "up_days_20d": r[16], "down_days_20d": r[17],
-                      "ud_vol_ratio_20d": r[18]}
+                      "ud_vol_ratio_20d": r[18],
+                      **dict(zip(_WIN, r[19:19 + len(_WIN)]))}
                for r in cur.fetchall()}
         cur.close()
         conn.close()

@@ -58,7 +58,8 @@ earnings_per_share_diluted_ttm price_52_week_high price_52_week_low all_time_hig
 RSI ADX ATR VWAP MACD.macd MACD.signal MACD.hist Stoch.K Stoch.D BB.upper BB.lower BB.basis
 Perf.W Perf.1M Perf.3M Perf.6M Perf.Y Perf.YTD rs_rating rs_raw rs_line_up_days
 vcp_contractions vcp_first_depth vcp_last_depth vcp_vol_declining vcp_last_vol_ratio
-vcp_pivot_dist vcp_base_days vcp_low_vol_ratio up_days_20d down_days_20d ud_vol_ratio_20d""".split())
+vcp_pivot_dist vcp_base_days vcp_low_vol_ratio up_days_20d down_days_20d ud_vol_ratio_20d
+high_5d low_5d high_21d low_21d high_63d low_63d""".split())
 FIELDS |= {f"SMA{n}" for n in SMA} | {f"EMA{n}" for n in EMA} | {f"RSI{n}" for n in RSI}
 FIELDS |= {f"average_volume_{n}d_calc" for n in (10, 30, 60, 90)}
 
@@ -300,6 +301,18 @@ SHOULD_REJECT += [
     "买卖量比大于2",
     "日均量比大于1",
     "最低点量比小于今日量比",    # 分母不同,不能直接比
+]
+
+
+# ── 2026-09-11 第三批 · 低点抬高 / 精确交易日窗口字段 ─────────────────
+SHOULD_MATCH += [
+    ("low_21d大于low_63d", "low_21d > low_63d"),                 # 字段原名直接认,里面的 low 不能被截走
+    ("high_5d小于high_21d", "high_5d < high_21d"),
+]
+SHOULD_REJECT += [
+    "低点抬高",                  # 没有对应字段(收缩次数 ≥2 已保证),不能随便映射到哪个价格字段
+    "1月低点比3月低点抬高2%",    # 两个窗口的最低价之比,本地不拆
+    "low_21d大于low_63d的1.02倍",  # 倍数,本地不拆
 ]
 
 
