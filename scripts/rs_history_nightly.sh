@@ -8,11 +8,23 @@
 # 美股收盘 = 上海时间凌晨 4 点(夏令时)/ 5 点(冬令时),06:30 两种都赶得上。
 # 每天都跑(含周末)也没关系:整窗覆盖重写是幂等的,周末跑一次等于重算一遍同样的数。
 #
-# 退出码非 0 = 完整性检查没过(最新交易日有收盘价的 < 90%)或基准拉取失败,看日志。
+# 两个设计:
+# · 用 `docker compose run --rm` 起**独立的一次性容器**,不 exec 进 api 容器 ——
+#   A 股一轮要 90 分钟,期间 api 一重建(部署)exec 进去的进程就跟着死了
+# · flock 互斥:上一轮没跑完(或者有人手动在跑)这一轮直接跳过。
+#   两轮同时跑 = 两个进程各 1 次/秒打腾讯,限速就翻倍了(2026-09-11 WAF 事故)
+#
+# 退出码非 0 = 完整性检查没过(最新交易日有收盘价的 < 90%)/ 基准拉取失败 / 被 WAF 拦了,看日志。
 cd "$(dirname "$0")/.." || exit 1
+exec 9>/tmp/rs_history.lock
+if ! flock -n 9; then
+  echo "=== $(date '+%F %T') 上一轮还在跑,本轮跳过:$*"
+  exit 0
+fi
 rc=0
 for m in "$@"; do
   echo "=== $(date '+%F %T') rs_history $m"
-  docker compose exec -T api python -m app.services.quant.rs_history run --market "$m" || rc=$?
+  docker compose run --rm --no-deps -T api python -m app.services.quant.rs_history run --market "$m" || rc=$?
 done
+echo "=== $(date '+%F %T') 结束 rc=$rc"
 exit $rc
