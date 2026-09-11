@@ -59,7 +59,7 @@ def main() -> int:
 
     adv = bt._price_and_adv(["AAPL"], end).get("AAPL")
     if adv and adv[1]:
-        check(3e9 < adv[1] < 1e12, f"AAPL 日均成交额 {adv[1] / 1e9:.1f} 亿美元量级合理(没有多乘 100)")
+        check(3e9 < adv[1] < 1e12, f"AAPL 日均成交额 {adv[1] / 1e8:.0f} 亿美元,量级合理(没有多乘 100)")
     cur.execute("SELECT market, count(*) FROM factor_value WHERE code = ANY(%s) GROUP BY 1", (codes,))
     by = dict(cur.fetchall())
     check(by.get("US", 0) > 0 and not by.get("A"), f"美股因子行都标 US:{by}")

@@ -761,16 +761,27 @@ def _run_us(job_id: int, job: dict, codes: list[str], start: date, end: date) ->
     finally:
         us_kline.release(lock)
 
-    # 因子:整个已下载的美股池一起算(截面要全池,只算这次新下的几只 z-score 是错的)
+    # 因子:整个已下载的美股池一起算(截面要全池,只算这次新下的几只 z-score 是错的)。
+    # 「这次一只都没新下」也可能要算:上一轮停在算因子那一步(api 容器一重建线程就没了,
+    # 任务被标成已暂停),续跑时股票全被跳过 —— 只看 done 的话因子就永远补不上
     factors = {}
-    if done:
-        pool_codes = uv.covered_codes("us")
+    pool_codes = uv.covered_codes("us")
+    if done or _us_factors_stale(pool_codes, end):
+
+        class _Stop(Exception):
+            pass
 
         def _fp(i, total):
+            # 全美股要算两个多小时 —— 每个调仓日回头看一眼状态,点了暂停/取消要能停下来
+            if _read_status(job_id) in ("paused", "canceled", "failed"):
+                raise _Stop()
             _progress(job_id, done=done, skipped=skipped + bad, failed=failed,
                       phase=f"计算因子 {i}/{total} 个调仓日")
         try:
             factors = _compute_factors(pool_codes, start, end, market="us", on_progress=_fp)
+        except _Stop:
+            _progress(job_id, phase="已暂停(算因子阶段 · 续跑会接着补算)")
+            return {"paused": True, "done": done}
         except Exception as e:                                # noqa: BLE001
             log.error("[data_job %s] 美股因子计算失败: %s", job_id, e)
 
@@ -785,6 +796,21 @@ def _run_us(job_id: int, job: dict, codes: list[str], start: date, end: date) ->
     set_status(job_id, "done", msg)
     log.info("[data_job %s] 美股完成 · %s · 因子 %s", job_id, msg, factors)
     return {"done": done, "skipped": skipped, "bad": bad, "failed": failed, "factors": factors}
+
+
+def _us_factors_stale(pool_codes: list[str], end: date) -> bool:
+    """美股池最近 10 天的因子不到 8 成的票有 → 判定上一轮没算完。
+    拿 vol_20d_inv 当探针:纯日线因子,只要有 21 根日线就一定算得出来。"""
+    if not pool_codes:
+        return False
+    conn = get_conn(); cur = conn.cursor()
+    try:
+        cur.execute("""SELECT count(DISTINCT code) FROM factor_value
+                        WHERE market='US' AND factor_key='vol_20d_inv' AND trade_date >= %s""",
+                    (end - timedelta(days=10),))
+        return (cur.fetchone()[0] or 0) < 0.8 * len(pool_codes)
+    finally:
+        cur.close(); conn.close()
 
 
 def _compute_factors(codes: list[str], start: date, end: date,

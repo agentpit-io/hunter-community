@@ -57,6 +57,10 @@ _BASELINE = Path(__file__).resolve().parents[3] / "data" / "stocks_catalog_basel
 # 首轮 4069 只实测 4072 秒拉完(RS 管线,同一接口同一限速)。
 # 「只补最新」**不打折**:美股一律整只重写(见 us_kline 约定 1),补一天和补一年都是一次请求。
 RATE_US_SEC = 1.05
+# 下完还要按**整个美股池**、每个调仓日(周频 ∪ 月频)算一遍技术因子。
+# 2026-09-11 试跑:204 只 × 180 个调仓日 = 437 秒 → 0.012 秒 / 只 / 调仓日。
+# 全美股 3 年 ≈ 4069 × 180 × 0.012 ≈ 2.4 小时 —— 比下载本身(约 70 分钟)还久,必须写进预估
+FACTOR_US_SEC = 0.012
 # 最长 5 年:腾讯单次最多约 1500 根(≈6 年),拆股核对的锚点最远 5 年(扫描源 Perf.5Y)
 US_SPAN_MAX = 60
 US_KINDS = {"us_all"}
@@ -381,6 +385,10 @@ def estimate(scope: dict, span_months: int, with_financial: bool,
     }
 
 
+def _fmt_min(sec: float) -> str:
+    return f"{sec / 3600:.1f} 小时" if sec >= 5400 else f"{max(1, round(sec / 60))} 分钟"
+
+
 def _estimate_us(codes: list[str], note: str, start: date, end: date, span_months: int) -> dict:
     """美股预估。和 A 股的差别都写在返回的说明里,不藏:
     限速 1 秒/只(防封 IP)、没有财报、最长 5 年、下完还要算一阵因子。"""
@@ -388,10 +396,15 @@ def _estimate_us(codes: list[str], note: str, start: date, end: date, span_month
     skip = _covered(codes, "kline", start, end)
     todo = n - len(skip)
     years = max(0.1, (span_months or 1) / 12.0)
-    sec = todo * RATE_US_SEC
+    dl_sec = todo * RATE_US_SEC
+    # 因子在全池上算(截面要全池);没有要下的就不算(任务里同样跳过)
+    n_dates = 2 if span_months <= 0 else int(span_months * 52 / 12)
+    f_sec = (n * n_dates * FACTOR_US_SEC) if todo else 0
+    sec = dl_sec + f_sec
     mb = todo * (MB_KLINE_PER_YEAR + MB_FACTOR_PER_YEAR) * (0.05 if span_months <= 0 else years)
-    warn = ("美股按 1 秒/只限速下载(免费源持续快了会被封 IP)· 没有财报 · 最长 5 年 · "
-            "下完还要按美股池算一遍因子,大范围会再多等一阵 · 中途随时可以暂停,已下载的不会丢")
+    warn = (f"其中下载约 {_fmt_min(dl_sec)}(1 秒/只限速,免费源持续快了会被封 IP)、"
+            f"之后按美股池算因子约 {_fmt_min(f_sec)} · 没有财报 · 最长 5 年 · "
+            "中途随时可以暂停,已下载的不会丢")
     if span_months > US_SPAN_MAX:
         warn = f"美股最长下 {US_SPAN_MAX // 12} 年 —— 请把时间范围改短。" + warn
     return {"stocks": n, "skip": len(skip), "todo": todo, "seconds": int(sec),
