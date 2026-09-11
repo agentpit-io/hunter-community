@@ -47,7 +47,7 @@ const container = document.getElementById('page-content')
 const RATE_KLINE = 1.81, RATE_FIN = 8.6
 
 let SCOPES = null
-let sel = { kind: 'hs300', industries: [], span: 36, fin: false, raw: false }
+let sel = { market: 'a', kind: 'hs300', industries: [], span: 36, fin: false, raw: false }
 let estTimer = null
 
 const fmtSec = s => s < 90 ? Math.round(s) + ' 秒'
@@ -90,6 +90,8 @@ container.innerHTML = `
   <div class="dc-split" style="margin:0 20px">
     <div class="panel"><div class="p-hd">下载数据</div>
       <div class="cnt">选好范围点开始 · 后台跑 · 关掉页面也不影响</div>
+      <div class="dc-lbl">⓪ 哪个市场</div>
+      <div class="dc-seg" id="dc-market"></div>
       <div class="dc-lbl">① 选哪些股票</div>
       <div class="dc-seg" id="dc-scope"></div>
       <div id="dc-ind-block" class="off">
@@ -104,10 +106,7 @@ container.innerHTML = `
       </div>
       <div class="dc-lbl">③ 下哪类数据</div>
       <div class="dc-seg" id="dc-kind"></div>
-      <div class="cnt" style="margin-top:6px;line-height:1.7">
-        日线支撑 <b>8 个技术因子</b>,实测约 1.8 秒/只 —— 因子本身是本地算的,几乎不花时间。<br>
-        财报支撑另外 <b>10 个基本面因子</b>(PE / ROE / 营收同比…),实测约 8.6 秒/只,<b>贵 5 倍</b>。
-      </div>
+      <div class="cnt" id="dc-kind-note" style="margin-top:6px;line-height:1.7"></div>
       <div class="dc-lbl">④ 从哪里下</div>
       <div class="dc-seg" id="dc-src"></div>
       <div class="cnt" id="dc-src-note" style="margin-top:6px;line-height:1.7"></div>
@@ -155,8 +154,16 @@ function seg(id, items, cur, onPick) {
   }
 }
 
-async function loadScopes() {
-  SCOPES = await fetch('/api/quant/data/scopes').then(r => r.json())
+// ① 范围随市场变。美股只有一个范围:全美股 = RS 排名池同一口径
+// (交易所上市、不含 OTC、市值 ≥5000 万美元)。只数用后端缓存,没有就写「约 4000」,不为一个数字去打扫描源
+function renderScope() {
+  if (!SCOPES) return
+  if (sel.market === 'us') {
+    const n = SCOPES.us && SCOPES.us.count
+    seg('dc-scope', [{ v: 'us_all', label: `全美股 ${n ? '约 ' + n : '约 4000'} 只` }],
+        'us_all', () => {})
+    return
+  }
   const idx = SCOPES.indexes.map(x => ({ v: x.kind, label: `${x.label}${x.count ? ' ' + x.count : ''}` }))
   seg('dc-scope', [
     ...idx,
@@ -164,6 +171,11 @@ async function loadScopes() {
     { v: 'industry', label: '按行业选' },
     { v: 'watchlist', label: `我的自选 ${SCOPES.watchlist.count}` },
   ], sel.kind, v => { sel.kind = v; toggleInd(); estimate() })
+}
+
+async function loadScopes() {
+  SCOPES = await fetch('/api/quant/data/scopes').then(r => r.json())
+  renderScope()
 
   const wrap = document.getElementById('dc-inds')
   if (!SCOPES.industry_seeded) {
@@ -207,18 +219,52 @@ async function loadScopes() {
 
 // 行业区只在选了「按行业选」时可点 —— 否则用户勾了半天才发现没生效
 function toggleInd() {
-  document.getElementById('dc-ind-block').classList.toggle('off', sel.kind !== 'industry')
+  // 美股没有行业选择,整块藏起来(而不是灰着让人以为能点)
+  const blk = document.getElementById('dc-ind-block')
+  blk.style.display = sel.market === 'us' ? 'none' : ''
+  blk.classList.toggle('off', sel.kind !== 'industry')
 }
 
-seg('dc-span', [
-  { v: 0, label: '只补最新' }, { v: 12, label: '1 年' },
-  { v: 36, label: '3 年' }, { v: 60, label: '5 年' }, { v: 120, label: '全部历史' },
-], sel.span, v => { sel.span = +v; estimate() })
+// ⓪ 市场。切换时把后面几项都换成该市场能用的选项 ——
+// 美股:最长 5 年(免费源单次约 6 年,拆股核对的锚点最远 5 年)、没有财报、只有免费通道
+seg('dc-market', [{ v: 'a', label: 'A 股' }, { v: 'us', label: '美股' }], 'a', v => {
+  sel.market = v
+  if (v === 'us') {
+    sel.kind = 'us_all'; sel.fin = false; sel.raw = false; sel.src = 'free'
+    if (sel.span > 60) sel.span = 36
+  } else {
+    sel.kind = 'hs300'
+  }
+  renderScope(); renderSpan(); renderKind(); renderSrc(); toggleInd(); estimate()
+})
 
-seg('dc-kind', [
-  { v: 'k', label: '只要日线(快)' }, { v: 'kf', label: '日线 + 财报(慢很多)' },
-], 'k', v => { sel.fin = v === 'kf'; document.getElementById('dc-raw-wrap').style.display = sel.fin ? 'flex' : 'none'; estimate() })
-document.getElementById('dc-raw-wrap').style.display = 'none'
+function renderSpan() {
+  const items = [{ v: 0, label: '只补最新' }, { v: 12, label: '1 年' },
+                 { v: 36, label: sel.market === 'us' ? '3 年(推荐)' : '3 年' }, { v: 60, label: '5 年' }]
+  if (sel.market !== 'us') items.push({ v: 120, label: '全部历史' })
+  seg('dc-span', items, sel.span, v => { sel.span = +v; estimate() })
+}
+renderSpan()
+
+const KIND_NOTE = {
+  a: '日线支撑 <b>8 个技术因子</b>,实测约 1.8 秒/只 —— 因子本身是本地算的,几乎不花时间。<br>' +
+     '财报支撑另外 <b>10 个基本面因子</b>(PE / ROE / 营收同比…),实测约 8.6 秒/只,<b>贵 5 倍</b>。',
+  us: '美股只有日线:动量、均线、波动率这类<b>技术因子都能算</b>;' +
+      '<b>暂时没有美股财报源</b>(站内财报来自 A 股接口),所以 PE / ROE 这类基本面因子在美股上是空的。',
+}
+function renderKind() {
+  const items = sel.market === 'us'
+    ? [{ v: 'k', label: '只要日线' }]
+    : [{ v: 'k', label: '只要日线(快)' }, { v: 'kf', label: '日线 + 财报(慢很多)' }]
+  seg('dc-kind', items, sel.fin ? 'kf' : 'k', v => {
+    sel.fin = v === 'kf'
+    document.getElementById('dc-raw-wrap').style.display = sel.fin ? 'flex' : 'none'
+    estimate()
+  })
+  document.getElementById('dc-raw-wrap').style.display = sel.fin ? 'flex' : 'none'
+  document.getElementById('dc-kind-note').innerHTML = KIND_NOTE[sel.market]
+}
+renderKind()
 document.getElementById('dc-raw').onchange = e => { sel.raw = e.target.checked; estimate() }
 
 // ── ④ 下载通道 ─────────────────────────────────────────
@@ -237,18 +283,26 @@ const SRC_NOTE = {
         '单次最多 2000 只。',
   custom: '填你自己的 API 和 Key —— <b>额度算你的,不占我们的</b>,' +
         '数据源的授权也由你和供应商约定。',
+  // 美股:限速是硬性的 —— 2026-09-11 首轮没限速,服务器 IP 被腾讯防火墙封了一个多小时
+  us: '腾讯 · <b>免费</b> · 美股单次最长约 6 年 · <b>限速 1 秒/只</b>(持续快了会被封 IP),' +
+      '全美股约 70 分钟。每只都会拿扫描源已复权的涨幅核对拆股,对不上的票<b>不入库</b>(不给错数)。',
 }
-seg('dc-src', [
-  { v: 'free', label: '本地免费源' },
-  { v: 'agentpit', label: 'AgentPit 高速通道' },
-  { v: 'custom', label: '我自己的数据源' },
-], 'free', v => {
-  sel.src = v
-  document.getElementById('dc-src-note').innerHTML = SRC_NOTE[v] || ''
-  document.getElementById('dc-custom').style.display = v === 'custom' ? 'block' : 'none'
-  estimate()
-})
-document.getElementById('dc-src-note').innerHTML = SRC_NOTE.free
+function renderSrc() {
+  const items = sel.market === 'us'
+    ? [{ v: 'free', label: '本地免费源' }]
+    : [{ v: 'free', label: '本地免费源' }, { v: 'agentpit', label: 'AgentPit 高速通道' },
+       { v: 'custom', label: '我自己的数据源' }]
+  const cur = sel.src || 'free'
+  seg('dc-src', items, cur, v => {
+    sel.src = v
+    document.getElementById('dc-src-note').innerHTML = SRC_NOTE[v] || ''
+    document.getElementById('dc-custom').style.display = v === 'custom' ? 'block' : 'none'
+    estimate()
+  })
+  document.getElementById('dc-src-note').innerHTML = sel.market === 'us' ? SRC_NOTE.us : (SRC_NOTE[cur] || '')
+  document.getElementById('dc-custom').style.display = cur === 'custom' && sel.market !== 'us' ? 'block' : 'none'
+}
+renderSrc()
 
 document.getElementById('dc-cust-test').onclick = async () => {
   const btn = document.getElementById('dc-cust-test')
@@ -303,7 +357,9 @@ async function loadOverview() {
     <div class="dc-stat"><div class="k">日线区间</div><div class="v" style="font-size:13px">${o.kline_from || '—'}<br><small>→ ${o.kline_to || '—'}</small></div></div>
     <div class="dc-stat"><div class="k">可用因子</div><div class="v">${o.factors_with_data} <small>/ ${o.factors_total}</small></div></div>
     <div class="dc-stat"><div class="k">财报数据</div><div class="v">${o.financial_stocks} <small>只</small></div></div>
-    <div class="dc-stat"><div class="k">占用磁盘</div><div class="v">${o.disk_mb} <small>MB</small></div></div>`
+    <div class="dc-stat"><div class="k">占用磁盘</div><div class="v">${o.disk_mb} <small>MB</small></div></div>
+    ${o.us && o.us.stocks ? `<div class="dc-stat"><div class="k">美股日线</div><div class="v">${o.us.stocks} <small>只</small></div>
+      <div class="cnt" style="font-size:11.5px;margin-top:2px">${o.us.kline_from || '—'} → ${o.us.kline_to || '—'}</div></div>` : ''}`
   document.getElementById('dc-factor-note').innerHTML = o.empty
     ? '还没有任何数据 —— 在下面选一批股票下载,大约 10 分钟就能开始回测'
     : `· <b>技术因子</b>只靠日线算,下过日线就有<br>· <b>基本面因子</b>要财报 —— 没下financial 的话,选了它们回测会提示"这些因子没有数据"`
@@ -312,6 +368,8 @@ async function loadOverview() {
 // ── 任务 ───────────────────────────────────────────────
 const STATUS_CN = { queued: '排队中', running: '进行中', paused: '已暂停',
                     done: '完成', failed: '失败', canceled: '已取消' }
+// 任务列表里的范围名。没列的原样显示(A 股那几个一直是这样,不在这次改)
+const KIND_CN = { us_all: '全美股' }
 
 async function loadJobs() {
   const d = await fetch('/api/quant/data/jobs?limit=8').then(r => r.json())
@@ -322,6 +380,11 @@ async function loadJobs() {
 // 只会让人白等或者白重试。
 function failHint (j) {
   const f = j.failed_count || 0
+  // 美股被腾讯防火墙拦了:不是等几分钟的限流,是按小时算的封禁 —— 任务已自动暂停,别马上续跑
+  if ((j.phase || '').includes('WAF') || (j.message || '').includes('WAF')) {
+    return `<div class="cnt" style="color:#c60">腾讯的防火墙拦住了本机 IP —— 任务已暂停,已下的不会丢。
+      通常几小时内自动解封,<b>过几小时再点续跑</b>;马上续跑只会延长封禁。</div>`
+  }
   if ((j.phase || '').includes('限流')) {
     return `<div class="cnt" style="color:#c60">上游在限流 —— 已自动放慢并等待,
       恢复后会继续,失败的票末尾还会重跑一遍。<b>不用管它</b>。</div>`
@@ -360,7 +423,7 @@ function failHint (j) {
       <span style="color:var(--muted)">#${j.id}</span>
       <span>${j.scope?.kind === 'package'
         ? '导入 ' + (j.scope.file || '').replace(/^hunter-data-/, '')
-        : (j.scope?.kind || '?') + ' · ' + (j.span_months ? j.span_months + ' 个月' : '只补最新')
+        : (KIND_CN[j.scope?.kind] || j.scope?.kind || '?') + ' · ' + (j.span_months ? j.span_months + ' 个月' : '只补最新')
           + (j.with_financial ? ' + 财报' : '')}</span>
       <span style="margin-left:auto;color:var(--muted)">成功 ${j.done_count} · 跳过 ${j.skipped_count}</span>
       <span>${STATUS_CN[j.status] || j.status}</span>

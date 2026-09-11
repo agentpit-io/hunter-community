@@ -52,6 +52,19 @@ MB_FIN_RAW = 0.045
 
 _BASELINE = Path(__file__).resolve().parents[3] / "data" / "stocks_catalog_baseline.json"
 
+# ── 美股(2026-09-11)────────────────────────────────────────
+# 腾讯全局限速 1 次/秒(见 rs_history 顶部 WAF 事故)+ 拆股核对 + 入库 ≈ 1.05 秒/只。
+# 首轮 4069 只实测 4072 秒拉完(RS 管线,同一接口同一限速)。
+# 「只补最新」**不打折**:美股一律整只重写(见 us_kline 约定 1),补一天和补一年都是一次请求。
+RATE_US_SEC = 1.05
+# 最长 5 年:腾讯单次最多约 1500 根(≈6 年),拆股核对的锚点最远 5 年(扫描源 Perf.5Y)
+US_SPAN_MAX = 60
+US_KINDS = {"us_all"}
+
+
+def market_of_scope(scope: dict | None) -> str:
+    return "us" if (scope or {}).get("kind") in US_KINDS else "a"
+
 # 一级行业 —— 归并成 7 个,不直接用东财的 80+ 板块名(平铺给用户选反而更难挑)
 L1_ORDER = ["科技", "医药", "消费", "新能源", "金融", "制造", "资源"]
 
@@ -146,6 +159,16 @@ def resolve_scope(scope: dict, user_id: str | None = None) -> tuple[list[str], s
         codes = _all_a_codes()
         return codes, ("" if codes else "全A清单读取失败")
 
+    if kind == "us_all":
+        # 全美股 = RS 排名池同一口径:交易所上市(不含 OTC)、市值 ≥5000 万美元
+        from app.services.quant import us_kline
+        try:
+            members, _ = us_kline.pool()
+        except Exception as e:                                # noqa: BLE001
+            log.warning("[data_center] 取美股名单失败: %s", e)
+            return [], "暂时拉不到美股名单(扫描源没响应)—— 稍后再试"
+        return [m["code"] for m in members], ""
+
     if kind == "manual":
         raw = (scope or {}).get("codes") or []
         codes = [str(c).strip().zfill(6) for c in raw if str(c).strip()]
@@ -180,11 +203,18 @@ def overview() -> dict:
                 missing.append(table)
             return default
 
+    from app.services.quant import market as _mk
     try:
+        # 顶部那一排是 **A 股**的(因子、财报、行业都是 A 股口径);美股单独一组,
+        # 不混进「已下载股票」—— 559 突然变成 4600,会被理解成这些都能按 A 股口径用
         k_n, k_from, k_to = _one(
             """SELECT count(DISTINCT code), min(covered_from), max(covered_to)
-                 FROM data_coverage WHERE data_type='kline'""",
+                 FROM data_coverage WHERE data_type='kline' AND """ + _mk.SQL_IS_A,
             default=(0, None, None), table="data_coverage")
+        u_n, u_from, u_to = _one(
+            """SELECT count(DISTINCT code), min(covered_from), max(covered_to)
+                 FROM data_coverage WHERE data_type='kline' AND """ + _mk.SQL_IS_US
+            + " AND code <> %s", (_mk.US_BENCH,), default=(0, None, None))
         f_n = (_one("SELECT count(DISTINCT code) FROM data_coverage "
                     "WHERE data_type='financial'", default=[0]))[0]
         fk = (_one("SELECT count(DISTINCT factor_key) FROM factor_value",
@@ -212,9 +242,12 @@ def overview() -> dict:
         "factors_total": total_factors,
         "disk_mb": disk_mb,
         # 库是空的 → 前端提示"到「数据」页下载",而不是让用户对着空界面发懵
-        "empty": (k_n or 0) == 0,
+        "empty": (k_n or 0) + (u_n or 0) == 0,
         # 缺哪张表照实说 —— 空着表示一切正常
         "missing_tables": missing,
+        "us": {"stocks": u_n or 0,
+               "kline_from": u_from.isoformat() if u_from else None,
+               "kline_to": u_to.isoformat() if u_to else None},
     }
 
 
@@ -251,7 +284,15 @@ def scopes(user_id: str | None = None) -> dict:
         # "行业分类还没同步",而不是显示一个空白的行业区
         "industries": [{"l1": l1, "children": by_l1.get(l1, [])} for l1 in L1_ORDER],
         "industry_seeded": bool(ind_rows),
+        # 美股只有一个范围。只数不为了显示去打扫描源 —— 用缓存 / us_symbol 表,都没有就给 None
+        "us": {"kind": "us_all", "label": "全美股", "count": _us_count(),
+               "span_max_months": US_SPAN_MAX},
     }
+
+
+def _us_count() -> int | None:
+    from app.services.quant import us_kline
+    return us_kline.pool_count_cached()
 
 
 # ═══════════════════════════════════════════════════════════
@@ -309,6 +350,9 @@ def estimate(scope: dict, span_months: int, with_financial: bool,
     # 已经覆盖到今天的可以跳过,差几天的要补
     start = end - timedelta(days=7 if latest_only else span_months * 31)
 
+    if market_of_scope(scope) == "us":
+        return _estimate_us(codes, note, start, end, span_months)
+
     skip_k = _covered(codes, "kline", start, end)
     skip = set(skip_k)
     if with_financial:
@@ -335,3 +379,20 @@ def estimate(scope: dict, span_months: int, with_financial: bool,
         "warn": ("这个范围很大 —— 中途随时可以暂停,已下载的不会丢,下次接着跑"
                  if todo > 2000 else ""),
     }
+
+
+def _estimate_us(codes: list[str], note: str, start: date, end: date, span_months: int) -> dict:
+    """美股预估。和 A 股的差别都写在返回的说明里,不藏:
+    限速 1 秒/只(防封 IP)、没有财报、最长 5 年、下完还要算一阵因子。"""
+    n = len(codes)
+    skip = _covered(codes, "kline", start, end)
+    todo = n - len(skip)
+    years = max(0.1, (span_months or 1) / 12.0)
+    sec = todo * RATE_US_SEC
+    mb = todo * (MB_KLINE_PER_YEAR + MB_FACTOR_PER_YEAR) * (0.05 if span_months <= 0 else years)
+    warn = ("美股按 1 秒/只限速下载(免费源持续快了会被封 IP)· 没有财报 · 最长 5 年 · "
+            "下完还要按美股池算一遍因子,大范围会再多等一阵 · 中途随时可以暂停,已下载的不会丢")
+    if span_months > US_SPAN_MAX:
+        warn = f"美股最长下 {US_SPAN_MAX // 12} 年 —— 请把时间范围改短。" + warn
+    return {"stocks": n, "skip": len(skip), "todo": todo, "seconds": int(sec),
+            "disk_mb": round(mb, 1), "note": note, "warn": warn, "market": "us"}

@@ -300,6 +300,16 @@ def register_local(scheduler):
         CronTrigger(day_of_week="sat", hour=2, minute=0),
         id="quant_akshare_weekly", replace_existing=True,
     )
+    # 美股(2026-09-11):只更新用户在数据页下过的美股,一只没下过就什么都不做。
+    # 周二到周六 08:00 CST = 美股周一到周五收盘后。放在 api 进程里而不是宿主机 crontab ——
+    # 自己部署的用户没有 fin-r1 那份 crontab。和 RS 管线(06:30 起约 70 分钟)撞上时靠
+    # us_kline.tencent_lock 排队,不会两边同时打腾讯。
+    from app.services.quant import us_kline
+    scheduler.add_job(
+        us_kline.nightly_refresh,
+        CronTrigger(day_of_week="tue-sat", hour=8, minute=0),
+        id="quant_us_nightly", replace_existing=True,
+    )
 
 
 def daily_ic_recompute():

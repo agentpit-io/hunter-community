@@ -724,11 +724,27 @@ def _main(argv=None) -> int:
     a = p.parse_args(argv)
 
     if a.cmd in ("fetch", "run"):
+        # 和数据页的美股下载、每晚美股刷新共用一把锁(us_kline.tencent_lock)——
+        # 三者都打腾讯 ifzq,同时跑就是各 1 次/秒叠加,限速等于白设(2026-09-11 WAF 事故)。
+        # 宿主机 crontab 的 flock 只管得住本脚本自己,管不到 api 进程里的下载任务
+        from app.services.quant import us_kline
+        lock, waited = us_kline.tencent_lock(), 0
+        while lock is None and waited < 90 * 60:
+            if waited == 0:
+                log.info("[rs_history] 腾讯通道被占用(数据页下载或每晚美股刷新在跑)· 排队等")
+            time.sleep(60)
+            waited += 60
+            lock = us_kline.tencent_lock()
+        if lock is None:
+            log.error("[rs_history] 等了 90 分钟腾讯通道仍被占用 · 本轮不跑")
+            return 4
         try:
             st = fetch_market(a.market, a.limit)
         except WafBlocked as e:
             log.error("[rs_history] %s", e)
             return 3
+        finally:
+            us_kline.release(lock)
         log.info("[rs_history] 拉取完成 %s", st)
     if a.cmd in ("compute", "run"):
         st = compute_market(a.market)

@@ -2,9 +2,11 @@
 # 每晚拉全市场日线 → RS 线上涨天数 + 精确 RS 评级(apps/api/app/services/quant/rs_history.py)
 #
 # 由 fin-r1 宿主机 crontab 调用 —— 容器里 HUNTER_MINIMAL_BOOT=1,后台调度器是关的,
-# 不能指望 api 进程自己定时跑。时间按上海时间(服务器时区):
-#   30 6  * * *  ~/hunter-community/scripts/rs_history_nightly.sh us     >> ~/rs_history.log 2>&1
-#   30 17 * * *  ~/hunter-community/scripts/rs_history_nightly.sh a hk   >> ~/rs_history.log 2>&1
+# 不能指望 api 进程自己定时跑。目标时间是上海 06:30(美股)/ 17:30(A/港股)。
+# ⚠ fin-r1 的 cron 进程按 **UTC** 计时(启动时系统还是 UTC,没重启过),所以 crontab 里写的是:
+#   30 22 * * *  ~/hunter-community/scripts/rs_history_nightly.sh us     >> ~/rs_history.log 2>&1
+#   30 9  * * *  ~/hunter-community/scripts/rs_history_nightly.sh a hk   >> ~/rs_history.log 2>&1
+# 退出码 4 = 等了 90 分钟腾讯通道仍被占用(数据页的美股下载在跑),本轮没跑。
 # 美股收盘 = 上海时间凌晨 4 点(夏令时)/ 5 点(冬令时),06:30 两种都赶得上。
 # 每天都跑(含周末)也没关系:整窗覆盖重写是幂等的,周末跑一次等于重算一遍同样的数。
 #

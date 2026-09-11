@@ -70,8 +70,11 @@ async def post_estimate(body: EstimateIn, request: Request):
     前端拖选项时是**本地算**的(速率写死在前端),点「开始下载」前
     调这个拿准确的可跳过数 —— 因为"哪些已经下过"只有后端知道。
     """
-    return data_center.estimate(
-        body.scope, body.span_months, body.with_financial,
+    # 放线程里:美股的范围解析第一次要打一次扫描源(约 3 秒,之后缓存 10 分钟),
+    # 在事件循环里同步做会让整个 API 卡住这几秒
+    import asyncio as _aio
+    return await _aio.to_thread(
+        data_center.estimate, body.scope, body.span_months, body.with_financial,
         body.keep_raw, _uid(request),
     )
 
@@ -107,8 +110,8 @@ async def create_job(body: JobIn, request: Request):
                 "message": f"已经有一个任务在跑(#{running['id']})· 同时只允许一个",
                 "job": running}
 
-    est = data_center.estimate(body.scope, body.span_months, body.with_financial,
-                              body.keep_raw, _uid(request))
+    est = await _aio.to_thread(data_center.estimate, body.scope, body.span_months,
+                               body.with_financial, body.keep_raw, _uid(request))
     if not est["stocks"]:
         return {"error": "empty_scope", "message": est.get("note") or "这个范围没有股票"}
 
@@ -117,6 +120,19 @@ async def create_job(body: JobIn, request: Request):
     from app.services.quant import download_source as ds
     src = ds.normalize(getattr(body, "source", None))
     custom = getattr(body, "custom", None)
+
+    # 美股三条限制(2026-09-11)—— 前端也置灰了,这里再拦一道,不信前端
+    if data_center.market_of_scope(body.scope) == "us":
+        if body.with_financial:
+            return {"error": "us_no_financial",
+                    "message": "美股暂时没有财报数据源(站内财报来自 A 股接口),只能下日线。"}
+        if src != ds.FREE:
+            return {"error": "us_free_only",
+                    "message": "美股目前只能走免费通道(腾讯日线,已做拆股核对)。"}
+        if (body.span_months or 0) > data_center.US_SPAN_MAX:
+            return {"error": "us_span_too_long",
+                    "message": f"美股最长下 {data_center.US_SPAN_MAX // 12} 年:免费源单次最多约 6 年,"
+                               f"拆股核对的锚点最远 5 年,再长的部分核对不了。"}
     # 把只数塞进去,让 validate 能判断"是不是一次要太多"
     bad = ds.validate(src, {**(custom or {}), "_stocks": est.get("todo") or est.get("stocks") or 0})
     if bad:

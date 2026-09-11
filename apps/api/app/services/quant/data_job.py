@@ -354,6 +354,11 @@ def run(job_id: int) -> dict:
     latest_only = (job["span_months"] or 0) <= 0
     start = end - timedelta(days=7 if latest_only else job["span_months"] * 31)
 
+    # 美股单独一条路(2026-09-11)。下面 A 股这一整段一字未动 ——
+    # 美股的取数通道、限速、拆股核对、失败处理全都不一样,硬塞进一个循环只会互相牵连
+    if data_center.market_of_scope(job["scope"]) == "us":
+        return _run_us(job_id, job, codes, start, end)
+
     already = data_center._covered(codes, "kline", start, end)
 
     # ── 三个计数器必须共用一个基准:**本轮**。─────────────────
@@ -656,6 +661,130 @@ def run(job_id: int) -> dict:
     set_status(job_id, "done", msg)
     log.info("[data_job %s] 完成 · %s · 因子 %s", job_id, msg, factors)
     return {"done": done, "skipped": skipped, "failed": failed, "factors": factors}
+
+
+def _run_us(job_id: int, job: dict, codes: list[str], start: date, end: date) -> dict:
+    """美股下载(数据页「全美股」)。约定见 us_kline 模块说明,这里只讲和 A 股循环的不同:
+
+    · **被 WAF 拦了立刻暂停**,不走 A 股那套"连续失败 → 退避重试"。
+      A 股的退避是给"限流会自己恢复"写的;WAF 封 IP 是按小时算的,退避重试只会延长封禁
+      (2026-09-11 首轮就是在 501 里重试了 40 分钟)。已下的不会丢,几小时后点续跑。
+    · **拆股对不上的不入库**,计进跳过并在结束信息里单列 —— 不是下载失败,是不给错数。
+    · 同一时刻只有一个批量任务打腾讯(us_kline.tencent_lock):每晚刷新在跑就排队等。
+    · 下完只对**美股池**、按**美股交易日历**算因子,进度按调仓日报。
+    """
+    from app.services.quant import data_center, universe as uv, us_kline
+    from app.services.quant import rs_history as rh
+
+    already = data_center._covered(codes, "kline", start, end)
+    skipped = len(already)
+    _progress(job_id, phase="等待腾讯通道", done=0, skipped=skipped, failed=0)
+    lock = None
+    while lock is None:
+        lock = us_kline.tencent_lock()
+        if lock is None:
+            _progress(job_id, phase="等每晚美股刷新 / RS 管线跑完再开始(同一时刻只允许一个批量任务打腾讯)")
+            if not _sleep_interruptible(job_id, 60):
+                _progress(job_id, phase="已暂停")
+                return {"paused": True, "done": 0}
+
+    done = failed = bad = fixed_n = 0
+    t0 = time.time()
+    try:
+        try:
+            _members, perf = us_kline.pool()
+        except Exception as e:                                # noqa: BLE001
+            set_status(job_id, "failed", f"拉不到美股锚点数据(拆股核对要用)· 稍后重试 · {e}")
+            return {"error": "no_anchors"}
+        syms = {m["code"]: m["sym"] for m in _members}
+        syms.update(us_kline.symbols([c for c in codes if c not in syms]))
+        # 整只重写:请求的起点必须盖住这只票**已有的最早日期**(见 us_kline 约定 1)。
+        # 否则「只补最新」只请求 60 根,整只重写会把之前下好的几年历史删掉
+        conn = get_conn(); cur = conn.cursor()
+        try:
+            cur.execute("SELECT code, covered_from FROM data_coverage "
+                        "WHERE data_type='kline' AND code = ANY(%s)", (codes,))
+            cov_from = dict(cur.fetchall())
+        finally:
+            cur.close(); conn.close()
+
+        _progress(job_id, phase="下载标普500(基准 + 美股交易日历)")
+        try:
+            if not us_kline.download_bench(us_kline.N_MAX):
+                set_status(job_id, "failed", "标普500 拉取失败 —— 没有它就没有美股交易日历和基准,本次中止")
+                return {"error": "no_bench"}
+        except rh.WafBlocked:
+            set_status(job_id, "paused", "腾讯 WAF 拦截了本机 IP · 几小时后点续跑,已下的不会重来")
+            return {"paused": True, "reason": "waf"}
+
+        _progress(job_id, phase="下载美股日线")
+        last_flush = time.time()
+        for i, code in enumerate(codes, 1):
+            if i % 5 == 1:
+                st = _read_status(job_id)
+                if st == "paused":
+                    _progress(job_id, done=done, skipped=skipped + bad, failed=failed, phase="已暂停")
+                    return {"paused": True, "done": done}
+                if st in ("canceled", "failed"):
+                    return {"canceled": True, "done": done}
+            if code in already:
+                continue
+            sym = syms.get(code)
+            if not sym:
+                bad += 1
+                continue
+            n = us_kline.bars_needed(min(start, cov_from.get(code) or start), end)
+            try:
+                res, nfix, last = us_kline.download_one(code, sym, n, perf.get(code))
+            except rh.WafBlocked:
+                _progress(job_id, done=done, skipped=skipped + bad, failed=failed, phase="被腾讯 WAF 拦截")
+                set_status(job_id, "paused",
+                           f"腾讯 WAF 拦截了本机 IP(已下 {done} 只,不会丢)· 几小时后点续跑")
+                log.error("[data_job %s] 美股下载被 WAF 拦截 · 已下 %d 只", job_id, done)
+                return {"paused": True, "reason": "waf", "done": done}
+            except Exception as e:                            # noqa: BLE001
+                log.warning("[data_job %s] %s 入库失败: %s", job_id, code, e)
+                res, nfix, last = "fail", 0, None
+            if res == "ok":
+                _upsert_coverage(code, "kline", start, last)
+                _clear_failure(code, "kline")
+                done += 1
+                fixed_n += nfix > 0
+            elif res == "bad":
+                bad += 1                                      # 拆股对不上 / 没有锚点 —— 不给错数
+            else:
+                failed += 1
+                _note_failure(code, "kline", isolated=True)
+            if time.time() - last_flush >= _FLUSH_SEC:
+                _progress(job_id, done=done, skipped=skipped + bad, failed=failed, code=code)
+                last_flush = time.time()
+    finally:
+        us_kline.release(lock)
+
+    # 因子:整个已下载的美股池一起算(截面要全池,只算这次新下的几只 z-score 是错的)
+    factors = {}
+    if done:
+        pool_codes = uv.covered_codes("us")
+
+        def _fp(i, total):
+            _progress(job_id, done=done, skipped=skipped + bad, failed=failed,
+                      phase=f"计算因子 {i}/{total} 个调仓日")
+        try:
+            factors = _compute_factors(pool_codes, start, end, market="us", on_progress=_fp)
+        except Exception as e:                                # noqa: BLE001
+            log.error("[data_job %s] 美股因子计算失败: %s", job_id, e)
+
+    msg = (f"美股日线 {done} 只 · 跳过 {skipped} 只(已有)"
+           + (f" · 拆股核对不上不入库 {bad} 只" if bad else "")
+           + (f" · 其中修正拆股 {fixed_n} 只" if fixed_n else "")
+           + f" · 失败 {failed} 只 · 耗时 {int(time.time() - t0)}s")
+    if done == 0 and skipped == 0:
+        set_status(job_id, "failed", msg + " —— 一只都没下成,稍后重试")
+        return {"error": "all_failed", "failed": failed}
+    _progress(job_id, done=done, skipped=skipped + bad, failed=failed, phase="完成")
+    set_status(job_id, "done", msg)
+    log.info("[data_job %s] 美股完成 · %s · 因子 %s", job_id, msg, factors)
+    return {"done": done, "skipped": skipped, "bad": bad, "failed": failed, "factors": factors}
 
 
 def _compute_factors(codes: list[str], start: date, end: date,
