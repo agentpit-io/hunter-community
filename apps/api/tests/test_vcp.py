@@ -109,6 +109,60 @@ check("突破 · 距枢轴为负", s and s["pivot_dist"] is not None and s["pivo
 s = vcp.vcp_stats(path(TEXTBOOK + [(140, 200.0, 1000.0)]))
 check("太久 · 半年前的收缩不算", s and s["contractions"] == 0, str(s))
 
+# ─── 2026-09-11 第二批:用户完整规则(首次 ≤50% / 至少 3 次 / 末次 ≤10% 且低点缩量 / 底部 3~12 个月)
+
+# 第一次大回调中途有一次反抽(100 → 80 → 反弹 88 → 62):是同一次 38% 的下跌,不是两次
+s = vcp.vcp_stats(path([UP, (12, 80.0, 1000.0), (6, 88.0, 900.0), (12, 62.0, 1000.0),
+                        (20, 97.0, 800.0), (12, 80.0, 700.0), (12, 96.0, 700.0),
+                        (8, 89.0, 400.0), (8, 95.0, 500.0)]))
+check("反抽 · ⭐中途反抽没过前高又跌破前低,并成同一次(38% 而不是 20%+30%)",
+      s and s["contractions"] == 3 and 36 < s["first_depth"] < 40, str(s))
+
+# 9 个月的长底部:第一次收缩在 160 个交易日前开始,旧的 6 个月窗口会漏掉它
+s = vcp.vcp_stats(path([UP, (40, 70.0, 1000.0), (40, 98.0, 800.0), (25, 85.0, 700.0),
+                        (25, 97.0, 700.0), (15, 92.0, 400.0), (15, 96.0, 500.0)]))
+check("长底部 · ⭐9 个月的底部照样数出 3 次", s and s["contractions"] == 3, str(s))
+check("长底部 · 底部天数超过 6 个月", s and 150 <= s["base_days"] <= 165, str(s))
+
+# 突破后已经冲过枢轴 15%:底部走完了,现在不在底部里
+s = vcp.vcp_stats(path(TEXTBOOK[:-1] + [(4, 112.0, 1500.0)]))
+check("走完 · ⭐冲过枢轴 10% 以上 → 0 次(不能带着「收缩 3 次」通过筛选)",
+      s and s["contractions"] == 0 and s["base_days"] is None, str(s))
+
+# 最低点量比:教科书最后一次收缩 400 量,前 50 天日均约 820
+s = vcp.vcp_stats(path(TEXTBOOK))
+check("低点量 · 最低点量比约 0.49", s and s["low_vol_ratio"] is not None and 0.4 < s["low_vol_ratio"] < 0.6, str(s))
+check("低点量 · 越接近低点量越小(最低点量比 < 最后一次收缩量比)",
+      s and s["low_vol_ratio"] < s["last_vol_ratio"], str(s))
+s = vcp.vcp_stats(path(TEXTBOOK[:-2] + [(4, 94.0, 400.0), (2, 93.0, 1500.0), (6, 97.0, 500.0)]))
+check("低点量 · 低点那几天放量 → 最低点量比 > 1", s and s["low_vol_ratio"] is not None and s["low_vol_ratio"] > 1, str(s))
+
+# 近 20 日涨跌天数与涨跌日均量比
+d0 = date(2026, 8, 1)
+seq_c = [100.0]
+seq_v = [1000.0]
+for i in range(20):                       # 12 天涨(量 2000)· 8 天跌(量 1000)
+    up = i % 5 != 4 and i < 15 or i >= 18
+    seq_c.append(seq_c[-1] * (1.01 if up else 0.99))
+    seq_v.append(2000.0 if up else 1000.0)
+pv_bars = [(d0 + timedelta(days=i), c, c * 1.005, c * 0.995, v) for i, (c, v) in enumerate(zip(seq_c, seq_v))]
+p = vcp.pv_stats(pv_bars)
+n_up = sum(1 for a, b in zip(seq_c, seq_c[1:]) if b > a)
+check("涨跌 · 上涨天数 / 下跌天数按收盘比前一天", p["up_days"] == n_up and p["down_days"] == 20 - n_up, str(p))
+check("涨跌 · 涨跌日均量比 = 2000 ÷ 1000", p["ud_vol_ratio"] == 2.0, str(p))
+p = vcp.pv_stats([(d, c, None, None, None) for d, c, _h, _l, _v in pv_bars])
+check("涨跌 · ⭐老数据只有收盘:天数照算,量比为空(不补 0)",
+      p["up_days"] == n_up and p["ud_vol_ratio"] is None, str(p))
+p = vcp.pv_stats([(d0 + timedelta(days=i), 100.0 + i, None, None, 1000.0) for i in range(21)])
+check("涨跌 · 20 天没有下跌日 → 量比为空(除不了)", p["up_days"] == 20 and p["ud_vol_ratio"] is None, str(p))
+check("涨跌 · 不足 21 根 → 全空", vcp.pv_stats(pv_bars[:15])["up_days"] is None)
+
+# 覆盖数按条件里用到的字段数:只用涨跌天数时,老数据也算得出
+hist2 = {"AAA": {"as_of": date(2026, 9, 10), "up_days_20d": 12, "vcp_contractions": None}}
+rows2 = [{"_code": "AAA"}]
+check("补字段 · 只用涨跌天数时按它数覆盖", vcp.inject(rows2, hist2, False, ["up_days_20d"]) == 1)
+check("补字段 · 用了收缩次数就按收缩次数数", vcp.inject(rows2, hist2, False, ["up_days_20d", "vcp_contractions"]) == 0)
+
 # 算不出就是空
 check("数据 · 不足 60 根 → 空", vcp.vcp_stats(path([(50, 80.0, 1000.0)])) is None)
 old = [(d, c, None, None, None) for d, c, _h, _l, _v in path(TEXTBOOK)]

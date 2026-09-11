@@ -109,6 +109,12 @@ _FIELD_WORDS: dict[str, str] = {
     "最后一次收缩量比": "vcp_last_vol_ratio", "收缩量比": "vcp_last_vol_ratio",
     "距枢轴点": "vcp_pivot_dist", "距离枢轴": "vcp_pivot_dist", "距枢轴": "vcp_pivot_dist",
     "离枢轴": "vcp_pivot_dist", "底部天数": "vcp_base_days",
+    "最低点量比": "vcp_low_vol_ratio", "低点量比": "vcp_low_vol_ratio",
+    # 量价(同日第二批)。**光秃秃的「上涨天数」不收** —— 词表里已有「RS线上涨天数」,
+    # 用户说「上涨天数大于50」时指的是哪个说不准;窗口必须带着「20日」说出来
+    "近20日上涨天数": "up_days_20d", "20日上涨天数": "up_days_20d",
+    "近20日下跌天数": "down_days_20d", "20日下跌天数": "down_days_20d",
+    "近20日涨跌日均量比": "ud_vol_ratio_20d", "涨跌日均量比": "ud_vol_ratio_20d",
 }
 
 # 比较符。**长的必须排在短的前面**:「大于等于」不能被「大于」先吃掉。
@@ -195,6 +201,15 @@ def _looks_like_field_name(tok: str) -> bool:
     return any(ch in tok for ch in "_.|")
 
 
+# 中文没有词边界,短词会从别的复合词里被截出来(英文那边靠 \b,见 _candidates)。
+# 这里登记「前面接了这些字,意思就不是这个字段了」的情况 —— 命中就当没看见这个词。
+# 2026-09-11 实测:「涨跌量比大于1」产出 relative_volume_10d_calc > 1(今日量比),静默错。
+# 词表里能认的长说法(收缩量比 / 涨跌日均量比)按长度优先先被认走,不受这里影响。
+_SHADOW: dict[str, tuple[str, ...]] = {
+    "量比": ("涨跌", "升降", "上下", "多空", "买卖", "内外", "内外盘", "日均", "均"),
+}
+
+
 class _Vocab:
     """把可用周期带进来 —— 能不能用 SMA37 由扫描源说了算,不在这里硬编码。"""
 
@@ -260,6 +275,8 @@ class _Vocab:
                     out.append((m.start(), -len(w), fld, w, ""))
             else:
                 i = low.find(w)
+                if i >= 0 and any(low[max(0, i - len(p)):i] == p for p in _SHADOW.get(w, ())):
+                    continue          # 「涨跌量比」里的「量比」不是今日量比 —— 意思变了,宁可认不出
                 if i >= 0:
                     out.append((i, -len(w), fld, w, ""))
                 elif w in low_ns:
@@ -355,8 +372,12 @@ def _unit(fld: str) -> str | None:
     if fld.startswith("Stoch."):
         return "随机指标"
     # 「大于50天」里的天是阈值单位 —— 只对这类字段成立(见 _clause_to_expr 末尾)
-    if fld == "rs_line_up_days" or fld.endswith("_days"):
+    if fld == "rs_line_up_days" or fld.endswith("_days") or fld in ("up_days_20d", "down_days_20d"):
         return "天数"
+    # 两个 VCP 量比的分母是同一个(收缩前 50 天日均量),可以互相比:
+    # 「最低点量比小于最后一次收缩量比」= 越接近低点量越小。今日量比、涨跌日均量比分母不同,不归这类
+    if fld in ("vcp_last_vol_ratio", "vcp_low_vol_ratio"):
+        return "VCP量比"
     return None
 
 

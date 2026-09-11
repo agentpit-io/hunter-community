@@ -676,6 +676,11 @@ def missing_reason(field: str) -> str:
     """字段为空的**常见**原因。只写有把握的,拿不准就不写。"""
     if field in ("rs_rating", "rs_raw"):
         return "次新股(不足 250 个交易日)或不在 RS 排名池里(美股 OTC、市值约 5000 万美元以下)"
+    if field in ("up_days_20d", "down_days_20d"):
+        return "日线不足 21 根、不在 RS 排名池里,或这个市场的日线已过期"
+    if field == "ud_vol_ratio_20d":
+        return ("日线里还没有成交量(老数据只存了收盘,每晚任务整窗重拉后才有)、"
+                "近 20 日没有下跌日(除不了),或日线不足 21 根 / 已过期")
     if field.startswith("vcp_"):
         return ("日线不足 60 根、日线里还没有最高/最低价(老数据只存了收盘,每晚任务整窗重拉后才有)、"
                 "不在 RS 排名池里,或这个市场的日线已过期;量能递减另有一种:只有一次收缩,无从比较")
@@ -747,6 +752,8 @@ _FIELD_LABEL = {
     "vcp_last_depth": "VCP最后一次收缩深度%", "vcp_vol_declining": "VCP量能逐次递减(1是0否)",
     "vcp_last_vol_ratio": "VCP最后一次收缩量比", "vcp_pivot_dist": "距VCP枢轴%",
     "vcp_base_days": "VCP底部天数", "vcp_depths": "VCP各次深度%",
+    "vcp_low_vol_ratio": "VCP最低点量比", "up_days_20d": "近20日上涨天数",
+    "down_days_20d": "近20日下跌天数", "ud_vol_ratio_20d": "近20日涨跌日均量比",
 
     # 固定搭配 —— 这些**不能**靠词素拼,必须逐条给准确译名。
     # (price_to_book 拼出来是「价格账面」,free_cash_flow 是「自由现金流量」,

@@ -141,6 +141,11 @@ ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS vcp_last_vol_ratio DOUBLE PREC
 ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS vcp_pivot          DOUBLE PRECISION;
 ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS vcp_pivot_dist     DOUBLE PRECISION;
 ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS vcp_base_days      INT;
+-- 同日第二批:最低点量比 + 近 20 日涨跌天数 / 涨跌日均量比(口径见 vcp.py)
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS vcp_low_vol_ratio  DOUBLE PRECISION;
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS up_days_20d        INT;
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS down_days_20d      INT;
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS ud_vol_ratio_20d   DOUBLE PRECISION;
 """
 
 
@@ -622,12 +627,14 @@ def compute_market(market: str) -> dict:
         bars = adjust_bars(raw, series)
         from app.services.quant import vcp     # 函数内 import:本文件的惯例,tests/ 能不带 app 包单独加载
         vs = vcp.vcp_stats(bars) or {}
+        pv = vcp.pv_stats(bars)                # 只要收盘就能数涨跌天数,不跟着形态一起为空
         rows.append((market, code, st["as_of"], st["n_days"], st["rs_line"],
                      st["rs_ma21"], st["up_days"], st["up_days_censored"],
                      rs_raw_exact([c for _, c in series]),
                      vs.get("contractions"), vs.get("depths") or None, vs.get("first_depth"),
                      vs.get("last_depth"), vs.get("vol_declining"), vs.get("last_vol_ratio"),
-                     vs.get("pivot"), vs.get("pivot_dist"), vs.get("base_days")))
+                     vs.get("pivot"), vs.get("pivot_dist"), vs.get("base_days"),
+                     vs.get("low_vol_ratio"), pv["up_days"], pv["down_days"], pv["ud_vol_ratio"]))
         split["vcp"] += vs.get("contractions") is not None
 
     # 服务端游标逐只流式算 —— 美股一个市场就是 4000 只 × 320 天 ≈ 130 万行,
@@ -658,7 +665,8 @@ def compute_market(market: str) -> dict:
                        "INSERT INTO rs_line_stat (market, code, as_of, n_days, rs_line, rs_ma21, "
                        "up_days, up_days_censored, rs_raw_exact, vcp_contractions, vcp_depths, "
                        "vcp_first_depth, vcp_last_depth, vcp_vol_declining, vcp_last_vol_ratio, "
-                       "vcp_pivot, vcp_pivot_dist, vcp_base_days) VALUES %s", rows)
+                       "vcp_pivot, vcp_pivot_dist, vcp_base_days, vcp_low_vol_ratio, up_days_20d, "
+                       "down_days_20d, ud_vol_ratio_20d) VALUES %s", rows)
     conn.commit()
     cur.close()
     conn.close()
@@ -692,13 +700,16 @@ def load_stats(market: str) -> tuple[dict, dict]:
         cur = conn.cursor()
         cur.execute("SELECT code, as_of, up_days, up_days_censored, rs_raw_exact, rs_line, rs_ma21, "
                     "vcp_contractions, vcp_depths, vcp_first_depth, vcp_last_depth, "
-                    "vcp_vol_declining, vcp_last_vol_ratio, vcp_pivot_dist, vcp_base_days "
+                    "vcp_vol_declining, vcp_last_vol_ratio, vcp_pivot_dist, vcp_base_days, "
+                    "vcp_low_vol_ratio, up_days_20d, down_days_20d, ud_vol_ratio_20d "
                     "FROM rs_line_stat WHERE market=%s", (market,))
         out = {r[0]: {"as_of": r[1], "up_days": r[2], "censored": r[3],
                       "rs_raw_exact": r[4], "rs_line": r[5], "rs_ma21": r[6],
                       "vcp_contractions": r[7], "vcp_depths": r[8], "vcp_first_depth": r[9],
                       "vcp_last_depth": r[10], "vcp_vol_declining": r[11],
-                      "vcp_last_vol_ratio": r[12], "vcp_pivot_dist": r[13], "vcp_base_days": r[14]}
+                      "vcp_last_vol_ratio": r[12], "vcp_pivot_dist": r[13], "vcp_base_days": r[14],
+                      "vcp_low_vol_ratio": r[15], "up_days_20d": r[16], "down_days_20d": r[17],
+                      "ud_vol_ratio_20d": r[18]}
                for r in cur.fetchall()}
         cur.close()
         conn.close()

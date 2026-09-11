@@ -327,7 +327,8 @@ def run_script(script: str, market_key: str = "us", limit: int = 100,
     # RS 字段**不能**原样发给扫描源(它没有这两列,会整批报错),
     # 换成算 RS 需要的四个来源列,拉回来之后在全市场上算好再补进每一行。
     uses_rs = any(f in screen_rs.RS_FIELDS for f in c.fields)
-    uses_vcp = any(f in vcp.FIELDS for f in c.fields)
+    vcp_used = [f for f in c.fields if f in vcp.FIELDS]
+    uses_vcp = bool(vcp_used)
     if uses_vcp and vcp.DISPLAY not in want:
         want.append(vcp.DISPLAY)      # 结果表里顺带显示「25.7→13.0→6.0」,一眼看出每次多深
     ours = set(screen_rs.RS_FIELDS) | set(vcp.FIELDS) | {vcp.DISPLAY}
@@ -360,7 +361,7 @@ def run_script(script: str, market_key: str = "us", limit: int = 100,
         v_stale = v_as_of is None or (_date.today() - v_as_of).days > screen_rs.HIST_STALE_DAYS
         fresh_n = sum(1 for v in (hist or {}).values() if v["as_of"] == v_as_of)
         vcp_stat = {"as_of": v_as_of, "stale": v_stale, "fresh": fresh_n,
-                    "n": vcp.inject(rows, hist, v_stale)}
+                    "n": vcp.inject(rows, hist, v_stale, vcp_used)}
 
     t1 = time.time()
     hits, skipped, missing = screen_dsl.evaluate_detail(c, rows, cache)
@@ -423,7 +424,7 @@ def run_script(script: str, market_key: str = "us", limit: int = 100,
                             f"会给错答案,所以这次 VCP 字段全部为空。")
         elif vcp_stat["n"] < vcp_stat["fresh"] * 0.5:
             # 2026-09-11 上线当天就是这种情况:老日线只存了收盘价,没有最高/最低/成交量
-            warnings.append(f"VCP 字段要用日线里的最高价、最低价和成交量。这次只有 {vcp_stat['n']} 只"
+            warnings.append(f"VCP 与量价字段要用日线里的最高价、最低价和成交量。这次只有 {vcp_stat['n']} 只"
                             f"算得出(日线里带着这三项的),其余 {vcp_stat['fresh'] - vcp_stat['n']} 只"
                             f"要等下一轮每晚定时任务整窗重拉之后才有 —— 它们是「算不出」,不是「不满足」。")
         else:
@@ -725,6 +726,42 @@ def cond_line = RSLineUpDays() > 50;
 def cond_liq  = Average(volume, 30) > 500000;
 
 plot scan = cond_rs and cond_line and cond_liq;
+""",
+})
+
+# 2026-09-11 用户给的五条 VCP 规则,逐条对应。字段口径见 services/quant/vcp.py。
+# 阈值里只有「最低点量比 ≤ 0.6」是我们定的(用户原话「相对非常小」没给数),脚本里写明了。
+PRESETS.append({
+    "key": "vcp",
+    "name": "VCP 波动收缩",
+    "market": "us",
+    "desc": "Minervini VCP:首次收缩 ≤50%、至少 3 次逐次变浅、末次 ≤10% 且低点缩量、"
+            "近 4 周上涨放量下跌缩量、底部 3~12 个月。字段来自每晚的全市场日线。",
+    "script": """# ===== VCP 波动收缩(Minervini)=====
+# 字段每晚由全市场日线算出。一次收缩 = 摆动高点(比前后各 5 个交易日都高)到其后的低点;
+# 往前数时前一次要明显更深、各次高点大致持平,才算连续收缩。
+
+# 1. 第一次收缩在 50% 以内
+def cond_first = vcp_first_depth <= 50;
+
+# 2. 后一次比前一次浅,至少 3 次(逐次变浅已包含在收缩次数的数法里)
+def cond_count = vcp_contractions >= 3;
+
+# 3. 最后一次收缩在 10% 以内;越接近低点量越小;
+#    低点(当天及前 2 天)的日均量不到收缩前 50 天日均量的 6 成(「相对非常小」,可按需调)
+def cond_last    = vcp_last_depth <= 10;
+def cond_dryup   = vcp_low_vol_ratio < vcp_last_vol_ratio;
+def cond_low_vol = vcp_low_vol_ratio <= 0.6;
+
+# 4. 近 20 个交易日:上涨日的日均量大于下跌日,上涨天数多于下跌天数
+def cond_ud_vol  = ud_vol_ratio_20d > 1;
+def cond_ud_days = up_days_20d > down_days_20d;
+
+# 5. 底部 3~12 个月(按交易日算:63~252 天)
+def cond_base = vcp_base_days >= 63 and vcp_base_days <= 252;
+
+plot scan = cond_first and cond_count and cond_last and cond_dryup
+        and cond_low_vol and cond_ud_vol and cond_ud_days and cond_base;
 """,
 })
 

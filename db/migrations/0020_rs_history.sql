@@ -28,3 +28,21 @@ CREATE TABLE IF NOT EXISTS rs_line_stat (
     computed_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (market, code)
 );
+-- 2026-09-11 · VCP 字段(口径见 apps/api/app/services/quant/vcp.py)。
+-- 腾讯每根 K 线本来就带 [日期, 开, 收, 高, 低, 量],原来只存收盘 —— 同一次响应多存三列,零新增请求。
+ALTER TABLE rs_daily ADD COLUMN IF NOT EXISTS high   DOUBLE PRECISION;
+ALTER TABLE rs_daily ADD COLUMN IF NOT EXISTS low    DOUBLE PRECISION;
+ALTER TABLE rs_daily ADD COLUMN IF NOT EXISTS volume DOUBLE PRECISION;
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS vcp_contractions   INT;
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS vcp_depths         TEXT;
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS vcp_first_depth    DOUBLE PRECISION;
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS vcp_last_depth     DOUBLE PRECISION;
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS vcp_vol_declining  SMALLINT;
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS vcp_last_vol_ratio DOUBLE PRECISION;
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS vcp_pivot          DOUBLE PRECISION;
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS vcp_pivot_dist     DOUBLE PRECISION;
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS vcp_base_days      INT;
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS vcp_low_vol_ratio  DOUBLE PRECISION;
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS up_days_20d        INT;
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS down_days_20d      INT;
+ALTER TABLE rs_line_stat ADD COLUMN IF NOT EXISTS ud_vol_ratio_20d   DOUBLE PRECISION;

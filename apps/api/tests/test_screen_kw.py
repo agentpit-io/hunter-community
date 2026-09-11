@@ -58,7 +58,7 @@ earnings_per_share_diluted_ttm price_52_week_high price_52_week_low all_time_hig
 RSI ADX ATR VWAP MACD.macd MACD.signal MACD.hist Stoch.K Stoch.D BB.upper BB.lower BB.basis
 Perf.W Perf.1M Perf.3M Perf.6M Perf.Y Perf.YTD rs_rating rs_raw rs_line_up_days
 vcp_contractions vcp_first_depth vcp_last_depth vcp_vol_declining vcp_last_vol_ratio
-vcp_pivot_dist vcp_base_days""".split())
+vcp_pivot_dist vcp_base_days vcp_low_vol_ratio up_days_20d down_days_20d ud_vol_ratio_20d""".split())
 FIELDS |= {f"SMA{n}" for n in SMA} | {f"EMA{n}" for n in EMA} | {f"RSI{n}" for n in RSI}
 FIELDS |= {f"average_volume_{n}d_calc" for n in (10, 30, 60, 90)}
 
@@ -276,6 +276,30 @@ SHOULD_REJECT += [
     "收缩次数大于3周",          # 单位对不上
     "市盈率10%到20%",          # 区间,不带「之间」也要认出来
     "市盈率从10到20",
+]
+
+
+# ── 2026-09-11 第二批 · 最低点量比 / 近 20 日涨跌天数 / 涨跌日均量比 ─────────
+SHOULD_MATCH += [
+    ("最低点量比小于0.6", "vcp_low_vol_ratio < 0.6"),       # 不能被里面的「量比」截胡
+    ("低点量比不超过0.5", "vcp_low_vol_ratio <= 0.5"),
+    ("近20日涨跌日均量比大于1", "ud_vol_ratio_20d > 1"),
+    ("涨跌日均量比大于1.2", "ud_vol_ratio_20d > 1.2"),
+    ("20日上涨天数大于12", "up_days_20d > 12"),              # 字段名里的 20 不能当阈值
+    ("近20日下跌天数小于8天", "down_days_20d < 8"),
+    ("近20日上涨天数大于近20日下跌天数", "up_days_20d > down_days_20d"),
+    ("最低点量比小于最后一次收缩量比", "vcp_low_vol_ratio < vcp_last_vol_ratio"),  # 同一个分母,能比
+    ("量比大于2", "relative_volume_10d_calc > 2"),          # 拦「涨跌量比」不能误伤裸「量比」
+    ("今日量比大于2", "relative_volume_10d_calc > 2"),
+]
+SHOULD_REJECT += [
+    "上涨天数大于下跌天数",      # 不带窗口:和「RS线上涨天数」撞,也不知道几天
+    "涨跌量比大于1",            # IBD 口径(总量比)和我们的日均量比不是一个数,不能被「量比」截胡
+    "最低点成交量很小",          # 没有数字
+    "多空量比大于1",            # 同类:前面接了修饰词,「量比」的意思就变了
+    "买卖量比大于2",
+    "日均量比大于1",
+    "最低点量比小于今日量比",    # 分母不同,不能直接比
 ]
 
 
