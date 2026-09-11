@@ -1467,6 +1467,11 @@ BFF prompt 里那句「用户说『用 xxx skill 分析』时,你会先读到那
 存储在 `services/screen_saved.py`(per-user · `user_screen_preset` 表),
 文件头写了为什么存后端不存 localStorage、为什么同名即覆盖。
 
+**系统示例(后端 `PRESETS`)可以对自己隐藏,不能删**(2026-09-11)。全站共用,所以只存 localStorage
+`hunter_screener_hidden_presets`(没登录也能用,丢了只是示例重新出现 —— 和上面「我的扫描策略」存后端不矛盾:
+那是用户的数据,这是显示偏好)。✕ 按用户要求做得小而淡,但**常驻可见**;行尾常驻「已隐藏 N 个 · 恢复」,
+全部隐藏时它也必须还在(否则再也找不回来)。render_check 有 8 条断言盯着。
+
 ## 小鹿智能体页(`strategies/agent.html`)· 三条别改坏的约定
 
 2026-09-09 新增的自迭代量化原型页,**前端已完成、后端接口还没有**。
