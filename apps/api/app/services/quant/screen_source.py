@@ -482,7 +482,8 @@ def parse_script(script: str, market_key: str = "us", allow_ai: bool = False,
             # names:字段原名不分大小写(perf.y → Perf.Y)。learned:之前 AI 识别学来的对照表,
             # 只补规则认不出的句子。表读不到时是空 dict,本地规则照常工作。
             k = screen_kw.translate(script, has_field, meta.sma, meta.ema, meta.rsi,
-                                    names=meta.names, learned=screen_learned.table())
+                                    names=meta.names,
+                                    learned=screen_learned.table_for(screen_kw.candidate_keys(script)))
             script = k["script"]
             # 对照表里的表达式可能已经过时(字段下线、周期不支持)—— 这一步编译不过
             # 就整体落回 AI,AI 的新结果会覆盖掉那条旧的

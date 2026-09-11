@@ -799,6 +799,32 @@ def learned_lookup(text: str, table: dict | None) -> tuple[list[str], dict] | No
     return None
 
 
+def candidate_keys(text: str) -> list[str]:
+    """这段输入**可能**用到的全部对照表 key(整句 + 每一句,各种数字挖空组合)。
+
+    存储层按这个清单去库里精确查,而不是整张表读进内存缓存 ——
+    缓存在多进程部署下会过期不一致:用户在 A 进程点了「忘掉」,
+    B 进程还拿着旧的那条,刚纠完错一重新生成又看到学错的结果(2026-09-11 端到端实测踩到)。
+    必须和 translate / learned_lookup 走完全一样的归一化与切分。
+    """
+    t = _normalize(text or "")
+    out: list[str] = []
+    seen: set[str] = set()
+    for x in [t] + _split(t):
+        tt = _key_base(x)
+        if not tt:
+            continue
+        ms = _num_matches(tt)
+        idx = list(range(len(ms)))
+        for size in range(0, len(idx) + 1):
+            for combo in combinations(idx, size):
+                k = _tmpl(tt, ms, list(combo))
+                if k not in seen:
+                    seen.add(k)
+                    out.append(k)
+    return out
+
+
 def _entry(text: str, exprs: list[str]) -> list[tuple[str, list[str]]]:
     """一句话 + 它对应的表达式 → [(key, 表达式模板)]。能对上的数字挖成空位。"""
     t = _key_base(text)

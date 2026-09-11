@@ -21,17 +21,18 @@ tests/test_screen_learn.py 不连库就能测。这里只管存取。
      「这句来自之前的 AI 识别」+「这条不对,忘掉它」。忘掉是软删(disabled),
      行留着备查;下次这句话会重新交给 AI,新结果会重新启用它。
 
-## 为什么缓存 30 秒
+## 为什么不缓存
 
-每次点「生成」都要查表。表不大(一条一行),整张读进内存做 dict 查找;
-30 秒 TTL 让多进程部署之间最多差 30 秒,学/忘之后本进程立刻失效重读。
+最初是整张表读进内存、缓存 30 秒。端到端实测踩到:「忘掉」只清得掉**处理这次请求的
+那个进程**的缓存,多 worker 部署下别的进程还拿着旧记录 —— 用户刚点完「忘掉」、
+一重新生成,又看到那条学错的结果,正好发生在他最想确认纠错生效的那一刻。
+
+现在每次只查「这句话可能用到的那几个 key」(screen_kw.candidate_keys,
+每句最多几十个),一条 `WHERE key = ANY(...)`。永远是最新的,表再大也不用整张读。
 """
 from __future__ import annotations
 
 import json
-import threading
-import time
-
 from loguru import logger
 
 from app.services.database import get_conn
@@ -59,9 +60,6 @@ CREATE TABLE IF NOT EXISTS screen_learned_phrase (
 # created_by / disabled_by 故意用 TEXT 不挂外键:单用户模式下的 uid 未必在 users 表里,
 # 挂了外键会让「学」这一步在那种部署上直接失败 —— 而学失败不该影响任何人用。
 
-_TTL = 30.0
-_lock = threading.Lock()
-_cache: dict = {"at": 0.0, "table": {}}
 _ddl_applied = False
 
 # 单条上限:一句话的 key 太长说明是整段复杂描述,记下来命中率极低,不值得占表
@@ -83,37 +81,33 @@ def _ensure_table() -> None:
         conn.close()
 
 
-def invalidate() -> None:
-    with _lock:
-        _cache["at"] = 0.0
+def table_for(keys: list[str]) -> dict:
+    """{key: {"id", "exprs"}},只含 keys 里、且没被忘掉的那几条。
 
-
-def table() -> dict:
-    """{key: {"id", "exprs"}} 快照。**出错返回空表** —— 对照表是锦上添花,
-    库连不上时本地规则照常工作,不能因为它把「生成」整个打成 500。"""
-    now = time.time()
-    with _lock:
-        if now - _cache["at"] < _TTL:
-            return _cache["table"]
+    **出错返回空表** —— 对照表是锦上添花,库连不上时本地规则照常工作,
+    不能因为它把「生成」整个打成 500。
+    """
+    keys = [k for k in (keys or []) if k and len(k) <= MAX_KEY_LEN]
+    if not keys:
+        return {}
     try:
         _ensure_table()
         conn = get_conn()
         try:
             cur = conn.cursor()
-            cur.execute("SELECT id, key, exprs FROM screen_learned_phrase WHERE NOT disabled")
+            cur.execute("SELECT id, key, exprs FROM screen_learned_phrase "
+                        "WHERE key = ANY(%s) AND NOT disabled", (keys,))
             tb = {}
             for i, k, ex in cur.fetchall():
                 if isinstance(ex, str):
                     ex = json.loads(ex)
                 tb[k] = {"id": i, "exprs": list(ex or [])}
+            return tb
         finally:
             conn.close()
     except Exception as e:                                        # noqa: BLE001
-        logger.warning("[screen_learned] 读对照表失败,本次只用本地规则: {}", e)
+        logger.warning("[screen_learned] 查对照表失败,本次只用本地规则: {}", e)
         return {}
-    with _lock:
-        _cache.update(at=now, table=tb)
-    return tb
 
 
 def learn(entries: list[tuple[str, list[str]]], source_text: str, model: str | None,
@@ -140,7 +134,6 @@ def learn(entries: list[tuple[str, list[str]]], source_text: str, model: str | N
         conn.commit()
     finally:
         conn.close()
-    invalidate()
     logger.info("[screen_learned] 记下 {} 条 · 来自「{}」· {}", len(entries),
                 (source_text or "")[:60], [k for k, _e in entries])
     return len(entries)
@@ -178,7 +171,6 @@ def forget(entry_id: int, user_id: str | None) -> bool:
         conn.commit()
     finally:
         conn.close()
-    invalidate()
     if n:
         logger.info("[screen_learned] 忘掉 #{} · by {}", entry_id, user_id)
     return n > 0

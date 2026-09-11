@@ -137,6 +137,22 @@ check("展开 · 中间变量被替换进去",
 check("展开 · 引用了不存在的条件就不学", kw.inline_conditions(conds, ["c1", "nope"]) is None)
 check("展开 · 没有 plot 引用(自定义组合)就不学", kw.inline_conditions(conds, []) is None)
 
+# ⑩ 存储层只按 candidate_keys 去库里查 —— 候选必须覆盖 translate 实际会用到的 key。
+#    两边的归一化/切分只要差一点,线上就是「明明学过却查不到」,而且不报错。
+ALL = {}
+for t, ex in [("RS线连涨超过50天", ["rs_line_up_days > 50"]),
+              ("市值在100亿以上", ["market_cap_basic > 10000000000"]),
+              ("收盘价高于50日均线的1.05倍", ["close > SMA50 * 1.05"]),
+              ("市盈率大于10小于20", ["price_earnings_ttm > 10 and price_earnings_ttm < 20"])]:
+    ALL.update(table_of(kw.learn_entries(t, ex, RULE_OK), start_id=len(ALL) + 1))
+for q in ["RS线连涨超过60天", "市值在50亿以上", "收盘价高于50日均线的1.1倍",
+          "市盈率大于5小于30", "RS线连涨超过30天，市盈率大于8小于25", "  RS 线 连涨 超过 60 天 "]:
+    full, _m1 = tr(q, ALL)
+    narrowed = {k: v for k, v in ALL.items() if k in set(kw.candidate_keys(q))}
+    only, _m2 = tr(q, narrowed)
+    check(f"候选 key · 只按候选查也能命中「{q.strip()}」", full is not None and only == full,
+          f"整表={full} 只查候选={only}")
+
 total = passed + len(fails)
 print(f"对照表用例 {total} 条")
 if fails:
