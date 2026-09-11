@@ -275,6 +275,8 @@ function num(v) {
   const a = Math.abs(v)
   if (a >= 1e8) return (v / 1e8).toFixed(2) + '亿'
   if (a >= 1e4) return (v / 1e4).toFixed(1) + '万'
+  // 整数原样显示 —— RS 评级这类 1~99 的整数显示成「99.00」像是算出来的小数
+  if (Number.isInteger(v)) return String(v)
   return v.toFixed(2)
 }
 function plain(v) { return Number.isFinite(v) ? v.toFixed(2) : (v == null ? NA : esc(v)) }
