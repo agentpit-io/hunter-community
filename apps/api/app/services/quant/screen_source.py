@@ -610,6 +610,10 @@ def parse_script(script: str, market_key: str = "us", allow_ai: bool = False,
 
 # ═══════════════════════════════════════════════════════════════
 # 预置脚本 —— 前端「示例」与 MCP 的 preset 参数共用一份
+# 2026-09-11 用户精简:删了「强势股 RS≥80」(rs_leaders)与「VCP 波动收缩」(vcp · 五条规则那份,
+# 脚本在 git show 136bb35 里);「RS线持续向上」改名「精选强势股」、「VCP 区间收缩」改名「VCP 波段收缩」。
+# **改名只改 name,key 不动**:用户隐藏示例(screener.html · localStorage)和 MCP 的 preset 参数都认 key。
+# 增删示例要同步 huntercode mcp/screener_mcp.py 的 preset 清单(本仓 scripts/opencode-mcp/ 是它的副本)。
 # ═══════════════════════════════════════════════════════════════
 
 PRESETS = [
@@ -699,24 +703,8 @@ plot scan = cond_div and cond_debt and cond_roe and cond_liq;
 
 
 PRESETS.append({
-    "key": "rs_leaders",
-    "name": "强势股 RS≥80",
-    "market": "us",
-    "desc": "IBD 口径 RS 相对强度评级 ≥80(跑赢全市场 80% 的股票)+ 站上 50 日线 + 均线多头。",
-    "script": """# ===== 强势股:RS 相对强度 + 趋势 =====
-# RS() 是 IBD 口径的相对强度评级(1–99),在全市场里排名
-def cond_rs    = RS() >= 80;
-def cond_trend = close > Average(close, 50);
-def cond_ma    = Average(close, 50) > Average(close, 200);
-def cond_liq   = Average(volume, 30) > 500000;
-
-plot scan = cond_rs and cond_trend and cond_ma and cond_liq;
-""",
-})
-
-PRESETS.append({
     "key": "rs_line_up",
-    "name": "RS线持续向上",
+    "name": "精选强势股",            # 2026-09-11 用户改名(原「RS线持续向上」),key 不变
     "market": "us",
     "desc": "RS 评级 ≥80,且 RS 线(个股 ÷ 标普500)已连续 50 个交易日以上站在自身 21 日均线之上。",
     "script": """# ===== 强势且持续跑赢大盘 =====
@@ -729,49 +717,6 @@ plot scan = cond_rs and cond_line and cond_liq;
 """,
 })
 
-# 2026-09-11 用户给的五条 VCP 规则,逐条对应。字段口径见 services/quant/vcp.py。
-# 阈值里只有「最低点量比 ≤ 0.6」是我们定的(用户原话「相对非常小」没给数),脚本里写明了。
-# 「收缩到低点时成交量减小」**不要**写成「最低点量比 < 最后一次收缩量比」:最后一次收缩常常只有
-# 四五天,低点那 3 天几乎就是整次收缩,两个数差不多,比出来是抛硬币(实测 STT 整次 0.53、
-# 低点 0.56,量能明显枯竭却被卡掉)。用「最后一次收缩量比 < 1」。
-PRESETS.append({
-    "key": "vcp",
-    "name": "VCP 波动收缩",
-    "market": "us",
-    "desc": "Minervini VCP:首次收缩 ≤50%、至少 3 次逐次变浅、末次 ≤10% 且低点缩量、"
-            "近 4 周上涨放量下跌缩量、底部 3~12 个月。字段来自每晚的全市场日线。",
-    "script": """# ===== VCP 波动收缩(Minervini)=====
-# 字段每晚由全市场日线算出。一次收缩 = 摆动高点(比前后各 5 个交易日都高)到其后的低点;
-# 往前数时前一次要明显更深、各次高点大致持平,才算连续收缩。
-
-# 1. 第一次收缩在 50% 以内
-def cond_first = vcp_first_depth <= 50;
-
-# 2. 后一次比前一次浅,至少 3 次(逐次变浅已包含在收缩次数的数法里)
-def cond_count = vcp_contractions >= 3;
-
-# 3. 最后一次收缩在 10% 以内;这次收缩期间在缩量(日均量低于收缩前 50 天);
-#    低点(当天及前 2 天)的日均量不到收缩前 50 天日均量的 6 成(「相对非常小」,可按需调)
-def cond_last    = vcp_last_depth <= 10;
-def cond_dryup   = vcp_last_vol_ratio < 1;
-def cond_low_vol = vcp_low_vol_ratio <= 0.6;
-
-# 4. 近 20 个交易日:上涨日的日均量大于下跌日,上涨天数多于下跌天数
-def cond_ud_vol  = ud_vol_ratio_20d > 1;
-def cond_ud_days = up_days_20d > down_days_20d;
-
-# 5. 底部 3~12 个月(按交易日算:63~252 天)
-def cond_base = vcp_base_days >= 63 and vcp_base_days <= 252;
-
-# 6. 在枢轴附近:最后一次收缩的高点下方 5% 以内,或刚突破不超过 3%
-#    (低点逐次抬高不用另写 —— 收缩次数的数法已经保证了)
-def cond_pivot = vcp_pivot_dist >= -3 and vcp_pivot_dist <= 5;
-
-plot scan = cond_first and cond_count and cond_last and cond_dryup
-        and cond_low_vol and cond_ud_vol and cond_ud_days and cond_base and cond_pivot;
-""",
-})
-
 # 2026-09-11 用户对快照版 VCP 脚本(git log --grep=VCP 那份)提的四点,改好的版本。
 # 1) 扫描源的 High.5D / High.3M 实测是 4 / 61 根,不是 5 / 63 —— 换成自家日线的精确窗口;
 # 2) 区间分母用最高价(= 回撤深度,和 vcp_*_depth 同一口径,最大 100%)。
@@ -781,11 +726,11 @@ plot scan = cond_first and cond_count and cond_last and cond_dryup
 # 3) 加低点抬高;4) 枢轴用 vcp_pivot_dist —— 拿近 1 月最高当枢轴,「≤ 枢轴 × 1.03」恒成立。
 PRESETS.append({
     "key": "vcp_range",
-    "name": "VCP 区间收缩",
+    "name": "VCP 波段收缩",          # 2026-09-11 用户改名(原「VCP 区间收缩」),key 不变
     "market": "us",
     "desc": "3 个月 → 1 个月 → 5 天价格区间逐级收紧 + 低点抬高 + 在枢轴附近。"
             "窗口严格按最近 63 / 21 / 5 个交易日(自家日线),趋势模板与流动性来自扫描源。",
-    "script": """# ===== VCP 区间收缩 · 精确交易日窗口 =====
+    "script": """# ===== VCP 波段收缩 · 精确交易日窗口 =====
 # high_/low_Nd 严格是最近 N 根日线(扫描源的 High.5D / High.3M 实测只有 4 / 61 根)
 # 区间 = (最高 - 最低) ÷ 最高 = 从高点回撤的深度,和 VCP 收缩深度同一口径
 def rng3m = (high_63d - low_63d) / high_63d;
