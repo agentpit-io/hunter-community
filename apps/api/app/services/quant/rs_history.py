@@ -696,6 +696,16 @@ _ddl_checked = False
 # compute_market 的写库语句和 load_stats 都拿不到它 —— 2026-09-11 在写库那行用了 vcp.WINDOW_FIELDS,
 # 部署后重算当场 NameError(每晚任务会整轮失败,RS 线天数跟着过期)
 _WIN = ("high_5d", "low_5d", "high_21d", "low_21d", "high_63d", "low_63d")
+# 读统计的 SELECT 放模块级,test_vcp 不连库也能检查它。
+# ⚠ 拼接一律写显式 `+`:相邻的字符串字面量会被 Python 直接连成一个 —— 2026-09-11 删一个字段时
+# 丢了 `+`,`"…, " ", ".join(_WIN)` 把整段 SQL 当成了 join 的分隔符,
+# 线上扫描读不到统计,RS 线天数和 VCP 字段整批变空(except 吞成「表可能还没建」)
+_SELECT_STATS = ("SELECT code, as_of, up_days, up_days_censored, rs_raw_exact, rs_line, rs_ma21, "
+                 + "vcp_contractions, vcp_depths, vcp_first_depth, vcp_last_depth, "
+                 + "vcp_vol_declining, vcp_last_vol_ratio, vcp_pivot_dist, vcp_base_days, "
+                 + "vcp_low_vol_ratio, up_days_20d, down_days_20d, ud_vol_ratio_20d, "
+                 + ", ".join(_WIN)
+                 + " FROM rs_line_stat WHERE market=%s")
 
 
 def load_stats(market: str) -> tuple[dict, dict]:
@@ -712,12 +722,7 @@ def load_stats(market: str) -> tuple[dict, dict]:
             _ensure_tables(conn)
             _ddl_checked = True
         cur = conn.cursor()
-        cur.execute("SELECT code, as_of, up_days, up_days_censored, rs_raw_exact, rs_line, rs_ma21, "
-                    "vcp_contractions, vcp_depths, vcp_first_depth, vcp_last_depth, "
-                    "vcp_vol_declining, vcp_last_vol_ratio, vcp_pivot_dist, vcp_base_days, "
-                    "vcp_low_vol_ratio, up_days_20d, down_days_20d, ud_vol_ratio_20d, "
-                    ", ".join(_WIN) + " "
-                    "FROM rs_line_stat WHERE market=%s", (market,))
+        cur.execute(_SELECT_STATS, (market,))
         out = {r[0]: {"as_of": r[1], "up_days": r[2], "censored": r[3],
                       "rs_raw_exact": r[4], "rs_line": r[5], "rs_ma21": r[6],
                       "vcp_contractions": r[7], "vcp_depths": r[8], "vcp_first_depth": r[9],

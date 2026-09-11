@@ -228,6 +228,11 @@ check("拆股 · repair_splits 截掉开头时只按留下的日期出", [x[0] f
 check("窗口 · rs_history 读库用的列表与 vcp.WINDOW_FIELDS 一致", tuple(rh._WIN) == vcp.WINDOW_FIELDS,
       f"{rh._WIN} vs {vcp.WINDOW_FIELDS}")
 
+sel = rh._SELECT_STATS
+check("读库 · ⭐SELECT 只有一个、列数对得上 load_stats 的下标(相邻字面量丢了 + 会把整段 SQL 当分隔符)",
+      sel.startswith("SELECT code, as_of") and sel.count("SELECT") == 1 and sel.count("FROM") == 1
+      and len(sel.split(" FROM ")[0].replace("SELECT ", "").split(",")) == 19 + len(rh._WIN), sel[:120])
+
 total = passed + len(fails)
 print(f"VCP 用例 {total} 条")
 if fails:
