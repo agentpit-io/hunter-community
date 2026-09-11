@@ -73,6 +73,20 @@
       font-size:12.5px;font-family:inherit;color:var(--text)}
     .mg-eg button:hover{border-color:#2E86DE;color:#2E86DE}
     .mg-eg .ar{color:#2E86DE;font-size:12px}
+    /* 我保存的扫描策略 —— 用站内品牌棕,和系统示例的蓝色一眼能分开。
+       ✕ 删除按钮**常驻可见**,不藏 hover(仓内铁律:新功能入口不许藏在 hover 里)。 */
+    .mg-eg .mg-sep{width:1px;background:#DCEBFA;margin:4px 2px}
+    .mg-eg .mg-mine{display:inline-flex;align-items:stretch;border:1px solid #e6cbaa;
+      border-radius:8px;overflow:hidden;background:#fdf8f2}
+    .mg-eg .mg-mine button{border:0;border-radius:0;background:transparent;margin:0;
+      padding:6px 9px;font-size:12.5px;font-family:inherit;cursor:pointer;
+      display:inline-flex;align-items:center;gap:6px}
+    .mg-eg .mg-mine .nm{color:var(--brand-dark,#8f4f1d);font-weight:600;padding-left:11px}
+    .mg-eg .mg-mine .nm:hover{background:#f6eee7;color:var(--brand-dark,#8f4f1d)}
+    .mg-eg .mg-mine .nm .mk{font-weight:400;color:var(--muted);font-size:11px}
+    .mg-eg .mg-mine .del{color:var(--soft,#a2a49d);border-left:1px solid #efe0cc;padding:6px 8px}
+    .mg-eg .mg-mine .del:hover{color:var(--danger,#b34b43);background:#fbeceb}
+    .mg-eg .mg-mine.on{border-color:var(--brand,#b56b2d);box-shadow:inset 0 0 0 1px var(--brand,#b56b2d)}
 
     /* ── 条件区 ────────────────────────────────────────── */
     .cd-hd{display:flex;align-items:center;flex-wrap:wrap;gap:8px;font-size:14.5px;
@@ -287,6 +301,9 @@ const S = {
   genError: null, runError: null,
   result: null,
   probe: {},                 // 条件名 → 单独测试的命中数
+  saved: [], savedErr: null, savedMax: 50,   // 我保存的扫描策略(后端 per-user)
+  loadedName: '',            // 当前这套条件是从哪个保存的策略加载来的 —— 保存弹窗默认填它,
+                             // 「改完再存一次」直接回车就是覆盖,不用重新打名字
   sortBy: 'market_cap_basic', desc: true,
 }
 
@@ -406,7 +423,7 @@ function vMagic() {
         '</div>' +
       '</div>' +
     '</div>' +
-    '<div class="mg-eg" id="mg-eg">' + chips + '</div>' +
+    '<div class="mg-eg" id="mg-eg">' + chips + vSavedChips() + '</div>' +
     '</div>' +
     // 本地认不出来时**不直接烧 token**,把「AI 识别」摆出来让用户自己决定。
     // 按钮上写清「会消耗 token」—— 花钱的动作必须是用户明示的。
@@ -582,11 +599,165 @@ function vNotes() {
 }
 
 // ═══ 结果 ═════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// 我保存的扫描策略
+// ═══════════════════════════════════════════════════════════════
+// 后端 per-user 存(services/screen_saved.py,那里写了为什么不存 localStorage)。
+//
+// 三个容易写错的点:
+//   1. 保存必须 buildScript(false)。草稿用的 true 会把停用的条件也写进 plot,
+//      加载回来用户关掉的开关全亮了。false 只写启用的,加载时 reparse →
+//      applyParsed 按 plot_refs 恢复开关,往返一致。
+//   2. 加载 = **替换**,不管上面「追加/替换」选的是哪个。那个开关管的是
+//      「生成框里的新条件怎么合进来」;加载一个存好的策略是「回到那套设置」,
+//      追加进去就变成两套条件的混合,不是用户要的东西。
+//   3. 同名覆盖要确认 —— 但如果名字就是刚加载的那个(用户在「改完再存」),
+//      不弹确认,那是预期行为,弹了反而烦。
+const SAVED_API = '/api/quant/screener/saved'
+const MKT_LABEL = { a: 'A股', hk: '港股', us: '美股' }
+
+function vSavedChips() {
+  if (S.savedErr) {
+    return '<span class="mg-sep"></span><span class="sc-na" style="font-size:12px;align-self:center">' +
+      '我的扫描策略没拉到 · ' + esc(S.savedErr) + '</span>'
+  }
+  if (!S.saved.length) return ''
+  return '<span class="mg-sep"></span>' + S.saved.map(function (p) {
+    return '<span class="mg-mine' + (p.name === S.loadedName ? ' on' : '') + '">' +
+      '<button class="nm" data-saved="' + p.id + '" title="加载「' + esc(p.name) + '」(替换当前条件)">' +
+        '<span class="hi hi-save"></span>' + esc(p.name) +
+        '<span class="mk">' + esc(MKT_LABEL[p.market] || p.market) + '</span></button>' +
+      '<button class="del" data-del="' + p.id + '" title="删除「' + esc(p.name) + '」">✕</button>' +
+    '</span>'
+  }).join('')
+}
+
+async function loadSaved() {
+  let r
+  try {
+    r = await fetch(SAVED_API, { headers: apiHeaders(), cache: 'no-store' })
+  } catch (e) {
+    S.savedErr = '请求没发出去'; render(); return
+  }
+  // 没登录:不显示也不报错 —— 列表本来就是空的。点「保存」时才提示要登录。
+  if (r.status === 401) { S.saved = []; S.savedErr = null; render(); return }
+  if (!r.ok) { S.savedErr = 'HTTP ' + r.status; render(); return }
+  try {
+    const d = await r.json()
+    S.saved = d.items || []
+    S.savedMax = d.max || 50
+    S.savedErr = null
+  } catch (e) { S.savedErr = '返回的不是合法 JSON' }
+  render()
+}
+
+function openSaveDialog() {
+  if (!S.conditions.length) return
+  const bools = S.conditions.filter(function (c) { return c.is_bool })
+  const on = bools.filter(function (c) { return c.enabled }).length
+  const m = openModal(
+    '<div class="modal-hd"><span class="hi hi-save" style="color:var(--brand)"></span> 保存扫描策略' +
+      '<span class="close" data-close>×</span></div>' +
+    '<div class="modal-body">' +
+      '<div class="field"><div class="lbl">名称</div>' +
+        '<input id="sv-name" maxlength="30" autocomplete="off" ' +
+        'placeholder="比如:美股放量突破 · 市值大于 100 亿" value="' + esc(S.loadedName) + '"></div>' +
+      '<div class="sc-note" style="line-height:1.8">会保存 <b>' + bools.length + '</b> 个条件' +
+        (bools.length !== on ? '(其中 <b>' + on + '</b> 个启用,停用的也一起存,加载回来开关不变)' : '') +
+        ' · 市场 <b>' + esc(MKT_LABEL[S.market] || S.market) + '</b>' +
+        ' · 排序 <b>' + esc(S.sortBy || '—') + '</b> ' + (S.desc ? '↓' : '↑') + '<br>' +
+        '同名会覆盖原来那个。保存后会出现在示例按钮那一排,点一下就能加载回来。</div>' +
+      '<div class="sc-err" id="sv-err" style="display:none;margin-top:10px"></div>' +
+    '</div>' +
+    '<div class="modal-ft"><button class="btn" data-close>取消</button>' +
+      '<button class="btn primary" id="sv-ok">保存</button></div>')
+  const inp = m.querySelector('#sv-name')
+  if (inp) { inp.focus(); inp.select() }
+  const go = function () { doSave(inp ? inp.value : '', m) }
+  const ok = m.querySelector('#sv-ok')
+  if (ok) ok.addEventListener('click', go)
+  if (inp) inp.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); go() }
+  })
+}
+
+async function doSave(raw, modal) {
+  const name = String(raw || '').trim()
+  const err = modal.querySelector('#sv-err')
+  const show = function (t) { if (err) { err.textContent = t; err.style.display = t ? '' : 'none' } }
+  if (!name) { show('给这个扫描策略起个名字'); return }
+  const dup = S.saved.filter(function (p) { return p.name === name })[0]
+  if (dup && name !== S.loadedName &&
+      !confirm('已经有一个叫「' + name + '」的扫描策略了,覆盖它吗?')) return
+  const btn = modal.querySelector('#sv-ok')
+  if (btn) { btn.disabled = true; btn.textContent = '保存中…' }
+  const r = await post(SAVED_API, {
+    name: name,
+    market: S.market,
+    // ⚠️ 必须是 false,见本节开头第 1 条
+    script: buildScript(false),
+    sort_by: S.sortBy,
+    sort_desc: S.desc,
+  })
+  if (btn) { btn.disabled = false; btn.textContent = '保存' }
+  if (r.status === 401) { show('登录后才能保存扫描策略'); return }
+  if (!r.ok) { show(errOf(r, '保存失败 · HTTP ' + r.status)); return }
+  modal.remove()
+  S.loadedName = name
+  await loadSaved()
+  toast((r.data && r.data.created ? '已保存' : '已覆盖') + '「' + name + '」', 'success')
+}
+
+async function loadSavedPreset(id) {
+  const p = S.saved.filter(function (x) { return x.id === id })[0]
+  if (!p) return
+  const before = S.conditions.filter(function (c) { return c.is_bool }).length
+  const prevMarket = S.market
+  S.market = p.market
+  if (p.sort_by) { S.sortBy = p.sort_by; S.desc = !!p.sort_desc }
+  S.input = ''
+  S.genError = null
+  await reparse(p.script)
+  if (S.genError) {
+    // 解析失败(比如上游撤掉了某个字段):条件没换,市场也退回去,别让界面处于半加载状态
+    S.market = prevMarket
+    S.loadedName = ''
+    render()
+    return
+  }
+  S.loadedName = p.name
+  render()
+  toast('已加载「' + p.name + '」' + (before ? ' · 替换了原来的 ' + before + ' 个条件' : ''))
+}
+
+async function deleteSaved(id) {
+  const p = S.saved.filter(function (x) { return x.id === id })[0]
+  if (!p) return
+  if (!confirm('删除扫描策略「' + p.name + '」?删了不能恢复。')) return
+  let r
+  try {
+    r = await fetch(SAVED_API + '/' + encodeURIComponent(id),
+                    { method: 'DELETE', headers: apiHeaders() })
+  } catch (e) { toast('删除失败:请求没发出去', 'warn'); return }
+  if (!r.ok) {
+    let d = null
+    try { d = await r.json() } catch (e) { /* 非 JSON */ }
+    toast((d && d.detail) || ('删除失败 · HTTP ' + r.status), 'warn')
+    return
+  }
+  if (S.loadedName === p.name) S.loadedName = ''
+  await loadSaved()
+  toast('已删除「' + p.name + '」')
+}
+
 function vRunBar() {
   const n = S.conditions.filter(function (c) { return c.is_bool && c.enabled }).length
   return '<div class="sc-runbar">' +
     '<button class="btn" id="sc-run"' + (S.conditions.length && !S.running ? '' : ' disabled') + '>' +
       (S.running ? '扫描中…' : '<span class="hi hi-search"></span> 运行扫描') + '</button>' +
+    '<button class="btn" id="sc-save"' + (S.conditions.length ? '' : ' disabled') +
+      ' title="把当前的条件、开关状态、市场和排序存成一个扫描策略">' +
+      '<span class="hi hi-save"></span> 保存扫描策略</button>' +
     (S.conditions.length && !n && S.combine !== 'custom'
       ? '<span class="sc-na" style="font-size:12px">一条都没启用,扫不出东西</span>' : '') +
     '</div>' +
@@ -724,7 +895,11 @@ function bind() {
   const eg = document.getElementById('mg-eg')
   if (eg) eg.addEventListener('click', function (e) {
     const b = e.target && e.target.closest ? e.target.closest('button') : null
-    if (!b || !b.dataset.preset) return
+    if (!b) return
+    if (b.dataset.del) { deleteSaved(+b.dataset.del); return }
+    if (b.dataset.saved) { loadSavedPreset(+b.dataset.saved); return }
+    if (!b.dataset.preset) return
+    S.loadedName = ''         // 换成系统示例了,就不再是「基于我那个策略」
     const p = ((S.meta && S.meta.presets) || []).filter(function (x) {
       return x.key === b.dataset.preset
     })[0]
@@ -757,11 +932,13 @@ function bind() {
   const clr = document.getElementById('cd-clear')
   if (clr) clr.addEventListener('click', function () {
     S.conditions = []; S.result = null; S.probe = {}; S.notes = []; S.parseWarnings = []
-    S.combine = 'all'; S.plotExpr = ''; saveDraft(); render()
+    S.combine = 'all'; S.plotExpr = ''; S.loadedName = ''; saveDraft(); render()
   })
 
   const run = document.getElementById('sc-run')
   if (run) run.addEventListener('click', runScan)
+  const sv = document.getElementById('sc-save')
+  if (sv) sv.addEventListener('click', openSaveDialog)
   const copy = document.getElementById('sc-copy')
   if (copy) copy.addEventListener('click', function () {
     const codes = ((S.result && S.result.picks) || []).map(function (p) { return p.code }).join('\n')
@@ -1389,6 +1566,7 @@ async function boot() {
   }
   if (!r.ok) { S.metaErr = 'HTTP ' + r.status; render(); return }
   try { S.meta = await r.json() } catch (e) { S.metaErr = '返回的不是合法 JSON'; render(); return }
+  loadSaved()
 
   // ?preset=xxx 是明确指令,优先级高于上次草稿
   let want = null

@@ -393,5 +393,50 @@ try {
   console.log('FAIL 智能体定向断言 ·', e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e)
 }
 
+// ─── 保存的扫描策略:开关状态必须能往返 ─────────────────────────────
+// 这个功能最容易悄悄写错的地方:保存时如果用了 buildScript(true)(草稿用的那个),
+// 停用的条件也会被写进 plot —— 页面一切正常、保存也成功,但加载回来
+// 用户关掉的开关全亮了。没有任何报错,只有用户会发现。
+try {
+  const ctx = vm.createContext(makeContext('screener.html'))
+  vm.runInContext(appJs, ctx, { filename: 'app.js' })
+  const sc = inlineScripts(fs.readFileSync(path.join(DIR, 'screener.html'), 'utf8'))
+  sc.forEach((src, i) => vm.runInContext(src, ctx, { filename: `screener#${i + 1}` }))
+
+  vm.runInContext(`
+    S.combine = 'all'; S.plotName = 'scan'; S.plotExpr = ''
+    S.conditions = [
+      { name: 'avg90',    expr: 'Average(volume, 90)', is_bool: false, enabled: true },
+      { name: 'cond_vol', expr: 'avg90 > 1000000',     is_bool: true,  enabled: true },
+      { name: 'cond_px',  expr: 'close > 20',          is_bool: true,  enabled: false },
+      { name: 'cond_rsi', expr: 'RSI(14) < 70',        is_bool: true,  enabled: true },
+    ]
+    var SAVE_SCRIPT = buildScript(false)
+    S.saved = [{ id: 7, name: '放量突破', market: 'us', script: SAVE_SCRIPT },
+               { id: 8, name: '低估值',   market: 'a',  script: SAVE_SCRIPT }]
+    S.loadedName = '放量突破'
+    var CHIPS = vSavedChips()
+  `, ctx, { filename: 'assert-saved' })
+
+  const sv = ctx.SAVE_SCRIPT
+  const plot = (sv.match(/plot\s+scan\s*=\s*([^;]+);/) || [])[1] || ''
+  const checks = [
+    ['停用的条件仍以 def 保存', /def cond_px = close > 20;/.test(sv)],
+    ['停用的条件**不进** plot(否则加载回来开关全亮)', !/cond_px/.test(plot)],
+    ['启用的条件都进了 plot', /cond_vol/.test(plot) && /cond_rsi/.test(plot)],
+    ['中间变量不进 plot', !/avg90/.test(plot)],
+    ['每个保存的策略都有常驻的 ✕ 删除', (ctx.CHIPS.match(/data-del="/g) || []).length === 2],
+    ['当前加载的那个高亮', /mg-mine on"[^>]*>\s*<button class="nm" data-saved="7"/.test(ctx.CHIPS)],
+    ['没加载的那个不高亮', !/mg-mine on"[^>]*>\s*<button class="nm" data-saved="8"/.test(ctx.CHIPS)],
+  ]
+  for (const [name, ok] of checks) {
+    if (ok) console.log('PASS 保存策略 ·', name)
+    else { failed++; console.log('FAIL 保存策略 ·', name, '| plot =', plot) }
+  }
+} catch (e) {
+  failed++
+  console.log('FAIL 保存策略定向断言 ·', e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e)
+}
+
 console.log(failed ? `SOME FAILED (${failed})` : 'ALL OK')
 process.exit(failed ? 1 : 0)

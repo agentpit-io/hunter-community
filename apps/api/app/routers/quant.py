@@ -1175,6 +1175,9 @@ def _format_orders_csv(orders: list[dict], broker: str) -> str:
 #   GET  /quant/screener/meta            · 市场 / 预置脚本 / 语法说明
 #   GET  /quant/screener/fields          · 字段搜索(3777 个,只能搜不能列)
 #   POST /quant/screener/run             · 跑脚本
+#   GET  /quant/screener/saved           · 我保存的扫描策略(要登录)
+#   POST /quant/screener/saved           · 保存 · 同名覆盖(要登录)
+#   DELETE /quant/screener/saved/{id}    · 删一个(只能删自己的)
 #
 # 端点名不能叫 /scan —— 那个已经是「按因子打分选 Top N」了,两件事:
 # /scan 走站内 factor_value(A 股 · 有历史 · 能回测),
@@ -1271,3 +1274,55 @@ async def screener_run(body: ScreenIn):
         # 脚本写错、周期映射不了、上游挂了 —— 都是 400,message 直接给用户看。
         # 不要吞成 500 空结果:用户看到"0 只命中"会以为是市场里真的没有票满足条件。
         raise HTTPException(400, str(e))
+
+
+# ─── 用户保存的扫描策略 ─────────────────────────────────────────────
+# 存储与校验在 services/screen_saved.py,那里的文件头写了为什么
+# 脚本必须带停用状态、为什么同名即覆盖、为什么存后端不存 localStorage。
+#
+# 三个接口都**要登录**:/api/quant/ 不在免登录前缀里,这里再判一次 uid
+# 是兜底 —— 万一哪天有人把 /api/quant/ 加进白名单,匿名请求也写不进来。
+from app.services import screen_saved
+
+
+class ScreenSaveIn(BaseModel):
+    name: str
+    market: str
+    script: str
+    sort_by: str | None = None
+    sort_desc: bool = True
+
+
+def _need_uid(request: Request) -> str:
+    uid = getattr(request.state, "user_id", None)
+    if not uid:
+        raise HTTPException(401, "登录后才能保存和查看自己的扫描策略")
+    return uid
+
+
+@router.get("/screener/saved")
+async def screener_saved_list(request: Request):
+    uid = _need_uid(request)
+    return {"items": await asyncio.to_thread(screen_saved.list_for, uid),
+            "max": screen_saved.MAX_PER_USER}
+
+
+@router.post("/screener/saved")
+async def screener_saved_save(body: ScreenSaveIn, request: Request):
+    uid = _need_uid(request)
+    try:
+        return await asyncio.to_thread(
+            screen_saved.save, uid, body.name, body.market, body.script,
+            body.sort_by, body.sort_desc, set(screen_source.MARKETS.keys()))
+    except screen_saved.SavedError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.delete("/screener/saved/{preset_id}")
+async def screener_saved_delete(preset_id: int, request: Request):
+    uid = _need_uid(request)
+    ok = await asyncio.to_thread(screen_saved.delete, uid, preset_id)
+    if not ok:
+        # 不区分「不存在」和「不是你的」—— 区分的话等于告诉别人这个 id 存在
+        raise HTTPException(404, "没有这个扫描策略(可能已经删过了)")
+    return {"ok": True}
