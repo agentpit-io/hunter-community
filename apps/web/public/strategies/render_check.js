@@ -498,9 +498,9 @@ try {
   console.log('FAIL 对照表定向断言 ·', e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e)
 }
 
-// ─── 系统示例可以对自己隐藏:✕ 常驻、隐藏后能恢复 ─────────────────────
-// 示例是全站共用的,只能对自己隐藏。最怕的两件事:入口藏进 hover(没人发现),
-// 以及隐藏了找不回来(一个都不剩时连恢复入口也跟着没了)。
+// ─── 系统示例可以对自己隐藏:✕ 常驻、隐藏后直接不显示 ─────────────────
+// 示例是全站共用的,只能对自己隐藏。入口不能藏进 hover(没人发现)。
+// 不留恢复入口是用户 2026-09-11 的明确决定(看了「已隐藏 N 个 · 恢复」之后要求去掉)。
 try {
   const ctx = vm.createContext(makeContext('screener.html'))
   vm.runInContext(appJs, ctx, { filename: 'app.js' })
@@ -526,11 +526,9 @@ try {
     ['每个示例都有常驻的隐藏 ✕', (ctx.ALL.match(/data-hide="/g) || []).length === 3],
     ['✕ 不靠 hover 出现(不写 opacity:0 / display:none)',
       !/\.mg-sys \.hide\{[^}]*(opacity:\s*0[;}]|display:\s*none)/.test(fs.readFileSync(path.join(DIR, 'screener.html'), 'utf8'))],
-    ['没隐藏时不出恢复入口', !/data-restore/.test(ctx.ALL)],
     ['隐藏的那个不再渲染', !/data-preset="vcp"/.test(ctx.SOME) && /data-preset="uptrend"/.test(ctx.SOME)],
-    ['恢复入口只数还存在的示例(1 个,不是 2 个)', /已隐藏 1 个/.test(ctx.SOME)],
-    ['⭐全部隐藏时恢复入口还在', /data-restore/.test(ctx.NONE) && /已隐藏 3 个/.test(ctx.NONE)
-      && !/data-preset=/.test(ctx.NONE)],
+    ['⭐隐藏后不留任何痕迹(不显示「已隐藏 N 个」)', !/已隐藏|恢复|data-restore/.test(ctx.SOME + ctx.NONE)],
+    ['全部隐藏时一个示例都不画、也不报错', ctx.NONE === ''],
     ['localStorage 写坏了照常渲染全部示例', (ctx.BROKEN.match(/data-preset="/g) || []).length === 3],
     ['全部恢复后不留空键', ctx.STORED === null],
   ]

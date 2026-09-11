@@ -89,9 +89,6 @@
     .mg-eg .mg-sys .nm{padding:6px 5px 6px 12px}
     .mg-eg .mg-sys .hide{padding:0 7px 0 2px;font-size:10px;line-height:1;color:#c9d4e0;gap:0}
     .mg-eg .mg-sys .hide:hover{color:var(--danger,#b34b43);background:#fbeceb}
-    .mg-eg .mg-restore{border:0;background:transparent;padding:6px 4px;font-size:11.5px;
-      color:var(--soft,#a2a49d);text-decoration:underline dotted;text-underline-offset:3px}
-    .mg-eg .mg-restore:hover{color:#2E86DE;border:0}
     /* 我保存的扫描策略 —— 用站内品牌棕,和系统示例的蓝色一眼能分开。
        ✕ 删除按钮**常驻可见**,不藏 hover(仓内铁律:新功能入口不许藏在 hover 里)。 */
     .mg-eg .mg-sep{width:1px;background:#DCEBFA;margin:4px 2px}
@@ -405,8 +402,9 @@ function rebuild() { pruneVars(); return reparse(buildScript()) }
 //   2. 存 localStorage 不存后端:没登录也能用;丢了(换浏览器 / 清缓存)的代价只是示例重新出现。
 //   3. ✕ 做得小、颜色淡(用户要的「隐蔽」),但**常驻可见、不藏 hover** —— 仓内铁律
 //      「新功能入口不许藏在 hover 里」。
-//   4. 隐藏了就必须找得回来:行尾常驻「已隐藏 N 个 · 恢复」。只数**当前还存在**的示例 ——
-//      后端哪天删了某个示例,它的 key 留在列表里也不该让计数虚高。
+//   4. **不留恢复入口**。第一版在行尾放了「已隐藏 N 个 · 恢复」,用户当天看了说
+//      「不要这样显示隐藏,直接不显示,不用留恢复功能」—— 这是用户的明确决定,别再加回来。
+//      想找回只能清掉这个站点的浏览器数据(或删 localStorage 里的 hunter_screener_hidden_presets)。
 const LS_HIDE = 'hunter_screener_hidden_presets'
 function hiddenPresets() {
   try {
@@ -428,17 +426,14 @@ function vPresetChips() {
   }
   const hid = hiddenPresets()
   const shown = presets.filter(function (p) { return hid.indexOf(p.key) < 0 })
-  const n = presets.length - shown.length
   return shown.map(function (p) {
     return '<span class="mg-sys">' +
       '<button class="nm" data-preset="' + esc(p.key) + '" title="' + esc(p.desc) + '">' +
         esc(p.name) + '<span class="ar">↵</span></button>' +
       '<button class="hide" data-hide="' + esc(p.key) + '" title="隐藏「' + esc(p.name) +
-        '」· 只对你自己生效,随时可恢复" aria-label="隐藏示例 ' + esc(p.name) + '">✕</button>' +
+        '」· 只对你自己生效" aria-label="隐藏示例 ' + esc(p.name) + '">✕</button>' +
     '</span>'
-  }).join('') +
-    (n ? '<button class="mg-restore" data-restore="1" title="把隐藏的系统示例全部恢复">' +
-         '已隐藏 ' + n + ' 个 · 恢复</button>' : '')
+  }).join('')
 }
 
 function vMagic() {
@@ -479,7 +474,10 @@ function vMagic() {
         '</div>' +
       '</div>' +
     '</div>' +
-    '<div class="mg-eg" id="mg-eg">' + chips + vSavedChips() + '</div>' +
+    // 系统示例全被隐藏时,「我的扫描策略」前面那根分隔线就成了孤零零的一道竖线,去掉
+    '<div class="mg-eg" id="mg-eg">' +
+      (chips ? chips + vSavedChips() : vSavedChips().replace('<span class="mg-sep"></span>', '')) +
+    '</div>' +
     '</div>' +
     // 本地认不出来时**不直接烧 token**,把「AI 识别」摆出来让用户自己决定。
     // 按钮上写清「会消耗 token」—— 花钱的动作必须是用户明示的。
@@ -999,7 +997,6 @@ function bind() {
       if (h.indexOf(b.dataset.hide) < 0) h.push(b.dataset.hide)
       setHiddenPresets(h); render(); return
     }
-    if (b.dataset.restore) { setHiddenPresets([]); render(); return }
     if (!b.dataset.preset) return
     S.loadedName = ''         // 换成系统示例了,就不再是「基于我那个策略」
     const p = ((S.meta && S.meta.presets) || []).filter(function (x) {
