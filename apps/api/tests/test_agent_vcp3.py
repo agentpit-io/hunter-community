@@ -73,7 +73,28 @@ check("评分 · 五项各 S~D 计 100/80/60/40/0,总分 0~500", len(gr["factors
 fg, fpts, ff = c3.form_grade(ind2, c3.PARAMS, 95)
 check("评分 · 第 1 项形态 = 第一版 10 分制", len(ff) == 5 and 0 <= fpts <= 10 and gr["factors"][0][1] == fg and gr["form_points"] == fpts, str((fg, fpts)))
 check("评分 · 教科书形态 + RS 95 + 基准(抗跌 S)至少 B 级", gr["grade"] in ("S", "A", "B") and gr["factors"][2][1] == "S", gr["text"])
-check("评分 · 盈亏比按量度目标:枢轴 × (1 + 首次收缩深度)", abs(c3.rr_ratio(ind2)[1] - ind2["pivot"] * (1 + ind2["first_depth"] / 100)) < 1e-9, str(c3.rr_ratio(ind2)))
+tg = ind2["targets"]
+check("评分 · ⭐目标价 = 三个算得出的维度里最小的,且都在收盘上方", tg and tg["final"][0] == min([tg["level"][0], tg["vol"][0]] + ([tg["volume"]] if tg["volume"] is not None else []))
+      and tg["final"][0] > ind2["close"] and abs(c3.rr_ratio(ind2)[1] - tg["final"][0]) < 1e-9, str(tg))
+check("评分 · 盈亏比 = (目标 − 收盘) ÷ (收盘 − 止损)", abs(c3.rr_ratio(ind2)[0] - (tg["final"][0] - ind2["close"]) / (ind2["close"] - stop0)) < 1e-9, str(c3.rr_ratio(ind2)))
+check("评分 · 盈亏比说明写明取了哪一维、AI 维度无数据", "最保守" in c3.rr_ratio(ind2)[2] and "AI" in c3.rr_ratio(ind2)[2], c3.rr_ratio(ind2)[2])
+# T_level:前高 / 缺口 / 整数关口
+d0 = date(2026, 1, 5)
+flat = [(d0 + timedelta(days=i), 20.0, 20.3, 19.7, 1000.0) for i in range(80)]
+with_high = flat[:40] + [(flat[40][0], 20.0, 23.0, 19.7, 1000.0)] + flat[41:]        # 40 天前一根冲到 23 的前高
+check("评分 · T_level:上方最近的前高 23(比整数关口 25 近)", c3.t_level(with_high, 20.0, 0.6) == (23.0, "前高"), str(c3.t_level(with_high, 20.0, 0.6)))
+check("评分 · T_level:没有前高就是整数关口(20 → 25,步长 5)", c3.t_level(flat, 20.0, 0.6) == (25.0, "整数关口"), str(c3.t_level(flat, 20.0, 0.6)))
+gapped = ([(d0 + timedelta(days=i), 26.0, 26.3, 25.7, 1000.0) for i in range(30)]
+          + [(d0 + timedelta(days=i), 20.0, 20.1, 19.7, 1000.0) for i in range(30, 80)])   # 30 天前从 26 跳空跌到 20,没回补
+check("评分 · ⭐T_level:未回补的向下缺口,目标是缺口下沿(跳空之后的最高 20.1,比关口 25 近)", c3.t_level(gapped, 19.7, 0.6) == (20.1, "缺口下沿"), str(c3.t_level(gapped, 19.7, 0.6)))
+check("评分 · T_level:离收盘不足 0.5 ATR 的前高不算", c3.t_level(with_high, 22.8, 0.6)[1] == "整数关口", str(c3.t_level(with_high, 22.8, 0.6)))
+# T_volume:上方有一段天量区间 → 节点下沿
+vp_bars = [(d0 + timedelta(days=i), 20.0, 20.2, 19.8, 1000.0) for i in range(20)] + [(d0 + timedelta(days=20 + i), 22.5, 22.8, 22.2, 20000.0) for i in range(10)]
+tv = c3.t_volume(vp_bars, 20.0, 0.4)
+check("评分 · ⭐T_volume:收盘上方的高成交量节点下沿(约 22.2)", tv is not None and 22.0 <= tv <= 22.4, str(tv))
+check("评分 · T_volume:上方没有节点 → None", c3.t_volume(vp_bars, 23.0, 0.4) is None)
+check("评分 · T_volatility:倍数 = √RVOL 限 1~3(RVOL 6 → 2.45;RVOL 0.5 → 1;RVOL 16 → 3)",
+      abs(c3.t_volatility(10.0, 0.5, 6.0)[1] - 2.449) < 0.01 and c3.t_volatility(10.0, 0.5, 0.5)[1] == 1.0 and c3.t_volatility(10.0, 0.5, 16.0)[1] == 3.0)
 fill, blocked = c3.try_entry("AAA", "甲", ind2, state, score=95)
 check("买入 · 成交挂 C-01,带评分,止损来自形态", fill and fill["rule_id"] == "C-01" and fill["grade"] == gr["grade"] and abs(state["positions"][0].stop - stop0) < 1e-9, str(fill))
 pos = state["positions"][0]
@@ -88,7 +109,9 @@ check("买入 · ⭐止损被 -8% 封顶的形态不进,并说明(C-04)", capped
 # ⭐D 级不买
 ind_bad = dict(ind2, contractions=1, last_depth=15.0, low_vol_ratio=1.2, close=ind2["pivot"] + 0.8 * atr,
                recent_vols=[ind2["vol_sma20"] * 1.35] * len(ind2["recent_vols"]),   # 突破质量只有 1 分(放量 1.35×、高出 0.8 ATR)
-               vp_net_63=0, defense_63=(1, 30), first_depth=8.0, macd_d=False, macd_w=False)   # 量价 D、抗跌 D、盈亏比 <1 D、无金叉 C
+               vp_net_63=0, defense_63=(1, 30), macd_d=False, macd_w=False,
+               targets={"level": (ind2["pivot"] + 0.9 * atr, "前高"), "volume": None, "vol": (ind2["pivot"] + 2 * atr, 1.0),
+                        "final": (ind2["pivot"] + 0.9 * atr, "日线结构·前高")})   # 量价 D、抗跌 D、盈亏比 <1 D、无金叉 C
 gd = c3.grade(ind_bad, c3.PARAMS, 60)
 st_b = dict(state, positions=[], cash=100_000.0, open_risk=0.0)
 fb, bb = c3.try_entry("BBB", "乙", ind_bad, st_b, score=60)
@@ -195,9 +218,10 @@ check("卖出 · 到过 1R 就不受时间止损管", not fl, str(fl))
 
 # ── 整合 + 文案 ───────────────────────────────────────────────
 bars_map = {"AAA": brk}
-r = c3.run_day(str(brk[-1][0]), [], 100_000.0, lambda c: bars_map.get(c), [("AAA", "甲", 80)], None, 0)
+ind_of = lambda c: c3.indicators(bars_map[c], bench=bench)      # 生产里指标缓存带基准,这里也带,否则抗跌项 0 分评成 D 不买
+r = c3.run_day(str(brk[-1][0]), [], 100_000.0, lambda c: bars_map.get(c), [("AAA", "甲", 80)], None, 0, ind_of=ind_of)
 check("整合 · 突破日买入,权益不变", [f["symbol"] for f in r["fills"]] == ["AAA"] and abs(r["equity"] - 100_000) < 1e-6, str(r["fills"]))
-r3 = c3.run_day(str(brk[-1][0]), [], 100_000.0, lambda c: bars_map.get(c), [("AAA", "甲", 80)], None, 3)
+r3 = c3.run_day(str(brk[-1][0]), [], 100_000.0, lambda c: bars_map.get(c), [("AAA", "甲", 80)], None, 3, ind_of=ind_of)
 check("整合 · 连亏停机只停一天并说明", not r3["fills"] and "C-07" in r3["watch_items"][0]["blocked_reason"] and r3["consec_losses"] == 0, str(r3["watch_items"]))
 check("文案 · 参数改了规则手册跟着变", "20 天" not in c3.rules_for()[5]["condition"] and "20 个交易日" in c3.rules_for(dict(c3.PARAMS, time_days=20))[5]["condition"])
 check("接口 · 引擎常量齐全", c3.ENTRY_RULE == "C-01" and set(c3.STOP_KEYS) <= set(c3.PARAMS) and callable(c3.summary))

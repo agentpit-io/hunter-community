@@ -50,9 +50,15 @@
 2. 量价配合:最近 63 个交易日,(涨且量 > 50 日均量)+(跌且量 < 50 日均量)−(涨且量 < 均量)−(跌且量 > 均量);
    >5 S、>4 A、>3 B、>2 C、≤2 D。
 3. 抗跌:最近 63 个交易日里标普 500 下跌的日子,这只票收盘不跌(≥ 前收)的次数;>15 S、>10 A、>5 B、>2 C、≤2 D。
-4. 盈亏比:预期涨幅 ÷ 止损距离;≥5 S、≥4 A、≥3 B、≥2 C、≥1 D(不足 1:1 也是 D)。
-   **预期涨幅按底部量度目标**(用户没定目标价,这是 Claude 的口径):枢轴 × 第一次收缩深度 = 底部高度,从枢轴往上投射,
-   目标 = 枢轴 × (1 + 首次收缩深度)。止损距离 = 收盘 − C-04 的止损位。
+4. 盈亏比:(目标价 − 收盘)÷(收盘 − C-04 止损位);≥5 S、≥4 A、≥3 B、≥2 C、不足 2 是 D。
+   **目标价按用户 2026-09-12 给的四维法,永远取最保守(最小)的那个**:
+   - T_level 日线结构:近 252 根里上方最近的前高(5 根摆动高点)、未回补的向下跳空缺口下沿、整数关口,三者取最小;
+     离收盘不足 0.5 ATR 的忽略(那是噪声,不是阻力)。整数关口的步长按价位:<10 → 1,<50 → 5,<200 → 10,<1000 → 50,其余 100。
+   - T_volume 成交量分布:近 30 根的 Volume Profile(每根的量按高低区间均摊到价格格子,格宽 = max(ATR/4, 区间/40)),
+     高成交量节点 = 量 ≥ 均值 1.5 倍的格子;取收盘上方第一个不含收盘的节点簇的下沿。上方没有节点就没有这一维。
+   - T_volatility 波动上限:收盘 + ATR × 倍数,倍数 = √RVOL(RVOL = 今日量 ÷ 20 日均量),限在 1~3 之间。
+     用户例子「ATR 0.5、RVOL 6 倍 → 放大 2.5 倍」与 √6 = 2.45 吻合,倍数公式是 Claude 从这个例子反推的。
+   - T_ai(催化剂评分 + 流通盘匹配历史涨幅上限)**没有数据源,不算**,不用别的值顶替;min 只在算得出的维度里取。
 5. MACD 金叉(突破时):日线 + 周线都金叉 S、只有周线 A、只有日线 B、没有 C(此项没有 D)。
    「突破时」= 日线在最近 5 个交易日内 DIF 上穿 DEA 且现在仍在其上;周线在最近 3 根周 K(含本周未收完的)内上穿。
    周线 MACD 要 ≥ 48 根周 K,日线不够长就当没有周线金叉。
@@ -60,6 +66,8 @@
 项目 2、3 的窗口和阈值、项目 4 的档位、项目 5 的组合都是用户定的,**不进优化器**(不在 RULE_PARAM_KEY 里)。
 """
 from __future__ import annotations
+
+import math
 
 from app.services.quant import agent_vcp as av
 from app.services.quant import vcp
@@ -81,6 +89,9 @@ VP_MIN = {"S": 6, "A": 5, "B": 4, "C": 3}                            # 第 2 项
 DEF_MIN = {"S": 16, "A": 11, "B": 6, "C": 3}                         # 第 3 项抗跌次数:>15 S、>10 A、>5 B、>2 C
 RR_MIN = {"S": 5.0, "A": 4.0, "B": 3.0, "C": 2.0}                    # 第 4 项盈亏比;<2 一律 D(含不足 1:1)
 LOOKBACK = 63                 # 「最近 3 个月」= 63 个交易日
+LEVEL_BARS = 252              # 目标价 T_level 的回看根数(前 365 天)
+VP_BARS = 30                  # 目标价 T_volume 的 Volume Profile 根数
+HVN_MULT = 1.5                # 高成交量节点 = 量 ≥ 均值 × 1.5 的格子
 VOL_SMA = 50                  # 第 2 项的成交量均线
 MACD_DAILY_WITHIN = 5         # 第 5 项:日线金叉要在最近 5 个交易日内
 MACD_WEEKLY_WITHIN = 3        # 第 5 项:周线金叉要在最近 3 根周 K 内(含本周)
@@ -223,6 +234,87 @@ def _defense(bars: list[tuple], bench: dict | None, look: int = LOOKBACK):
     return cnt, down
 
 
+# ═══════════════════════════════════════════════════════════════
+# 目标价(四维取最保守)—— 第 4 项盈亏比用
+# ═══════════════════════════════════════════════════════════════
+
+def _round_step(px: float) -> float:
+    return 1.0 if px < 10 else 5.0 if px < 50 else 10.0 if px < 200 else 50.0 if px < 1000 else 100.0
+
+
+def t_level(bars: list[tuple], px: float, atr: float, n: int = LEVEL_BARS) -> tuple[float, str]:
+    """日线结构:上方最近的前高 / 未回补的向下缺口下沿 / 整数关口,取最小 → (价, 来源)。离收盘不足 0.5 ATR 的忽略。"""
+    win = bars[-n:]
+    h = [b[2] for b in win]
+    lo = [b[3] for b in win]
+    floor = px + 0.5 * atr
+    cands = []
+    for i in range(2, len(win) - 2):
+        if h[i] > floor and h[i] > max(h[i - 2:i] + h[i + 1:i + 3]):      # 严格的 5 根摆动高点(平台不算)
+            cands.append((h[i], "前高"))
+    for i in range(1, len(win)):
+        if lo[i - 1] > h[i]:                                   # 向下跳空
+            edge = max(h[i:])                                  # 之后回补到哪,缺口下沿就抬到哪
+            if floor < edge < lo[i - 1]:
+                cands.append((edge, "缺口下沿"))
+    r = math.floor(px / _round_step(px)) * _round_step(px)
+    while r <= floor:
+        r += _round_step(px)
+    cands.append((r, "整数关口"))
+    return min(cands)
+
+
+def t_volume(bars: list[tuple], px: float, atr: float, n: int = VP_BARS) -> float | None:
+    """成交量分布:近 n 根的 Volume Profile,收盘上方第一个(不含收盘的)高成交量节点簇的下沿;没有 → None。"""
+    win = bars[-n:]
+    lo_all, hi_all = min(b[3] for b in win), max(b[2] for b in win)
+    if hi_all <= lo_all or not atr:
+        return None
+    width = max(atr / 4, (hi_all - lo_all) / 40)
+    nb = int((hi_all - lo_all) / width) + 1
+    vol = [0.0] * nb
+    for b in win:
+        l, hgh, v = b[3], b[2], b[4] or 0.0
+        i0, i1 = int((l - lo_all) / width), min(int((hgh - lo_all) / width), nb - 1)
+        share = v / (i1 - i0 + 1)
+        for i in range(i0, i1 + 1):
+            vol[i] += share
+    thresh = sum(vol) / nb * HVN_MULT
+    hvn = [v >= thresh for v in vol]
+    i = 0
+    while i < nb:
+        if not hvn[i]:
+            i += 1
+            continue
+        j = i
+        while j + 1 < nb and hvn[j + 1]:
+            j += 1
+        low_edge = lo_all + i * width
+        if low_edge > px:
+            return low_edge
+        i = j + 1
+    return None
+
+
+def t_volatility(px: float, atr: float, rvol: float | None) -> tuple[float, float]:
+    """波动上限:收盘 + ATR × √RVOL(限 1~3)→ (价, 倍数)。"""
+    mult = min(3.0, max(1.0, math.sqrt(rvol))) if rvol and rvol > 0 else 1.0
+    return px + atr * mult, mult
+
+
+def targets(bars: list[tuple], px: float, atr: float | None, rvol: float | None) -> dict | None:
+    """四维目标价里算得出的三维 → {"level": (价, 来源), "volume": 价|None, "vol": (价, 倍数), "final": (价, 维度名)}。"""
+    if not atr or len(bars) < MIN_BARS:
+        return None
+    lv = t_level(bars, px, atr)
+    tv = t_volume(bars, px, atr)
+    ta = t_volatility(px, atr, rvol)
+    cands = [(lv[0], f"日线结构·{lv[1]}"), (ta[0], "波动上限")]
+    if tv is not None:
+        cands.append((tv, "量能节点"))
+    return {"level": lv, "volume": tv, "vol": ta, "final": min(cands)}
+
+
 def indicators(bars: list[tuple], p: dict = PARAMS, bench: dict | None = None) -> dict | None:
     if len(bars) < MIN_BARS:
         return None
@@ -234,10 +326,11 @@ def indicators(bars: list[tuple], p: dict = PARAMS, bench: dict | None = None) -
         return None
     vs = vcp.vcp_stats(bars) or {}
     vp = _vp_net(c, v) if all(x is not None for x in v[-(LOOKBACK + VOL_SMA):]) else None
+    atr, vs20 = av._atr(bars[-61:], 20), av._sma(v, 20)
     return {
         "close": c[-1], "high": h[-1], "low": lo[-1], "volume": v[-1],
-        "atr20": av._atr(bars[-61:], 20),
-        "vol_sma20": av._sma(v, 20),
+        "atr20": atr,
+        "vol_sma20": vs20,
         "pivot": vs.get("pivot"), "base_low": vs.get("last_low"), "contractions": vs.get("contractions"),
         "last_depth": vs.get("last_depth"), "low_vol_ratio": vs.get("low_vol_ratio"),
         "first_depth": vs.get("first_depth"),
@@ -246,6 +339,7 @@ def indicators(bars: list[tuple], p: dict = PARAMS, bench: dict | None = None) -
         "defense_63": _defense(bars, bench),
         "macd_d": _macd_cross(c, MACD_DAILY_WITHIN),
         "macd_w": _macd_cross(_weekly_closes(bars), MACD_WEEKLY_WITHIN),
+        "targets": targets(bars, c[-1], atr, (v[-1] / vs20) if (vs20 and v[-1] is not None) else None),
         "recent_closes": c[-_MAX_CONFIRM - 1:],          # 含今天
         "recent_vols": v[-_MAX_CONFIRM:],                 # 含今天
         "lows_prior": lo[-_MAX_TRAIL - 1:-1],             # 不含今天
@@ -323,14 +417,19 @@ def form_grade(ind: dict, p: dict = PARAMS, score=None) -> tuple[str, int, list]
     return _tier(total, FORM_MIN), total, factors
 
 
-def rr_ratio(ind: dict, p: dict = PARAMS) -> tuple[float | None, float | None]:
-    """第 4 项 · 盈亏比 = 预期涨幅 ÷ 止损距离 → (比值, 目标价)。预期涨幅按底部量度目标(见文件头),算不出 → (None, None)。"""
+def rr_ratio(ind: dict, p: dict = PARAMS) -> tuple[float | None, float | None, str]:
+    """第 4 项 · 盈亏比 = (目标价 − 收盘)÷(收盘 − 止损)→ (比值, 目标价, 说明)。目标价 = 四维里最保守的(见文件头)。"""
     stop, _ = stop_of(ind, p)
-    fd, ph, px = ind.get("first_depth"), ind.get("pivot"), ind["close"]
-    if stop is None or stop >= px or fd is None or ph is None:
-        return None, None
-    target = ph * (1 + fd / 100)
-    return max(target - px, 0.0) / (px - stop), target
+    tg, px = ind.get("targets"), ind["close"]
+    if stop is None or stop >= px or not tg:
+        return None, None, "止损或目标价算不出"
+    target, src = tg["final"]
+    parts = [f"前高/缺口/关口 ${tg['level'][0]:.2f}", f"波动上限 ${tg['vol'][0]:.2f}(√RVOL={tg['vol'][1]:.1f})"]
+    if tg["volume"] is not None:
+        parts.append(f"量能节点 ${tg['volume']:.2f}")
+    else:
+        parts.append("量能节点上方无")
+    return max(target - px, 0.0) / (px - stop), target, f"目标 ${target:.2f} 取最保守的「{src}」;" + "、".join(parts) + ";AI 相似度维度无数据不算"
 
 
 def grade(ind: dict, p: dict = PARAMS, score=None) -> dict:
@@ -345,8 +444,8 @@ def grade(ind: dict, p: dict = PARAMS, score=None) -> dict:
     df = ind.get("defense_63")
     items.append(("抗跌", _tier(df[0], DEF_MIN) if df else None,
                   f"标普下跌 {df[1]} 天里 {df[0]} 天不跌" if df else "没有基准日线,算不出"))
-    rr, target = rr_ratio(ind, p)
-    items.append(("盈亏比", _tier(rr, RR_MIN), f"{rr:.1f}:1(量度目标 ${target:.2f})" if rr is not None else "首次收缩深度或止损算不出"))
+    rr, _target, rr_txt = rr_ratio(ind, p)
+    items.append(("盈亏比", _tier(rr, RR_MIN), f"{rr:.1f}:1({rr_txt})" if rr is not None else rr_txt))
     md, mw = bool(ind.get("macd_d")), bool(ind.get("macd_w"))
     g5 = "S" if md and mw else "A" if mw else "B" if md else "C"
     items.append(("MACD 金叉", g5, "日线 + 周线" if md and mw else "只有周线" if mw else "只有日线" if md else
