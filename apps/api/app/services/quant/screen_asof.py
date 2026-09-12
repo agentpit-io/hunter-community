@@ -225,11 +225,13 @@ def _load_store(market_key: str, perf: dict) -> dict:
                  "WHERE market=%s ORDER BY code, trade_date", (market_key,))
     codes: dict = {}
     bench: dict = {}
+    bench_bars: list = []          # 基准整根 (日期, 收, 高, 低, 量) —— 小鹿方向 A 的市场过滤要量(分布日)
     cur_code, buf = None, []
 
     def flush(code, full):
         if code == rh.BENCH_CODE:
             bench.update({d: c for d, c, _h, _l, _v in full})
+            bench_bars.extend(full)
             return
         p = perf.get(code)
         series = [(d, c) for d, c, _h, _l, _v in full]
@@ -256,7 +258,7 @@ def _load_store(market_key: str, perf: dict) -> dict:
     scan.close()
     conn.close()
     last = max(bench) if bench else None
-    return {"codes": codes, "bench": bench, "loaded_at": time.time(), "last": last}
+    return {"codes": codes, "bench": bench, "bench_bars": sorted(bench_bars), "loaded_at": time.time(), "last": last}
 
 
 def get_store(market_key: str, perf: dict) -> dict:

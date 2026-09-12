@@ -41,8 +41,10 @@ check("allowed · 放宽止损被拒", not ao.allowed("max_stop_pct", 0.10) and 
       and ao.allowed("max_stop_pct", 0.06) and ao.allowed("tp1", 0.5))
 check("候选 · 止盈档位必须递增(tp1=0.12 时 tp2=0.13 仍合法,tp3=0.18 与 tp2=0.15 合法)",
       all(c["params"]["tp1"] < c["params"]["tp2"] < c["params"]["tp3"] for c in cs))
-cb = ao.candidates("buy", BASE)
-check("候选 · 方向 A 只动买入侧", {c["key"] for c in cb} <= set(ao.BRANCHES["buy"]["tunable"]) and cb)
+P4 = dict(ao.engine_of("buy").PARAMS)          # 2026-09-13 起方向 A 是 agent_vcp4
+cb = ao.candidates("buy", P4)
+check("候选 · 方向 A 只动买入侧(vcp4 的四个买入档位)", {c["key"] for c in cb} <= set(ao.BRANCHES["buy"]["tunable"]) and cb
+      and all(k in ("atr_chase", "vol_boost", "breakout_window", "vcp_last_depth_max") for k in {c["key"] for c in cb}))
 check("候选 · 基准方向没有候选", ao.candidates("base", BASE) == [])
 # 用户把当前值改到档位之外时,当前值不在候选里(不会退回去)
 cur2 = dict(BASE, max_stop_pct=0.06)
@@ -59,8 +61,9 @@ vals = [c["value"] for c in cs3 if c["key"] == "time1_days"]
 check("⭐候选 · 冻结期过了也不许改回历史旧值(5 天不再出现)", vals and 5 not in vals, str(vals))
 nb = ao.neighbors("sell", BASE, "time1_days", 7)
 check("邻域 · 7 天的邻档是 5(当前,跳过)和无 → 空;3 天的邻档是 5(当前)→ 空", nb == [] and ao.neighbors("sell", BASE, "time1_days", 3) == [])
-nb2 = ao.neighbors("buy", BASE, "vol_boost", 1.7)
-check("邻域 · 1.7 的邻档是 1.4(当前,跳过)→ 空;1.2 的邻档 1.4 也是当前 → 空", nb2 == [] and ao.neighbors("buy", BASE, "vol_boost", 1.2) == [])
+nb2 = ao.neighbors("buy", P4, "vol_boost", 2.0)
+check("邻域 · 方向 A(vcp4)vol_boost 2.0 的邻档是 1.8;1.8 的邻档去掉当前 1.5 只剩 2.0",
+      [x["vol_boost"] for x in nb2] == [1.8] and [x["vol_boost"] for x in ao.neighbors("buy", P4, "vol_boost", 1.8)] == [2.0], str(nb2))
 nb3 = ao.neighbors("c", c3_base := dict(ao.engine_of("c").PARAMS), "time_days", 20)
 check("邻域 · C 方向 time_days 20 的邻档是 15(当前)→ 空;10 的邻档 15(当前)→ 空", nb3 == [] and ao.neighbors("c", c3_base, "time_days", 10) == [])
 csc = ao.candidates("c", c3_base)

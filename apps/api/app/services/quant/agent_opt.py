@@ -37,9 +37,10 @@ from datetime import date
 
 from app.services.quant import agent_vcp as av
 from app.services.quant import agent_vcp3 as av3
+from app.services.quant import agent_vcp4 as av4
 from app.services.quant import agent_sim
 
-ENGINES = {"vcp": av, "vcp3": av3}
+ENGINES = {"vcp": av, "vcp3": av3, "vcp4": av4}
 
 MIN_CYCLES = 8
 OBS_DAYS = 10           # 原 5,2026-09-12 全年回测后用户同意拉长
@@ -52,9 +53,12 @@ MIN_GAIN = 50.0         # 两段上净盈亏至少各多这么多美元(起始�
 
 BRANCHES: dict = {
     "base": {"engine": "vcp", "label": "基准 v1", "direction": "规则固定,不优化", "tunable": {}},
-    "buy": {"engine": "vcp", "label": "方向 A · 调买入", "direction": "固定卖出规则,只优化买入时机",
-            "tunable": {"atr_compact": [0.8, 1.0, 1.2], "vol_boost": [1.2, 1.4, 1.7],
-                        "chase_limit": [1.03, 1.05, 1.08], "min_adtv": [5e6, 1e7, 2e7]}},
+    # 2026-09-13 起方向 A 换成 agent_vcp4(用户按 SEPA 拆解方向 C 后的 v4 草案);原来的「固定卖出调买入」记录已清,
+    # 引擎 A 的那组买入档位留在 git 历史里(atr_compact / chase_limit / min_adtv)
+    "buy": {"engine": "vcp4", "label": "方向 A · SEPA 优化",
+            "direction": "用户按 Minervini SEPA 拆解方向 C 后的 v4:市场过滤 + 趋势模板 + 加权评分否决 + 风险定仓 + 加仓 + 盘中止损",
+            "tunable": {"atr_chase": [0.15, 0.25, 0.35], "vol_boost": [1.5, 1.8, 2.0],
+                        "breakout_window": [5, 10, 15], "vcp_last_depth_max": [4.0, 5.0, 6.0]}},
     "sell": {"engine": "vcp", "label": "方向 B · 调卖出", "direction": "固定买入时机,只优化卖出时机(止损只许收紧不许放宽)",
              "tunable": {"tp1": [0.08, 0.10, 0.12], "tp2": [0.13, 0.15, 0.18], "tp3": [0.18, 0.20, 0.25],
                          "time1_days": [3, 5, 7], "time2_days": [8, 10, 14],
@@ -78,7 +82,16 @@ PARAM_LABEL = {
     "max_stop_pct": "R-09 硬止损", "half_loss_pct": "R-08 减半止损", "sma_stop_pct": "R-10 跌破均线幅度",
     "atr_chase": "C-01 追高上限(ATR 倍数)", "confirm_days": "C-02 确认天数", "trail_days": "C-05 移动止损回看天数",
     "time_days": "C-06 时间止损天数", "stop_atr": "C-04 初始止损(底部下方 ATR 倍数)",
+    "breakout_window": "V-03 突破后有效天数", "vcp_last_depth_max": "V-03 末次收缩上限(%)",
 }
+# 同名参数在不同引擎里挂在不同规则上,按引擎覆盖文案
+PARAM_LABEL_BY_ENGINE = {
+    "vcp4": {"atr_chase": "V-03 追高上限(ATR 倍数)", "vol_boost": "V-04 突破日放量倍数", "stop_atr": "V-06 初始止损(枢轴下方 ATR 倍数)"},
+}
+
+
+def param_label(branch: str, key: str) -> str:
+    return PARAM_LABEL_BY_ENGINE.get(BRANCHES[branch]["engine"], {}).get(key) or PARAM_LABEL.get(key, key)
 
 
 def fmt(key: str, v) -> str:
@@ -246,7 +259,7 @@ def step(branch: str, st: dict, today: date, dates: list[date], pool: dict, cach
         why = f"没有一个在训练段和检验段都更好" if not passed else f"{len(passed)} 个两段都更好,但相邻档位都不比当前好(邻域检验没过)"
         return {"evaluated": len(cands), "action": "none", "cycles": cyc,
                 "text": f"评估了 {len(cands)} 个候选(一次只动一个参数),{why} —— 不改"}
-    change = f"{PARAM_LABEL.get(best['key'], best['key'])} {fmt(best['key'], cur[best['key']])} → {fmt(best['key'], best['value'])}"
+    change = f"{param_label(branch, best['key'])} {fmt(best['key'], cur[best['key']])} → {fmt(best['key'], best['value'])}"
     st["observing"] = {"key": best["key"], "value": best["value"], "old": cur[best["key"]], "params": best["params"],
                        "since": str(today), "change": change,
                        "reason": f"训练段多赚 ${best['cmp']['train_gain']:+.0f}、检验段多赚 ${best['cmp']['test_gain']:+.0f},回撤 {best['cmp']['dd_cand']:.1f}%",

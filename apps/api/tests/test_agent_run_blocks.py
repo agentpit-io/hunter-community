@@ -33,7 +33,7 @@ def test_c08_per_grade_stats_reachable():
     assert labels["A 级"].startswith("1 笔 · 胜率 100%"), labels
     assert labels["C 级"].startswith("1 笔 · 胜率 0%"), labels
     assert labels["S 级"] == "0 笔" and labels["B 级"] == "0 笔"
-    assert "挡下(D 级 / 空间受限)" in labels
+    assert "挡下(D 级或否决)" in labels
     assert "挡下候选" not in labels          # 不是通用买入分支的输出
 
 

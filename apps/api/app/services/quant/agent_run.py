@@ -35,6 +35,7 @@ base 基准 v1 规则固定 · buy 固定卖出只调买入 · sell 固定买入
 from __future__ import annotations
 
 import argparse
+from bisect import bisect_right
 import json
 import logging
 import math
@@ -106,6 +107,7 @@ ALTER TABLE agent_trade ADD COLUMN IF NOT EXISTS branch TEXT NOT NULL DEFAULT 'b
 ALTER TABLE agent_trade ADD COLUMN IF NOT EXISTS grade TEXT;
 ALTER TABLE agent_trade ADD COLUMN IF NOT EXISTS grade_detail TEXT;
 CREATE INDEX IF NOT EXISTS agent_trade_date_idx ON agent_trade (branch, trade_date);
+ALTER TABLE agent_position ADD COLUMN IF NOT EXISTS extra TEXT;
 CREATE TABLE IF NOT EXISTS agent_position (
     code         TEXT NOT NULL,
     name         TEXT,
@@ -215,6 +217,7 @@ class Ctx:
         from app.services.quant import screen_asof
         self.rows, self.perf = _snapshot()
         self.snap = {r["_code"]: r for r in self.rows}
+        self.sectors = {c: r.get("sector") for c, r in self.snap.items()}      # 方向 A 的「同板块 ≤2」用
         self.store = screen_asof.get_store(MARKET, self.perf)
         self.screen_of: dict = {}          # date → [[code, name, score]]
         self.cache: dict = {k: {} for k in ao.ENGINES}      # 引擎 → {(code, date): 指标}
@@ -249,6 +252,19 @@ class Ctx:
                 for name, eng in ao.ENGINES.items():
                     self.cache[name][(code, d)] = eng.indicators(bars[:i + 1], bench=self.store["bench"]) if i is not None else None
             self.seen.add(code)
+        # 方向 A(agent_vcp4)要按日的市场状态与板块表:放在同一份缓存里,模拟器和实盘拿的是同一个东西
+        bb = self.store.get("bench_bars") or []
+        bdates = [b[0] for b in bb]
+        for name, eng in ao.ENGINES.items():
+            mk = getattr(eng, "MARKET_KEY", None)
+            if not mk:
+                continue
+            for d in new_dates:
+                if (mk, d) in self.cache[name]:
+                    continue
+                k = bisect_right(bdates, d)
+                self.cache[name][(mk, d)] = eng.market_regime(bb[:k])
+                self.cache[name][(eng.SECTORS_KEY, d)] = self.sectors
         self.cache_dates.update(dates)
 
 
@@ -258,10 +274,11 @@ class Ctx:
 
 def _load_positions(cur, branch: str) -> list[av.Position]:
     cur.execute("SELECT code, name, size, initial_size, entry_price, entry_date, avg_cost, highest, level, "
-                "bars_held, entry_rule, stop, risk FROM agent_position WHERE branch=%s ORDER BY entry_date, code", (branch,))
+                "bars_held, entry_rule, stop, risk, extra FROM agent_position WHERE branch=%s ORDER BY entry_date, code", (branch,))
     return [av.Position(code=r[0], name=r[1], size=r[2], initial_size=r[3], entry_price=r[4],
                         entry_date=str(r[5]), avg_cost=r[6], highest=r[7], level=r[8], bars_held=r[9],
-                        entry_rule=r[10] or "R-04", stop=r[11] or 0.0, risk=r[12] or 0.0) for r in cur.fetchall()]
+                        entry_rule=r[10] or "R-04", stop=r[11] or 0.0, risk=r[12] or 0.0,
+                        extra=(json.loads(r[13]) if r[13] else {})) for r in cur.fetchall()]
 
 
 def run_date(d: date, ctx: Ctx | None = None) -> dict:
@@ -342,6 +359,7 @@ def run_date(d: date, ctx: Ctx | None = None) -> dict:
                    "summary": (f"「VCP 波段收缩」今天命中 {ws.get('matched')} 只,连同近 {av.PARAMS['watch_pool_days']} 天入选的共 {len(watch_today)} 只 → 观察列表;"
                                f"买入 {n_buy} 笔、卖出 {n_sell} 笔" + (f",已实现 {realized:+.0f} 美元" if n_sell else "")
                                + (f";护栏:{res['halt_reason']}" if res["halt_reason"] else "")
+                               + (f";市场:{res['market']['text']}" if res.get("market") else "")
                                + (f"。⚠ 今天筛选为空是因为 RS 评级被门槛挡下(不是没有候选):{ws['gate'][:60]}…" if gated else ""))
                               if scan_ok else f"筛选失败:{ws.get('error')};持仓照常管理,今天不开新仓"}
 
@@ -355,10 +373,11 @@ def run_date(d: date, ctx: Ctx | None = None) -> dict:
             bench_pct = round((bench[d] / b0 - 1) * 100, 2) if b0 else None
             sh, sh_na = _stock_sharpe(bars, entry)
             cur.execute("INSERT INTO agent_position (branch, code, name, size, initial_size, entry_price, entry_date, avg_cost, "
-                        "highest, level, bars_held, entry_rule, last_price, bench_pct, sharpe, sharpe_na, stop, risk) "
-                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                        "highest, level, bars_held, entry_rule, last_price, bench_pct, sharpe, sharpe_na, stop, risk, extra) "
+                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                         (branch, pos.code, pos.name, pos.size, pos.initial_size, pos.entry_price, entry, pos.avg_cost,
-                         pos.highest, pos.level, pos.bars_held, pos.entry_rule, last, bench_pct, sh, sh_na, pos.stop, pos.risk))
+                         pos.highest, pos.level, pos.bars_held, pos.entry_rule, last, bench_pct, sh, sh_na, pos.stop, pos.risk,
+                         json.dumps(pos.extra or {}, ensure_ascii=False)))
         for i, f in enumerate(fills):
             cur.execute("INSERT INTO agent_trade (branch, trade_date, seq, side, code, name, shares, price, amount, position_pct, "
                         "pnl_abs, pnl_pct, hold_days, rule_id, rule_name, rationale, entry_date, level, grade, grade_detail) "
@@ -698,6 +717,8 @@ _V1 = {
             "用户 2026-09-12 指定;观察列表 = 筛选器「VCP 波段收缩」近 10 天并集"),
     "vcp3": ("VCP 三段式 —— 枢轴 + ATR 触发、3 天内放量确认、底部低点止损、1R 后移动止损、15 天时间止损",
              "Claude 2026-09-12 按全年回测的三个事实自设计,用户同意后实现;同一份观察列表"),
+    "vcp4": ("VCP · SEPA 优化 —— 市场过滤 + 趋势模板 + 加权评分与一票否决 + 风险定仓 + S 级加仓 + 盘中止损 + 分段跟踪",
+             "用户 2026-09-13 按 Minervini SEPA 五根柱子拆解方向 C 后给的 v4 草案;没有基本面 / 行业数据源,那两块没做"),
 }
 
 
@@ -887,11 +908,12 @@ def _trade_item(t) -> dict:
 def _strategy_block(universe_size, st: dict, branch: str = "base") -> dict:
     p = st["params"]
     eng = ao.engine_of(branch)
-    return {"name": STRATEGY_NAME if eng is av else "VCP 三段式(方向 C)", "version": f"v{st['version']}",
+    names = {"vcp": STRATEGY_NAME, "vcp3": "VCP 三段式(方向 C)", "vcp4": "VCP · SEPA 优化(方向 A)"}
+    return {"name": names.get(ao.BRANCHES[branch]["engine"], STRATEGY_NAME), "version": f"v{st['version']}",
             "summary": eng.summary(p),
-            "market_label": "美股", "market_note": "纸上交易 · 日线收盘价成交",
+            "market_label": "美股", "market_note": getattr(eng, "EXEC_NOTE", "纸上交易 · 日线收盘价成交"),
             "universe": "筛选器「VCP 波段收缩」近 10 天结果并集", "universe_size": universe_size,
-            "rebalance": "每个交易日收盘后跑一次 · 信号当天收盘价成交",
+            "rebalance": "每个交易日收盘后跑一次 · 信号当天收盘价成交" + (";止损按盘中触及价" if getattr(eng, "EXEC_NOTE", None) else ""),
             "data_source": "自家全市场日线(每晚落库,拆股已核对)+ 标普500 基准 · 不含盘中"}
 
 
@@ -933,6 +955,8 @@ def _rules_block(trades, poss, days, p: dict, st: dict | None = None, eng=av) ->
     changed = {v["key"]: v for v in (st or {}).get("versions", [])}
     key_of_rule = eng.RULE_PARAM_KEY
     entry_rule = eng.ENTRY_RULE
+    add_rule = getattr(eng, "ADD_RULE", "R-16")          # 加仓规则:统计「触发」次数
+    grade_rule = getattr(eng, "GRADE_RULE", "C-08")      # 评分规则:统计每档的完整周期结果
     out = []
     for r in eng.rules_for(p):
         rid = r["id"]
@@ -946,25 +970,25 @@ def _rules_block(trades, poss, days, p: dict, st: dict | None = None, eng=av) ->
             else:
                 stats.append({"label": "触发后胜率", "value": None})
                 stats.append({"label": "样本", "value": "还没有走完的持仓周期", "dim": True})
-        elif rid == "C-08":
+        elif rid == grade_rule:
             # 每档的完整周期结果:评分记在买入那笔上,周期盈亏按 (code, entry_date) 加总
             g_of = {(t[3], str(t[15])): t[18] for t in trades if t[2] == "buy" and len(t) > 18 and t[18]}
             for gk in ("S", "A", "B", "C"):
                 pn = [v for k, v in done.items() if g_of.get(k) == gk]
                 stats.append({"label": f"{gk} 级", "value": (f"{len(pn)} 笔 · 胜率 {sum(1 for x in pn if x > 0) / len(pn) * 100:.0f}% · "
                                                               f"均 {sum(pn) / len(pn):+,.0f} 美元") if pn else "0 笔"})
-            stats.append({"label": "挡下(D 级 / 空间受限)", "value": blocked.get("C-08", 0)})
-        elif r["kind"] == "buy" and rid != "R-16":
+            stats.append({"label": "挡下(D 级或否决)", "value": blocked.get(grade_rule, 0)})
+        elif r["kind"] == "buy" and rid != add_rule:
             stats.append({"label": "挡下候选", "value": blocked.get(rid, 0)})
             stats.append({"label": "说明", "value": "买入条件要同时满足,单条不单独产生交易", "dim": True})
-        elif r["kind"] == "sell" or rid == "R-16":
+        elif r["kind"] == "sell" or rid == add_rule:
             ts = by_rule.get(rid, [])
             stats.append({"label": "触发", "value": len(ts)})
-            if rid != "R-16":
+            if rid != add_rule:
                 pn = [t[10] for t in ts if t[10] is not None]
                 stats.append({"label": "平均盈亏", "value": f"{sum(pn) / len(pn):+.1f}%" if pn else None})
                 stats.append({"label": "触发后胜率", "value": f"{sum(1 for x in pn if x > 0) / len(pn) * 100:.0f}%" if pn else None})
-        elif rid in ("R-18", "R-19", "C-07", "C-03", "C-09", "C-04"):
+        elif r["kind"] == "risk" or rid in ("R-18", "R-19", "C-07", "C-03", "C-09", "C-04"):
             stats.append({"label": "挡下候选", "value": blocked.get(rid, 0)})
         else:
             stats.append({"label": "说明", "value": "仓位算法,每次开仓 / 加仓都经过", "dim": True})

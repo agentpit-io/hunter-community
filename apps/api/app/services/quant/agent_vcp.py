@@ -162,6 +162,7 @@ class Position:
     entry_rule: str = "R-04"
     stop: float = 0.0        # 方向 C(agent_vcp3)用:当前止损位;A/B 不用
     risk: float = 0.0        # 方向 C 用:初始风险 1R = 入场价 − 初始止损
+    extra: dict = field(default_factory=dict)   # 方向 A(agent_vcp4)用:枢轴 / 档位 / 板块 / 计划股数 / 减半、减仓标记;存 agent_position.extra(JSON)
 
     def to_dict(self) -> dict:
         return asdict(self)
