@@ -126,13 +126,26 @@ CREATE UNIQUE INDEX IF NOT EXISTS agent_position_uq ON agent_position (branch, c
 """
 
 
+_ddl_done = False
+
+
 def _conn():
+    """连库;DDL **每个进程只跑一次**(和 rs_history.load_stats 同一套路)。
+
+    2026-09-12 事故:原来每次连库都跑 _DDL。ALTER / DROP CONSTRAINT 即便是 IF EXISTS 的空操作也要拿
+    ACCESS EXCLUSIVE 锁;一个诊断脚本的连接停在「idle in transaction」(psycopg2 第一次 SELECT 就开事务)
+    拿着 agent_day 的共享锁,dashboard() 的第二个连接跑 DDL 在它后面排队,再后面所有读 agent_day 的都排在
+    DDL 后面 —— 面板接口和一条 count(*) 一起卡了 6 分钟,pg_terminate_backend 才解开。
+    """
+    global _ddl_done
     from app.services.database import get_conn
     c = get_conn()
-    cur = c.cursor()
-    cur.execute(_DDL)
-    c.commit()
-    cur.close()
+    if not _ddl_done:
+        cur = c.cursor()
+        cur.execute(_DDL)
+        c.commit()
+        cur.close()
+        _ddl_done = True
     return c
 
 
