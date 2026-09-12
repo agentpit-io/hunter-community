@@ -202,24 +202,25 @@ Besides an LLM key (required · yours, drives conversation itself) · you have *
 - ✅ **All left-side tools stay visible** — not crippled, not hidden · clicking tells you exactly how to unlock · never silent failure
 - ✅ **Pipeline usage metered per key** — we don't look at your data or conversations · we only count requests
 
-### 🆕 Official MCP Support Progress (2026-09-13)
+### 🆕 Official MCP Support Progress (updated 2026-09-13)
 
-**HiThink (THS) Official MCP · Verified**
+**Our current stance: hunter-community does not preinstall integrations for any specific finance data vendor's MCP. We will enable them one by one, only after obtaining explicit authorization from each vendor.**
 
-- The `fuyao.aicubes.cn/mcp/*` endpoints (A-shares, index, fund, futures, options, meta — 6 in total) are publicly documented on HiThink's official docs site
-- Users self-issue API keys in three clicks via the docs site; requests carry `X-api-key`
-- We ran an end-to-end field test with a real key: accuracy matches three independent sources, rate limits are generous
-- This fits Hunter's **Option ② (BYO MCP)** pattern — **you bring your own key, our code carries zero secrets**
-- ⚠️ Zero hits in 387KB of HiThink docs for "commercial use / resale / redistribution" — **confirm ToS with the vendor before commercial use**
+**HiThink (THS) · Awaiting official partnership**
 
-**Tongdaxin (TDX) · Official MCP not yet documented for open access · We're waiting**
+- HiThink publicly lists MCP endpoints at `fuyao.aicubes.cn/mcp/*` and allows developers to self-issue API keys on their docs site
+- **However, we have not yet obtained written authorization from HiThink for hunter-community as an integration partner** — for compliance reasons, we do not preinstall this data source
+- We are in touch with HiThink's team and **hope to establish a formal partnership** · once authorized, we will support user-brought keys
+
+**Tongdaxin (TDX) · Awaiting officially documented third-party MCP access**
 
 - Tongdaxin also runs an MCP service, but **has not officially published an authorized API address or developer documentation for third-party integrations**
 - For compliance reasons, hunter-community **does not integrate any Tongdaxin interface that has not been officially opened**
-- We are reaching out to Tongdaxin's team and **hope Tongdaxin will support our open-source project** — so that users who have already purchased a paid key can plug the Tongdaxin MCP into hunter-community
-- If anyone from Tongdaxin sees this, please reach out via GitHub Issues or email
+- We are reaching out to Tongdaxin's team and **hope they will support our open-source project** — so that users who have already purchased a paid key can plug the Tongdaxin MCP into hunter-community
 
-**Detailed article**: [www.agentpit.io/en/blog/ths-tdx-official-mcp-field-test](https://www.agentpit.io/en/blog/ths-tdx-official-mcp-field-test)
+**What users can use today**: free open sources (akshare / yfinance) + user-brought third-party MCPs (generic MCP integration, no preinstalled vendor). Vendor-specific official integrations (HiThink, Tongdaxin, etc.) will be added one by one after we secure authorization.
+
+**If you're from a data vendor**: please reach out via GitHub Issues or email to discuss partnership.
 
 ---
 

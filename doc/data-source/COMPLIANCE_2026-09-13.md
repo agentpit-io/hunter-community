@@ -1,7 +1,7 @@
-# 合规修订记录 · 通达信 MCP 部分撤回
+# 合规修订记录 · 所有厂商 MCP 集成待官方合作
 
-**日期**:2026-09-13
-**范围**:hunter-community 仓库(agentpit-io/hunter-community)
+**日期**:2026-09-13(下午更新 —— 立场从"只撤通达信"扩展到"所有厂商都撤回,等逐一沟通")
+**范围**:hunter-community 仓库(agentpit-io/hunter-community)+ agentpit.io 博客与微信公众号
 **决策人**:项目所有者
 
 ---
@@ -40,9 +40,18 @@
 - `README.md` —— 中文 · 「官方 MCP 实测对照:同花顺 vs 通达信」小节替换为「官方 MCP 支持进展(2026-09-13)」精简说明
 - `README_EN.md` —— 英文 · 对应小节同步替换
 
-### 保留
+### 保留 → 撤回(2026-09-13 下午更新)
 
-**同花顺(HiThink)相关内容全部保留** —— 该厂商的 MCP 端点在其官方文档站公开列出、Key 通过官方文档站三步签发、我们所有测试均使用官方渠道,**合规无争议**。
+**同花顺(HiThink)相关内容也已撤回**:
+
+- 上午的判断:同花顺 MCP 端点公开、Key 官方签发 · 合规无争议
+- 下午的更新:**"官方公开的 API"≠"官方对我们的产品授权集成"**。同花顺没有对 hunter-community 作为集成方书面授权 · 提前公开宣传"实测通过"在商务上可能不当
+- 立场调整为:与同花顺、通达信、以及任何其他数据厂商 · 全部等**逐一正式沟通并拿到授权后再开放集成**
+
+### 同步撤回
+
+- agentpit 博客文章 `/blog/ths-tdx-official-mcp-field-test`(中英)已从 lib/blog.ts 中删除 · 页面 404 · sitemap 自动移除
+- 微信公众号草稿已通过 draft/delete API 删除
 
 ### 未涉及
 
@@ -50,16 +59,23 @@
 - hunter-community 从未有过任何通达信接口的代码集成
 - 无需 Docker 容器重建、无需数据库迁移、无需服务重启
 
-## 通达信部分的路线
+## 所有厂商的路线
 
-hunter-community 期望通达信官方能够:
+hunter-community 期望所有金融数据厂商能够:
 
-- 公开授权 MCP 接口的第三方接入文档
-- 允许已购买付费 key 的用户,自主将 Key 配置到 hunter-community 等开源客户端使用
+- 与我们建立正式合作关系,书面授权 hunter-community 作为第三方集成方
+- 支持"用户自持 key"的合规模式,允许用户将自己付费购买的 key 配置到 hunter-community 使用
 
-**在通达信官方书面确认第三方 MCP 集成方式之前,hunter-community 不集成任何通达信相关接口。**
+**在与每家数据厂商完成正式沟通、拿到书面授权之前,hunter-community 不集成任何具体厂商的接口。**
 
-如通达信官方希望联系我们,请通过 GitHub Issues 或 hangeaiagent@gmail.com。
+用户目前可用的数据供给:
+
+- **免费开源源**:akshare(A 股)、yfinance(美股/港股)—— 保留
+- **用户自持第三方 MCP**:通用 MCP 接入能力(用户自己接入任何 MCP)—— 保留
+
+厂商相关的官方集成(如 HiThink、Tongdaxin、其他数据商)· 一律**等我们正式沟通并拿到授权后陆续开放**。
+
+如数据厂商希望联系我们,请通过 GitHub Issues 或 hangeaiagent@gmail.com。
 
 ---
 
