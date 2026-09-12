@@ -796,6 +796,8 @@ def _trade_rounds(trades, rule_cond: dict) -> list[dict]:
             leg = {"kind": "entry" if t[2] == "buy" else "exit", "date": str(t[0]),
                    "rule_id": t[12], "rule_name": t[13], "rationale": t[14],
                    "rule_text": rule_cond.get(t[12]), "price": t[6], "shares": t[5]}
+            if t[2] == "buy" and len(t) > 18 and t[18]:
+                leg["rule_name"] = f"{t[13]} · {t[18]} 级"      # 评分只记在买入那笔上
             if t[2] == "sell":
                 leg.update({"pnl_abs": t[9], "pnl_pct": t[10], "followup": t[17]})
             legs.append(leg)
@@ -890,6 +892,14 @@ def _rules_block(trades, poss, days, p: dict, st: dict | None = None, eng=av) ->
             else:
                 stats.append({"label": "触发后胜率", "value": None})
                 stats.append({"label": "样本", "value": "还没有走完的持仓周期", "dim": True})
+        elif rid == "C-08":
+            # 每档的完整周期结果:评分记在买入那笔上,周期盈亏按 (code, entry_date) 加总
+            g_of = {(t[3], str(t[15])): t[18] for t in trades if t[2] == "buy" and len(t) > 18 and t[18]}
+            for gk in ("S", "A", "B", "C"):
+                pn = [v for k, v in done.items() if g_of.get(k) == gk]
+                stats.append({"label": f"{gk} 级", "value": (f"{len(pn)} 笔 · 胜率 {sum(1 for x in pn if x > 0) / len(pn) * 100:.0f}% · "
+                                                              f"均 {sum(pn) / len(pn):+,.0f} 美元") if pn else "0 笔"})
+            stats.append({"label": "D 级挡下", "value": blocked.get("C-08", 0)})
         elif r["kind"] == "buy" and rid != "R-16":
             stats.append({"label": "挡下候选", "value": blocked.get(rid, 0)})
             stats.append({"label": "说明", "value": "买入条件要同时满足,单条不单独产生交易", "dim": True})
@@ -900,14 +910,6 @@ def _rules_block(trades, poss, days, p: dict, st: dict | None = None, eng=av) ->
                 pn = [t[10] for t in ts if t[10] is not None]
                 stats.append({"label": "平均盈亏", "value": f"{sum(pn) / len(pn):+.1f}%" if pn else None})
                 stats.append({"label": "触发后胜率", "value": f"{sum(1 for x in pn if x > 0) / len(pn) * 100:.0f}%" if pn else None})
-        elif rid == "C-08":
-            # 每档的完整周期结果:评分记在买入那笔上,周期盈亏按 (code, entry_date) 加总
-            g_of = {(t[3], str(t[15])): t[18] for t in trades if t[2] == "buy" and len(t) > 18 and t[18]}
-            for gk in ("S", "A", "B", "C"):
-                pn = [v for k, v in done.items() if g_of.get(k) == gk]
-                stats.append({"label": f"{gk} 级", "value": (f"{len(pn)} 笔 · 胜率 {sum(1 for x in pn if x > 0) / len(pn) * 100:.0f}% · "
-                                                              f"均 {sum(pn) / len(pn):+.0f}") if pn else "0 笔"})
-            stats.append({"label": "D 级挡下", "value": blocked.get("C-08", 0)})
         elif rid in ("R-18", "R-19", "C-07", "C-03", "C-09", "C-04"):
             stats.append({"label": "挡下候选", "value": blocked.get(rid, 0)})
         else:
