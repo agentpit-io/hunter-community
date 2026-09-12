@@ -202,6 +202,29 @@ Besides an LLM key (required · yours, drives conversation itself) · you have *
 - ✅ **All left-side tools stay visible** — not crippled, not hidden · clicking tells you exactly how to unlock · never silent failure
 - ✅ **Pipeline usage metered per key** — we don't look at your data or conversations · we only count requests
 
+### 🆕 Official MCP Field Test: THS vs TDX (2026-09-12)
+
+**Verdict**: Both top-tier Chinese finance data providers now ship an official MCP · both let end users self-issue API keys · which is exactly Hunter's **Option ② (BYO MCP)** pattern · our code carries zero secrets.
+
+| | HiThink / THS (同花顺) | Tongdaxin / TDX (通达信) |
+|---|---|---|
+| Official MCP endpoint | `https://fuyao.aicubes.cn/mcp/*` · **6** (A-shares / index / fund / futures / options / meta) | `https://txmcp.tdx.com.cn:3001/clawmcp` · **1** |
+| Auth | `X-api-key: <key>` | `Authorization: Bearer TDX-<key>` |
+| Key issuance | Login on doc site · 3 clicks · no fee observed | In-app store「Points & Key Management」self-serve · **paid credit-based** |
+| Unique capability | ⭐ **Whole-market 10-year daily K · 172MB Parquet in one shot** · dragon-tiger list split into institutional & hot-money desks (63 rows) | ⭐ **News / disclosure / research / macro** four tools · natural-language screener · adjusted K-line |
+| Data accuracy | ✅ Moutai 1275.16 (matches 2 other independent sources) | ✅ Moutai 1275.16 (matches 2 other independent sources) |
+| Rate limit | 120 requests across 1/4/8 concurrency · zero 429 | Credit-metered · per-call cost pending confirmation |
+| **Commercial-use / resale terms** | ⚠️ **Zero hits in 387KB of docs** | ⚠️ **Not published** |
+
+**How to wire it up** (identical to Option ②):
+1. User fills their own key in Data Source settings (prominent location)
+2. Backend attaches the right header to the right endpoint based on user choice · our code holds no key
+3. If user hasn't filled a key → return a clear error + official signup link · **never fall back to our key**
+
+**⚠️ Iron rule**: Our own key is only for dev testing · never into repo / never into image / never used to fetch data on behalf of users — doing so would constitute data resale. Please confirm ToS with the official provider before commercial use.
+
+**Full field-test report** (evidence chain · 401 auth verification · JSON-RPC captures): [`doc/data-source/2026-09-12_ths-vs-tdx-mcp.md`](./doc/data-source/2026-09-12_ths-vs-tdx-mcp.md) (Chinese)
+
 ---
 
 ## 🧠 Killer Feature: Investment Thesis
