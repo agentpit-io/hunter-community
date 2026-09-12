@@ -223,7 +223,7 @@ Besides an LLM key (required · yours, drives conversation itself) · you have *
 
 **⚠️ Iron rule**: Our own key is only for dev testing · never into repo / never into image / never used to fetch data on behalf of users — doing so would constitute data resale. Please confirm ToS with the official provider before commercial use.
 
-**Full field-test report** (evidence chain · 401 auth verification · JSON-RPC captures): [`doc/data-source/2026-09-12_ths-vs-tdx-mcp.md`](./doc/data-source/2026-09-12_ths-vs-tdx-mcp.md) (Chinese)
+**Full field-test report** (evidence chain · 401 auth verification · JSON-RPC captures): [`doc/data-source/2026-09-12_ths-vs-tdx-mcp.en.md`](./doc/data-source/2026-09-12_ths-vs-tdx-mcp.en.md) · [中文原版](./doc/data-source/2026-09-12_ths-vs-tdx-mcp.md)
 
 ---
 
