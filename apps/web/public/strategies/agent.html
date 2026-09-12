@@ -35,6 +35,29 @@
     .ag-clock b{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
     .ag-ops{display:flex;gap:7px}
 
+    /* 迭代方向(2026-09-12)· 一行标签卡,每个方向一张,active 的品牌色高亮。
+       卡片是 button、常驻可见 —— 新功能入口不藏 hover(仓内铁律)。 */
+    .ag-br{background:#fff;border:1px solid var(--line);border-radius:12px;padding:11px 14px}
+    .ag-br .hd{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;font-size:11.5px;color:var(--muted)}
+    .ag-br .hd .lb{color:var(--muted);font-weight:600;letter-spacing:.03em}
+    .ag-br-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:9px;margin-top:9px}
+    .ag-brc{display:block;width:100%;text-align:left;font:inherit;color:var(--text);cursor:pointer;
+      background:var(--panel);border:1.5px solid var(--line);border-radius:10px;padding:10px 12px;
+      transition:border-color .15s,background .15s,box-shadow .15s}
+    .ag-brc:hover{border-color:var(--line-strong);background:#fff}
+    .ag-brc:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+    .ag-brc.on{border-color:var(--brand);background:#fff;box-shadow:0 0 0 2px var(--brand-pale)}
+    .ag-brc .t{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:13px;font-weight:650}
+    .ag-brc .t .ver{font-family:ui-monospace,menlo,monospace;font-size:11px;color:var(--brand-dark);font-weight:700}
+    .ag-brc .t .cur{margin-left:auto;font-size:10.5px;color:var(--brand);font-weight:600;letter-spacing:.03em}
+    .ag-brc .dr{display:block;color:var(--muted);font-size:11px;line-height:1.5;margin-top:3px}
+    .ag-brc .st{display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;padding-top:7px;
+      border-top:1px solid var(--line);font-size:10.5px;color:var(--muted)}
+    .ag-brc .st span{display:block}
+    .ag-brc .st b{display:block;font-size:13px;font-weight:700;color:var(--text);
+      font-variant-numeric:tabular-nums;margin-top:1px}
+    .ag-brc .st b.pos{color:var(--up)} .ag-brc .st b.neg{color:var(--dn)}
+
     /* 当前策略条 */
     .ag-strat{background:#fff;border:1px solid var(--line);border-left:3px solid var(--brand);
       border-radius:12px;padding:13px 16px}
@@ -296,6 +319,47 @@ function vStatus(d) {
       '<button class="btn small" id="ag-run"><span class="hi hi-play"></span> 立即跑一次</button>' +
       '<button class="btn small" id="ag-toggle">' + (d.state === 'paused' ? '恢复' : '暂停') + '</button>' +
     '</div></div>'
+}
+
+// ═══ ①.5 迭代方向(2026-09-12)═══════════════════════════════════
+// 后端把 dashboard 扩成 `?branch=<key>`,返回体顶层多 `branch`(本次返回的是哪个方向)
+// 和 `branches[]`(全部方向,顺序固定)。每张卡是一个方向:label / direction / version /
+// 总收益 / 对比基准 / 交易笔数与胜率 / 最大回撤,active 的那张品牌色高亮。
+//   · 后端没给 branches(字段缺失)或给了空数组 → 这一块**整个不渲染**,旧契约不变,
+//     骨架断言不受影响(render_check 里有断言盯着)。
+//   · 点一张卡 → 重拉那个方向的面板、整页重渲染,key 写进 location.hash(刷新后恢复)。
+//   · 「立即跑一次 / 暂停」对所有方向一起生效,不随卡片切换。
+//   · 数字一律 Number.isFinite 判断,不是数字显示 `—`;文本全部过 esc()。
+function vBranches(d) {
+  const bs = d.branches
+  if (!Array.isArray(bs) || !bs.length) return ''
+  const cards = bs.map(function (b) {
+    b = b || {}
+    const on = b.active === true
+    const key = (b.key == null ? '' : String(b.key)).trim()
+    const stats = [
+      ['总收益', pct(b.pnl_pct, 2, true), dir(b.pnl_pct)],
+      ['对比基准', Number.isFinite(b.excess_pt) ? (b.excess_pt > 0 ? '+' : '') + fixed(b.excess_pt, 2) + ' pt' : NA,
+        dir(b.excess_pt)],
+      ['交易', (Number.isFinite(b.trades_total) ? int(b.trades_total) + ' 笔' : NA) + ' · 胜率 ' + pct(b.win_rate, 1), ''],
+      ['最大回撤', pct(b.max_dd_pct, 2), Number.isFinite(b.max_dd_pct) ? 'neg' : ''],
+    ].map(function (s) {
+      return '<span>' + s[0] + '<b' + (s[2] ? ' class="' + s[2] + '"' : '') + '>' + s[1] + '</b></span>'
+    }).join('')
+    // key 缺失的卡点了也没法请求,禁用但照样画出来(结构本身是信息)
+    return '<button type="button" class="ag-brc' + (on ? ' on' : '') + '" data-branch="' + esc(key) + '"' +
+      (key ? '' : ' disabled') + ' aria-pressed="' + (on ? 'true' : 'false') + '"' +
+      ' title="' + (on ? '当前显示的就是这个方向' : '点击切换到这个方向') + '">' +
+      '<span class="t">' + txt(b.label) +
+        (b.version ? '<span class="ver">' + esc(b.version) + '</span>' : '') +
+        (on ? '<span class="cur">● 当前显示</span>' : '') + '</span>' +
+      '<span class="dr">' + txt(b.direction) + '</span>' +
+      '<span class="st">' + stats + '</span></button>'
+  }).join('')
+  return '<div class="ag-br"><div class="hd"><span class="lb">迭代方向</span>' +
+    '<span>' + esc(bs.length + ' 个方向并行') + ' · 点一张卡切换下面整页的数据 · ' +
+    '「立即跑一次 / 暂停」对所有方向一起生效</span></div>' +
+    '<div class="ag-br-row">' + cards + '</div></div>'
 }
 
 // ═══ ② 当前策略 ═══════════════════════════════════════════════════
@@ -755,7 +819,7 @@ function vBanner(n) {
 function render(d, notice) {
   // 返回 html 而不只是写进 container:render_check.js 靠这个返回值断言区块顺序
   const html = '<div class="ag-wrap">' + vBanner(notice) +
-    vStatus(d) + vStrategy(d) + vGuard(d) + vPipeline(d) + vKpi(d) + vNav(d) +
+    vStatus(d) + vBranches(d) + vStrategy(d) + vGuard(d) + vPipeline(d) + vKpi(d) + vNav(d) +
     vScreener() + vRules(d) +
     '<div class="ag-two">' + vHoldings(d) + vWatch(d) + '</div>' +
     vTrades(d) + vVersions(d) + vLessons(d) +
@@ -803,6 +867,26 @@ function bindOps() {
     const paused = tg.textContent.trim() === '恢复'
     agCall(paused ? '/api/quant/agent/resume' : '/api/quant/agent/pause', tg, paused ? '恢复' : '暂停')
   })
+  // 迭代方向:点卡片切换。卡片是 button、常驻可见,不藏 hover
+  const cards = container.querySelectorAll('.ag-brc[data-branch]')
+  Array.prototype.forEach.call(cards, function (c) {
+    c.addEventListener('click', function () {
+      const key = c.getAttribute('data-branch')
+      if (key) switchBranch(key)
+    })
+  })
+}
+
+// ─── 迭代方向的切换与 hash 恢复 ────────────────────────────────────
+// 选中的 key 写进 location.hash(`#branch=sell`),刷新后按 hash 恢复;
+// 首次加载没有 hash 就不带参数(后端返默认方向)。
+function hashBranch() {
+  const m = /(?:^#|&)branch=([A-Za-z0-9_.-]+)/.exec(String(location.hash || ''))
+  return m ? m[1] : ''
+}
+function switchBranch(key) {
+  try { location.hash = '#branch=' + encodeURIComponent(key) } catch (e) { /* 假 DOM 没有 location */ }
+  boot(key)
 }
 
 let agBusy = false
@@ -827,12 +911,16 @@ async function agCall(url, btn, what) {
   boot()
 }
 
-async function boot() {
+// boot(branch):branch 是方向 key(字符串)。刷新 / 重试按钮把它当 click 回调用,
+// 传进来的是 Event —— 非字符串一律按 hash 恢复,所以跑完一次 / 暂停后重拉也停在当前方向。
+async function boot(branch) {
+  if (typeof branch !== 'string') branch = hashBranch()
+  const url = branch ? API + '?branch=' + encodeURIComponent(branch) : API
   container.innerHTML = '<div class="ag-wrap"><div class="panel">' +
     '<div class="cnt" style="padding:24px;text-align:center">加载中…</div></div></div>'
   let r
   try {
-    r = await fetch(API, { headers: apiHeaders(), cache: 'no-store' })
+    r = await fetch(url, { headers: apiHeaders(), cache: 'no-store' })
   } catch (e) {
     render({}, errNotice('请求没发出去 · ' + (e && e.message ? e.message : e))); return
   }

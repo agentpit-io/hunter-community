@@ -49,7 +49,17 @@ PARAMS = {
     "min_adtv": 10_000_000.0, "min_price": 10.0, "atr_compact": 1.00,   # 原脚本 0.70(当天算),见文件头
     "watch_pool_days": 10,
     "pivot_period": 20, "ema_fast": 8, "ema_slow": 21, "sma_trend": 50,
+    # 卖出侧(原脚本写死在 _manage_exits 里的数字,2026-09-12 抽成参数给优化器用)
+    "pullback_trigger": 0.05,   # R-07 / R-14 / R-15 的「涨过 +5%」
+    "half_loss_pct": 0.05,      # R-08 亏 -5% 减半
+    "sma_stop_pct": 0.02,       # R-10 跌破 SMA50 2%
+    "tp1": 0.10, "tp2": 0.15, "tp3": 0.20,     # R-11 / R-12 / R-13
+    "time1_days": 5, "time2_days": 10,         # R-14 / R-15
+    "pyramid_max_reaction": 0.10,              # R-16 自然调整幅度上限
 }
+# 止损类参数只许收紧不许放宽(用户 2026-09-12 定的前提):优化器生成候选时按这张表校验,
+# 方向是「数值更小 = 更紧」
+STOP_KEYS = ("max_stop_pct", "half_loss_pct", "sma_stop_pct")
 # 护栏(原脚本没有,UI 契约 §3.3 需要;2026-09-12 先取默认值,待用户确认)
 GUARDS = {"initial_capital": 100_000.0, "daily_loss_halt_pct": -3.0, "consecutive_loss_pause": 3}
 
@@ -76,6 +86,46 @@ RULES = [
     {"id": "R-18", "kind": "risk", "condition": "最多同时持有 10 只"},
     {"id": "R-19", "kind": "risk", "condition": "护栏:单日权益回撤达 -3% 当天停止开仓;连亏 3 笔后下一个交易日不开仓"},
 ]
+def rules_for(p: dict = PARAMS) -> list[dict]:
+    """规则手册的文案按参数生成 —— 优化器改了参数,面板上的条件文字必须跟着变。"""
+    def pct(x):
+        return f"{x * 100:.0f}%"
+    out = []
+    for r in RULES:
+        c = dict(r)
+        rid = r["id"]
+        if rid == "R-02":
+            c["condition"] = f"流动性:20 日日均成交额 ≥ ${p['min_adtv'] / 1e6:.0f}M,且股价 ≥ ${p['min_price']:.0f}"
+        elif rid == "R-03":
+            c["condition"] = f"VCP 收缩:突破前一天的 5 日 ATR 低于 20 日 ATR 的 {pct(p['atr_compact'])}(不含突破日;原脚本当天算、70%)"
+        elif rid == "R-04":
+            c["condition"] = f"突破:收盘高于前 {p['pivot_period']} 日枢轴高点,且不超过枢轴 {pct(p['chase_limit'] - 1)}(不追高)"
+        elif rid == "R-05":
+            c["condition"] = f"放量:当日成交量 ≥ 50 日均量的 {p['vol_boost']:.1f} 倍"
+        elif rid == "R-07":
+            c["condition"] = f"涨过 +{pct(p['pullback_trigger'])} 后回落到买入价:全部清仓"
+        elif rid == "R-08":
+            c["condition"] = f"亏损达 -{pct(p['half_loss_pct'])}(仍是初始仓位):卖出一半"
+        elif rid == "R-09":
+            c["condition"] = f"亏损达 -{pct(p['max_stop_pct'])}:硬止损,全部清仓"
+        elif rid == "R-10":
+            c["condition"] = f"跌破 50 日均线 {pct(p['sma_stop_pct'])} 以上:强制清仓"
+        elif rid == "R-11":
+            c["condition"] = f"盈利 +{pct(p['tp1'])}:卖出一半"
+        elif rid == "R-12":
+            c["condition"] = f"盈利 +{pct(p['tp2'])}:再卖出剩余的一半"
+        elif rid == "R-13":
+            c["condition"] = f"盈利 +{pct(p['tp3'])}:全部清仓"
+        elif rid == "R-14":
+            c["condition"] = f"时间止损:持有第 {p['time1_days']} 个交易日仍没涨过 +{pct(p['pullback_trigger'])},减仓一半"
+        elif rid == "R-15":
+            c["condition"] = f"时间止损:持有第 {p['time2_days']} 个交易日仍没涨过 +{pct(p['pullback_trigger'])},全部清仓"
+        elif rid == "R-16":
+            c["condition"] = f"倒三角加仓:盈利中、近 3 日回撤 ≤{pct(p['pyramid_max_reaction'])} 后收盘突破前高,加第 1 注的一半(最多 3 注)"
+        out.append(c)
+    return out
+
+
 RULE_NAME = {
     "R-04": "VCP 突破买入", "R-07": "涨后回落到成本", "R-08": "-5% 减半", "R-09": "-8% 硬止损",
     "R-10": "跌破 50 日线", "R-11": "+10% 止盈一半", "R-12": "+15% 再止盈", "R-13": "+20% 清仓",
@@ -168,43 +218,64 @@ def indicators(bars: list[tuple], p: dict = PARAMS) -> dict | None:
 # 买入过滤 + 观察列表的「还差什么」
 # ═══════════════════════════════════════════════════════════════
 
+def entry_flags(ind: dict, p: dict = PARAMS) -> dict:
+    """五条买入过滤的判定 + 判定用到的数字(不拼文字 —— 优化器一天要判几万次,文字只在展示时拼)。"""
+    ema8, ema21, close = ind["ema8"], ind["ema21"], ind["close"]
+    adtv, ph, vs = ind["adtv"], ind["pivot_high"], ind["vol_sma50"]
+    a5, a20 = ind.get("atr5_prev"), ind.get("atr20_prev")
+    ratio = (a5 / a20) if (a5 is not None and a20) else None
+    dist = (close / ph - 1) * 100 if ph else None
+    vr = (ind["volume"] / vs) if vs else None
+    return {
+        "R-01": ema8 is not None and ema21 is not None and ema8 > ema21 and close > ema8,
+        "R-02": adtv is not None and adtv >= p["min_adtv"] and close >= p["min_price"],
+        "R-03": ratio is not None and ratio < p["atr_compact"],
+        "R-04": dist is not None and 0 < dist <= (p["chase_limit"] - 1) * 100,
+        "R-05": vr is not None and vr >= p["vol_boost"],
+        "ratio": ratio, "dist": dist, "vr": vr,
+    }
+
+
+def entry_ok(ind: dict, p: dict = PARAMS) -> bool:
+    f = entry_flags(ind, p)
+    return f["R-01"] and f["R-02"] and f["R-03"] and f["R-04"] and f["R-05"]
+
+
 def entry_checks(ind: dict, p: dict = PARAMS) -> list[dict]:
     """五条买入过滤 → [{rule, ok, text}],text 是给人看的差距(数字来自 ind)。"""
+    f = entry_flags(ind, p)
     out = []
-    ok1 = ind["ema8"] is not None and ind["ema21"] is not None and ind["ema8"] > ind["ema21"] and ind["close"] > ind["ema8"]
+    ok1 = f["R-01"]
     out.append({"rule": "R-01", "ok": ok1,
                 "text": (f"EMA8 ${ind['ema8']:.2f} / EMA21 ${ind['ema21']:.2f},收盘 ${ind['close']:.2f}"
                          if ind["ema8"] is not None and ind["ema21"] is not None else "EMA 算不出")
                         + ("" if ok1 else " —— 趋势不满足")})
     adtv = ind["adtv"]
-    ok2 = adtv is not None and adtv >= p["min_adtv"] and ind["close"] >= p["min_price"]
+    ok2 = f["R-02"]
     out.append({"rule": "R-02", "ok": ok2,
                 "text": (f"日均成交额 ${adtv / 1e6:.1f}M" if adtv is not None else "成交额算不出")
                         + (f",股价 ${ind['close']:.2f}") + ("" if ok2 else " —— 流动性不够")})
-    a5, a20 = ind.get("atr5_prev"), ind.get("atr20_prev")
-    ratio = (a5 / a20) if (a5 is not None and a20) else None
-    ok3 = ratio is not None and ratio < p["atr_compact"]
+    ratio = f["ratio"]
+    ok3 = f["R-03"]
     out.append({"rule": "R-03", "ok": ok3,
                 "text": (f"前一天 ATR5/ATR20 = {ratio:.2f}" if ratio is not None else "ATR 算不出")
                         + (f"(<{p['atr_compact']:.2f} 算收缩)" if ok3 else f" —— 还不够紧,要低于 {p['atr_compact']:.2f}")})
-    ph = ind["pivot_high"]
-    dist = (ind["close"] / ph - 1) * 100 if ph else None
-    ok4 = dist is not None and 0 < dist <= (p["chase_limit"] - 1) * 100
+    ph, dist = ind["pivot_high"], f["dist"]
+    ok4 = f["R-04"]
     if dist is None:
         t4 = "枢轴算不出"
     elif dist <= 0:
         t4 = f"距 20 日枢轴高点 ${ph:.2f} 还差 {-dist:.1f}%"
     elif ok4:
-        t4 = f"收盘高出枢轴 ${ph:.2f} {dist:.1f}%(≤5%,未超伸)"
+        t4 = f"收盘高出枢轴 ${ph:.2f} {dist:.1f}%(≤{(p['chase_limit'] - 1) * 100:.0f}%,未超伸)"
     else:
-        t4 = f"已高出枢轴 ${ph:.2f} {dist:.1f}%,超过 5% 不追"
+        t4 = f"已高出枢轴 ${ph:.2f} {dist:.1f}%,超过 {(p['chase_limit'] - 1) * 100:.0f}% 不追"
     out.append({"rule": "R-04", "ok": ok4, "text": t4})
-    vs = ind["vol_sma50"]
-    vr = (ind["volume"] / vs) if vs else None
-    ok5 = vr is not None and vr >= p["vol_boost"]
+    vr = f["vr"]
+    ok5 = f["R-05"]
     out.append({"rule": "R-05", "ok": ok5,
                 "text": (f"量能 {vr:.2f}× 50 日均量" if vr is not None else "均量算不出")
-                        + ("(≥1.4×)" if ok5 else f" —— 要 ≥{p['vol_boost']:.1f}×")})
+                        + (f"(≥{p['vol_boost']:.1f}×)" if ok5 else f" —— 要 ≥{p['vol_boost']:.1f}×")})
     return out
 
 
@@ -274,36 +345,38 @@ def manage_position(pos: Position, ind: dict, state: dict, p: dict = PARAMS) -> 
     def half(rule, why):
         fills.append(_sell(pos, int(pos.size * 0.5), px, rule, base + why, state))
 
+    pb, hl, ms, ss = p["pullback_trigger"], p["half_loss_pct"], p["max_stop_pct"], p["sma_stop_pct"]
+    tp1, tp2, tp3, t1, t2 = p["tp1"], p["tp2"], p["tp3"], p["time1_days"], p["time2_days"]
     # A. 止损
-    if high_now >= ep * 1.05 and px <= ep:
-        close_all("R-07", f"曾涨过 +5%(最高 ${high_now:.2f} ≥ ${ep * 1.05:.2f}),今天收回买入价以下 —— 全部清仓。")
-    elif prof <= -0.05 and pos.size == pos.initial_size:
-        half("R-08", f"亏损达到 -5%(仍是初始仓位 {pos.initial_size} 股)—— 先卖出一半。")
-    elif prof <= -p["max_stop_pct"]:
-        close_all("R-09", f"亏损达到 -8% 硬止损线 ${ep * (1 - p['max_stop_pct']):.2f} —— 全部清仓。")
-    elif ind["sma50"] is not None and px < ind["sma50"] * 0.98:
-        close_all("R-10", f"收盘 ${px:.2f} 跌破 50 日均线 ${ind['sma50']:.2f} 的 2% 以下 —— 强制清仓。")
+    if high_now >= ep * (1 + pb) and px <= ep:
+        close_all("R-07", f"曾涨过 +{pb * 100:.0f}%(最高 ${high_now:.2f} ≥ ${ep * (1 + pb):.2f}),今天收回买入价以下 —— 全部清仓。")
+    elif prof <= -hl and pos.size == pos.initial_size:
+        half("R-08", f"亏损达到 -{hl * 100:.0f}%(仍是初始仓位 {pos.initial_size} 股)—— 先卖出一半。")
+    elif prof <= -ms:
+        close_all("R-09", f"亏损达到 -{ms * 100:.0f}% 硬止损线 ${ep * (1 - ms):.2f} —— 全部清仓。")
+    elif ind["sma50"] is not None and px < ind["sma50"] * (1 - ss):
+        close_all("R-10", f"收盘 ${px:.2f} 跌破 50 日均线 ${ind['sma50']:.2f} 的 {ss * 100:.0f}% 以下 —— 强制清仓。")
     # B. 止盈
-    elif prof >= 0.20:
-        close_all("R-13", "盈利达到 +20% —— 全部清仓。")
-    elif prof >= 0.15 and pos.level == -1:
-        half("R-12", "盈利达到 +15%(已做过第一次止盈)—— 再卖出剩余的一半。")
+    elif prof >= tp3:
+        close_all("R-13", f"盈利达到 +{tp3 * 100:.0f}% —— 全部清仓。")
+    elif prof >= tp2 and pos.level == -1:
+        half("R-12", f"盈利达到 +{tp2 * 100:.0f}%(已做过第一次止盈)—— 再卖出剩余的一半。")
         pos.level = -2
-    elif prof >= 0.10 and pos.level not in (-1, -2):
-        half("R-11", "盈利达到 +10% —— 卖出一半,进入止盈状态。")
+    elif prof >= tp1 and pos.level not in (-1, -2):
+        half("R-11", f"盈利达到 +{tp1 * 100:.0f}% —— 卖出一半,进入止盈状态。")
         pos.level = -1
     # C. 时间
-    elif n == 5 and high_now < ep * 1.05:
-        half("R-14", f"持有第 5 个交易日,期间最高只到 ${high_now:.2f}(没涨过 +5% 的 ${ep * 1.05:.2f})—— 减仓一半。")
-    elif n >= 10 and high_now < ep * 1.05:
-        close_all("R-15", f"持有第 {n} 个交易日仍没涨过 +5% —— 全部清仓。")
+    elif n == t1 and high_now < ep * (1 + pb):
+        half("R-14", f"持有第 {t1} 个交易日,期间最高只到 ${high_now:.2f}(没涨过 +{pb * 100:.0f}% 的 ${ep * (1 + pb):.2f})—— 减仓一半。")
+    elif n >= t2 and high_now < ep * (1 + pb):
+        close_all("R-15", f"持有第 {n} 个交易日仍没涨过 +{pb * 100:.0f}% —— 全部清仓。")
     # D. 倒三角加仓(只在没出场、盈利中、加仓档 1~2)
     elif px > ep and 1 <= pos.level < 3:
         equity = state["equity"]
         pos_val = pos.size * px
         if pos_val < equity * p["max_single_stock_pct"]:
             reaction = (prev_high - ind["low3"]) / prev_high if prev_high else 1.0
-            if reaction <= 0.10 and px > prev_high:
+            if reaction <= p["pyramid_max_reaction"] and px > prev_high:
                 nxt = int(pos.initial_size * (0.5 ** pos.level))
                 cost = nxt * px
                 if nxt > 0 and cost <= state["cash"]:
@@ -322,10 +395,10 @@ def manage_position(pos: Position, ind: dict, state: dict, p: dict = PARAMS) -> 
     return fills
 
 
-def try_entry(code: str, name: str | None, ind: dict, state: dict, p: dict = PARAMS) -> tuple[dict | None, str | None]:
-    """新开仓。→ (成交 | None, 被挡的原因 | None)。"""
-    checks = entry_checks(ind, p)
-    if not all(c["ok"] for c in checks):
+def try_entry(code: str, name: str | None, ind: dict, state: dict, p: dict = PARAMS,
+              want_text: bool = True) -> tuple[dict | None, str | None]:
+    """新开仓。→ (成交 | None, 被挡的原因 | None)。want_text=False 时不拼 rationale(优化器模拟用)。"""
+    if not entry_ok(ind, p):
         return None, None
     if len(state["positions"]) >= p["max_holdings"]:
         return None, f"五条全满足,但已持有 {len(state['positions'])} 只,达到上限(R-18)"
@@ -348,7 +421,9 @@ def try_entry(code: str, name: str | None, ind: dict, state: dict, p: dict = PAR
     pos = Position(code=code, name=name or code, size=size, initial_size=size, entry_price=px,
                    entry_date=state["date"], avg_cost=px, highest=px, level=1, bars_held=0)
     state["positions"].append(pos)
-    t = {c["rule"]: c["text"] for c in checks}
+    if not want_text:
+        return _fill("buy", pos, size, px, "R-04", "", amount=round(cost, 2), position_pct=round(cost / equity * 100, 2)), None
+    t = {c["rule"]: c["text"] for c in entry_checks(ind, p)}
     rationale = (f"{t['R-04']};{t['R-05']};{t['R-03']};{t['R-01']};{t['R-02']}。"
                  f"按单笔风险 2%(${equity * p['portfolio_risk']:.0f} ÷ 止损距离 ${px * p['max_stop_pct']:.2f} = {risk_size} 股)"
                  f"与初始仓位 8%(${equity * p['initial_pos_pct']:.0f} ÷ ${px:.2f} = {cap_size} 股)取小,买入 {size} 股,"
@@ -358,20 +433,26 @@ def try_entry(code: str, name: str | None, ind: dict, state: dict, p: dict = PAR
 
 
 def run_day(date_iso: str, positions: list[Position], cash: float, bars_of, watch: list[tuple],
-            prev_equity: float | None, consec_losses: int, p: dict = PARAMS, g: dict = GUARDS) -> dict:
+            prev_equity: float | None, consec_losses: int, p: dict = PARAMS, g: dict = GUARDS,
+            ind_of=None, want_text: bool = True) -> dict:
     """跑一个交易日(收盘后)。
 
     bars_of(code) → 截到今天的日线;watch = [(code, name, score)] 今天的观察列表(筛选结果)。
+    ind_of(code) → 今天的指标(可选;优化器的模拟用预先算好的缓存,不重算)。
     → {fills, positions, cash, equity, watch_items, halt_reason, consec_losses, closed}
     """
     state = {"date": date_iso, "cash": cash, "positions": list(positions), "closed": [], "closed_pnl": [],
              "equity": None, "halt_reason": None}
+    if ind_of is None:
+        def ind_of(code):
+            return indicators(bars_of(code) or [], p)
     # 今天的指标
-    ind_of: dict = {}
+    ind_cache: dict = {}
     for pos in state["positions"]:
-        ind_of[pos.code] = indicators(bars_of(pos.code) or [], p)
+        ind_cache[pos.code] = ind_of(pos.code)
+    ind_of_pos = ind_cache
     # 今天收盘的权益(成交前),仓位算法的分母
-    mv = sum(pos.size * (ind_of[pos.code]["close"] if ind_of[pos.code] else pos.avg_cost) for pos in state["positions"])
+    mv = sum(pos.size * (ind_of_pos[pos.code]["close"] if ind_of_pos[pos.code] else pos.avg_cost) for pos in state["positions"])
     equity = cash + mv
     state["equity"] = equity
     # 护栏:单日权益回撤 / 连亏
@@ -383,7 +464,7 @@ def run_day(date_iso: str, positions: list[Position], cash: float, bars_of, watc
     fills: list[dict] = []
     # 1. 持仓管理(出场 / 加仓)
     for pos in list(state["positions"]):
-        ind = ind_of[pos.code]
+        ind = ind_of_pos[pos.code]
         if ind is None:
             pos.bars_held += 1
             continue                          # 今天没有这只票的日线(停牌)—— 不动
@@ -393,20 +474,22 @@ def run_day(date_iso: str, positions: list[Position], cash: float, bars_of, watc
     held = {x.code for x in state["positions"]}
     watch_items = []
     for code, name, score in watch:
-        ind = indicators(bars_of(code) or [], p)
+        ind = ind_cache[code] if code in ind_cache else ind_of(code)
+        ind_cache[code] = ind
         blocked = None
         if code not in held and ind is not None:
-            f, blocked = try_entry(code, name, ind, state, p)
+            f, blocked = try_entry(code, name, ind, state, p, want_text)
             if f:
                 fills.append(f)
                 held.add(code)
-        watch_items.append(watch_item(code, name, ind, code in held and not any(
-            x["symbol"] == code and x["side"] == "buy" and x["rule_id"] == "R-04" for x in fills), blocked, score))
+        if want_text:
+            watch_items.append(watch_item(code, name, ind, code in held and not any(
+                x["symbol"] == code and x["side"] == "buy" and x["rule_id"] == "R-04" for x in fills), blocked, score))
     # 连亏计数:按今天卖出成交的盈亏更新
     for pnl in state["closed_pnl"]:
         consec_losses = consec_losses + 1 if pnl < 0 else 0
     # 成交后的权益(仍按今天收盘)
-    mv = sum(pos.size * (ind_of.get(pos.code) or indicators(bars_of(pos.code) or [], p) or {"close": pos.avg_cost})["close"]
+    mv = sum(pos.size * (ind_cache.get(pos.code) or ind_of(pos.code) or {"close": pos.avg_cost})["close"]
              for pos in state["positions"])
     # 观察列表:被挡的排最后
     watch_items.sort(key=lambda x: (bool(x.get("blocked")), -(x.get("progress_pct") or 0)))

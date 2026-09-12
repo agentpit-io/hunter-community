@@ -431,6 +431,101 @@ try {
   console.log('FAIL 智能体定向断言 ·', e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e)
 }
 
+// ─── 小鹿智能体 · 迭代方向(2026-09-12)────────────────────────────────
+// 后端把 dashboard 扩成 ?branch=<key>,顶层多 branch / branches[]。要钉住的:
+//   ① 有 branches 时渲染出与数组等长的卡、active 的带高亮 class、
+//      区块夹在状态条(.ag-status)之后、「当前基于」(.ag-strat)之前;
+//   ② 没有 branches / 空数组 / 后端 404 骨架 → 这一块不出现(旧契约不变);
+//   ③ 全 null 的方向卡不出现 NaN / undefined / null 字面量;
+//   ④ 切换写 hash、重拉带 ?branch=;刷新 / 重试按钮传 Event 进 boot 时按 hash 恢复;首次无 hash 不带参数。
+// 上面那组 agent.html 断言一条都没动 —— 这组只加不改。
+try {
+  const ctx = vm.createContext(makeContext('agent.html'))
+  vm.runInContext(appJs, ctx, { filename: 'app.js' })
+  const ag = inlineScripts(fs.readFileSync(path.join(DIR, 'agent.html'), 'utf8'))
+  ag.forEach((src, i) => vm.runInContext(src, ctx, { filename: `agent#${i + 1}` }))
+
+  vm.runInContext(`
+    var BR_BASE = { state:'running', paper:true, version:'v3', day_count:25, iteration_count:3,
+      strategy:{ name:'VCP 波段交易', version:'v3', summary:'x', market_label:'美股' },
+      guardrails:{ initial_capital:100000, long_only:true, triggered_today:false },
+      overview:{ pnl_pct:1.2 }, nav:{ points:[] }, rules:[], holdings:{ items:[] },
+      watchlist:{ items:[] }, trades:{ items:[] }, versions:[], lessons:[] }
+    var BR_LIST = [
+      { key:'base', label:'基准 v1', direction:'规则固定,不优化', version:'v1',
+        pnl_pct:-0.26, benchmark_pct:-1.3, excess_pt:1.03, trades_total:2, win_rate:0, max_dd_pct:-0.6, active:false },
+      { key:'buy', label:'方向 A · 调买入', direction:'固定卖出规则,只优化买入时机', version:'v3',
+        pnl_pct:1.2, benchmark_pct:-1.3, excess_pt:2.5, trades_total:9, win_rate:44.4, max_dd_pct:-1.1, active:true },
+      { key:'sell', label:'方向 B · 调卖出', direction:'固定买入时机,只优化卖出时机', version:'v2',
+        pnl_pct:null, benchmark_pct:null, excess_pt:null, trades_total:0, win_rate:null, max_dd_pct:null, active:false },
+    ]
+    var H_BR = render({ state:'running', paper:true, version:'v3', day_count:25, iteration_count:3,
+      strategy:BR_BASE.strategy, guardrails:BR_BASE.guardrails, overview:BR_BASE.overview, nav:BR_BASE.nav,
+      rules:[], holdings:BR_BASE.holdings, watchlist:BR_BASE.watchlist, trades:BR_BASE.trades,
+      versions:[], lessons:[], branch:'buy', branches:BR_LIST })
+    var H_NOBR = render(BR_BASE)
+    var H_EMPTYBR = render({ state:'running', strategy:BR_BASE.strategy, branch:'buy', branches:[] })
+    // 全 null 的方向(刚开的分支,一笔都没跑)
+    var H_NULLBR = render({ state:'running', strategy:BR_BASE.strategy, branch:'x', branches:[
+      { key:'x', label:null, direction:null, version:null, pnl_pct:null, benchmark_pct:null, excess_pt:null,
+        trades_total:null, win_rate:null, max_dd_pct:null, active:null } ] })
+    var H_SKELBR = render({}, NOTICE.dev)
+  `, ctx, { filename: 'assert-branches' })
+
+  const H = ctx.H_BR
+  const cardCount = (H.match(/class="ag-brc/g) || []).length
+  const onCount = (H.match(/class="ag-brc on"/g) || []).length
+  const iStatus = H.indexOf('class="ag-status"')
+  const iBr = H.indexOf('class="ag-br"')
+  const iStrat = H.indexOf('class="ag-strat"')
+  const banned = [['NaN', /NaN/], ['undefined', /undefined/], ['凭空的 null 字面量', />null</]]
+  const checks = [
+    ['卡片数与 branches 等长', cardCount === 3],
+    ['只有 active 的那张高亮,且是 buy', onCount === 1 && /class="ag-brc on"[^>]*data-branch="buy"/.test(H)],
+    ['区块在状态条之后', iStatus >= 0 && iBr >= 0 && iStatus < iBr],
+    ['区块在「当前基于」之前', iBr >= 0 && iStrat >= 0 && iBr < iStrat],
+    ['卡片是 button、带 data-branch(常驻可见,不藏 hover)', /<button[^>]*class="ag-brc[^"]*"[^>]*data-branch="sell"/.test(H)],
+    ['卡片写了 label / direction / version', /方向 A · 调买入/.test(H) && /只优化买入时机/.test(H) && /class="ver">v3</.test(H)],
+    ['总收益按红涨绿跌着色', /<b class="pos">\+1\.20%<\/b>/.test(H) && /<b class="neg">-0\.26%<\/b>/.test(H)],
+    ['对比基准以 pt 计', /\+2\.50 pt/.test(H) && /\+1\.03 pt/.test(H)],
+    ['交易笔数与胜率', /9 笔 · 胜率 44\.4%/.test(H)],
+    ['最大回撤', /<b class="neg">-1\.10%<\/b>/.test(H)],
+    ['0 笔但胜率算不出 → 胜率 —(不是 0%)', /0 笔 · 胜率 <span class="ag-na">—<\/span>/.test(H)],
+    ['没有 branches 字段时这一块不出现', !/ag-br"|ag-brc/.test(ctx.H_NOBR)],
+    ['branches 为空数组时这一块不出现', !/ag-br"|ag-brc/.test(ctx.H_EMPTYBR)],
+    ['后端 404 骨架里也没有这一块', !/ag-br"|ag-brc/.test(ctx.H_SKELBR)],
+    ['全 null 的方向卡照样画出来', (ctx.H_NULLBR.match(/class="ag-brc/g) || []).length === 1],
+    ['全 null 的方向卡落到 —', (ctx.H_NULLBR.match(/—/g) || []).length >= 6],
+  ]
+  for (const [name, re] of banned) {
+    checks.push(['全 null 的方向卡不出现 ' + name, !re.test(ctx.H_NULLBR)])
+  }
+
+  // ④ 切换与 hash:换掉 fetch 抓 URL(fetch 在 boot 的第一段同步代码里就被调用,不用等 await)
+  vm.runInContext(`
+    var SEEN = []
+    fetch = function (url) { SEEN.push(String(url)); return Promise.reject(new Error('render_check: 不联网')) }
+    boot()                       // 首次加载:没有 hash
+    switchBranch('sell')         // 点卡片
+    boot({ type: 'click' })      // 刷新 / 重试按钮把 Event 传进来
+    var HASH = location.hash
+  `, ctx, { filename: 'assert-branch-switch' })
+  const seen = ctx.SEEN
+  checks.push(
+    ['首次加载没有 hash 时不带 branch 参数', seen[0] === '/api/quant/agent/dashboard'],
+    ['点卡片后 hash 写成 #branch=sell', ctx.HASH === '#branch=sell'],
+    ['点卡片后重拉带 ?branch=sell', seen[1] === '/api/quant/agent/dashboard?branch=sell'],
+    ['刷新按钮传 Event 进来时按 hash 恢复', seen[2] === '/api/quant/agent/dashboard?branch=sell'],
+  )
+  for (const [name, ok] of checks) {
+    if (ok) console.log('PASS 迭代方向 ·', name)
+    else { failed++; console.log('FAIL 迭代方向 ·', name) }
+  }
+} catch (e) {
+  failed++
+  console.log('FAIL 迭代方向定向断言 ·', e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e)
+}
+
 // ─── 登录态续期(app.js)─────────────────────────────────────────────
 // 策略中心这几页不经过主站 AuthGuard,续期全靠 app.js 自己。
 // 这里只验两个纯函数:判过期、换请求头。真正的续期流程要真浏览器 + 真 token 才测得了。

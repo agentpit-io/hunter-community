@@ -1382,8 +1382,9 @@ from app.services.quant import agent_run as _agent
 
 
 @router.get("/agent/dashboard")
-async def agent_dashboard():
-    return await asyncio.to_thread(_agent.dashboard)
+async def agent_dashboard(branch: str = "base"):
+    # branch = base | buy | sell(三个迭代方向,agent_opt.BRANCHES);不认识的落回 base
+    return await asyncio.to_thread(_agent.dashboard, branch)
 
 
 @router.post("/agent/run")
