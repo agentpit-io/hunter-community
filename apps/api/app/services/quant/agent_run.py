@@ -65,6 +65,13 @@ CREATE TABLE IF NOT EXISTS agent_watch (
     items      JSONB NOT NULL,
     info       JSONB
 );
+CREATE TABLE IF NOT EXISTS agent_watch_pool (
+    pool       TEXT NOT NULL,
+    trade_date DATE NOT NULL,
+    items      JSONB NOT NULL,
+    info       JSONB,
+    PRIMARY KEY (pool, trade_date)
+);
 CREATE TABLE IF NOT EXISTS agent_day (
     trade_date    DATE NOT NULL,
     equity        DOUBLE PRECISION NOT NULL,
@@ -188,11 +195,34 @@ def _snapshot():
     return rows, {r["_code"]: r for r in rows}
 
 
-def _screen(d: date) -> tuple[list, dict]:
-    """回溯到 d 跑「VCP 波段收缩」→ [[code, name, rs_rating]], 摘要。"""
+def _pool_of(eng_name: str) -> str:
+    """引擎用哪个池:默认「VCP 波段收缩」(PRESET);引擎声明了 POOL 就用自己的(方向 A 的 SEPA 池)。"""
+    return getattr(ao.ENGINES[eng_name], "POOL", PRESET)
+
+
+def _pool_label(pool: str) -> str:
+    if pool == PRESET:
+        return "VCP 波段收缩"
+    for eng in ao.ENGINES.values():
+        if getattr(eng, "POOL", None) == pool:
+            return getattr(eng, "POOL_LABEL", pool)
+    return pool
+
+
+def _pool_script(pool: str) -> str:
     from app.services.quant import screen_source
-    p = screen_source.preset(PRESET)
-    r = screen_source.run_script(p["script"], MARKET, 500, "rs_rating", True, d)
+    if pool == PRESET:
+        return screen_source.preset(PRESET)["script"]
+    for eng in ao.ENGINES.values():
+        if getattr(eng, "POOL", None) == pool:
+            return eng.POOL_SCRIPT
+    raise KeyError(f"没有这个池:{pool}")
+
+
+def _screen(d: date, pool: str = PRESET) -> tuple[list, dict]:
+    """回溯到 d 跑池子的筛选脚本 → [[code, name, rs_rating]], 摘要。"""
+    from app.services.quant import screen_source
+    r = screen_source.run_script(_pool_script(pool), MARKET, 500, "rs_rating", True, d)
     items = [[x["code"], x.get("name") or x["code"], x["fields"].get("rs_rating")] for x in r["picks"]]
     gate = next((w for w in r["warnings"] if "门槛" in w), None)
     return items, {"matched": r["matched"], "scanned": r["scanned"], "skipped": r["skipped_incomplete"],
@@ -219,10 +249,11 @@ class Ctx:
         self.snap = {r["_code"]: r for r in self.rows}
         self.sectors = {c: r.get("sector") for c, r in self.snap.items()}      # 方向 A 的「同板块 ≤2」用
         self.store = screen_asof.get_store(MARKET, self.perf)
-        self.screen_of: dict = {}          # date → [[code, name, score]]
+        self.screen_of: dict = {}          # date → [[code, name, score]](默认池「VCP 波段收缩」)
+        self.screens: dict = {PRESET: self.screen_of}       # 池 → {date → items};方向 A 的 SEPA 池另存
         self.cache: dict = {k: {} for k in ao.ENGINES}      # 引擎 → {(code, date): 指标}
-        self.cache_dates: set = set()
-        self.seen: set = set()
+        self.cache_dates: dict = {}        # 引擎 → 已算过的日期
+        self.seen: dict = {}               # 引擎 → 已整段算过的代码
 
     def bars_of(self, code, upto: date | None = None):
         from app.services.quant import screen_asof
@@ -232,40 +263,45 @@ class Ctx:
         cur.execute("SELECT trade_date, items FROM agent_watch ORDER BY trade_date")
         for td, items in cur.fetchall():
             self.screen_of[td] = items
+        cur.execute("SELECT pool, trade_date, items FROM agent_watch_pool ORDER BY trade_date")
+        for pool, td, items in cur.fetchall():
+            self.screens.setdefault(pool, {})[td] = items
 
-    def ensure_cache(self, dates: list[date], pool: dict):
-        """指标缓存按 (code, date) 增量补:每只票从首次进池那天起到最后一天。"""
+    def ensure_cache(self, dates: list[date], pool: dict, engine_names: list[str] | None = None):
+        """指标缓存按 (code, date) 增量补:每只票从首次进池那天起到最后一天。只算 engine_names 这几个引擎(各池各算)。"""
         first: dict = {}
         for d in dates:
             for code, _n, _s, _since in pool.get(d, []):
                 first.setdefault(code, d)
-        new_dates = [d for d in dates if d not in self.cache_dates]
-        for code, d0 in first.items():
-            scan = dates if code not in self.seen else new_dates
-            need = [d for d in scan if d >= d0 and (code, d) not in self.cache["vcp"]]
-            if not need:
-                continue
-            bars = self.bars_of(code)
-            idx = {b[0]: i for i, b in enumerate(bars)}
-            for d in need:
-                i = idx.get(d)
-                for name, eng in ao.ENGINES.items():
-                    self.cache[name][(code, d)] = eng.indicators(bars[:i + 1], bench=self.store["bench"]) if i is not None else None
-            self.seen.add(code)
-        # 方向 A(agent_vcp4)要按日的市场状态与板块表:放在同一份缓存里,模拟器和实盘拿的是同一个东西
         bb = self.store.get("bench_bars") or []
         bdates = [b[0] for b in bb]
-        for name, eng in ao.ENGINES.items():
-            mk = getattr(eng, "MARKET_KEY", None)
-            if not mk:
-                continue
-            for d in new_dates:
-                if (mk, d) in self.cache[name]:
+        for name in (engine_names or list(ao.ENGINES)):
+            eng = ao.ENGINES[name]
+            cache = self.cache[name]
+            seen = self.seen.setdefault(name, set())
+            done = self.cache_dates.setdefault(name, set())
+            new_dates = [d for d in dates if d not in done]
+            for code, d0 in first.items():
+                scan = dates if code not in seen else new_dates
+                need = [d for d in scan if d >= d0 and (code, d) not in cache]
+                if not need:
                     continue
-                k = bisect_right(bdates, d)
-                self.cache[name][(mk, d)] = eng.market_regime(bb[:k])
-                self.cache[name][(eng.SECTORS_KEY, d)] = self.sectors
-        self.cache_dates.update(dates)
+                bars = self.bars_of(code)
+                idx = {b[0]: i for i, b in enumerate(bars)}
+                for d in need:
+                    i = idx.get(d)
+                    cache[(code, d)] = eng.indicators(bars[:i + 1], bench=self.store["bench"]) if i is not None else None
+                seen.add(code)
+            # 方向 A(agent_vcp4)要按日的市场状态与板块表:放在同一份缓存里,模拟器和实盘拿的是同一个东西
+            mk = getattr(eng, "MARKET_KEY", None)
+            if mk:
+                for d in new_dates:
+                    if (mk, d) in cache:
+                        continue
+                    k = bisect_right(bdates, d)
+                    cache[(mk, d)] = eng.market_regime(bb[:k])
+                    cache[(eng.SECTORS_KEY, d)] = self.sectors
+            done.update(dates)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -301,28 +337,40 @@ def run_date(d: date, ctx: Ctx | None = None) -> dict:
                "duration_ms": int((time.time() - t0) * 1000),
                "summary": f"全市场日线 {len(ctx.store['codes'])} 只(拆股已核对)· 基准截至 {ctx.store['last']} · 回溯日 {d}"}
 
-    # 今天的筛选结果(三个方向共用)
+    # 今天的筛选结果:按池算(默认池三个方向共用;方向 A 用自己的 SEPA 池)
     t1 = time.time()
-    if d in ctx.screen_of:
-        items, ws, scan_ok = ctx.screen_of[d], {"matched": len(ctx.screen_of[d]), "cached": True}, True
-    else:
-        try:
-            items, ws = _screen(d)
-            scan_ok = True
-        except Exception as e:                                    # noqa: BLE001
-            log.exception("[agent] %s 观察列表扫描失败", d)
-            items, ws, scan_ok = [], {"error": str(e)[:200]}, False
-        cur.execute("INSERT INTO agent_watch (trade_date, items, info) VALUES (%s, %s, %s) "
-                    "ON CONFLICT (trade_date) DO UPDATE SET items=EXCLUDED.items, info=EXCLUDED.info",
-                    (d, json.dumps(items), json.dumps(ws, default=str)))
-        ctx.screen_of[d] = items
-    dates = sorted(x for x in ctx.screen_of if x <= d)
-    pool = agent_sim.pooled_watch(dates, {k: [tuple(x) for x in v] for k, v in ctx.screen_of.items()},
-                                  av.PARAMS["watch_pool_days"])
-    ctx.ensure_cache(dates, pool)
-    watch_today = [(c, n, s) for c, n, s, _since in pool[d]]
-    since_of = {c: str(since) for c, _n, _s, since in pool[d] if since != d}
-    gated = bool(ws.get("gate")) and not items
+    needed: dict = {}                       # 池 → 用它的引擎
+    for b in BRANCHES:
+        en = ao.BRANCHES[b]["engine"]
+        needed.setdefault(_pool_of(en), []).append(en)
+    items_of, ws_of, ok_of = {}, {}, {}
+    for pool_key in needed:
+        screens = ctx.screens.setdefault(pool_key, {})
+        if d in screens:
+            items, ws, scan_ok = screens[d], {"matched": len(screens[d]), "cached": True}, True
+        else:
+            try:
+                items, ws = _screen(d, pool_key)
+                scan_ok = True
+            except Exception as e:                                    # noqa: BLE001
+                log.exception("[agent] %s 观察列表扫描失败(池 %s)", d, pool_key)
+                items, ws, scan_ok = [], {"error": str(e)[:200]}, False
+            if pool_key == PRESET:
+                cur.execute("INSERT INTO agent_watch (trade_date, items, info) VALUES (%s, %s, %s) "
+                            "ON CONFLICT (trade_date) DO UPDATE SET items=EXCLUDED.items, info=EXCLUDED.info",
+                            (d, json.dumps(items), json.dumps(ws, default=str)))
+            else:
+                cur.execute("INSERT INTO agent_watch_pool (pool, trade_date, items, info) VALUES (%s, %s, %s, %s) "
+                            "ON CONFLICT (pool, trade_date) DO UPDATE SET items=EXCLUDED.items, info=EXCLUDED.info",
+                            (pool_key, d, json.dumps(items), json.dumps(ws, default=str)))
+            screens[d] = items
+        items_of[pool_key], ws_of[pool_key], ok_of[pool_key] = items, ws, scan_ok
+    dates = sorted(x for x in ctx.screens[PRESET] if x <= d)      # 日期轴按默认池(每个交易日都有)
+    pooled: dict = {}
+    for pool_key, engs in needed.items():
+        pooled[pool_key] = agent_sim.pooled_watch(dates, {k: [tuple(x) for x in v] for k, v in ctx.screens[pool_key].items()},
+                                                  av.PARAMS["watch_pool_days"])
+        ctx.ensure_cache(dates, pooled[pool_key], engs)
 
     out = {"date": str(d), "ran": True, "branches": {}}
     for branch in BRANCHES:
@@ -333,6 +381,12 @@ def run_date(d: date, ctx: Ctx | None = None) -> dict:
         p = st["params"]
         eng = ao.engine_of(branch)
         eng_name = ao.BRANCHES[branch]["engine"]
+        pool_key = _pool_of(eng_name)
+        pool = pooled[pool_key]
+        items, ws, scan_ok = items_of[pool_key], ws_of[pool_key], ok_of[pool_key]
+        watch_today = [(c, n, s) for c, n, s, _since in pool[d]]
+        since_of = {c: str(since) for c, _n, _s, since in pool[d] if since != d}
+        gated = bool(ws.get("gate")) and not items
         positions = _load_positions(cur, branch)
         cur.execute("SELECT equity, consec_losses FROM agent_day WHERE branch=%s ORDER BY trade_date DESC LIMIT 1", (branch,))
         prev = cur.fetchone()
@@ -356,7 +410,7 @@ def run_date(d: date, ctx: Ctx | None = None) -> dict:
         execute = {"key": "backtest", "name": "扫描与执行",
                    "status": ("fail" if not scan_ok else "warn" if gated else "ok"), "at": _hm(),
                    "duration_ms": int((time.time() - t1) * 1000),
-                   "summary": (f"「VCP 波段收缩」今天命中 {ws.get('matched')} 只,连同近 {av.PARAMS['watch_pool_days']} 天入选的共 {len(watch_today)} 只 → 观察列表;"
+                   "summary": (f"「{_pool_label(pool_key)}」今天命中 {ws.get('matched')} 只,连同近 {av.PARAMS['watch_pool_days']} 天入选的共 {len(watch_today)} 只 → 观察列表;"
                                f"买入 {n_buy} 笔、卖出 {n_sell} 笔" + (f",已实现 {realized:+.0f} 美元" if n_sell else "")
                                + (f";护栏:{res['halt_reason']}" if res["halt_reason"] else "")
                                + (f";市场:{res['market']['text']}" if res.get("market") else "")
@@ -414,7 +468,7 @@ def run_date(d: date, ctx: Ctx | None = None) -> dict:
     conn.commit()
     cur.close()
     conn.close()
-    log.info("[agent] %s 跑完 %s · 观察 %d · %.1fs", d, out["branches"], len(watch_today), time.time() - t0)
+    log.info("[agent] %s 跑完 %s · 观察 %s · %.1fs", d, out["branches"], {k: len(v[d]) for k, v in pooled.items()}, time.time() - t0)
     return out
 
 
@@ -912,7 +966,8 @@ def _strategy_block(universe_size, st: dict, branch: str = "base") -> dict:
     return {"name": names.get(ao.BRANCHES[branch]["engine"], STRATEGY_NAME), "version": f"v{st['version']}",
             "summary": eng.summary(p),
             "market_label": "美股", "market_note": getattr(eng, "EXEC_NOTE", "纸上交易 · 日线收盘价成交"),
-            "universe": "筛选器「VCP 波段收缩」近 10 天结果并集", "universe_size": universe_size,
+            "universe": (f"{getattr(eng, 'POOL_LABEL')} · 近 10 天并集" if getattr(eng, "POOL", None)
+                         else "筛选器「VCP 波段收缩」近 10 天结果并集"), "universe_size": universe_size,
             "rebalance": "每个交易日收盘后跑一次 · 信号当天收盘价成交" + (";止损按盘中触及价" if getattr(eng, "EXEC_NOTE", None) else ""),
             "data_source": "自家全市场日线(每晚落库,拆股已核对)+ 标普500 基准 · 不含盘中"}
 

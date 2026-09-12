@@ -88,6 +88,20 @@ ENTRY_RULE = "V-03"
 ADD_RULE = "V-08"
 GRADE_RULE = "V-05"
 EXEC_NOTE = "纸上交易 · 买入按收盘价,止损按盘中触及价(日线最低价近似,跳空按收盘)"
+# 股票池:用户 v4 草案的「全市场 · RS 80+ · 价格 > 50 > 150 > 200 · 距 52 周高点 ≤15%」,再加 VCP 收缩 2~4 次(V-03 反正要求,
+# 放进池子只是让池子小一点)。EPS / 营收加速、行业前 3 没有数据源。「VCP 波段收缩」那个池(区间写法)一年只有 73/250 个突破
+# 事件是 2 次以上收缩、突破日量 ≥1.5× 的只有 29 个,按 v4 的门槛全年 0 笔 —— 所以方向 A 不再共用那个池。
+POOL = "sepa"
+POOL_LABEL = "SEPA 趋势模板池(RS ≥80 · 均线多头 · 距 52 周高点 ≤15% · VCP 收缩 2~4 次)"
+POOL_SCRIPT = """# ===== SEPA 趋势模板池(小鹿方向 A)=====
+def c_price = close > 10;
+def c_liq   = average_volume_30d_calc > 500000;
+def c_trend = close > SMA50 and SMA50 > SMA150 and SMA150 > SMA200;
+def c_near  = close >= price_52_week_high * 0.85;
+def c_rs    = rs_rating >= 80;
+def c_vcp   = vcp_contractions >= 2 and vcp_contractions <= 4;
+plot scan = c_price and c_liq and c_trend and c_near and c_rs and c_vcp;
+"""
 
 
 def rules_for(p: dict = PARAMS) -> list[dict]:
