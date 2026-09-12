@@ -953,7 +953,7 @@ def _rules_block(trades, poss, days, p: dict, st: dict | None = None, eng=av) ->
                 pn = [v for k, v in done.items() if g_of.get(k) == gk]
                 stats.append({"label": f"{gk} 级", "value": (f"{len(pn)} 笔 · 胜率 {sum(1 for x in pn if x > 0) / len(pn) * 100:.0f}% · "
                                                               f"均 {sum(pn) / len(pn):+,.0f} 美元") if pn else "0 笔"})
-            stats.append({"label": "D 级挡下", "value": blocked.get("C-08", 0)})
+            stats.append({"label": "挡下(D 级 / 空间受限)", "value": blocked.get("C-08", 0)})
         elif r["kind"] == "buy" and rid != "R-16":
             stats.append({"label": "挡下候选", "value": blocked.get(rid, 0)})
             stats.append({"label": "说明", "value": "买入条件要同时满足,单条不单独产生交易", "dim": True})

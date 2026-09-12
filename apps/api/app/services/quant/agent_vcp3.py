@@ -50,14 +50,15 @@
 2. 量价配合:最近 63 个交易日,(涨且量 > 50 日均量)+(跌且量 < 50 日均量)−(涨且量 < 均量)−(跌且量 > 均量);
    >5 S、>4 A、>3 B、>2 C、≤2 D。
 3. 抗跌:最近 63 个交易日里标普 500 下跌的日子,这只票收盘不跌(≥ 前收)的次数;>15 S、>10 A、>5 B、>2 C、≤2 D。
-4. 盈亏比(R 倍数):R = 收盘 − C-04 止损位,盈亏比 = (目标价 − 收盘)÷ R;≥5 S、≥4 A、≥3 B、≥2 C、不足 2 是 D。
-   **目标价 = 收盘上方最近的显著阻力**(用户 2026-09-12 第三版拍板「直接用 R 倍数目标」,具体口径是 Claude 定的):
-   - 显著阻力只认两种:近 252 根(不含今天)的最高价 = 52 周高点;未回补的向下跳空缺口下沿(回补到哪下沿抬到哪)。两者取近的。
-     离收盘不足 0.5 ATR 的不算。**整数关口、ATR 波动上限、30 根量能节点不再参与** —— 第二版(四维取最保守)实测 20 笔盈亏比全在
-     0.2~0.6:1,就是这三样把目标压在 1 个 ATR 内,而 VCP 的止损离收盘 3~5 个 ATR。四维的函数(t_level / t_volume / t_volatility)
-     保留着没删,不再被 indicators 调用。
-   - 上方没有显著阻力(已在 52 周新高之上)→ 目标 = 底部量度目标 = 枢轴 × (1 + 首次收缩深度)。
-   - 这一项算的是「到下一道阻力有几个 R 的空间」;前两版分别是量度目标(26/29 笔 D)和四维最保守(20/20 笔 D)。
+4. 盈亏比(第四版,用户 2026-09-12 给的图「252 根阻力 + 基于波动的 R 倍数扩展」):
+   - R = 收盘 − C-04 止损位;**目标价 = 收盘 + 3R**(不死扣在第一个阻力位上,突破后往往有一段趋势延伸)。
+   - 阻力回看固定 252 根(不含今天),只认两种:**底部左侧前高**(252 根里的最高价 —— VCP 形成期内部的小高点自然都在它下面)
+     和 **1 年内的高成交量节点**(252 根 Volume Profile 里收盘上方第一个不含收盘的节点簇下沿;当前底部自己那团筹码含着收盘,不算)。
+     两者取近的 = T_level;离收盘不足 0.5 ATR 的不算。第三版的缺口下沿、第二版的整数关口 / ATR 波动上限 / 30 根节点都不再用。
+   - **走廊** = (T_level − 收盘)÷ R。走廊 ≥5 S、≥4 A、≥3 B、≥2 C;**不足 2R 直接判「空间受限」剔除,达到买点也不进**(不是记 0 分)。
+     上方 252 根内没有阻力(已在一年新高之上)= 走廊无上限,记 S。
+   - 前三版的结论(量度目标 26/29 笔 D、四维最保守 20/20 笔 D、到阻力的 R 倍数 20/20 笔 D)都说明这批 VCP 的走廊普遍不到 2R;
+     第四版把这些直接剔掉,只留走廊够宽或已创新高的。
 5. MACD 金叉(突破时):日线 + 周线都金叉 S、只有周线 A、只有日线 B、没有 C(此项没有 D)。
    「突破时」= 日线在最近 5 个交易日内 DIF 上穿 DEA 且现在仍在其上;周线在最近 3 根周 K(含本周未收完的)内上穿。
    周线 MACD 要 ≥ 48 根周 K,日线不够长就当没有周线金叉。
@@ -107,7 +108,7 @@ RULES = [
     {"id": "C-05", "kind": "sell", "condition": "保本 + 移动止损:涨到 1R 后止损上移到成本,之后按前 10 日最低价跟踪"},
     {"id": "C-06", "kind": "sell", "condition": "时间止损:持有 15 个交易日仍没涨过 1R,清仓"},
     {"id": "C-07", "kind": "risk", "condition": "护栏:单日权益回撤达 -3% 当天停止开仓;连亏 3 笔后下一个交易日不开仓"},
-    {"id": "C-08", "kind": "buy", "condition": "评分(500 分):形态 / 量价配合 / 抗跌 / 盈亏比 / MACD 金叉五项各评 S~D 计 100/80/60/40/0;总分 ≥350 S · ≥300 A · ≥250 B · ≥200 C · <200 D 不买"},
+    {"id": "C-08", "kind": "buy", "condition": "评分(500 分):形态 / 量价配合 / 抗跌 / 走廊(到 252 日强阻力有几个 R,目标 3R)/ MACD 金叉五项各评 S~D 计 100/80/60/40/0;总分 ≥350 S · ≥300 A · ≥250 B · ≥200 C · <200 D 不买;走廊不足 2R 空间受限不进"},
     {"id": "C-09", "kind": "risk", "condition": "组合总风险:所有持仓 (现价−止损)×股数 之和 ≤ 4% 总资产,放不下就缩仓或不进"},
 ]
 RULE_NAME = {"C-01": "VCP 枢轴突破买入", "C-04": "初始止损", "C-05": "移动止损", "C-06": "时间止损"}
@@ -302,7 +303,8 @@ def t_volatility(px: float, atr: float, rvol: float | None) -> tuple[float, floa
 
 
 def res_above(bars: list[tuple], px: float, atr: float, n: int = LEVEL_BARS) -> tuple[float, str] | None:
-    """收盘上方最近的显著阻力:近 n 根(不含今天)的最高价、未回补的向下缺口下沿,取近的 → (价, 来源);没有 → None。"""
+    """收盘上方最近的 252 日级强阻力:底部左侧前高(近 n 根不含今天的最高价)、1 年 Volume Profile 里上方第一个高成交量节点下沿,
+    取近的 → (价, 来源);上方没有 → None(已在一年新高之上)。离收盘不足 0.5 ATR 的不算。"""
     win = bars[-n - 1:-1] if len(bars) > 1 else []
     if not win:
         return None
@@ -310,14 +312,10 @@ def res_above(bars: list[tuple], px: float, atr: float, n: int = LEVEL_BARS) -> 
     cands = []
     hi = max(b[2] for b in win)
     if hi > floor:
-        cands.append((hi, "52 周高点"))
-    h = [b[2] for b in win]
-    lo = [b[3] for b in win]
-    for i in range(1, len(win)):
-        if lo[i - 1] > h[i]:
-            edge = max(h[i:])
-            if floor < edge < lo[i - 1]:
-                cands.append((edge, "缺口下沿"))
+        cands.append((hi, "底部左侧前高"))
+    hvn = t_volume(win, floor, atr, n=len(win))
+    if hvn is not None:
+        cands.append((hvn, "1 年高成交量节点"))
     return min(cands) if cands else None
 
 
@@ -437,21 +435,25 @@ def form_grade(ind: dict, p: dict = PARAMS, score=None) -> tuple[str, int, list]
 
 
 def rr_ratio(ind: dict, p: dict = PARAMS) -> tuple[float | None, float | None, str]:
-    """第 4 项 · 盈亏比(R 倍数)= (目标价 − 收盘)÷ R → (比值, 目标价, 说明)。目标 = 上方最近的显著阻力,没有就用底部量度目标(见文件头)。"""
+    """第 4 项 · 走廊 = (252 日强阻力 − 收盘)÷ R → (走廊 R 倍数, 3R 目标价, 说明)。上方没有阻力 → 走廊 inf。算不出 → (None, None, 原因)。"""
     stop, _ = stop_of(ind, p)
     px = ind["close"]
     if stop is None or stop >= px:
         return None, None, "止损算不出"
     r1 = px - stop
+    t3 = px + 3 * r1
     ra = ind.get("res_above")
-    if ra:
-        target, src = ra
-    else:
-        fd, ph = ind.get("first_depth"), ind.get("pivot")
-        if fd is None or ph is None:
-            return None, None, "上方无阻力且底部深度算不出"
-        target, src = ph * (1 + fd / 100), "已创 52 周新高,用底部量度目标"
-    return max(target - px, 0.0) / r1, target, f"R = ${r1:.2f};目标 ${target:.2f}({src}),空间 {max(target - px, 0.0) / r1:.1f}R"
+    if not ra:
+        return math.inf, t3, f"R = ${r1:.2f},3R 目标 ${t3:.2f};上方 252 根内无阻力(一年新高之上),走廊无上限"
+    lvl, src = ra
+    corr = max(lvl - px, 0.0) / r1
+    return corr, t3, f"R = ${r1:.2f},3R 目标 ${t3:.2f};到 252 日强阻力 ${lvl:.2f}({src})的走廊 {corr:.1f}R"
+
+
+def space_limited(ind: dict, p: dict = PARAMS) -> tuple[bool, str]:
+    """走廊不足 2R(RR_MIN["C"])→ 空间受限,剔除。"""
+    corr, _t3, txt = rr_ratio(ind, p)
+    return (corr is not None and corr < RR_MIN["C"]), txt
 
 
 def grade(ind: dict, p: dict = PARAMS, score=None) -> dict:
@@ -466,8 +468,8 @@ def grade(ind: dict, p: dict = PARAMS, score=None) -> dict:
     df = ind.get("defense_63")
     items.append(("抗跌", _tier(df[0], DEF_MIN) if df else None,
                   f"标普下跌 {df[1]} 天里 {df[0]} 天不跌" if df else "没有基准日线,算不出"))
-    rr, _target, rr_txt = rr_ratio(ind, p)
-    items.append(("盈亏比", _tier(rr, RR_MIN), f"{rr:.1f}:1({rr_txt})" if rr is not None else rr_txt))
+    rr, _t3, rr_txt = rr_ratio(ind, p)
+    items.append(("盈亏比", _tier(rr, RR_MIN), (f"走廊 {rr:.1f}R" if rr != math.inf else "走廊无上限") + f"({rr_txt})" if rr is not None else rr_txt))
     md, mw = bool(ind.get("macd_d")), bool(ind.get("macd_w"))
     g5 = "S" if md and mw else "A" if mw else "B" if md else "C"
     items.append(("MACD 金叉", g5, "日线 + 周线" if md and mw else "只有周线" if mw else "只有日线" if md else
@@ -587,6 +589,9 @@ def try_entry(code, name, ind, state: dict, p: dict = PARAMS, want_text: bool = 
         return None, (f"两条全满足,但底部低点下方 {p['stop_atr']:.1f} ATR 在 ${raw:.2f},距收盘 {(1 - raw / px) * 100:.1f}% "
                       f"超过 {p['max_stop_pct'] * 100:.0f}% —— 形态不够紧,不进(C-04)")
     risk = px - stop
+    limited, lim_txt = space_limited(ind, p)
+    if limited:
+        return None, f"两条全满足,但{lim_txt},不足 {RR_MIN['C']:.0f}R —— 空间受限不进(C-08)"
     gr = grade(ind, p, score)
     pct = p["grade_size"].get(gr["grade"], 0.0)
     if pct <= 0:

@@ -74,21 +74,27 @@ fg, fpts, ff = c3.form_grade(ind2, c3.PARAMS, 95)
 check("评分 · 第 1 项形态 = 第一版 10 分制", len(ff) == 5 and 0 <= fpts <= 10 and gr["factors"][0][1] == fg and gr["form_points"] == fpts, str((fg, fpts)))
 check("评分 · 教科书形态 + RS 95 + 基准(抗跌 S)至少 B 级", gr["grade"] in ("S", "A", "B") and gr["factors"][2][1] == "S", gr["text"])
 ra = ind2["res_above"]
-check("评分 · ⭐上方最近的显著阻力 = 52 周高点(教科书形态里是第一段涨到 100 的那根,高 102)", ra and ra[1] == "52 周高点" and abs(ra[0] - max(b[2] for b in brk[:-1])) < 1e-9, str(ra))
+check("评分 · ⭐252 日强阻力 = 底部左侧前高(教科书形态里是第一段涨到 100 的那根,高 102)", ra and ra[1] == "底部左侧前高" and abs(ra[0] - max(b[2] for b in brk[:-1])) < 1e-9, str(ra))
 rr = c3.rr_ratio(ind2)
-check("评分 · ⭐盈亏比 = (阻力 − 收盘) ÷ R,R = 收盘 − 止损", abs(rr[0] - (ra[0] - ind2["close"]) / (ind2["close"] - stop0)) < 1e-9 and abs(rr[1] - ra[0]) < 1e-9, str(rr))
-check("评分 · 盈亏比说明写 R、目标、空间几 R", "R =" in rr[2] and "空间" in rr[2] and "52 周高点" in rr[2], rr[2])
+check("评分 · ⭐走廊 = (阻力 − 收盘) ÷ R,目标 = 收盘 + 3R", abs(rr[0] - (ra[0] - ind2["close"]) / (ind2["close"] - stop0)) < 1e-9 and abs(rr[1] - (ind2["close"] + 3 * (ind2["close"] - stop0))) < 1e-9, str(rr))
+check("评分 · 走廊说明写 R、3R 目标、阻力来源", "R =" in rr[2] and "3R" in rr[2] and "底部左侧前高" in rr[2], rr[2])
 rr_nh = c3.rr_ratio(dict(ind2, res_above=None))
-check("评分 · ⭐已创 52 周新高 → 目标 = 底部量度目标 枢轴 × (1 + 首次收缩深度)", abs(rr_nh[1] - ind2["pivot"] * (1 + ind2["first_depth"] / 100)) < 1e-9 and "量度目标" in rr_nh[2], str(rr_nh))
-# 显著阻力:52 周高点 / 未回补缺口下沿;没有就 None
+check("评分 · ⭐上方 252 根内无阻力 → 走廊无上限记 S", rr_nh[0] == float("inf") and c3.grade(dict(ind2, res_above=None), c3.PARAMS, 95)["factors"][3][1] == "S" and "无上限" in rr_nh[2], str(rr_nh))
+check("评分 · ⭐走廊不足 2R → 空间受限剔除,达到买点也不进(C-08)", c3.space_limited(ind2)[0] and c3.try_entry("LLL", "限", ind2, dict(state, positions=[], cash=100_000.0, open_risk=0.0), score=95)[1].count("空间受限") == 1, str(c3.try_entry("LLL", "限", ind2, dict(state, positions=[], cash=100_000.0, open_risk=0.0), score=95)))
+check("评分 · 走廊 2R 以上不剔除;走廊 2.4R 记 C、3R 记 B", not c3.space_limited(dict(ind2, res_above=(ind2["close"] + 2.4 * (ind2["close"] - stop0), "底部左侧前高")))[0]
+      and c3.grade(dict(ind2, res_above=(ind2["close"] + 2.4 * (ind2["close"] - stop0), "底部左侧前高")))["factors"][3][1] == "C"
+      and c3.grade(dict(ind2, res_above=(ind2["close"] + 3.0 * (ind2["close"] - stop0), "底部左侧前高")))["factors"][3][1] == "B")
+# 252 日强阻力:底部左侧前高 / 1 年高成交量节点;没有就 None
 d0 = date(2026, 1, 5)
 flat = [(d0 + timedelta(days=i), 20.0, 20.3, 19.7, 1000.0) for i in range(80)]
 with_high = flat[:40] + [(flat[40][0], 20.0, 23.0, 19.7, 1000.0)] + flat[41:]        # 40 天前一根冲到 23 的前高
-check("评分 · ⭐res_above:上方的 52 周高点 23", c3.res_above(with_high, 20.0, 0.6) == (23.0, "52 周高点"), str(c3.res_above(with_high, 20.0, 0.6)))
-check("评分 · res_above:上方没有阻力(已创新高)→ None;离收盘不足 0.5 ATR 的不算", c3.res_above(flat, 20.4, 0.6) is None and c3.res_above(with_high, 22.8, 0.6) is None)
-gapped0 = ([(d0 + timedelta(days=i), 26.0, 26.3, 25.7, 1000.0) for i in range(30)]
-           + [(d0 + timedelta(days=i), 20.0, 20.1, 19.7, 1000.0) for i in range(30, 80)])
-check("评分 · ⭐res_above:未回补缺口下沿 20.1 比 52 周高点 26.3 近", c3.res_above(gapped0, 19.7, 0.6) == (20.1, "缺口下沿"), str(c3.res_above(gapped0, 19.7, 0.6)))
+check("评分 · ⭐res_above:底部左侧前高 23", c3.res_above(with_high, 20.0, 0.6) == (23.0, "底部左侧前高"), str(c3.res_above(with_high, 20.0, 0.6)))
+check("评分 · res_above:上方没有阻力(一年新高之上)→ None;离收盘不足 0.5 ATR 的不算", c3.res_above(flat, 20.4, 0.6) is None and c3.res_above(with_high, 22.8, 0.6) is None)
+hvn_bars = ([(d0 + timedelta(days=i), 24.0, 24.3, 23.7, 20000.0) for i in range(20)]           # 一年前在 24 附近堆了大量筹码
+            + [(d0 + timedelta(days=20 + i), 27.0, 27.5, 26.5, 500.0) for i in range(5)]      # 之后冲到 27.5(底部左侧前高)
+            + [(d0 + timedelta(days=25 + i), 20.0, 20.3, 19.7, 1000.0) for i in range(60)])   # 现在在 20 做底
+ra_h = c3.res_above(hvn_bars, 20.0, 0.6)
+check("评分 · ⭐res_above:1 年高成交量节点(约 23.7)比底部左侧前高 27.5 近", ra_h and ra_h[1] == "1 年高成交量节点" and 23.5 <= ra_h[0] <= 24.0, str(ra_h))
 # 下面是第二版四维目标价法的函数(已不参与评分,保留)
 check("评分 · T_level:上方最近的前高 23(比整数关口 25 近)", c3.t_level(with_high, 20.0, 0.6) == (23.0, "前高"), str(c3.t_level(with_high, 20.0, 0.6)))
 check("评分 · T_level:没有前高就是整数关口(20 → 25,步长 5)", c3.t_level(flat, 20.0, 0.6) == (25.0, "整数关口"), str(c3.t_level(flat, 20.0, 0.6)))
@@ -103,10 +109,12 @@ check("评分 · ⭐T_volume:收盘上方的高成交量节点下沿(约 22.2)",
 check("评分 · T_volume:上方没有节点 → None", c3.t_volume(vp_bars, 23.0, 0.4) is None)
 check("评分 · T_volatility:倍数 = √RVOL 限 1~3(RVOL 6 → 2.45;RVOL 0.5 → 1;RVOL 16 → 3)",
       abs(c3.t_volatility(10.0, 0.5, 6.0)[1] - 2.449) < 0.01 and c3.t_volatility(10.0, 0.5, 0.5)[1] == 1.0 and c3.t_volatility(10.0, 0.5, 16.0)[1] == 3.0)
-fill, blocked = c3.try_entry("AAA", "甲", ind2, state, score=95)
-check("买入 · 成交挂 C-01,带评分,止损来自形态", fill and fill["rule_id"] == "C-01" and fill["grade"] == gr["grade"] and abs(state["positions"][0].stop - stop0) < 1e-9, str(fill))
+ind2_ok = dict(ind2, res_above=None)            # 当作一年新高之上(走廊无上限),否则教科书形态的走廊只有 0.2R 会被剔除
+gr_ok = c3.grade(ind2_ok, c3.PARAMS, 95)
+fill, blocked = c3.try_entry("AAA", "甲", ind2_ok, state, score=95)
+check("买入 · 成交挂 C-01,带评分,止损来自形态", fill and fill["rule_id"] == "C-01" and fill["grade"] == gr_ok["grade"] and abs(state["positions"][0].stop - stop0) < 1e-9, str(fill))
 pos = state["positions"][0]
-check("买入 · ⭐股数 = 评分对应仓位 × 总资产 ÷ 收盘(不超总风险上限)", pos.size == min(int(100_000 * c3.PARAMS["grade_size"][gr["grade"]] / pos.entry_price), int(4000.0 / (pos.entry_price - pos.stop))), str((pos.size, gr["grade"], pos.entry_price, pos.stop)))
+check("买入 · ⭐股数 = 评分对应仓位 × 总资产 ÷ 收盘(不超总风险上限)", pos.size == min(int(100_000 * c3.PARAMS["grade_size"][gr_ok["grade"]] / pos.entry_price), int(4000.0 / (pos.entry_price - pos.stop))), str((pos.size, gr_ok["grade"], pos.entry_price, pos.stop)))
 check("买入 · rationale 有评分、止损位、开放风险", "评分" in fill["rationale"] and "止损" in fill["rationale"] and "开放风险" in fill["rationale"], fill["rationale"][:160])
 # ⭐止损被封顶(末次收缩太深)→ 不进
 ind_deep = c3.indicators(bars_deep + [(brk[-1][0], c3.indicators(bars_deep)["pivot"] + 0.5 * atr, c3.indicators(bars_deep)["pivot"] + 0.7 * atr, c3.indicators(bars_deep)["pivot"] - 0.2 * atr, 1400.0)])
@@ -118,17 +126,17 @@ check("买入 · ⭐止损被 -8% 封顶的形态不进,并说明(C-04)", capped
 ind_bad = dict(ind2, contractions=1, last_depth=15.0, low_vol_ratio=1.2, close=ind2["pivot"] + 0.8 * atr,
                recent_vols=[ind2["vol_sma20"] * 1.35] * len(ind2["recent_vols"]),   # 突破质量只有 1 分(放量 1.35×、高出 0.8 ATR)
                vp_net_63=0, defense_63=(1, 30), macd_d=False, macd_w=False,
-               res_above=(ind2["pivot"] + 0.9 * atr, "52 周高点"))   # 量价 D、抗跌 D、盈亏比 <1 D、无金叉 C
+               res_above=(ind2["pivot"] + 2.5 * (ind2["close"] - stop0), "底部左侧前高"))   # 量价 D、抗跌 D、走廊 2R 出头 C(不剔除)、无金叉 C → 总分 <200
 gd = c3.grade(ind_bad, c3.PARAMS, 60)
 st_b = dict(state, positions=[], cash=100_000.0, open_risk=0.0)
 fb, bb = c3.try_entry("BBB", "乙", ind_bad, st_b, score=60)
 check("买入 · ⭐评分够不上 C 级(D)达到信号也不买", gd["grade"] == "D" and fb is None and bb and "D 级" in bb, str((gd["text"], bb)))
 # ⭐组合总风险上限:已有开放风险 3.9% 时只能放 0.1%
 st_h = dict(state, positions=[], cash=100_000.0, open_risk=3900.0)
-fh, bh = c3.try_entry("HHH", "热", ind2, st_h, score=95)
+fh, bh = c3.try_entry("HHH", "热", ind2_ok, st_h, score=95)
 check("买入 · ⭐组合开放风险快满时按余额缩仓", fh and fh["shares"] == int(100.0 / (fh["price"] - st_h["positions"][0].stop)), str((fh and fh["shares"], bh)))
 st_h2 = dict(state, positions=[], cash=100_000.0, open_risk=4000.0)
-fh2, bh2 = c3.try_entry("HHH", "热", ind2, st_h2, score=95)
+fh2, bh2 = c3.try_entry("HHH", "热", ind2_ok, st_h2, score=95)
 check("买入 · ⭐组合开放风险已满就不进并说明(C-09)", fh2 is None and bh2 and "C-09" in bh2, str(bh2))
 
 # ── 五项评分的子项 ──────────────────────────────────────────────
@@ -225,7 +233,7 @@ check("卖出 · 到过 1R 就不受时间止损管", not fl, str(fl))
 
 # ── 整合 + 文案 ───────────────────────────────────────────────
 bars_map = {"AAA": brk}
-ind_of = lambda c: c3.indicators(bars_map[c], bench=bench)      # 生产里指标缓存带基准,这里也带,否则抗跌项 0 分评成 D 不买
+ind_of = lambda c: dict(c3.indicators(bars_map[c], bench=bench), res_above=None)      # 带基准(抗跌项),并当作一年新高之上(否则走廊 0.2R 被剔除)
 r = c3.run_day(str(brk[-1][0]), [], 100_000.0, lambda c: bars_map.get(c), [("AAA", "甲", 80)], None, 0, ind_of=ind_of)
 check("整合 · 突破日买入,权益不变", [f["symbol"] for f in r["fills"]] == ["AAA"] and abs(r["equity"] - 100_000) < 1e-6, str(r["fills"]))
 r3 = c3.run_day(str(brk[-1][0]), [], 100_000.0, lambda c: bars_map.get(c), [("AAA", "甲", 80)], None, 3, ind_of=ind_of)
