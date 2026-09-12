@@ -217,10 +217,15 @@ def run_date(d: date, perf: dict | None = None, snap: dict | None = None) -> dic
     cur.execute("SELECT trade_date, watchlist FROM agent_day WHERE trade_date < %s ORDER BY trade_date DESC LIMIT %s",
                 (d, av.PARAMS["watch_pool_days"] - 1))
     carried: dict = {}
-    for td, wl in cur.fetchall():
+    prev_days = cur.fetchall()
+    # 只保留首次入选日仍在窗口内的:存下来的观察列表本身就含带过来的老候选,
+    # 不按 since 截断会链式滚雪球(2026-09-12 首次回填实测 6 只涨到 61 只)
+    cutoff = str(min(td for td, _ in prev_days)) if prev_days else str(d)
+    for td, wl in prev_days:
         for w in (wl or []):
-            if w["symbol"] not in today_codes:
-                carried[w["symbol"]] = (w.get("name"), w.get("score"), (w.get("since") or str(td)))
+            since = w.get("since") or str(td)
+            if w["symbol"] not in today_codes and since >= cutoff:
+                carried[w["symbol"]] = (w.get("name"), w.get("score"), since)
     n_today = len(watch)
     watch = watch + [(c, v[0], v[1]) for c, v in carried.items()]
     since_of = {c: v[2] for c, v in carried.items()}
