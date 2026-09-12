@@ -202,28 +202,24 @@ Besides an LLM key (required · yours, drives conversation itself) · you have *
 - ✅ **All left-side tools stay visible** — not crippled, not hidden · clicking tells you exactly how to unlock · never silent failure
 - ✅ **Pipeline usage metered per key** — we don't look at your data or conversations · we only count requests
 
-### 🆕 Official MCP Field Test: THS vs TDX (2026-09-12)
+### 🆕 Official MCP Support Progress (2026-09-13)
 
-**Verdict**: Both top-tier Chinese finance data providers now ship an official MCP · both let end users self-issue API keys · which is exactly Hunter's **Option ② (BYO MCP)** pattern · our code carries zero secrets.
+**HiThink (THS) Official MCP · Verified**
 
-| | HiThink / THS (同花顺) | Tongdaxin / TDX (通达信) |
-|---|---|---|
-| Official MCP endpoint | `https://fuyao.aicubes.cn/mcp/*` · **6** (A-shares / index / fund / futures / options / meta) | `https://txmcp.tdx.com.cn:3001/clawmcp` · **1** |
-| Auth | `X-api-key: <key>` | `Authorization: Bearer TDX-<key>` |
-| Key issuance | Login on doc site · 3 clicks · no fee observed | In-app store「Points & Key Management」self-serve · **paid credit-based** |
-| Unique capability | ⭐ **Whole-market 10-year daily K · 172MB Parquet in one shot** · dragon-tiger list split into institutional & hot-money desks (63 rows) | ⭐ **News / disclosure / research / macro** four tools · natural-language screener · adjusted K-line |
-| Data accuracy | ✅ Moutai 1275.16 (matches 2 other independent sources) | ✅ Moutai 1275.16 (matches 2 other independent sources) |
-| Rate limit | 120 requests across 1/4/8 concurrency · zero 429 | Credit-metered · per-call cost pending confirmation |
-| **Commercial-use / resale terms** | ⚠️ **Zero hits in 387KB of docs** | ⚠️ **Not published** |
+- The `fuyao.aicubes.cn/mcp/*` endpoints (A-shares, index, fund, futures, options, meta — 6 in total) are publicly documented on HiThink's official docs site
+- Users self-issue API keys in three clicks via the docs site; requests carry `X-api-key`
+- We ran an end-to-end field test with a real key: accuracy matches three independent sources, rate limits are generous
+- This fits Hunter's **Option ② (BYO MCP)** pattern — **you bring your own key, our code carries zero secrets**
+- ⚠️ Zero hits in 387KB of HiThink docs for "commercial use / resale / redistribution" — **confirm ToS with the vendor before commercial use**
 
-**How to wire it up** (identical to Option ②):
-1. User fills their own key in Data Source settings (prominent location)
-2. Backend attaches the right header to the right endpoint based on user choice · our code holds no key
-3. If user hasn't filled a key → return a clear error + official signup link · **never fall back to our key**
+**Tongdaxin (TDX) · Official MCP not yet documented for open access · We're waiting**
 
-**⚠️ Iron rule**: Our own key is only for dev testing · never into repo / never into image / never used to fetch data on behalf of users — doing so would constitute data resale. Please confirm ToS with the official provider before commercial use.
+- Tongdaxin also runs an MCP service, but **has not officially published an authorized API address or developer documentation for third-party integrations**
+- For compliance reasons, hunter-community **does not integrate any Tongdaxin interface that has not been officially opened**
+- We are reaching out to Tongdaxin's team and **hope Tongdaxin will support our open-source project** — so that users who have already purchased a paid key can plug the Tongdaxin MCP into hunter-community
+- If anyone from Tongdaxin sees this, please reach out via GitHub Issues or email
 
-**Full field-test report** (evidence chain · 401 auth verification · JSON-RPC captures): [`doc/data-source/2026-09-12_ths-vs-tdx-mcp.en.md`](./doc/data-source/2026-09-12_ths-vs-tdx-mcp.en.md) · [中文原版](./doc/data-source/2026-09-12_ths-vs-tdx-mcp.md)
+**Detailed article**: [www.agentpit.io/en/blog/ths-tdx-official-mcp-field-test](https://www.agentpit.io/en/blog/ths-tdx-official-mcp-field-test)
 
 ---
 
