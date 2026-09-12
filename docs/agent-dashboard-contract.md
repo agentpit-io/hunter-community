@@ -119,6 +119,21 @@ Prompt 里写「严禁编造」对 flash 模型完全无效,必须强校验。
 > 放后端只写一次,放前端要在四个地方各写一遍。前端不做时区数学。
 > 交易时间戳同理(`trades[].ts_market` / `ts_market_tz` / `ts_local`)。
 
+### 3.1.1 `branch` / `branches` · 迭代方向(2026-09-12 加)
+
+```jsonc
+"branch": "buy",                       // 本次返回的是哪个方向;请求用 ?branch=base|buy|sell,不认识的落回 base
+"branches": [                          // 全部方向,顺序固定;前端据此画切换卡,缺失 / 空数组 → 不画
+  { "key": "base", "label": "基准 v1", "direction": "规则固定,不优化", "version": "v1",
+    "pnl_pct": -0.26, "benchmark_pct": -1.3, "excess_pt": 1.03, "trades_total": 2, "win_rate": 0,
+    "max_dd_pct": -0.6, "active": false }
+]
+```
+
+三个方向各有自己的现金 / 持仓 / 成交 / 净值 / 版本;观察列表(筛选结果)共用。
+`versions` 里 `status: "observing"` 的那条是优化器选出的候选,正在 5 天观察期;`rules[].status: "observing"` 标的是它动的那条规则。
+「立即跑一次」「暂停」对所有方向一起生效。
+
 ### 3.2 `strategy` · 当前基于什么策略
 
 ```jsonc
