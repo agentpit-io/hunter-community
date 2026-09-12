@@ -429,11 +429,12 @@ def run_script(script: str, market_key: str = "us", limit: int = 100,
             ri = asof_info["rs"]
             if ri["gated"]:
                 warnings.append(
-                    f"回溯到 {a} 时排名池里只有 {ri['coverage']:.0%} 的票有满 253 根日线可算精确 RS,"
-                    f"低于 {screen_rs.RS_UNIVERSE_THRESHOLD:.0%} 的门槛 —— RS 评级这次全部不给。"
-                    f"日线只保留约 320 根,回溯太远就算不出 RS,这是数据边界,不是故障。")
+                    f"回溯到 {a} 时排名池里(不含 {ri['young']} 只上市不足一年的次新股)只有 {ri['coverage']:.0%} 的票"
+                    f"有满 253 根日线可算精确 RS,低于 {screen_rs.RS_UNIVERSE_THRESHOLD:.0%} 的门槛 —— RS 评级这次全部不给。"
+                    f"日线保留约两年半,回溯太远就算不出 RS,这是数据边界,不是故障。")
             else:
-                warnings.append(screen_rs.METHOD_NOTE_EXACT.format(as_of=a))
+                warnings.append(screen_rs.METHOD_NOTE_EXACT.format(as_of=a)
+                                + f"(回溯:排名池 {ri['universe']} 只,另有 {ri['young']} 只上市不足一年的次新股不参与排名)")
     if rs_stat is not None:
         uses_rating = any(f in ("rs_rating", "rs_raw") for f in c.fields)
         uses_line = "rs_line_up_days" in c.fields

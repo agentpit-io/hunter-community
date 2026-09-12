@@ -348,6 +348,7 @@ def build_rows(market_key: str, as_of: date, fields: list[str],
     pool_idx: list[int] = []
     raw_exact: dict = {}
     short = 0
+    young = 0
     for code, (dates, arr) in store["codes"].items():
         k = bisect_right(dates, as_of_actual)
         if k == 0 or dates[k - 1] != as_of_actual:
@@ -379,8 +380,16 @@ def build_rows(market_key: str, as_of: date, fields: list[str],
         if uses_rating:
             in_pool = bool(s) and screen_rs.in_population(s, market_key)
             if in_pool:
-                pool_idx.append(len(rows))
-                raw_exact[len(rows)] = rh.rs_raw_exact([b[1] for b in bars])
+                # 覆盖率的分母只算「够老」的票:第一根日线在回溯日 253 根之前的。
+                # 快照那条路把次新股也算进分母,是因为快照分不清「次新」和「数据没拉到」;
+                # 这里有整段日线,次新股是能确认的事实,不是缺数据 —— 2026-09-12 实测:池里 11% 是
+                # 2025 年 6 月之后上市的票,把它们算进分母后 6~7 月的覆盖率永远 89%,评级整批被门槛挡掉
+                closes = [b[1] for b in bars]
+                if len(closes) > 252:
+                    pool_idx.append(len(rows))
+                    raw_exact[len(rows)] = rh.rs_raw_exact(closes)
+                else:
+                    young += 1
             row["rs_raw"] = raw_exact.get(len(rows))
             row["rs_rating"] = None
         if len(bars) < 60:
@@ -392,7 +401,8 @@ def build_rows(market_key: str, as_of: date, fields: list[str],
         ratings, coverage = screen_rs.rs_ratings(raw_exact, len(pool_idx))
         for idx, rt in ratings.items():
             rows[idx]["rs_rating"] = rt
-        rs_info = {"universe": len(pool_idx), "coverage": coverage, "gated": not ratings and bool(raw_exact),
+        rs_info = {"universe": len(pool_idx), "young": young, "coverage": coverage,
+                   "gated": not ratings and bool(raw_exact),
                    "eligible": sum(1 for v in raw_exact.values() if v is not None)}
 
     return rows, {"as_of": as_of_actual, "requested": as_of, "n": len(rows),
