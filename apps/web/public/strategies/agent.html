@@ -884,8 +884,16 @@ function errNotice(msg) {
 
 // 观察列表只露 5 张卡片,其余滚动。高度必须渲染完再量:卡片里的 gap 文案会换行,
 // 写死像素会在窄屏切掉半行。量的是「第 5 张的底边到第 1 张的顶边」,
-// 用相对差消掉 offsetParent 是谁的问题。窗口宽度变了换行数会变,所以 resize 要重算。
+// 用相对差消掉 offsetParent 是谁的问题。
+// 重算的触发源有三个,少一个就会看到「露 4 张半」或「露 7 张」:
+//   · window resize —— 用户拖窗口
+//   · ResizeObserver —— 容器自己变宽变窄(侧栏开合、浏览器缩放、devtools 改视口),
+//     这些不一定派发 window resize。只在宽度真的变了才重算:设 max-height 自己
+//     也会触发回调,不拦就会打转。
+//   · document.fonts.ready —— 字体换掉之后行高会变,首屏量早了会偏
 const WATCH_ROWS = 5
+let watchW = -1
+let watchRO = null
 function fitWatch() {
   const wl = document.getElementById('ag-watch')
   if (!wl) return
@@ -897,12 +905,24 @@ function fitWatch() {
     wl.style.maxHeight = ''
     return
   }
+  watchW = wl.clientWidth
   wl.style.maxHeight = (last.offsetTop + last.offsetHeight - cs[0].offsetTop) + 'px'
   wl.className = 'ag-wl scr more'
   wl.addEventListener('scroll', function () {
     const atEnd = wl.scrollTop + wl.clientHeight >= wl.scrollHeight - 2
     wl.className = atEnd ? 'ag-wl scr' : 'ag-wl scr more'
   })
+  // 每次重渲染都是新元素,旧的 observer 要断掉,否则观察着已经不在页面上的节点越积越多
+  if (typeof ResizeObserver === 'function') {
+    if (watchRO) watchRO.disconnect()
+    watchRO = new ResizeObserver(function (es) {
+      const w = Math.round(es[0].contentRect.width)
+      if (w === watchW) return
+      watchW = w
+      fitWatch()
+    })
+    watchRO.observe(wl)
+  }
 }
 let watchFitBound = false
 function bindOps() {
@@ -911,6 +931,7 @@ function bindOps() {
   if (!watchFitBound) {
     watchFitBound = true
     window.addEventListener('resize', fitWatch)
+    try { document.fonts.ready.then(fitWatch) } catch (e) { /* 老浏览器 / 假 DOM 没有 fonts */ }
   }
   const rules = document.getElementById('ag-rules')
   const goto = document.getElementById('ag-goto-rules')
