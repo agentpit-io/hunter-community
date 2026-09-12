@@ -68,6 +68,14 @@ check("买入 · 成交挂在 R-04,股数 = 8% 总资产 ÷ 收盘", f and f["ru
 check("买入 · 现金扣掉、持仓建立", state["positions"][0].size == f["shares"] and abs(state["cash"] - (100_000 - f["amount"])) < 1e-6)
 check("买入 · rationale 里有枢轴、量能、ATR 的数字", "枢轴" in f["rationale"] and "×" in f["rationale"] and "ATR5/ATR20" in f["rationale"], f["rationale"][:120])
 
+# R-03 按突破前一天算(用户 2026-09-12 拍板):突破当天振幅再大也不影响;前一天不紧就不算
+wide_today = bars[:-1] + [(bars[-1][0], 101.5, 106.0, 97.0, 2_000_000.0)]
+chk = {c["rule"]: c for c in av.entry_checks(av.indicators(wide_today))}
+check("买入 · ⭐突破当天振幅很大,R-03 仍按前一天判为收缩", chk["R-03"]["ok"] and "前一天" in chk["R-03"]["text"], chk["R-03"]["text"])
+loose_prev = bars[:-6] + [(d, c, c * 1.06, c * 0.94, v) for d, c, _h, _l, v in bars[-6:-1]] + [bars[-1]]
+chk = {c["rule"]: c for c in av.entry_checks(av.indicators(loose_prev))}
+check("买入 · 前一天不收缩(ATR5 ≥ ATR20)→ R-03 不过", not chk["R-03"]["ok"], chk["R-03"]["text"])
+
 # 追高:收在枢轴上方 6% → 不买,gap 说明原因
 bars_hi = bars[:-1] + [(bars[-1][0], 108.0, 108.3, 107.5, 2_000_000.0)]
 chk = {c["rule"]: c for c in av.entry_checks(av.indicators(bars_hi))}

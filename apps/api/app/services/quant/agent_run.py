@@ -211,6 +211,19 @@ def run_date(d: date, perf: dict | None = None, snap: dict | None = None) -> dic
     except Exception as e:                                    # noqa: BLE001
         log.exception("[agent] %s 观察列表扫描失败", d)
         watch, ws, scan_ok = [], {"error": str(e)[:200]}, False
+    # 观察池 = 最近 N 个交易日筛选结果的并集(用户 2026-09-12 拍板):筛出来的是还没突破的票,
+    # 真突破那天往往已经不在当天结果里;今天的结果排前面,老的按首次入选日带上
+    today_codes = {c for c, _n, _s in watch}
+    cur.execute("SELECT trade_date, watchlist FROM agent_day WHERE trade_date < %s ORDER BY trade_date DESC LIMIT %s",
+                (d, av.PARAMS["watch_pool_days"] - 1))
+    carried: dict = {}
+    for td, wl in cur.fetchall():
+        for w in (wl or []):
+            if w["symbol"] not in today_codes:
+                carried[w["symbol"]] = (w.get("name"), w.get("score"), (w.get("since") or str(td)))
+    n_today = len(watch)
+    watch = watch + [(c, v[0], v[1]) for c, v in carried.items()]
+    since_of = {c: v[2] for c, v in carried.items()}
     positions = _load_positions(cur)
     cur.execute("SELECT equity, consec_losses FROM agent_day ORDER BY trade_date DESC LIMIT 1")
     prev = cur.fetchone()
@@ -225,6 +238,10 @@ def run_date(d: date, perf: dict | None = None, snap: dict | None = None) -> dic
         return screen_asof.bars_upto(store, code, d)
 
     res = av.run_day(str(d), positions, float(cash), bars_of, watch, prev_equity, consec)
+    for w in res["watch_items"]:
+        w["since"] = since_of.get(w["symbol"], str(d))
+        if w["symbol"] in since_of:
+            w["gap"] = f"{since_of[w['symbol']][5:]} 入选 · " + (w.get("gap") or "")
     fills = res["fills"]
     n_buy = sum(1 for f in fills if f["side"] == "buy")
     n_sell = len(fills) - n_buy
@@ -232,7 +249,7 @@ def run_date(d: date, perf: dict | None = None, snap: dict | None = None) -> dic
     gated = bool(ws.get("gate")) and not watch
     steps.append({"key": "backtest", "name": "扫描与执行", "status": ("fail" if not scan_ok else "warn" if gated else "ok"), "at": _hm(),
                   "duration_ms": int((time.time() - t1) * 1000),
-                  "summary": (f"「VCP 波段收缩」命中 {ws.get('matched')} 只 → 观察列表;买入 {n_buy} 笔、卖出 {n_sell} 笔"
+                  "summary": (f"「VCP 波段收缩」今天命中 {ws.get('matched')} 只,连同近 {av.PARAMS['watch_pool_days']} 天入选的共 {len(watch)} 只 → 观察列表;买入 {n_buy} 笔、卖出 {n_sell} 笔"
                               + (f",已实现 {realized:+.0f} 美元" if n_sell else "")
                               + (f";护栏:{res['halt_reason']}" if res["halt_reason"] else "")
                               + (f"。⚠ 观察列表为空是因为 RS 评级被门槛挡下(不是没有候选):{ws['gate'][:60]}…" if gated else ""))
@@ -357,7 +374,7 @@ def _lesson(cur, d: date, fills: list[dict], res: dict, ws: dict, followups: lis
     else:
         title = (f"今日买 {len(buys)} 笔、卖 {len(sells)} 笔" + (f",已实现 {realized:+.0f} 美元" if sells else ""))
         kind = "loss" if realized < 0 else "validated"
-    what = (f"观察列表 {n_watch} 只(「VCP 波段收缩」命中 {ws.get('matched')} 只)"
+    what = (f"观察列表 {n_watch} 只(「VCP 波段收缩」今天命中 {ws.get('matched')} 只,其余是近 {av.PARAMS['watch_pool_days']} 天入选的)"
             + (f",其中 {n_blocked} 只被护栏或上限挡下" if n_blocked else "")
             + f";成交 {len(fills)} 笔" + (";".join(
                 f"{f['symbol']} {'买' if f['side'] == 'buy' else '卖'} {f['shares']} 股 @ ${f['price']:.2f}({f['rule_id']})"

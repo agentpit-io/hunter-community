@@ -14,6 +14,14 @@
    会再卖一半并把状态改回 -1。这里 -1 / -2 都不再触发第一档。
 3. **止盈状态下还能加仓**:原脚本 `pyramid_level >= 3` 才拦,-1 / -2 都能过。这里只在 1~2 档加仓。
 
+## 用户 2026-09-12 拍板的两处改动(回填实测原样跑 25 个交易日 0 笔成交之后)
+
+- **R-03 收缩看突破前一天、阈值 1.0**:原脚本要求突破当天 ATR5 < 0.7·ATR20,但 ATR5 含突破日本身,
+  突破日振幅必然放大 —— 全市场 20 个交易日 76887 个票-日里,突破且放量的 669 个只有 12 个能过。
+  改成前一天(不含突破日)ATR5 < 1.0·ATR20:258 个里能过 119 个。
+- **观察池 = 最近 10 个交易日筛选结果的并集**(agent_run 负责拼):「VCP 波段收缩」筛出来的是还没突破的票,
+  真突破那天往往已经不在当天的结果里,只看当天永远接不到突破。
+
 其余逐条照搬:过滤(趋势 / 流动性 / ATR 收缩 / 突破未超伸 / 放量)、仓位(风险 2% 与初始 8% 取小)、
 止损(涨过 5% 回落到成本 / -5% 减半 / -8% 清仓 / 跌破 SMA50 2%)、止盈(+10% 减半 / +15% 再减半 / +20% 清仓)、
 时间止损(第 5 天没涨 5% 减半 / 第 10 天清仓)、倒三角加仓(第 2 注是第 1 注的一半,最多 3 注,单股 ≤25%)。
@@ -38,7 +46,8 @@ PARAMS = {
     "portfolio_risk": 0.02, "max_stop_pct": 0.08, "avg_loss_limit": 0.06,
     "initial_pos_pct": 0.08, "max_single_stock_pct": 0.25, "max_holdings": 10,
     "chase_limit": 1.05, "vol_boost": 1.40,
-    "min_adtv": 10_000_000.0, "min_price": 10.0, "atr_compact": 0.70,
+    "min_adtv": 10_000_000.0, "min_price": 10.0, "atr_compact": 1.00,   # 原脚本 0.70(当天算),见文件头
+    "watch_pool_days": 10,
     "pivot_period": 20, "ema_fast": 8, "ema_slow": 21, "sma_trend": 50,
 }
 # 护栏(原脚本没有,UI 契约 §3.3 需要;2026-09-12 先取默认值,待用户确认)
@@ -49,7 +58,7 @@ MIN_BARS = 60          # 少于这么多根日线的票不交易(SMA50 + 枢轴 
 RULES = [
     {"id": "R-01", "kind": "buy", "condition": "趋势:EMA8 > EMA21,且收盘在 EMA8 上方"},
     {"id": "R-02", "kind": "buy", "condition": "流动性:20 日日均成交额 ≥ 1000 万美元,且股价 ≥ $10"},
-    {"id": "R-03", "kind": "buy", "condition": "VCP 收缩:近 5 日 ATR 低于 20 日 ATR 的 70%"},
+    {"id": "R-03", "kind": "buy", "condition": "VCP 收缩:突破前一天的 5 日 ATR 低于 20 日 ATR(不含突破日;原脚本当天算、70%)"},
     {"id": "R-04", "kind": "buy", "condition": "突破:收盘高于前 20 日枢轴高点,且不超过枢轴 5%(不追高)"},
     {"id": "R-05", "kind": "buy", "condition": "放量:当日成交量 ≥ 50 日均量的 1.4 倍"},
     {"id": "R-06", "kind": "risk", "condition": "仓位:单笔风险 2% 总资产(按 -8% 止损反推)与初始仓位 8% 总资产取小"},
@@ -148,6 +157,8 @@ def indicators(bars: list[tuple], p: dict = PARAMS) -> dict | None:
         "adtv": _sma([cc * vv for cc, vv in zip(c[-20:], v[-20:])], 20),
         "pivot_high": max(h[-pv - 1:-1]) if len(h) >= pv + 1 else None,
         "atr20": _atr(bars[-61:], 20), "atr5": _atr(bars[-61:], 5),
+        # 前一天的 ATR(不含今天):R-03 用它 —— 突破日本身振幅放大,含今天几乎永远过不了
+        "atr20_prev": _atr(bars[-62:-1], 20), "atr5_prev": _atr(bars[-62:-1], 5),
         "low3": min(lo[-3:]),
     }
     return out
@@ -170,12 +181,12 @@ def entry_checks(ind: dict, p: dict = PARAMS) -> list[dict]:
     out.append({"rule": "R-02", "ok": ok2,
                 "text": (f"日均成交额 ${adtv / 1e6:.1f}M" if adtv is not None else "成交额算不出")
                         + (f",股价 ${ind['close']:.2f}") + ("" if ok2 else " —— 流动性不够")})
-    a5, a20 = ind["atr5"], ind["atr20"]
+    a5, a20 = ind.get("atr5_prev"), ind.get("atr20_prev")
     ratio = (a5 / a20) if (a5 is not None and a20) else None
     ok3 = ratio is not None and ratio < p["atr_compact"]
     out.append({"rule": "R-03", "ok": ok3,
-                "text": (f"ATR5/ATR20 = {ratio:.2f}" if ratio is not None else "ATR 算不出")
-                        + ("(≤0.70 算收缩)" if ok3 else f" —— 还不够紧,要低于 {p['atr_compact']:.2f}")})
+                "text": (f"前一天 ATR5/ATR20 = {ratio:.2f}" if ratio is not None else "ATR 算不出")
+                        + (f"(<{p['atr_compact']:.2f} 算收缩)" if ok3 else f" —— 还不够紧,要低于 {p['atr_compact']:.2f}")})
     ph = ind["pivot_high"]
     dist = (ind["close"] / ph - 1) * 100 if ph else None
     ok4 = dist is not None and 0 < dist <= (p["chase_limit"] - 1) * 100
