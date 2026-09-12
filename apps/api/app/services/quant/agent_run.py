@@ -848,8 +848,6 @@ def _trade_rounds(trades, rule_cond: dict, scan_of: dict | None = None) -> list[
                    "rule_id": t[12], "rule_name": t[13], "rationale": t[14],
                    "rule_text": rule_cond.get(t[12]), "price": t[6], "shares": t[5],
                    "fee": round(fee_of.get((t[0], t[1]), 0.0), 4)}
-            if t[2] == "buy" and len(t) > 18 and t[18]:
-                leg["rule_name"] = f"{t[13]} · {t[18]} 级"      # 评分只记在买入那笔上
             if t[2] == "sell":
                 leg.update({"pnl_abs": t[9], "pnl_pct": t[10], "followup": t[17]})
             legs.append(leg)
@@ -860,6 +858,8 @@ def _trade_rounds(trades, rule_cond: dict, scan_of: dict | None = None) -> list[
             "pnl_abs": round(pnl, 2), "pnl_pct": round(pnl / cost * 100, 2) if cost else None,
             "pnl_gross": round(gross, 2), "fee": round(fee, 4),
             "hold_days": sells[-1][11], "adds": len(buys) - 1, "legs": legs,
+            # 进场当天评定的档位(C-08),用户 2026-09-12 要求标在代号下方;方向 A/B/base 的引擎不评分 → None,前端不画
+            "grade": (buys[0][18] if len(buys[0]) > 18 else None),
             "scan_dates": (scan_of or {}).get(code, []),
         })
     # 按平仓日排;编号按时间正序给(1 = 第一笔),前端倒序显示,和券商对账单一个习惯

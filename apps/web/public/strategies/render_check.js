@@ -318,7 +318,7 @@ try {
         scope_note:'这一列只进这张表 —— 上面的总览、净值曲线、胜率仍是引擎的零费用口径',
         fee_total:1.98, pnl_gross_total:149.14, pnl_net_total:147.16, items:[
         {no:19, symbol:'ARMK', name:'ARMK', side:'long', entry_date:'2026-08-11', exit_date:'2026-08-25',
-         shares:232, amount:14134.64, pnl_abs:-265.34, pnl_pct:-1.88, pnl_gross:-263.36, fee:1.9775,
+         shares:232, amount:14134.64, pnl_abs:-265.34, pnl_pct:-1.88, pnl_gross:-263.36, fee:1.9775, grade:'A',
          scan_dates:['2026-08-06','2026-08-07','2026-08-10'],
          hold_days:10, adds:2, legs:[
            {kind:'entry', date:'2026-08-11', rule_id:'R-04', rule_name:'VCP 突破买入', price:60.47, shares:133,
@@ -329,7 +329,7 @@ try {
             rationale:'持有 10 个交易日仍未涨过 1R,按 R-15 清仓;当日量能 0.7 倍 20 日均量',
             followup:'卖出后 T+5 该股再跌 3.2% —— 这次是躲过了'}]},
         {no:18, symbol:'GS', name:'GS', side:'long', entry_date:'2026-07-02', exit_date:'2026-07-20',
-         shares:8, amount:7806.88, pnl_abs:411.8, pnl_pct:5.27, pnl_gross:412.5, fee:0.7,
+         shares:8, amount:7806.88, pnl_abs:411.8, pnl_pct:5.27, pnl_gross:412.5, fee:0.7, grade:null,
          hold_days:13, adds:0, legs:[
            {kind:'entry', date:'2026-07-02', rule_id:'R-04', rule_name:'VCP 突破买入', price:975.86, shares:8},
            {kind:'exit', date:'2026-07-20', rule_id:'R-13', rule_name:'移动止盈', price:1027.42,
@@ -497,6 +497,8 @@ try {
   //   只给净的,用户拿它和上面总览(引擎零费用口径)对不上,会以为哪边算错了
   const feeNeed = [['有手续费列', /<th[^>]*>手续费/], ['有代号列', /<th[^>]*>代号/],
     ['代号填的是股票代码', /class="sym"[^>]*><b>ARMK</],
+    ['进场档位标在代号下方(用户 2026-09-12 要求)', /<b>ARMK<\/b><s class="gd gd-A"[^>]*>A 级<\/s>/],
+    ['没评分的方向不画档位、不写占位', /<b>GS<\/b><\/td>/],
     ['净损益是扣费后的数', /-\$265/], ['扣费前的数在 hover 里', /title="扣费前 -\$263[^"]*手续费 1\.98/],
     ['脚注说明了这一列不进净值曲线', /仍是引擎的零费用口径/],
     ['脚注给出两个口径的差额', /一共扣了 <b>\$2<\/b>/]]

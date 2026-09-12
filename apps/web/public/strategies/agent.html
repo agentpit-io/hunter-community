@@ -181,6 +181,9 @@
     .ag-hb .sym{font-weight:650;font-size:12.5px;vertical-align:top;padding-top:9px;
       font-family:ui-monospace,menlo,monospace}
     /* 代号能悬停看日K:虚线下划线 + 十字光标。入口不藏 hover —— 这条虚线就是入口的招牌 */
+    .ag-hb .sym s{display:block;text-decoration:none;font-size:10.5px;margin-top:2px;font-weight:700;letter-spacing:.02em}
+    .ag-hb .sym s.gd-S,.ag-hb .sym s.gd-A{color:var(--brand-dark)}
+    .ag-hb .sym s.gd-B,.ag-hb .sym s.gd-C,.ag-hb .sym s.gd-D{color:var(--muted)}
     .ag-hb .sym[data-kchart]{cursor:crosshair}
     .ag-hb .sym[data-kchart] b{font-weight:650;border-bottom:1px dotted var(--line-strong)}
     .ag-hb .sym[data-kchart]:hover b{background:var(--brand-pale);color:var(--brand-dark)}
@@ -697,6 +700,13 @@ function sortWatch(items) {
 // 编号 · 大小 · 净损益 · 回报用 rowspan 跨整组 —— 这四个是「这一笔」的属性。
 // 为什么不按成交逐笔平铺:倒三角加仓会让一只票有 2~3 次买入、2 次卖出,
 // 平铺出来是 5 行互不相干的记录,看不出「这一笔最后是赚是亏」。
+// 进场当天评定的档位(C-08)标在代号下方 —— 用户 2026-09-12 要求。
+// 只有方向 C 的引擎评分;别的方向 grade 是 null,不画(不是缺数据,是这个方向没有这一步),也不写「—」占位。
+function gradeTag(g) {
+  if (typeof g !== 'string' || !/^[SABCD]$/.test(g)) return ''
+  return '<s class="gd gd-' + g + '" title="进场当天的评分档位(规则 C-08),仓位按它定">' + g + ' 级</s>'
+}
+
 function vHistory(d) {
   const h = d.history || {}
   const has = Array.isArray(h.items)
@@ -726,7 +736,7 @@ function vHistory(d) {
       const head = i > 0 ? '' :
         '<td class="no"' + span + '>' + (Number.isFinite(r.no) ? int(r.no) : NA) +
           '<s>' + (r.side === 'long' ? '做多' : txt(r.side, '')) + '</s></td>' +
-        '<td class="sym"' + span + kattr + '><b>' + txt(r.symbol) + '</b></td>'
+        '<td class="sym"' + span + kattr + '><b>' + txt(r.symbol) + '</b>' + gradeTag(r.grade) + '</td>'
       // 净损益是**扣完手续费**的;毛利放 hover —— 两个数都要能看到,
       // 否则用户拿它和上面总览(引擎零费用口径)对不上,会以为哪边算错了
       const pnlTip = Number.isFinite(r.pnl_gross) && Number.isFinite(r.fee)

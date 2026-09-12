@@ -43,13 +43,14 @@ def test_generic_buy_rule_still_generic():
     assert [s["label"] for s in c02["stats"]] == ["挡下候选", "说明"]
 
 
-def test_trade_rounds_entry_leg_carries_grade():
+def test_trade_rounds_carry_entry_grade():
     rounds = ar._trade_rounds(TRADES, {})
     assert len(rounds) == 2
-    entries = [leg for r in rounds for leg in r["legs"] if leg["kind"] == "entry"]
-    assert {leg["rule_name"] for leg in entries} == {"买入 · A 级", "买入 · C 级"}
-    exits = [leg for r in rounds for leg in r["legs"] if leg["kind"] == "exit"]
-    assert all("级" not in leg["rule_name"] for leg in exits)
+    assert {r["symbol"]: r["grade"] for r in rounds} == {"AAA": "A", "BBB": "C"}
+    # 档位标在代号下方(前端),信号列的规则名保持原样,不再拼「· X 级」(那一列窄,会被截掉)
+    assert all("级" not in leg["rule_name"] for r in rounds for leg in r["legs"])
+    no_grade = [t[:18] + (None,) for t in TRADES]
+    assert all(r["grade"] is None for r in ar._trade_rounds(no_grade, {}))
 
 
 if __name__ == "__main__":
