@@ -794,11 +794,37 @@ function bindOps() {
   if (goto && rules) goto.addEventListener('click', function () { rules.scrollIntoView({ behavior: 'smooth', block: 'start' }) })
   const retry = document.getElementById('ag-retry')
   if (retry) retry.addEventListener('click', boot)
-  // 控制接口(手动触发 / 暂停 / 启动)还没定,先明说没实现,不做假的成功提示
-  ;['ag-run', 'ag-toggle', 'ag-start'].forEach(function (id) {
-    const b = document.getElementById(id)
-    if (b) b.addEventListener('click', function () { toast('控制接口尚未实现', 'warn') })
+  // 控制接口(2026-09-12 接通):跑一次 / 暂停·恢复 / 启动。都要登录;「跑一次」按日期幂等,
+  // 前端再加一道闸门(busy)—— 不可撤销的副作用在发请求之前去重(仓内铁律)
+  const run = document.getElementById('ag-run') || document.getElementById('ag-start')
+  if (run) run.addEventListener('click', function () { agCall('/api/quant/agent/run', run, '跑一次') })
+  const tg = document.getElementById('ag-toggle')
+  if (tg) tg.addEventListener('click', function () {
+    const paused = tg.textContent.trim() === '恢复'
+    agCall(paused ? '/api/quant/agent/resume' : '/api/quant/agent/pause', tg, paused ? '恢复' : '暂停')
   })
+}
+
+let agBusy = false
+async function agCall(url, btn, what) {
+  if (agBusy) return
+  agBusy = true
+  const old = btn.textContent
+  btn.disabled = true; btn.textContent = what + '中…'
+  let r, d = null
+  try {
+    r = await fetch(url, { method: 'POST', headers: apiHeaders({ 'Content-Type': 'application/json' }), body: '{}' })
+    try { d = await r.json() } catch (e) { /* 非 JSON */ }
+  } catch (e) {
+    agBusy = false; btn.disabled = false; btn.textContent = old
+    toast('请求没发出去', 'warn'); return
+  }
+  agBusy = false
+  if (r.status === 401) { toast('登录已失效,请在新窗口重新登录后再试', 'warn'); btn.disabled = false; btn.textContent = old; return }
+  if (!r.ok) { toast((d && d.detail) || (what + '失败 · HTTP ' + r.status), 'warn'); btn.disabled = false; btn.textContent = old; return }
+  if (d && d.ran === false) toast(d.reason || '这次没有新东西可跑', 'warn')
+  else toast(what + '完成')
+  boot()
 }
 
 async function boot() {

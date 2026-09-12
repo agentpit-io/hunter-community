@@ -1372,3 +1372,36 @@ async def screener_learned_forget(entry_id: int, request: Request):
     if not ok:
         raise HTTPException(404, "对照表里没有这条(可能已经被忘掉了)")
     return {"ok": True}
+
+
+# ─── 小鹿智能体(单实例 · 纸上交易)────────────────────────────────
+# 契约 docs/agent-dashboard-contract.md;实现 services/quant/agent_run.py。
+# dashboard 免登录(和别的 /api/quant/ 读接口一样);三个控制接口要登录 ——
+# 「立即跑一次」会产生交易记录,不可撤销,按日期幂等(同一天第二次返回已有结果)。
+from app.services.quant import agent_run as _agent
+
+
+@router.get("/agent/dashboard")
+async def agent_dashboard():
+    return await asyncio.to_thread(_agent.dashboard)
+
+
+@router.post("/agent/run")
+async def agent_run_once(request: Request):
+    _need_uid(request)
+    try:
+        return await asyncio.to_thread(_agent.run_latest)
+    except Exception as e:                                    # noqa: BLE001
+        raise HTTPException(400, f"这次没跑成:{e}")
+
+
+@router.post("/agent/pause")
+async def agent_pause(request: Request):
+    _need_uid(request)
+    return {"state": await asyncio.to_thread(_agent.set_state, "paused")}
+
+
+@router.post("/agent/resume")
+async def agent_resume(request: Request):
+    _need_uid(request)
+    return {"state": await asyncio.to_thread(_agent.set_state, "running")}

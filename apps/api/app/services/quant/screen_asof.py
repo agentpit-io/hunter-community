@@ -306,6 +306,15 @@ def _tuples(dates, arr, k: int) -> list[tuple]:
     return out
 
 
+def bars_upto(store: dict, code: str, as_of: date) -> list[tuple]:
+    """缓存里的一只票截到 as_of 的日线 → [(日期, 收, 高, 低, 量)];没有这只票 → []。"""
+    item = store["codes"].get(code)
+    if not item:
+        return []
+    dates, arr = item
+    return _tuples(dates, arr, bisect_right(dates, as_of))
+
+
 def build_rows(market_key: str, as_of: date, fields: list[str],
                snap_rows: list[dict], perf: dict) -> tuple[list[dict], dict]:
     """→ (回溯日的全市场行, 信息 {as_of, requested, n, unavailable, short})

@@ -27,6 +27,11 @@ rc=0
 for m in "$@"; do
   echo "=== $(date '+%F %T') rs_history $m"
   docker compose run --rm --no-deps -T api python -m app.services.quant.rs_history run --market "$m" || rc=$?
+  # 美股日线落完 → 小鹿智能体跑今天(收盘后)这一步。它只读 rs_daily,不打腾讯;失败不影响日线的退出码
+  if [ "$m" = "us" ]; then
+    echo "=== $(date '+%F %T') agent daily"
+    docker compose run --rm --no-deps -T api python -m app.services.quant.agent_run daily || echo "=== agent daily 失败 rc=$?"
+  fi
 done
 echo "=== $(date '+%F %T') 结束 rc=$rc"
 exit $rc
