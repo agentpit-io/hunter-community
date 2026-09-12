@@ -1198,6 +1198,20 @@ class ScreenIn(BaseModel):
     limit: int = 100
     sort_by: str | None = None
     descending: bool = True
+    as_of: str | None = None       # 时间回溯:YYYY-MM-DD,空 = 今天的快照
+
+
+@router.get("/screener/history-range")
+async def screener_history_range(market: str = "us"):
+    """时间回溯能选的日期范围 —— 来自自家日线(rs_daily),前端据此限制日期框。"""
+    from app.services.quant import screen_asof
+    if market not in screen_source.MARKETS:
+        raise HTTPException(400, f"不支持的市场:{market}")
+    d = await asyncio.to_thread(screen_asof.history_range, market)
+    d["market"] = market
+    d["note"] = ("回溯用的是每晚落库的全市场日线,只保留约 320 个交易日;越往前,52 周高低、"
+                 "精确 RS 评级这类长窗口字段越算不出。市值 / 财务字段没有历史值,回溯不了。")
+    return d
 
 
 @router.get("/screener/meta")
@@ -1274,11 +1288,20 @@ async def screener_run(body: ScreenIn):
         if p is None:
             raise HTTPException(404, f"没有这个示例脚本:{body.preset}")
         script = p["script"]
+    as_of = None
+    if body.as_of:
+        from datetime import date as _date
+        try:
+            as_of = _date.fromisoformat(body.as_of.strip())
+        except ValueError:
+            raise HTTPException(400, f"时间回溯的日期格式不对:{body.as_of!r},要 YYYY-MM-DD")
+        if as_of > _date.today():
+            raise HTTPException(400, f"时间回溯不能选未来的日期:{as_of}")
     try:
         # 同上 —— 拉全市场实测 1~3s,同步 httpx,不能占着事件循环
         return await asyncio.to_thread(
             screen_source.run_script,
-            script, body.market, body.limit, body.sort_by, body.descending)
+            script, body.market, body.limit, body.sort_by, body.descending, as_of)
     except ScreenError as e:
         # 脚本写错、周期映射不了、上游挂了 —— 都是 400,message 直接给用户看。
         # 不要吞成 500 空结果:用户看到"0 只命中"会以为是市场里真的没有票满足条件。

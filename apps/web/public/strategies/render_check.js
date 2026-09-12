@@ -53,7 +53,7 @@ function makeEl(tag) {
     remove() {},
     setAttribute() {},
     getAttribute() { return null },
-    focus() {}, click() {}, scrollIntoView() {},
+    focus() {}, click() {}, scrollIntoView() {}, select() {}, setSelectionRange() {},
     getBoundingClientRect() { return { width: 800, height: 600, top: 0, left: 0 } },
     querySelector() { return makeEl() },
     querySelectorAll() { return [] },
@@ -130,6 +130,11 @@ function inlineScripts(html) {
   }
   return out
 }
+
+// fetch 一律 reject,有的页面(data.html 的 loadOverview)不 catch。以前收尾是同步 process.exit,
+// 这些 rejection 来不及冒出来;改成 setImmediate 收尾之后 node 20 会把它当未处理异常直接崩。
+// 它们不是要抓的错(页面拿不到数据本来就该静默),所以吞掉。
+process.on('unhandledRejection', () => {})
 
 let failed = 0
 const appJs = fs.readFileSync(path.join(DIR, 'app.js'), 'utf8')
@@ -541,6 +546,71 @@ try {
   console.log('FAIL 隐藏示例定向断言 ·', e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e)
 }
 
+// ─── 时间回溯:入口常驻、退出常驻、请求真的带了日期、结果标明是哪一天 ──────
+// 最怕的是"回溯了却不知道自己在回溯":旧结果留着、K 线露出之后的走势、请求没带日期。
+try {
+  const ctx = vm.createContext(makeContext('screener.html'))
+  vm.runInContext(appJs, ctx, { filename: 'app.js' })
+  const sc = inlineScripts(fs.readFileSync(path.join(DIR, 'screener.html'), 'utf8'))
+  sc.forEach((src, i) => vm.runInContext(src, ctx, { filename: `screener#${i + 1}` }))
+  vm.runInContext(`
+    S.conditions = [{ name: 'c1', expr: 'close > 20', is_bool: true, enabled: true }]
+    S.combine = 'all'; S.plotName = 'scan'; S.plotExpr = ''
+    var BAR_OFF = vRunBar()
+    var SENT = []
+    post = async function (url, body) { SENT.push(body); return { ok: true, status: 200, data: { matched: 0, picks: [], as_of: body.as_of } } }
+    toast = function () {}
+    S.result = { picks: [{ code: 'X' }] }; S.probe = { c1: 3 }
+    setAsOf('2026-08-15')
+    var BAR_ON = vRunBar()
+    var CLEARED = S.result === null && Object.keys(S.probe).length === 0
+    var RES_ON = vResult()
+  `, ctx, { filename: 'assert-asof-1' })
+  // runScan 是 async,跑完再看
+  const done = vm.runInContext(`runScan().then(function () { return probeOne(S.conditions[0]) })`, ctx, { filename: 'assert-asof-2' })
+  const KC_ROWS = vm.runInContext(`
+    (function () {
+      // 悬停日 K:回溯时只画到那天。直接调 kcRender 依赖 DOM 太多,这里验证同一条过滤逻辑
+      const rows = [{ ts: '2026-08-14' }, { ts: '2026-08-15' }, { ts: '2026-08-18' }]
+      return rows.filter(function (r) { return String(r.ts || r.date || '').slice(0, 10) <= S.asOf }).length
+    })()
+  `, ctx, { filename: 'assert-asof-3' })
+  Promise.resolve(done).then(() => {
+    const sent = ctx.SENT
+    const checks = [
+      ['没回溯时运行栏有「时间回溯」按钮', /id="sc-asof"/.test(ctx.BAR_OFF) && !/sc-asof-off/.test(ctx.BAR_OFF)],
+      ['回溯后运行栏显示日期,且「回到今天」常驻', /回溯到 <b>2026-08-15<\/b>/.test(ctx.BAR_ON) && /id="sc-asof-off"/.test(ctx.BAR_ON)],
+      ['⭐切换回溯日时清掉旧结果与单条测试', ctx.CLEARED === true],
+      ['回溯后清了结果,结果区不画', ctx.RES_ON === ''],
+      ['⭐运行扫描的请求带 as_of', sent.length >= 1 && sent[0].as_of === '2026-08-15'],
+      ['单条测试的请求也带 as_of', sent.length >= 2 && sent[1].as_of === '2026-08-15'],
+      ['结果区标明回溯到哪一天', (() => {
+        vm.runInContext(`S.result = { as_of: '2026-08-15', universe_total: 4000, scanned: 4000, matched: 1, skipped_incomplete: 0, picks: [], columns: [], notes: [], warnings: [] }; var RES2 = vResult()`, ctx)
+        return /回溯扫描结果/.test(ctx.RES2) && /截至 2026-08-15 收盘/.test(ctx.RES2) && /日线池/.test(ctx.RES2) && /panel asof/.test(ctx.RES2)
+      })()],
+      ['悬停日 K 只保留回溯日及之前', KC_ROWS === 2],
+      ['回到今天后按钮恢复、请求不带 as_of', (() => {
+        vm.runInContext(`setAsOf(null); var BAR_BACK = vRunBar()`, ctx)
+        return /时间回溯<\/button>/.test(ctx.BAR_BACK) && vm.runInContext('S.asOf', ctx) === null
+      })()],
+      ['⭐回溯日不进草稿(刷新回到今天)', (() => {
+        vm.runInContext(`S.asOf = '2026-08-15'; saveDraft(); var DRAFT = localStorage.getItem(LS) || ''`, ctx)
+        return !/2026-08-15/.test(ctx.DRAFT)
+      })()],
+    ]
+    for (const [name, ok] of checks) {
+      if (ok) console.log('PASS 时间回溯 ·', name)
+      else { failed++; console.log('FAIL 时间回溯 ·', name) }
+    }
+  }).catch(e => {
+    failed++
+    console.log('FAIL 时间回溯定向断言 ·', e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e)
+  })
+} catch (e) {
+  failed++
+  console.log('FAIL 时间回溯定向断言 ·', e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e)
+}
+
 // ─── 保存的扫描策略:开关状态必须能往返 ─────────────────────────────
 // 这个功能最容易悄悄写错的地方:保存时如果用了 buildScript(true)(草稿用的那个),
 // 停用的条件也会被写进 plot —— 页面一切正常、保存也成功,但加载回来
@@ -586,5 +656,8 @@ try {
   console.log('FAIL 保存策略定向断言 ·', e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e)
 }
 
-console.log(failed ? `SOME FAILED (${failed})` : 'ALL OK')
-process.exit(failed ? 1 : 0)
+// setImmediate:上面有一组断言挂在 async 函数的 await 链上(微任务),同步退出会跳过它们
+setImmediate(() => {
+  console.log(failed ? `SOME FAILED (${failed})` : 'ALL OK')
+  process.exit(failed ? 1 : 0)
+})

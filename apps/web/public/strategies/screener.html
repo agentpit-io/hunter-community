@@ -235,6 +235,16 @@
     .sc-fl span.sub{margin-left:2px;background:#F6F1FB}
 
     .sc-runbar{display:flex;flex-wrap:wrap;gap:9px;align-items:center;margin-top:14px}
+    /* 时间回溯:没开时是普通按钮;开了变成一枚醒目的琥珀色标签(整页此刻看的都是那天),
+       两个小动作(改日期 / 回到今天)常驻在标签里 —— 退出入口不能藏 */
+    .sc-asof{display:inline-flex;align-items:center;gap:8px;border:1px solid #e0b56a;background:#fff6e3;
+      border-radius:8px;padding:5px 10px;font-size:12.5px;color:#7a4b00}
+    .sc-asof b{font-weight:700}
+    .sc-asof button{border:0;background:transparent;color:#2E86DE;cursor:pointer;font-size:12px;
+      padding:0 2px;font-family:inherit;text-decoration:underline dotted;text-underline-offset:3px}
+    .sc-asof button:hover{color:#1b5fa8}
+    .panel.asof{border-color:#e0b56a;box-shadow:inset 0 0 0 1px #f2dfb0}
+    .panel.asof .p-hd .cnt{color:#7a4b00}
     /* 左右留边 —— 与 agent.html 的 .ag-wrap 同一套(padding:0 20px 40px)。
        原来一条都没写,条件行的文字直接贴在窗口左边缘上。 */
     .sc-wrap{padding:0 20px 40px;display:flex;flex-direction:column;gap:12px}
@@ -323,6 +333,11 @@ const S = {
   loadedName: '',            // 当前这套条件是从哪个保存的策略加载来的 —— 保存弹窗默认填它,
                              // 「改完再存一次」直接回车就是覆盖,不用重新打名字
   sortBy: 'market_cap_basic', desc: true,
+  // 时间回溯(2026-09-12):'YYYY-MM-DD' = 按那天收盘的自家日线跑;null = 今天的快照。
+  // **不进草稿、不进保存的策略**:它是"此刻在看哪一天",刷新页面就回到今天 —— 存下来的话
+  // 用户隔天打开还停在过去某一天,而页面上又没有足够醒目的提示,会拿旧数据当今天的
+  asOf: null,
+  asOfRange: {},            // 市场 → /screener/history-range 的结果(能选的日期范围)
 }
 
 const LS = 'hunter_screener_script_v2'
@@ -844,6 +859,96 @@ async function deleteSaved(id) {
   toast('已删除「' + p.name + '」')
 }
 
+// ─── 时间回溯 ──────────────────────────────────────────────────
+// 跳到过去某一天,按那天收盘的自家日线重算字段再跑同一套条件(后端 screen_asof)。
+// 扫描源只有当天快照,所以市值 / 财务类字段回溯不了 —— 对话框和结果里都要说。
+function vAsOf() {
+  if (!S.asOf) {
+    return '<button class="btn" id="sc-asof" title="跳到过去的某一天,按那天收盘的数据跑同一套条件">' +
+      '<span class="hi hi-clock"></span> 时间回溯</button>'
+  }
+  return '<span class="sc-asof"><span class="hi hi-clock"></span>回溯到 <b>' + esc(S.asOf) + '</b> 收盘' +
+    '<button id="sc-asof" title="换一天">改日期</button>' +
+    '<button id="sc-asof-off" title="回到今天的快照">回到今天</button></span>'
+}
+
+function todayStr() {
+  const d = new Date()
+  const p = function (x) { return (x < 10 ? '0' : '') + x }
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate())
+}
+
+async function loadAsOfRange(market) {
+  if (S.asOfRange[market]) return S.asOfRange[market]
+  try {
+    const r = await fetch('/api/quant/screener/history-range?market=' + encodeURIComponent(market),
+                          { headers: apiHeaders(), cache: 'no-store' })
+    const d = r.ok ? await r.json() : null
+    if (d) S.asOfRange[market] = d
+    return d
+  } catch (e) { return null }
+}
+
+async function openAsOfDialog() {
+  const today = todayStr()
+  const m = openModal(
+    '<div class="modal-hd"><span class="hi hi-clock" style="color:var(--brand)"></span> 时间回溯' +
+      '<span class="close" data-close>×</span></div>' +
+    '<div class="modal-body">' +
+      '<div class="field"><div class="lbl">跳到哪一天(按那天收盘)</div>' +
+        '<input id="ao-date" type="date" value="' + esc(S.asOf || today) + '" max="' + today + '"></div>' +
+      '<div class="sc-note" id="ao-range" style="line-height:1.8">正在查能回溯的范围…</div>' +
+      '<div class="sc-note" style="line-height:1.8;margin-top:8px">' +
+        '回溯用的是每晚落库的全市场日线(约 320 个交易日),只有<b>价格 / 成交量类</b>字段能重算:' +
+        '收盘、均线、EMA、RSI、区间高低、涨幅、均量、RS 评级、VCP。' +
+        '<b>市值、PE、ROE、股息率这类财务字段没有历史值</b>,回溯时会整批「算不出」。' +
+        '选今天 = 回到正常的快照扫描。</div>' +
+      '<div class="sc-err" id="ao-err" style="display:none;margin-top:10px"></div>' +
+    '</div>' +
+    '<div class="modal-ft"><button class="btn" data-close>取消</button>' +
+      '<button class="btn primary" id="ao-ok">跳转</button></div>')
+  const inp = m.querySelector('#ao-date')
+  const rangeEl = m.querySelector('#ao-range')
+  loadAsOfRange(S.market).then(function (d) {
+    if (!rangeEl) return
+    if (!d || !d.min_date) {
+      rangeEl.textContent = '这个市场还没有日线,回溯不了(日线由每晚的定时任务拉取)'
+      return
+    }
+    if (inp) inp.min = d.min_date
+    rangeEl.innerHTML = esc(MKT_LABEL[S.market] || S.market) + ' 的日线:<b>' + esc(d.min_date) +
+      '</b> ~ <b>' + esc(d.max_date) + '</b>,' + d.n_codes + ' 只' +
+      (d.full_from ? ' · 52 周高低 / 精确 RS 评级这类长窗口字段从 <b>' + esc(d.full_from) + '</b> 起才算得出' : '')
+  })
+  const go = function () {
+    const v = inp ? String(inp.value || '').trim() : ''
+    const err = m.querySelector('#ao-err')
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) {
+      if (err) { err.textContent = '请选一个日期'; err.style.display = '' }
+      return
+    }
+    if (v > today) {
+      if (err) { err.textContent = '不能选未来的日期'; err.style.display = '' }
+      return
+    }
+    setAsOf(v >= today ? null : v)
+    m.remove()
+  }
+  const ok = m.querySelector('#ao-ok')
+  if (ok) ok.addEventListener('click', go)
+  if (inp) inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') go() })
+}
+
+function setAsOf(v) {
+  if (v === S.asOf) return
+  S.asOf = v
+  // 旧结果是另一天的,留着会让人拿两天的数据对着看
+  S.result = null; S.probe = {}; S.runError = null
+  KC.cache.clear()          // 悬停日 K 按回溯日截断,缓存的是整段,换天要重画
+  render()
+  toast(v ? '已回溯到 ' + v + ' 收盘 · 现在运行扫描就是按那天的数据' : '已回到今天')
+}
+
 function vRunBar() {
   const n = S.conditions.filter(function (c) { return c.is_bool && c.enabled }).length
   return '<div class="sc-runbar">' +
@@ -852,6 +957,7 @@ function vRunBar() {
     '<button class="btn" id="sc-save"' + (S.conditions.length ? '' : ' disabled') +
       ' title="把当前的条件、开关状态、市场和排序存成一个扫描策略">' +
       '<span class="hi hi-save"></span> 保存扫描策略</button>' +
+    vAsOf() +
     (S.conditions.length && !n && S.combine !== 'custom'
       ? '<span class="sc-na" style="font-size:12px">一条都没启用,扫不出东西</span>' : '') +
     '</div>' +
@@ -862,7 +968,7 @@ function vResult() {
   if (!S.result) return ''
   const r = S.result
   const stats = [
-    ['全市场', r.universe_total, ''], ['已扫描', r.scanned, ''],
+    [r.as_of ? '日线池' : '全市场', r.universe_total, ''], ['已扫描', r.scanned, ''],
     ['命中', r.matched, 'hit'], ['算不出', r.skipped_incomplete, ''],
   ].map(function (s) {
     return '<div class="s ' + s[2] + '"><div class="k">' + s[0] + '</div><div class="v">' +
@@ -871,8 +977,10 @@ function vResult() {
   const t = r.timing_ms || {}
   const timing = (Number.isFinite(t.fetch) ? '取数 ' + t.fetch + 'ms' : '') +
     (Number.isFinite(t.evaluate) ? ' · 求值 ' + t.evaluate + 'ms' : '')
-  return '<div class="panel" style="margin-top:14px"><div class="p-hd">扫描结果' +
+  return '<div class="panel' + (r.as_of ? ' asof' : '') + '" style="margin-top:14px"><div class="p-hd">' +
+    (r.as_of ? '回溯扫描结果' : '扫描结果') +
     '<span class="cnt">' + esc(r.market_label || '') +
+    (r.as_of ? ' · 截至 ' + esc(r.as_of) + ' 收盘' : '') +
     (r.returned != null ? ' · 显示前 ' + r.returned + ' 只' : '') + '</span></div>' +
     '<div class="sc-stat">' + stats + '</div>' +
     vWarn(r) + vTable(r) +
@@ -1038,6 +1146,10 @@ function bind() {
   if (run) run.addEventListener('click', runScan)
   const sv = document.getElementById('sc-save')
   if (sv) sv.addEventListener('click', openSaveDialog)
+  const ao = document.getElementById('sc-asof')
+  if (ao) ao.addEventListener('click', openAsOfDialog)
+  const aoff = document.getElementById('sc-asof-off')
+  if (aoff) aoff.addEventListener('click', function () { setAsOf(null) })
   const copy = document.getElementById('sc-copy')
   if (copy) copy.addEventListener('click', function () {
     const codes = ((S.result && S.result.picks) || []).map(function (p) { return p.code }).join('\n')
@@ -1219,7 +1331,11 @@ function kcRender(code, name, payload) {
   if (sy) sy.textContent = code
   if (nm) nm.textContent = name || ''
 
-  const rows = (payload && payload.rows) || []
+  let rows = (payload && payload.rows) || []
+  if (S.asOf) {
+    // 回溯时只画到那天:图上露出之后的走势,等于把答案写在题目旁边
+    rows = rows.filter(function (r) { return String(r.ts || r.date || '').slice(0, 10) <= S.asOf })
+  }
   if (!rows.length) {
     // 拿不到就明说,不要一直转圈 —— 与 routers/kline.py 那条注释同一个道理:
     // 用户分不清「这只票没数据」和「还在加载」,只会一直等下去。
@@ -1579,6 +1695,7 @@ async function runScan() {
   const r = await post(RUN_API, {
     script: script, market: S.market, limit: 100,
     sort_by: S.sortBy || null, descending: S.desc,
+    as_of: S.asOf || null,
   })
   S.running = false
   if (!r.ok) {
@@ -1597,7 +1714,7 @@ async function probeOne(c) {
     if (o.expr) lines.push('def ' + o.name + ' = ' + o.expr + ';')
   })
   lines.push('plot ' + S.plotName + ' = ' + c.name + ';')
-  const r = await post(RUN_API, { script: lines.join('\n'), market: S.market, limit: 1 })
+  const r = await post(RUN_API, { script: lines.join('\n'), market: S.market, limit: 1, as_of: S.asOf || null })
   S.probe[c.name] = (r.ok && r.data && Number.isFinite(r.data.matched)) ? r.data.matched : null
   render()
 }

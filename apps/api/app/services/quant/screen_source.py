@@ -300,8 +300,13 @@ _DISPLAY_EXTRA = ["market_cap_basic", "price_earnings_ttm", "RSI", "change",
 
 
 def run_script(script: str, market_key: str = "us", limit: int = 100,
-               sort_by: str | None = None, descending: bool = True) -> dict:
-    """编译 → 拉数 → 本地求值。返回体结构见 docs-hunter / 前端 screener.html。"""
+               sort_by: str | None = None, descending: bool = True,
+               as_of=None) -> dict:
+    """编译 → 拉数 → 本地求值。返回体结构见 docs-hunter / 前端 screener.html。
+
+    as_of(date)= 时间回溯:不用今天的快照,用自家日线重算「那天收盘」的字段再求值
+    (screen_asof)。快照里没有历史的字段(市值 / 财务)整批为空并在 warnings 里点名。
+    """
     md = _market(market_key)
     if not (script or "").strip():
         raise ScreenError("脚本是空的。至少要有一句 `plot scan = <条件>;`")
@@ -339,12 +344,30 @@ def run_script(script: str, market_key: str = "us", limit: int = 100,
                 req_cols.append(col)
 
     t0 = time.time()
-    rows, total = fetch_rows(market_key, req_cols)
+    asof_info = None
+    if as_of is not None:
+        from app.services.quant import screen_asof, rs_history
+        # 只算得出的字段进结果列 —— 市值 / PE 这些展示列在回溯里恒为空,摆着只会让人误以为"这天没数据"
+        want = [f for f in want if f in c.fields or screen_asof.reconstructable(f)]
+        # 快照只拿静态列 + 拆股锚点 + 排名池判断用的两列;今天的价格 / 市值一列都不进回溯行
+        snap_cols = [x for x in screen_asof.STATIC_COLS if x not in ALWAYS_COLS and has_field(x)]
+        snap_cols += list(rs_history._PERF_COLS) + ["exchange", "market_cap_basic"]
+        snap_rows, total = fetch_rows(market_key, snap_cols)
+        perf = {r["_code"]: r for r in snap_rows}
+        try:
+            rows, asof_info = screen_asof.build_rows(md.key, as_of, want, snap_rows, perf)
+        except ValueError as e:
+            raise ScreenError(f"时间回溯:{e}") from e
+        total = asof_info["n"]
+    else:
+        rows, total = fetch_rows(market_key, req_cols)
     fetch_ms = (time.time() - t0) * 1000
 
     rs_stat = None
     vcp_stat = None
     hist = None
+    if as_of is not None:
+        uses_rs = uses_vcp = False           # 回溯行里 RS / VCP 已经按那天算好,不再用今天的统计去盖
     if uses_rs or uses_vcp:
         # 每晚落库的全市场日线统计(RS 线上涨天数、精确 RS Raw、VCP)。读的是一张
         # 每市场几千行的小表,不是逐日明细;表还没建 / 读失败 → 空
@@ -376,9 +399,32 @@ def run_script(script: str, market_key: str = "us", limit: int = 100,
         has.sort(key=lambda r: r.get(sort_by), reverse=descending)
         hits = has + [r for r in hits if r.get(sort_by) is None]
 
-    warnings = [DELAY_WARN]
+    warnings = [DELAY_WARN] if as_of is None else []
     if md.note:
         warnings.append(md.note)
+    if asof_info is not None:
+        a = asof_info["as_of"]
+        warnings.append(
+            f"时间回溯:按 {a} 收盘的自家日线重算(不是扫描源快照)。股票池是 RS 排名池"
+            f"({asof_info['n']} 只有当天收盘;美股剔 OTC 与微盘)。"
+            + (f"你选的 {asof_info['requested']} 不是交易日或还没有日线,取了它之前最近的一天。"
+               if asof_info["requested"] != a else "")
+            + "固定窗口按 5 / 21 / 63 / 126 / 252 个交易日算;EMA / RSI 从可用日线起点递推,"
+              "周期越长、回溯越远,与快照的差异越大;日线不够长的字段给空,不拿短窗口冒充。")
+        if asof_info["unavailable"]:
+            names = "、".join(screen_dsl.field_label_cn(f) or f for f in asof_info["unavailable"])
+            warnings.append(
+                f"这些字段没有历史值(只有当天快照),回溯时整批为空:{names}。"
+                f"用到它们的条件全部「算不出」—— 要回溯就把它们换成价格 / 成交量类字段或先停用。")
+        if asof_info["rs"] is not None:
+            ri = asof_info["rs"]
+            if ri["gated"]:
+                warnings.append(
+                    f"回溯到 {a} 时排名池里只有 {ri['coverage']:.0%} 的票有满 253 根日线可算精确 RS,"
+                    f"低于 {screen_rs.RS_UNIVERSE_THRESHOLD:.0%} 的门槛 —— RS 评级这次全部不给。"
+                    f"日线只保留约 320 根,回溯太远就算不出 RS,这是数据边界,不是故障。")
+            else:
+                warnings.append(screen_rs.METHOD_NOTE_EXACT.format(as_of=a))
     if rs_stat is not None:
         uses_rating = any(f in ("rs_rating", "rs_raw") for f in c.fields)
         uses_line = "rs_line_up_days" in c.fields
@@ -435,7 +481,10 @@ def run_script(script: str, market_key: str = "us", limit: int = 100,
     # 该改哪条条件(2026-09-11 用户问:「2547 只具体缺少哪个字段?」)。
     missing_list = [
         {"field": f, "label": screen_dsl.field_label_cn(f), "count": n,
-         "reason": screen_dsl.missing_reason(f)}
+         "reason": ("回溯模式没有这个字段的历史值(只有当天快照)"
+                    if asof_info is not None and f in asof_info["unavailable"]
+                    else ("回溯到那天时这只票的日线不够长" if asof_info is not None
+                          else screen_dsl.missing_reason(f)))}
         for f, n in sorted(missing.items(), key=lambda kv: -kv[1])
     ]
     if skipped:
@@ -474,7 +523,11 @@ def run_script(script: str, market_key: str = "us", limit: int = 100,
         "columns": want,
         "notes": c.notes,
         "warnings": warnings,
-        "source": "全市场扫描源(非官方接口 · 延迟 15 分钟)",
+        "source": ("自家全市场日线 · 时间回溯" if asof_info is not None
+                   else "全市场扫描源(非官方接口 · 延迟 15 分钟)"),
+        "as_of": str(asof_info["as_of"]) if asof_info is not None else None,
+        "as_of_requested": str(asof_info["requested"]) if asof_info is not None else None,
+        "asof_unavailable": asof_info["unavailable"] if asof_info is not None else [],
         "timing_ms": {"fetch": round(fetch_ms), "evaluate": round(eval_ms)},
     }
 
