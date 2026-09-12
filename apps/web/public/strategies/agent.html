@@ -176,6 +176,12 @@
     .ag-hb .leg{color:var(--muted);white-space:nowrap}
     .ag-hb .leg.in{color:var(--text)}
     .ag-hb .sig{color:var(--muted);font-size:11px}
+    .ag-hb .sym{font-weight:650;font-size:12.5px;vertical-align:top;padding-top:9px;
+      font-family:ui-monospace,menlo,monospace}
+    /* 信号列收窄(用户 2026-09-12):规则号必须完整,规则名长了就省略号 ——
+       名字截断还能 hover 看全,把编号 / 价格 / 盈亏挤出视野才是真丢信息 */
+    .ag-hb td.sg{max-width:150px;overflow:hidden;text-overflow:ellipsis}
+    .ag-hb .fee{color:var(--muted);font-variant-numeric:tabular-nums}
     /* 带买卖理由的格子给一条虚线下划线 —— 不标出来没人知道这里能 hover */
     .ag-hb td.why{cursor:help;border-bottom:0}
     .ag-hb td.why .sig{border-bottom:1px dotted var(--line-strong)}
@@ -700,13 +706,20 @@ function vHistory(d) {
       const isIn = g.kind === 'entry'
       const head = i > 0 ? '' :
         '<td class="no"' + span + '>' + (Number.isFinite(r.no) ? int(r.no) : NA) +
-          '<s>' + (r.side === 'long' ? '做多' : txt(r.side, '')) + '</s></td>'
+          '<s>' + (r.side === 'long' ? '做多' : txt(r.side, '')) + '</s></td>' +
+        '<td class="sym"' + span + '>' + txt(r.symbol) + '</td>'
+      // 净损益是**扣完手续费**的;毛利放 hover —— 两个数都要能看到,
+      // 否则用户拿它和上面总览(引擎零费用口径)对不上,会以为哪边算错了
+      const pnlTip = Number.isFinite(r.pnl_gross) && Number.isFinite(r.fee)
+        ? ' title="扣费前 ' + money(r.pnl_gross, true) + ' · 手续费 ' + fixed(r.fee, 2) + ' USD"'
+        : ''
       const tail = i > 0 ? '' :
         '<td class="n sz mid"' + span + '>' + (Number.isFinite(r.shares) ? int(r.shares) + ' 股' : NA) +
           '<s>' + money(r.amount) + '</s></td>' +
-        '<td class="n mid ' + dir(r.pnl_abs) + '"' + span + '>' +
+        '<td class="n mid ' + dir(r.pnl_abs) + '"' + span + pnlTip + '>' +
           (Number.isFinite(r.pnl_abs) ? money(r.pnl_abs, true) : NA) + '</td>' +
-        '<td class="n mid ' + dir(r.pnl_pct) + '"' + span + '>' + pct(r.pnl_pct, 2, true) + '</td>'
+        '<td class="n mid ' + dir(r.pnl_pct) + '"' + span + '>' + pct(r.pnl_pct, 2, true) + '</td>' +
+        '<td class="n mid fee"' + span + '>' + (Number.isFinite(r.fee) ? fixed(r.fee, 2) : NA) + '</td>'
       // 信号 = 命中了哪条规则。规则号单独成 chip(hover 出条件原文),后面跟规则名
       const sig = g.rule_id
         ? ruleChip(g.rule_id, g.rule_text) + ' <span class="sig">' + txt(g.rule_name, '') + '</span>'
@@ -719,19 +732,29 @@ function vHistory(d) {
         '<td class="leg' + (isIn ? ' in' : '') + '">' +
           (g.kind === 'entry' ? '入场' : (g.kind === 'exit' ? '出场' : NA)) + '</td>' +
         '<td class="leg">' + txt(g.date) + '</td>' +
-        '<td' + (why ? ' class="why" title="' + esc(why) + '"' : '') + '>' + sig + '</td>' +
+        '<td class="sg' + (why ? ' why' : '') + '"' +
+          (why ? ' title="' + esc(why) + '"' : (g.rule_name ? ' title="' + esc(g.rule_name) + '"' : '')) +
+          '>' + sig + '</td>' +
         '<td class="n">' + num(g.price, 2) + '</td>' + tail + '</tr>'
     }).join('')
   }).join('')
   const cnt = (has ? esc(h.items.length + ' 笔') : NA) + ' · 已平仓'
   return panel('历史交易记录', cnt,
     '<div class="ag-scroll"><table class="ag-tb ag-hb"><thead><tr>' +
-    '<th>编号</th><th>类型</th><th>日期</th><th>信号</th><th style="text-align:right">价格</th>' +
-    '<th style="text-align:right">大小</th><th style="text-align:right">净损益</th>' +
-    '<th style="text-align:right">回报</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+    '<th>编号</th><th>代号</th><th>类型</th><th>日期</th><th>信号</th>' +
+    '<th style="text-align:right">价格</th><th style="text-align:right">大小</th>' +
+    '<th style="text-align:right">净损益</th><th style="text-align:right">回报</th>' +
+    '<th style="text-align:right">手续费</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
     '<div class="ag-note" style="margin-top:10px">一行组 = <b>一个持仓周期</b>(建仓 → 加仓 → 清仓算一笔),' +
     '所以这里的笔数比上面总览的「交易 N 笔」少 —— 总览按<b>每次卖出</b>计数,减半再清仓算两次。' +
-    (h.fee_note ? '<br>' + esc(h.fee_note) + ',所以没有手续费这一列(是没有这个数,不是 0)。' : '') +
+    (h.fee_note ? '<br><b>净损益与回报都是扣完手续费的。</b>' + esc(h.fee_note) + '。' : '') +
+    (Number.isFinite(h.fee_total) && Number.isFinite(h.pnl_gross_total)
+      ? '这 ' + (Array.isArray(h.items) ? int(h.items.length) : NA) + ' 笔一共扣了 <b>' +
+        money(h.fee_total) + '</b>,扣费前 ' + money(h.pnl_gross_total, true) +
+        ' → 扣费后 <b>' + money(h.pnl_net_total, true) + '</b>。' : '') +
+    (h.scope_note ? '<br><b>注意口径:</b>' + esc(h.scope_note) +
+      ' —— 引擎是按收盘价、不扣现金跑出来的,要让净值曲线也扣费得改引擎重跑全部历史' +
+      '(现金变少会买不起同样股数,仓位变了整条曲线和每一笔成交都会变)。' : '') +
     '<br><b>把鼠标放到信号上</b>看这一笔的买卖理由(以及卖出后的事后跟踪)—— ' +
     '理由里的数字来自成交记录与行情表,模型只负责把它们组织成人话、不参与计算。' +
     '</div>', 'ag-hist')

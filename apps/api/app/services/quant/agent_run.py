@@ -43,7 +43,7 @@ import sys
 import time
 from datetime import date, datetime, timedelta, timezone
 
-from app.services.quant import agent_vcp as av, agent_opt as ao, agent_sim
+from app.services.quant import agent_vcp as av, agent_opt as ao, agent_sim, commission as cm
 
 log = logging.getLogger(__name__)
 
@@ -672,7 +672,15 @@ def dashboard(branch: str = "base") -> dict:
         "holdings": {"as_of": f"{L[0].strftime('%m-%d')} 收盘", "quote_delay_min": None, "items": holdings},
         "watchlist": {"items": watch_items + fillers, "matched": len(watch_items), "filled": len(fillers)},
         "trades": {"date": str(L[0]), "items": today_trades},
-        "history": {"items": history, "fee_note": "模拟盘按收盘价成交,不计手续费与滑点"},
+        "history": {
+            "items": history,
+            "fee_total": round(sum(r["fee"] for r in history), 2),
+            "pnl_gross_total": round(sum(r["pnl_gross"] for r in history), 2),
+            "pnl_net_total": round(sum(r["pnl_abs"] for r in history), 2),
+            "fee_note": "手续费按阶梯式(当月累计 ≤30 万股 0.0035 美元/股,更高量级逐档降到 0.0005;"
+                        "每笔最低 0.35 美元、最高为成交金额的 1%)买卖各收一次",
+            "scope_note": "这一列只进这张表 —— 上面的总览、净值曲线、胜率仍是引擎的零费用口径",
+        },
         "versions": versions,
         "lessons": lessons,
     }
@@ -766,11 +774,25 @@ def _trade_rounds(trades, rule_cond: dict) -> list[dict]:
     只输出**已经平掉**的周期(买入股数 = 卖出股数)。没平完的还在持仓明细里,
     它的最终盈亏没发生,写进"历史交易记录"就是提前写结论。
 
-    净损益 = 该周期所有卖出的 pnl_abs 之和(逐笔算好的,这里不重算);
+    手续费(用户 2026-09-12 要求)按 commission.py 的阶梯算,**买卖各收一次**:
+    档位取决于当月在这笔之前已经成交了多少股,所以必须拿**整个 branch 的成交**
+    按时间顺序过一遍才能定 —— 不能只在一个周期内部算。
+
+    净损益 = 该周期所有卖出的 pnl_abs 之和 **减去这一笔全部腿的手续费**;
+    pnl_gross 是扣费前的数,两个都给 —— 只给净的,用户对不上引擎算的毛利。
     回报   = 净损益 ÷ 该周期买入总金额 —— 加仓过的票必须用总投入当分母,
-             用第一笔的成本会把回报算大。
-    模拟盘按收盘价成交,没有手续费和滑点这两个字段,所以不给这两列(不是 0,是没有)。
+             用第一笔的成本会把回报算大。分母不含买入手续费,和「大小」那一列对得上。
+
+    ⚠ 手续费只进这张表。上面的总览、净值曲线、胜率仍是**引擎的零费用口径** ——
+      引擎按收盘价成交、不扣现金,要让净值曲线也扣费得改引擎并重跑全部历史
+      (现金变少会买不起同样股数 → 仓位变 → 整条曲线和每一笔成交都会变)。
+      两个口径的差额写在卡片脚注里,不许闷着。
     """
+    fills = []
+    for t in sorted(trades, key=lambda x: (x[0], x[1])):
+        fills.append(((t[0], t[1]), t[0].strftime("%Y-%m"), t[5], t[6]))
+    fee_of = cm.fees_by_month(fills)
+
     groups: dict = {}
     for t in trades:
         key = (t[3], t[15])                      # code + entry_date
@@ -787,7 +809,9 @@ def _trade_rounds(trades, rule_cond: dict) -> list[dict]:
         if sum(t[5] for t in buys) != sum(t[5] for t in sells):
             continue                             # 还没平完 —— 归持仓明细管
         cost = sum(t[7] or (t[5] * t[6]) for t in buys)
-        pnl = sum(t[9] for t in sells if t[9] is not None)
+        gross = sum(t[9] for t in sells if t[9] is not None)
+        fee = sum(fee_of.get((t[0], t[1]), 0.0) for t in ts)
+        pnl = gross - fee
         legs = []
         for t in ts:
             # rationale / followup 原来只在「今日操作报告」里露面,那张卡片 2026-09-12 撤掉了,
@@ -795,7 +819,8 @@ def _trade_rounds(trades, rule_cond: dict) -> list[dict]:
             # 卡片没了不等于信息该没
             leg = {"kind": "entry" if t[2] == "buy" else "exit", "date": str(t[0]),
                    "rule_id": t[12], "rule_name": t[13], "rationale": t[14],
-                   "rule_text": rule_cond.get(t[12]), "price": t[6], "shares": t[5]}
+                   "rule_text": rule_cond.get(t[12]), "price": t[6], "shares": t[5],
+                   "fee": round(fee_of.get((t[0], t[1]), 0.0), 4)}
             if t[2] == "buy" and len(t) > 18 and t[18]:
                 leg["rule_name"] = f"{t[13]} · {t[18]} 级"      # 评分只记在买入那笔上
             if t[2] == "sell":
@@ -806,6 +831,7 @@ def _trade_rounds(trades, rule_cond: dict) -> list[dict]:
             "entry_date": str(entry_date), "exit_date": str(sells[-1][0]),
             "shares": sum(t[5] for t in buys), "amount": round(cost, 2),
             "pnl_abs": round(pnl, 2), "pnl_pct": round(pnl / cost * 100, 2) if cost else None,
+            "pnl_gross": round(gross, 2), "fee": round(fee, 4),
             "hold_days": sells[-1][11], "adds": len(buys) - 1, "legs": legs,
         })
     # 按平仓日排;编号按时间正序给(1 = 第一笔),前端倒序显示,和券商对账单一个习惯

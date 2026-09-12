@@ -314,9 +314,12 @@ try {
         {symbol:'FILL', price:9.9, filler:true, rs_pct:99.9, rs_raw_pct:412,
          gap:'不是今天的候选 —— 它没过任何一条买入规则'}], matched:6, filled:1},
       // 历史交易记录:第一笔是加过两次仓的(3 腿),第二笔是干净的一买一卖
-      history:{fee_note:'模拟盘按收盘价成交,不计手续费与滑点', items:[
+      history:{fee_note:'手续费按阶梯式(当月累计 ≤30 万股 0.0035 美元/股…)买卖各收一次',
+        scope_note:'这一列只进这张表 —— 上面的总览、净值曲线、胜率仍是引擎的零费用口径',
+        fee_total:1.98, pnl_gross_total:149.14, pnl_net_total:147.16, items:[
         {no:19, symbol:'ARMK', name:'ARMK', side:'long', entry_date:'2026-08-11', exit_date:'2026-08-25',
-         shares:232, amount:14134.64, pnl_abs:-263.36, pnl_pct:-1.86, hold_days:10, adds:2, legs:[
+         shares:232, amount:14134.64, pnl_abs:-265.34, pnl_pct:-1.88, pnl_gross:-263.36, fee:1.9775,
+         hold_days:10, adds:2, legs:[
            {kind:'entry', date:'2026-08-11', rule_id:'R-04', rule_name:'VCP 突破买入', price:60.47, shares:133,
             rationale:'收盘 $60.47 突破前 20 日高点 $59.90 1.0%(<5%,未追高);量能 2.1 倍 50 日均量'},
            {kind:'entry', date:'2026-08-13', rule_id:'R-16', rule_name:'倒三角加仓', price:61.11, shares:66},
@@ -325,7 +328,8 @@ try {
             rationale:'持有 10 个交易日仍未涨过 1R,按 R-15 清仓;当日量能 0.7 倍 20 日均量',
             followup:'卖出后 T+5 该股再跌 3.2% —— 这次是躲过了'}]},
         {no:18, symbol:'GS', name:'GS', side:'long', entry_date:'2026-07-02', exit_date:'2026-07-20',
-         shares:8, amount:7806.88, pnl_abs:412.5, pnl_pct:5.28, hold_days:13, adds:0, legs:[
+         shares:8, amount:7806.88, pnl_abs:411.8, pnl_pct:5.27, pnl_gross:412.5, fee:0.7,
+         hold_days:13, adds:0, legs:[
            {kind:'entry', date:'2026-07-02', rule_id:'R-04', rule_name:'VCP 突破买入', price:975.86, shares:8},
            {kind:'exit', date:'2026-07-20', rule_id:'R-13', rule_name:'移动止盈', price:1027.42,
             shares:8, pnl_abs:412.5, pnl_pct:5.28}]}]},
@@ -364,7 +368,7 @@ try {
                         bench_pct:null, sharpe:null, entry_rule:null}]},
       watchlist:{items:[{symbol:'Y', score:null, price:null, rule_id:null, progress_pct:null, gap:null}]},
       history:{items:[{no:null, symbol:null, side:null, shares:null, amount:null, pnl_abs:null,
-                       pnl_pct:null, hold_days:null,
+                       pnl_pct:null, hold_days:null, fee:null, pnl_gross:null,
                        legs:[{kind:'entry', date:null, rule_id:null, rule_name:null, price:null, shares:null}]}]},
       trades:{items:[{side:'buy', symbol:'Z', shares:null, price:null, rule_id:null, rationale:null}]},
       versions:[{label:null, date:null, change:null}],
@@ -478,17 +482,29 @@ try {
   else { failed++; console.log('FAIL 智能体 · 加仓周期没合并,退化成逐笔平铺') }
   if (/rowspan="2"/.test(H)) console.log('PASS 智能体 · 一买一卖的周期是 2 腿')
   else { failed++; console.log('FAIL 智能体 · 一买一卖的周期腿数不对') }
-  const need2 = [['净损益按笔算', /-\$263/], ['回报按笔算', /-1\.86%/], ['出场规则挂在腿上', /R-15</],
-    ['笔数与总览口径的差异写出来了', /总览按<b>每次卖出<\/b>计数/],
-    ['没有手续费列时说明为什么', /不计手续费与滑点/]]
+  const need2 = [['净损益按笔算(扣费后)', /-\$265/], ['回报按笔算(扣费后)', /-1\.88%/],
+    ['出场规则挂在腿上', /R-15</],
+    ['笔数与总览口径的差异写出来了', /总览按<b>每次卖出<\/b>计数/]]
   for (const [name, re] of need2) {
     if (re.test(H)) console.log('PASS 智能体 ·', name)
     else { failed++; console.log('FAIL 智能体 ·', name) }
   }
-  if (/class="why" title="[^"]{10,}"/.test(H)) console.log('PASS 智能体 · 买卖理由跟着搬到了信号列的 hover 上')
+  if (/class="sg why" title="[^"]{10,}"/.test(H)) console.log('PASS 智能体 · 买卖理由跟着搬到了信号列的 hover 上')
   else { failed++; console.log('FAIL 智能体 · 「今日操作报告」撤掉后买卖理由丢了') }
-  if (!/<th[^>]*>手续费/.test(H)) console.log('PASS 智能体 · 没凭空造手续费列')
-  else { failed++; console.log('FAIL 智能体 · 出现了手续费列,但数据源里没有这个字段') }
+  // 手续费 2026-09-12 从「没有这个字段」变成「按阶梯算」,断言跟着反过来:
+  //   必须有这一列,净损益必须是扣完费的,且扣费前的数要能 hover 到 ——
+  //   只给净的,用户拿它和上面总览(引擎零费用口径)对不上,会以为哪边算错了
+  const feeNeed = [['有手续费列', /<th[^>]*>手续费/], ['有代号列', /<th[^>]*>代号/],
+    ['代号填的是股票代码', /class="sym"[^>]*>ARMK</],
+    ['净损益是扣费后的数', /-\$265/], ['扣费前的数在 hover 里', /title="扣费前 -\$263[^"]*手续费 1\.98/],
+    ['脚注说明了这一列不进净值曲线', /仍是引擎的零费用口径/],
+    ['脚注给出两个口径的差额', /一共扣了 <b>\$2<\/b>/]]
+  for (const [name, re] of feeNeed) {
+    if (re.test(H)) console.log('PASS 智能体 ·', name)
+    else { failed++; console.log('FAIL 智能体 ·', name) }
+  }
+  if (/class="sg/.test(H)) console.log('PASS 智能体 · 信号列带收窄样式')
+  else { failed++; console.log('FAIL 智能体 · 信号列没有收窄样式') }
   // 护栏尤其不能猜:用户会据此判断风险敞口
   if (!/只做多|可做空/.test(S)) console.log('PASS 智能体 · 骨架不猜交易方向')
   else { failed++; console.log('FAIL 智能体 · 骨架凭空写了交易方向') }
