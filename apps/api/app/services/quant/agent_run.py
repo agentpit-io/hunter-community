@@ -149,8 +149,11 @@ def _watchlist(d: date) -> tuple[list[tuple], dict]:
     p = screen_source.preset(PRESET)
     r = screen_source.run_script(p["script"], MARKET, 500, "rs_rating", True, d)
     items = [(x["code"], x.get("name") or x["code"], x["fields"].get("rs_rating")) for x in r["picks"]]
+    # RS 评级被门槛挡掉(排名池里满 253 根日线的不到 90%)→ 筛选条件 rs_rating >= 70 整批算不出,
+    # 观察列表必然为空。这不是"今天没有候选",要在流水线里标 warn 并说出来
+    gate = next((w for w in r["warnings"] if "门槛" in w), None)
     return items, {"matched": r["matched"], "scanned": r["scanned"], "skipped": r["skipped_incomplete"],
-                   "as_of": r["as_of"]}
+                   "as_of": r["as_of"], "gate": gate}
 
 
 def _stock_sharpe(bars: list[tuple], since: date) -> tuple[float | None, str | None]:
@@ -226,11 +229,13 @@ def run_date(d: date, perf: dict | None = None, snap: dict | None = None) -> dic
     n_buy = sum(1 for f in fills if f["side"] == "buy")
     n_sell = len(fills) - n_buy
     realized = sum(f.get("pnl_abs") or 0 for f in fills if f["side"] == "sell")
-    steps.append({"key": "backtest", "name": "扫描与执行", "status": "ok" if scan_ok else "fail", "at": _hm(),
+    gated = bool(ws.get("gate")) and not watch
+    steps.append({"key": "backtest", "name": "扫描与执行", "status": ("fail" if not scan_ok else "warn" if gated else "ok"), "at": _hm(),
                   "duration_ms": int((time.time() - t1) * 1000),
                   "summary": (f"「VCP 波段收缩」命中 {ws.get('matched')} 只 → 观察列表;买入 {n_buy} 笔、卖出 {n_sell} 笔"
                               + (f",已实现 {realized:+.0f} 美元" if n_sell else "")
-                              + (f";护栏:{res['halt_reason']}" if res["halt_reason"] else ""))
+                              + (f";护栏:{res['halt_reason']}" if res["halt_reason"] else "")
+                              + (f"。⚠ 观察列表为空是因为 RS 评级被门槛挡下(不是没有候选):{ws['gate'][:60]}…" if gated else ""))
                              if scan_ok else f"筛选失败:{ws.get('error')};持仓照常管理,今天不开新仓"})
 
     # 落库:持仓 / 成交 / 当日
@@ -343,7 +348,10 @@ def _lesson(cur, d: date, fills: list[dict], res: dict, ws: dict, followups: lis
                 miss[rid] = miss.get(rid, 0) + 1
     top_miss = max(miss.items(), key=lambda kv: kv[1]) if miss else None
 
-    if not fills:
+    if not fills and ws.get("gate") and not n_watch:
+        title = "观察列表为空:RS 评级被覆盖率门槛挡下,筛选整批算不出(数据边界,不是没有候选)"
+        kind = "validated"
+    elif not fills:
         title = f"空仓观望:候选 {n_watch} 只无一触发买入" if not res["positions"] else f"持仓不动:{len(res['positions'])} 只都没到出场线,候选 {n_watch} 只没有新突破"
         kind = "validated"
     else:

@@ -1497,6 +1497,25 @@ BFF prompt 里那句「用户说『用 xxx skill 分析』时,你会先读到那
 `render_check.js` 顺带改了收尾:`setImmediate` 退出(有一组断言挂在 async 的 await 链上),
 并吞掉 `unhandledRejection`(fetch 一律 reject,data.html 有不 catch 的调用,node 20 会当崩溃)。
 
+## 小鹿智能体 · 后端已接(2026-09-12)· 六条边界
+
+策略 = 「VCP 波段交易」(`quant/agent_vcp.py`,用户给的 Backtrader 策略逐条移植),观察列表 = 筛选器内置示例
+「VCP 波段收缩」当天结果,行情 = `rs_daily` 日线(经 `screen_asof` 拆股修正与缓存),纸上交易、单实例、美股。
+每日流水线与面板组装在 `quant/agent_run.py`;四张表 `agent_meta / agent_day / agent_trade / agent_position`(幂等 DDL)。
+每天由 `scripts/rs_history_nightly.sh` 在美股日线落完后接着跑 `agent_run daily`。用例 `tests/test_agent_vcp.py`。
+
+1. **收盘后决策、信号当天收盘价成交。** 日线没有开盘价,做不了 Backtrader 默认的次日开盘成交;要改口径先补开盘价。
+2. **原脚本三处 bug 按意图改了**(文件头写全):加仓比较用昨天为止的最高(原脚本先更新再比,永远触发不了)、
+   止盈状态不重复触发 +10%、止盈状态不加仓。用户要改回去只动 `manage_position` 那几行。
+3. **护栏三参数是原脚本没有的**(起始资金 10 万美元 / 单日 -3% 熔断 / 连亏 3 笔停一天,`agent_vcp.GUARDS`),
+   2026-09-12 取的默认值,待用户确认。
+4. **回填只能从 RS 评级算得出的那天开始。** `rs_daily` 只保留约 320 根,精确 RS 要 253 根且排名池覆盖 ≥90%,
+   实测 2026-08-07 前观察列表整批为空(不是没有候选,流水线第 2 步标 warn 并说明)。**这个窗口会跟着日线一起滚动**,
+   永远只有约 60 个交易日可回填;要更长历史得让 rs_history 多拉几年。
+5. **同一天只跑一次**(`agent_day` 主键),「立即跑一次」按日期幂等;重跑历史要 `agent_run reset --yes` 再 `backfill`。
+   `reset` 清空全部交易记录,只在 CLI 有,不给接口。
+6. **文本全是规则模板拼的,不走 LLM**;数字来自成交与日线。以后要接 LLM 润色,必须照契约 §2.2 做正则回读校验。
+
 ## 小鹿智能体页(`strategies/agent.html`)· 三条别改坏的约定
 
 2026-09-09 新增的自迭代量化原型页,**前端已完成、后端接口还没有**。
