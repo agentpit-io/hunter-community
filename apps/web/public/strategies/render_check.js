@@ -627,6 +627,23 @@ try {
   console.log('FAIL 迭代方向定向断言 ·', e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e)
 }
 
+// ─── 悬停日K:dispose 必须在清容器之前(app.js)────────────────────────
+// 2026-09-12 线上 bug:kcRender 先 box.innerHTML='' 再 chart.dispose(),
+// echarts 去 removeChild 自己那个已经被摘走的根节点 → TypeError 把 kcRender 打断,
+// 表现是「头部和图例都填好了,图区一片空白」,而且只在第二只票起出现
+// (第一只时还没有上一张图可丢)。假 DOM 里没有真 echarts,这个 bug 跑不出来 ——
+// 只能拿源码顺序钉住它。
+{
+  const bad = /box\.innerHTML\s*=\s*''[\s\S]{0,80}?KC\.chart\.dispose\(\)/.test(appJs)
+  if (!bad) console.log('PASS 悬停日K · dispose 排在清空容器之前')
+  else { failed++; console.log('FAIL 悬停日K · 又变成先清容器再 dispose 了,第二只票起会空白') }
+  // 两条清空容器的路径(kcMsg 与正常渲染)都必须先丢图。中间隔着注释,窗口放宽到 120 字符
+  const paired = (appJs.match(/kcDropChart\(\)[\s\S]{0,120}?box\.innerHTML/g) || []).length
+  if (/function kcDropChart/.test(appJs) && paired >= 2)
+    console.log('PASS 悬停日K · 清容器的路径统一走 kcDropChart')
+  else { failed++; console.log('FAIL 悬停日K · 有清容器的路径没走 kcDropChart(配上的只有', paired, '处)') }
+}
+
 // ─── 登录态续期(app.js)─────────────────────────────────────────────
 // 策略中心这几页不经过主站 AuthGuard,续期全靠 app.js 自己。
 // 这里只验两个纯函数:判过期、换请求头。真正的续期流程要真浏览器 + 真 token 才测得了。

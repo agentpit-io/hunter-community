@@ -969,9 +969,22 @@ function kcHide() {
   }, 60)
 }
 
+// 丢掉上一张图。**必须在动 box.innerHTML 之前调用**:
+// 反过来的话(先 innerHTML='' 再 dispose)echarts 要 removeChild 自己的根节点,
+// 而那个节点已经被摘走了 → parentNode 为 null → TypeError 从这里把 kcRender 打断,
+// 表现是「头部和图例都填好了,图区一片空白」,而且只在**第二只票起**出现
+// (第一只时还没有上一张图可丢)。2026-09-12 线上复现并修掉。
+function kcDropChart() {
+  if (!KC.chart) return
+  try { KC.chart.dispose() } catch (e) { /* 容器已被外部清掉时不该连累后面的渲染 */ }
+  KC.chart = null
+}
+
 function kcMsg(html) {
   const box = document.getElementById('kc-box')
-  if (box) box.innerHTML = '<div class="kc-msg">' + html + '</div>'
+  if (!box) return
+  kcDropChart()            // 这里也要:kcMsg 同样会清空容器(「加载中…」就走这条路)
+  box.innerHTML = '<div class="kc-msg">' + html + '</div>'
 }
 
 // 把标记里的日期对到 K 线的下标上。日线只有交易日,而标记的日子一定是交易日
@@ -1137,8 +1150,7 @@ function kcRender(code, name, payload, mark) {
     // 用户分不清「这只票没数据」和「还在加载」,只会一直等下去。
     if (px) { px.textContent = ''; px.className = 'px' }
     if (rg) rg.textContent = ''
-    kcMsg(kcEsc((payload && payload.error) || '暂无日线数据'))
-    if (KC.chart) { KC.chart.dispose(); KC.chart = null }
+    kcMsg(kcEsc((payload && payload.error) || '暂无日线数据'))   // 它内部已经把上一张图丢掉了
     return
   }
 
@@ -1156,8 +1168,8 @@ function kcRender(code, name, payload, mark) {
 
   const box = document.getElementById('kc-box')
   if (!box) return
+  kcDropChart()            // 顺序不能反,原因见 kcDropChart 的注释
   box.innerHTML = ''
-  if (KC.chart) { KC.chart.dispose(); KC.chart = null }
   if (!window.echarts) { kcMsg('图表库没加载出来'); return }
   KC.chart = window.echarts.init(box)
   KC.chart.setOption(kcOption(rows, mark))
@@ -1207,7 +1219,11 @@ function kcShow(td) {
     const nm = document.getElementById('kc-nm')
     if (sy) sy.textContent = code
     if (nm) nm.textContent = td.dataset.kname || ''
-    if (!KC.cache.has(code)) kcMsg('加载中…')
+    // 首次拉日线要 5~10 秒(上游接口),不说清楚用户会以为卡死了 —— 他没法区分
+    // 「还在加载」和「坏了」,只会一直等或者以为功能是坏的
+    if (!KC.cache.has(code)) {
+      kcMsg('加载中…<br><span style="font-size:11px">首次拉一年日线要几秒,之后再看是瞬开的</span>')
+    }
     el.classList.add('on')
     kcPlace(el._rect)
     const payload = await kcFetch(code)
