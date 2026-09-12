@@ -260,7 +260,7 @@ try {
 // ─── 针对小鹿智能体的定向断言 ─────────────────────────────────────
 // 这个页面的全部数字来自后端,本地跑不到接口,所以直接把两份 fixture
 // 塞进渲染函数验证两件事:
-//   ① 区块顺序 —— 净值曲线 → 规则 → 持仓 → 操作报告 → 演进 → 成长总结
+//   ① 区块顺序 —— 净值曲线 → 规则 → 持仓 → 历史交易记录 → 演进 → 成长总结
 //   ② 字段为 null 时落到 `—`,不出现 NaN / undefined / 凭空的 0.00
 // 第 ② 条是仓内铁律「空的比假的好」的机器可验形式:光靠 review 看不住,
 // 以后有人给某个字段加 `|| 0` 兜底,这里会当场红。
@@ -317,10 +317,13 @@ try {
       history:{fee_note:'模拟盘按收盘价成交,不计手续费与滑点', items:[
         {no:19, symbol:'ARMK', name:'ARMK', side:'long', entry_date:'2026-08-11', exit_date:'2026-08-25',
          shares:232, amount:14134.64, pnl_abs:-263.36, pnl_pct:-1.86, hold_days:10, adds:2, legs:[
-           {kind:'entry', date:'2026-08-11', rule_id:'R-04', rule_name:'VCP 突破买入', price:60.47, shares:133},
+           {kind:'entry', date:'2026-08-11', rule_id:'R-04', rule_name:'VCP 突破买入', price:60.47, shares:133,
+            rationale:'收盘 $60.47 突破前 20 日高点 $59.90 1.0%(<5%,未追高);量能 2.1 倍 50 日均量'},
            {kind:'entry', date:'2026-08-13', rule_id:'R-16', rule_name:'倒三角加仓', price:61.11, shares:66},
            {kind:'exit', date:'2026-08-25', rule_id:'R-15', rule_name:'10 日不涨清仓', price:59.08,
-            shares:232, pnl_abs:-263.36, pnl_pct:-1.86}]},
+            shares:232, pnl_abs:-263.36, pnl_pct:-1.86,
+            rationale:'持有 10 个交易日仍未涨过 1R,按 R-15 清仓;当日量能 0.7 倍 20 日均量',
+            followup:'卖出后 T+5 该股再跌 3.2% —— 这次是躲过了'}]},
         {no:18, symbol:'GS', name:'GS', side:'long', entry_date:'2026-07-02', exit_date:'2026-07-20',
          shares:8, amount:7806.88, pnl_abs:412.5, pnl_pct:5.28, hold_days:13, adds:0, legs:[
            {kind:'entry', date:'2026-07-02', rule_id:'R-04', rule_name:'VCP 突破买入', price:975.86, shares:8},
@@ -388,8 +391,9 @@ try {
     ['扫描筛选在规则之前', at('扫描筛选 · 找候选票'), at('当前生效的规则')],
     ['规则在持仓之前', at('当前生效的规则'), at('持仓明细')],
     ['持仓在历史交易记录之前', at('持仓明细'), at('历史交易记录')],
-    ['历史交易记录在操作报告之前', at('历史交易记录'), at('今日操作报告')],
-    ['操作报告在策略演进之前', at('今日操作报告'), at('策略演进')],
+    // 「今日操作报告」2026-09-12 撤掉了(历史逐笔记录覆盖了它,还多了已平仓的盈亏),
+    // 它独有的买卖理由搬到了历史记录的信号列 hover 上 —— 见下面的断言
+    ['历史交易记录在策略演进之前', at('历史交易记录'), at('策略演进')],
     ['成长总结排最后', at('策略演进'), at('每日成长总结')],
   ]
   for (const [name, a, b] of order) {
@@ -399,7 +403,7 @@ try {
 
   // ② 关键内容真的渲染出来了
   const need = [
-    ['触发的规则挂在交易上', /class="ag-rule"[^>]*>R-03</],
+    ['触发的规则挂在成交腿上', /class="ag-rule"[^>]*>R-15</],
     ['净值曲线画出了 svg', /<svg[^>]*viewBox="0 0 720 250"/],
     ['换版竖线', /stroke-dasharray="3 3"/],
     ['教训带落地状态', /已落地 · R-03 止损/],
@@ -430,16 +434,16 @@ try {
   //   用户 2026-09-09 明确要求:「把没获取到后端数据的地方都用 — 表示」。
   //   整页替换掉的话,连这一页长什么样都看不见,而「这页会展示什么」本身就是信息。
   const skel = ['当前基于', '护栏', '净值 vs 基准', '当前生效的规则', '持仓明细', '历史交易记录',
-    '今日观察列表', '今日操作报告', '策略演进', '每日成长总结']
+    '今日观察列表', '策略演进', '每日成长总结']
   const lost = skel.filter(s => S.indexOf(s) < 0)
-  if (!lost.length) console.log('PASS 智能体 · 后端 404 时十个区块骨架都在')
+  if (!lost.length) console.log('PASS 智能体 · 后端 404 时九个区块骨架都在')
   else { failed++; console.log('FAIL 智能体 · 后端 404 时丢了区块:', lost.join(' / ')) }
   for (const [name, re] of banned) {
     if (!re.test(S)) console.log('PASS 智能体 · 骨架不出现', name)
     else { failed++; console.log('FAIL 智能体 · 骨架里出现了', name) }
   }
   // 买卖方向 / 教训类型缺失时不许猜 —— 猜错比留空严重
-  if (!/>卖出</.test(S) && !/>买入</.test(S)) console.log('PASS 智能体 · 骨架不猜买卖方向')
+  if (!/>入场</.test(S) && !/>出场</.test(S) && !/>做多</.test(S)) console.log('PASS 智能体 · 骨架不猜买卖方向')
   else { failed++; console.log('FAIL 智能体 · 骨架凭空写了买卖方向') }
   if (!/亏损教训|验证通过/.test(S)) console.log('PASS 智能体 · 骨架不猜教训类型')
   else { failed++; console.log('FAIL 智能体 · 骨架凭空写了教训类型') }
@@ -481,6 +485,8 @@ try {
     if (re.test(H)) console.log('PASS 智能体 ·', name)
     else { failed++; console.log('FAIL 智能体 ·', name) }
   }
+  if (/class="why" title="[^"]{10,}"/.test(H)) console.log('PASS 智能体 · 买卖理由跟着搬到了信号列的 hover 上')
+  else { failed++; console.log('FAIL 智能体 · 「今日操作报告」撤掉后买卖理由丢了') }
   if (!/<th[^>]*>手续费/.test(H)) console.log('PASS 智能体 · 没凭空造手续费列')
   else { failed++; console.log('FAIL 智能体 · 出现了手续费列,但数据源里没有这个字段') }
   // 护栏尤其不能猜:用户会据此判断风险敞口

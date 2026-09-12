@@ -176,6 +176,9 @@
     .ag-hb .leg{color:var(--muted);white-space:nowrap}
     .ag-hb .leg.in{color:var(--text)}
     .ag-hb .sig{color:var(--muted);font-size:11px}
+    /* 带买卖理由的格子给一条虚线下划线 —— 不标出来没人知道这里能 hover */
+    .ag-hb td.why{cursor:help;border-bottom:0}
+    .ag-hb td.why .sig{border-bottom:1px dotted var(--line-strong)}
     .ag-hb .sz s{display:block;text-decoration:none;color:var(--muted);font-size:10.5px;margin-top:2px}
     .ag-hb .mid{vertical-align:middle}
     /* 补位卡片:虚线框 + 灰底,一眼看出它和上面那些真候选不是一回事 */
@@ -207,24 +210,6 @@
     .ag-w .r2 b{color:var(--brand-dark);font-variant-numeric:tabular-nums}
     .ag-gap{height:5px;background:#efe7dc;border-radius:3px;margin-top:7px;overflow:hidden}
     .ag-gap i{display:block;height:100%;background:var(--brand);border-radius:3px}
-
-    /* 交易时间线 */
-    .ag-tl{display:flex;flex-direction:column}
-    .ag-t{display:grid;grid-template-columns:70px 1fr;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
-    .ag-t:last-child{border-bottom:0}
-    .ag-t .tm{font-family:ui-monospace,menlo,monospace;font-size:11px;color:var(--muted);
-      line-height:1.5;font-variant-numeric:tabular-nums}
-    .ag-t .tm s{display:block;text-decoration:none;color:var(--soft);font-size:10px}
-    .ag-act{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:13.5px}
-    .ag-act .buy{color:var(--up);font-weight:700} .ag-act .sell{color:var(--dn);font-weight:700}
-    .ag-act .qty{font-family:ui-monospace,menlo,monospace;font-size:12.5px;font-variant-numeric:tabular-nums}
-    .ag-why{color:var(--muted);font-size:12px;line-height:1.75;margin-top:6px}
-    .ag-why b{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums;
-      border-bottom:1px dotted var(--line-strong)}
-    .ag-post{margin-top:7px;font-size:11.5px;padding:6px 10px;border-radius:8px;background:var(--panel);
-      color:var(--muted);display:inline-block;line-height:1.6}
-    .ag-post b{color:var(--text)}
-    .ag-post.act{background:#fdf1e4;color:#8a5a1b}
 
     /* 版本演进 */
     .ag-vers{display:flex;overflow-x:auto;padding-bottom:4px}
@@ -726,11 +711,15 @@ function vHistory(d) {
       const sig = g.rule_id
         ? ruleChip(g.rule_id, g.rule_text) + ' <span class="sig">' + txt(g.rule_name, '') + '</span>'
         : NA
+      // 买卖理由(后端算好的数字 + 组织成的人话)挂在整格的 hover 上。
+      // 原来它占「今日操作报告」一整段正文,那张卡片撤掉后没地方放,
+      // 但它是这一行里唯一能回答"凭什么"的东西,不能丢。
+      const why = [g.rationale, g.followup ? '事后跟踪:' + g.followup : ''].filter(Boolean).join(' · ')
       return '<tr' + (i === 0 ? ' class="rd-first"' : '') + '>' + head +
         '<td class="leg' + (isIn ? ' in' : '') + '">' +
           (g.kind === 'entry' ? '入场' : (g.kind === 'exit' ? '出场' : NA)) + '</td>' +
         '<td class="leg">' + txt(g.date) + '</td>' +
-        '<td>' + sig + '</td>' +
+        '<td' + (why ? ' class="why" title="' + esc(why) + '"' : '') + '>' + sig + '</td>' +
         '<td class="n">' + num(g.price, 2) + '</td>' + tail + '</tr>'
     }).join('')
   }).join('')
@@ -743,6 +732,8 @@ function vHistory(d) {
     '<div class="ag-note" style="margin-top:10px">一行组 = <b>一个持仓周期</b>(建仓 → 加仓 → 清仓算一笔),' +
     '所以这里的笔数比上面总览的「交易 N 笔」少 —— 总览按<b>每次卖出</b>计数,减半再清仓算两次。' +
     (h.fee_note ? '<br>' + esc(h.fee_note) + ',所以没有手续费这一列(是没有这个数,不是 0)。' : '') +
+    '<br><b>把鼠标放到信号上</b>看这一笔的买卖理由(以及卖出后的事后跟踪)—— ' +
+    '理由里的数字来自成交记录与行情表,模型只负责把它们组织成人话、不参与计算。' +
     '</div>', 'ag-hist')
 }
 
@@ -792,51 +783,6 @@ function vWatch(d) {
     (nFill ? '<br><b>虚线框的是补位</b>:今天只筛出 ' + int(nReal) + ' 只,不足 5 只的部分按 RS 排名补上最强的几只。' +
       '它们<b>没过任何一条买入规则</b>,智能体不会因为它们出现在这里就买 —— 只是让你知道现在市场最强的是谁。' : '') +
     '</div>')
-}
-
-// ═══ ⑨ 今日操作报告 ═══════════════════════════════════════════════
-function vTrades(d) {
-  const t = d.trades || {}
-  const has = Array.isArray(t.items)
-  if (has && !t.items.length) {
-    return panel('今日操作报告', t.date ? esc(t.date) : '0 笔',
-      missing('今天没有成交', '没有标的触发买卖规则。空仓不动也是一种执行结果,不是故障'))
-  }
-  const rows = (has ? t.items : SKELETON_ROW).map(function (it) {
-    // side 缺失时不能默认「卖出」—— 买卖方向是这一行最关键的一个字,猜错比留空严重
-    const side = it.side === 'buy' ? '<span class="buy">买入</span>'
-      : it.side === 'sell' ? '<span class="sell">卖出</span>' : NA
-    const qty = (Number.isFinite(it.shares) || Number.isFinite(it.price))
-      ? (Number.isFinite(it.shares) ? int(it.shares) + ' 股' : '') +
-        (Number.isFinite(it.price) ? ' @ ' + fixed(it.price, 2) : '')
-      : NA
-    const pnl = Number.isFinite(it.pnl_abs)
-      ? '<span class="qty ' + dir(it.pnl_abs) + '" style="font-weight:650">' + money(it.pnl_abs, true) +
-        (Number.isFinite(it.pnl_pct) ? ' · ' + pct(it.pnl_pct, 1, true) : '') + '</span>'
-      : (Number.isFinite(it.amount)
-          ? '<span class="qty" style="color:var(--muted)">' + money(it.amount) +
-            (Number.isFinite(it.position_pct) ? ' · 占仓 ' + pct(it.position_pct, 1) : '') + '</span>'
-          : '')
-    return '<div class="ag-t">' +
-      '<div class="tm">' + txt(it.ts_market, '') + '<s>' + txt(it.ts_market_tz, '') + '</s>' +
-        '<s style="margin-top:3px">' + txt(it.ts_local, '') + '</s></div>' +
-      '<div><div class="ag-act">' +
-        side + '<b>' + txt(it.symbol) + '</b><span class="qty">' + qty + '</span>' + pnl +
-        '<span style="margin-left:auto">' + ruleChip(it.rule_id, it.rule_text) +
-          (it.rule_name ? ' <span style="font-size:11.5px;color:var(--muted)">' + esc(it.rule_name) + '</span>' : '') +
-        '</span></div>' +
-      // rationale 由后端组织,数字必须来自成交与行情表(见文件末尾的说明)
-      '<div class="ag-why">' + txt(it.rationale) + '</div>' +
-      (it.followup ? '<div class="ag-post"><span class="hi hi-lightbulb"></span> ' + esc(it.followup) + '</div>' : '') +
-      (it.adjustment ? '<div class="ag-post act"><span class="hi hi-edit"></span> ' + esc(it.adjustment) + '</div>' : '') +
-      '</div></div>'
-  }).join('')
-  return panel('今日操作报告',
-    (has ? esc(t.items.length + ' 笔') : NA) + (t.date ? ' · ' + esc(t.date) : '') + ' · 每笔注明触发了哪条规则',
-    '<div class="ag-tl">' + rows + '</div>' +
-    '<div class="ag-note" style="margin-top:12px;padding-top:11px;border-top:1px solid var(--line)">' +
-    '<b>归因里的数字必须来自成交记录与行情表</b>,模型只负责把它们组织成人话、不参与计算 —— ' +
-    '对应仓内铁律「LLM 严禁自由生成用户可见的数字」,后端出文本前要做正则回读校验。</div>')
 }
 
 // ═══ ⑩ 策略演进 ═══════════════════════════════════════════════════
@@ -953,7 +899,7 @@ function render(d, notice) {
     vStatus(d) + vBranches(d) + vStrategy(d) + vGuard(d) + vPipeline(d) + vKpi(d) + vNav(d) +
     vScreener() + vRules(d) +
     '<div class="ag-two"><div class="ag-col" id="ag-col">' + vHoldings(d) + vHistory(d) + '</div>' + vWatch(d) + '</div>' +
-    vTrades(d) + vVersions(d) + vLessons(d) +
+    vVersions(d) + vLessons(d) +
     '<div class="ag-note" style="text-align:center;padding:6px 0 0">' +
     '涨跌配色沿用站内中式惯例(<span style="color:var(--up);font-weight:650">红涨</span> · ' +
     '<span style="color:var(--dn);font-weight:650">绿跌</span>),与策略工作台、回测结果一致 —— 虽然标的是美股。' +

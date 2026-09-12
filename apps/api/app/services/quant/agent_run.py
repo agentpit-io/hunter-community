@@ -789,11 +789,14 @@ def _trade_rounds(trades, rule_cond: dict) -> list[dict]:
         pnl = sum(t[9] for t in sells if t[9] is not None)
         legs = []
         for t in ts:
+            # rationale / followup 原来只在「今日操作报告」里露面,那张卡片 2026-09-12 撤掉了,
+            # 这两样必须跟到这里来 —— 它们是"为什么买/卖"和"卖完之后怎么样了",
+            # 卡片没了不等于信息该没
             leg = {"kind": "entry" if t[2] == "buy" else "exit", "date": str(t[0]),
-                   "rule_id": t[12], "rule_name": t[13],
+                   "rule_id": t[12], "rule_name": t[13], "rationale": t[14],
                    "rule_text": rule_cond.get(t[12]), "price": t[6], "shares": t[5]}
             if t[2] == "sell":
-                leg.update({"pnl_abs": t[9], "pnl_pct": t[10]})
+                leg.update({"pnl_abs": t[9], "pnl_pct": t[10], "followup": t[17]})
             legs.append(leg)
         rounds.append({
             "symbol": code, "name": buys[0][4], "side": "long",
