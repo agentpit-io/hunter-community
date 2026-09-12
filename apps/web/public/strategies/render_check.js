@@ -319,10 +319,12 @@ try {
         fee_total:1.98, pnl_gross_total:149.14, pnl_net_total:147.16, items:[
         {no:19, symbol:'ARMK', name:'ARMK', side:'long', entry_date:'2026-08-11', exit_date:'2026-08-25',
          shares:232, amount:14134.64, pnl_abs:-265.34, pnl_pct:-1.88, pnl_gross:-263.36, fee:1.9775, grade:'A',
-         scan_dates:['2026-08-06','2026-08-07','2026-08-10'],
+         scan_dates:['2026-08-06','2026-08-07','2026-08-10'], grade:'A',
          hold_days:10, adds:2, legs:[
            {kind:'entry', date:'2026-08-11', rule_id:'R-04', rule_name:'VCP 突破买入', price:60.47, shares:133,
-            rationale:'收盘 $60.47 突破前 20 日高点 $59.90 1.0%(<5%,未追高);量能 2.1 倍 50 日均量'},
+            rationale:'收盘 $60.47 突破前 20 日高点 $59.90 1.0%(<5%,未追高);量能 2.1 倍 50 日均量。'+
+              '评分 A 级(340/500):形态 A80、量价配合 C40、抗跌 A80、盈亏比 S100、MACD 金叉 C40 → '+
+              '仓位 15% 总资产;止损挂在 $40.45(距收盘 3.9%)'},
            {kind:'entry', date:'2026-08-13', rule_id:'R-16', rule_name:'倒三角加仓', price:61.11, shares:66},
            {kind:'exit', date:'2026-08-25', rule_id:'R-15', rule_name:'10 日不涨清仓', price:59.08,
             shares:232, pnl_abs:-263.36, pnl_pct:-1.86,
@@ -379,6 +381,7 @@ try {
     var H_EMPTY = render(EMPTY)
     // 后端接口整个不存在(404)时传的就是这个 —— 页面必须照常出骨架
     var H_SKEL = render({}, NOTICE.dev)
+    var CSV = buildHistoryCsv(FULL)
   `, ctx, { filename: 'assert-agent' })
 
   const H = ctx.H_FULL
@@ -508,6 +511,36 @@ try {
   }
   if (/class="sg/.test(H)) console.log('PASS 智能体 · 信号列带收窄样式')
   else { failed++; console.log('FAIL 智能体 · 信号列没有收窄样式') }
+  // ⑦-2 导出 CSV(用户 2026-09-12):前几行要有完整策略 + 规则手册,
+  //   表里每条腿要有当时的触发情况与评级过程。buildHistoryCsv 是纯函数(不碰 DOM),
+  //   假 DOM 下能直接调 —— 这是这个页面里少数能真跑一遍逻辑的地方,别浪费。
+  {
+    const csv = ctx.CSV || ''
+    const need = [
+      ['有导出按钮', () => /id="ag-export"/.test(H)],
+      ['抬头写了策略名', () => csv.indexOf('动量突破 + 财报后漂移') >= 0],
+      ['抬头写了策略说明', () => csv.indexOf('买强势股的突破') >= 0],
+      ['抬头写了护栏', () => csv.indexOf('单票上限') >= 0 && csv.indexOf('# 初始资金,10000') >= 0],
+      ['抬头写了规则手册全文', () => csv.indexOf('动量前 10%') >= 0 && csv.indexOf('# R-01') >= 0],
+      ['抬头写了口径与手续费', () => csv.indexOf('已扣手续费') >= 0 && csv.indexOf('零费用口径') >= 0],
+      ['表头有全部列', () => csv.indexOf('触发情况(当时的数据)') >= 0 && csv.indexOf('评级过程(进场当天)') >= 0],
+      ['每条腿都有触发情况', () => csv.indexOf('突破前 20 日高点') >= 0 && csv.indexOf('持有 10 个交易日') >= 0],
+      ['评级档位单独成列', () => /,A 级,/.test(csv)],
+      ['评级过程切了出来', () => csv.indexOf('评分 A 级(340/500)') >= 0 && csv.indexOf('盈亏比 S100') >= 0],
+      // 切分不能把触发条件和评级过程混在一格 —— 混了就等于没切
+      // 两段必须落在**相邻的两列**(中间只有一个逗号,两侧的引号有没有取决于该段含不含逗号),
+      // 挤在同一格就等于没切
+      ['触发条件与评级过程落在相邻两列', () => /均量。"?,"?评分 A 级/.test(csv)],
+      ['带逗号的长文本被引号包住', () => /"[^"]*评分 A 级[^"]*"/.test(csv)],
+      ['数值列是裸数字', () => /,-265\.34,/.test(csv) && csv.indexOf(',-$265,') < 0],
+    ]
+    for (const [name, fn] of need) {
+      let ok = false
+      try { ok = fn() } catch (e) { ok = false }
+      if (ok) console.log('PASS 智能体 · 导出 ·', name)
+      else { failed++; console.log('FAIL 智能体 · 导出 ·', name) }
+    }
+  }
   // ⑧ 悬停日K(用户 2026-09-12):代号上挂钩子 + 三种标记的日期。
   //   日期是从成交与扫描记录里来的,不是前端推的 —— 钩子掉了不会报错、页面照常渲染,
   //   只有断言能发现「悬停没反应了」。

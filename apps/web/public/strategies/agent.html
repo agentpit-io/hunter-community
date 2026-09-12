@@ -191,6 +191,11 @@
        名字截断还能 hover 看全,把编号 / 价格 / 盈亏挤出视野才是真丢信息 */
     .ag-hb td.sg{max-width:150px;overflow:hidden;text-overflow:ellipsis}
     .ag-hb .fee{color:var(--muted);font-variant-numeric:tabular-nums}
+    /* 导出按钮常驻在标题栏里,不藏 hover(仓内铁律:新功能入口不许藏在 hover 里) */
+    .ag-exp{margin-left:10px;border:1px solid var(--line);background:#fff;border-radius:7px;
+      padding:3px 10px;font-size:11.5px;font-family:inherit;color:var(--brand-dark);cursor:pointer}
+    .ag-exp:hover{background:var(--brand-pale);border-color:var(--brand)}
+    .ag-exp:active{transform:translateY(1px)}
     /* 带买卖理由的格子给一条虚线下划线 —— 不标出来没人知道这里能 hover */
     .ag-hb td.why{cursor:help;border-bottom:0}
     .ag-hb td.why .sig{border-bottom:1px dotted var(--line-strong)}
@@ -695,6 +700,154 @@ function sortWatch(items) {
     return a.i - b.i
   }).map(function (x) { return x.it })
 }
+// ═══ ⑧-1 历史交易记录 · 导出 CSV ═══════════════════════════════════
+// 用户 2026-09-12:导出时前几行要写清楚**完整的交易策略**,
+// 信号栏要写清楚**当时是怎么触发买入 / 卖出的**。
+//
+// 三个决定:
+// 1. **一条腿一行**,不是一笔一行。加仓过的票一笔有 3~5 条腿,每条腿的触发情况都不一样
+//    ("突破枢轴 3.3%、量能 2.1 倍" 和 "持有 10 天没涨过 1R" 是两回事),
+//    挤进一个单元格就没法读也没法筛。这一笔的汇总(净损益 / 回报 / 手续费)在每行重复 ——
+//    CSV 没有 rowspan,重复才能做筛选和透视表。
+// 2. **数值列导出裸数字**(不带 $ 和 %),Excel 里才能直接求和求平均。
+//    界面上那些带符号的写法是给人看的,表格是给算的。
+// 3. **前几行用 # 开头**:Excel 照样显示,但一眼能看出这些不是数据行。
+//    规则手册全文也放进去 —— 信号列里的 C-01 / R-04 不解释清楚,这张表半年后就没人看得懂。
+function csvCell(v) {
+  if (v == null) return ''
+  const t = String(v)
+  return /[",\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t
+}
+function csvRows(rows) {
+  return rows.map(function (r) { return r.map(csvCell).join(',') }).join('\r\n')
+}
+const CSV_HEAD = ['编号', '代号', '评级', '方向', '类型', '日期', '信号编号', '信号名称',
+  '信号条件(规则原文)', '触发情况(当时的数据)', '评级过程(进场当天)', '价格', '本腿股数', '本腿手续费',
+  '事后跟踪', '本笔总股数', '本笔买入金额', '本笔净损益(已扣费)', '本笔回报%(已扣费)',
+  '本笔手续费合计', '本笔扣费前损益', '持有天数', '加仓次数', '建仓日', '清仓日', '扫描命中日']
+
+// 进场那条腿的 rationale 里,「评分 X 级(…)」之后是整段评级过程:
+// 五个维度各自的档位与明细 → 由它定的仓位、止损位、买入股数、这一笔的开放风险。
+// 用 indexOf 切,不用正则拆字段 —— 拆出来的结构化字段一旦引擎换了措辞就静默错;
+// 切不开就整段留在「触发情况」里,信息一个字都不丢。
+function splitGrading(text) {
+  const t = String(text == null ? '' : text)
+  const i = t.indexOf('评分 ')
+  if (i < 0) return [t, '']
+  return [t.slice(0, i).trim(), t.slice(i).trim()]
+}
+
+function buildHistoryCsv(d) {
+  const h = (d && d.history) || {}
+  const items = Array.isArray(h.items) ? h.items : []
+  const st = (d && d.strategy) || {}
+  const g = (d && d.guardrails) || {}
+  const rows = []
+  const kv = function (k, v) { rows.push(['# ' + k, v == null ? '' : v]) }
+
+  rows.push(['# 小鹿智能体 · 历史交易记录'])
+  kv('导出时间', nowSh())
+  kv('数据截至', d && d.last_run_text)
+  kv('迭代方向', (d && d.branch) || '')
+  kv('策略版本', (d && d.version) || '')
+  kv('已平仓笔数', items.length)
+  rows.push([])
+
+  rows.push(['# ── 当前策略(这张表里的每一笔都是它跑出来的)──'])
+  kv('名称', st.name)
+  kv('说明', st.summary)
+  kv('市场', st.market_label)
+  kv('成交方式', st.market_note)
+  kv('股票池', st.universe)
+  kv('股票池只数', st.universe_size)
+  kv('调仓节奏', st.rebalance)
+  kv('数据源', st.data_source)
+  rows.push([])
+
+  rows.push(['# ── 护栏(超过就停手,不是建议)──'])
+  kv('初始资金', g.initial_capital)
+  kv('单票上限(%)', g.max_position_pct)
+  kv('最多持仓(只)', g.max_holdings)
+  kv('单日权益回撤停开仓(%)', g.daily_loss_halt_pct)
+  kv('连亏几笔后停一天', g.consecutive_loss_pause)
+  kv('只做多', g.long_only === true ? '是' : (g.long_only === false ? '否' : ''))
+  rows.push([])
+
+  rows.push(['# ── 规则手册(信号编号对照这里)──'])
+  rows.push(['# 编号', '类型', '条件原文', '起始版本', '统计'])
+  const kindName = { buy: '买入', sell: '卖出', risk: '风控' };
+  (Array.isArray(d && d.rules) ? d.rules : []).forEach(function (r) {
+    const stats = (Array.isArray(r.stats) ? r.stats : [])
+      .filter(function (x) { return x && x.value != null })
+      .map(function (x) { return x.label + '=' + x.value }).join(' · ')
+    rows.push(['# ' + (r.id || ''), kindName[r.kind] || r.kind || '', r.condition || '',
+               r.since_text || '', stats])
+  })
+  rows.push([])
+
+  rows.push(['# ── 口径(不写清楚,这张表里的数会被误读)──'])
+  kv('一行 = ', '一条腿(一次买入或一次卖出);同一「编号」的若干行合起来是一笔完整的持仓周期')
+  kv('笔数口径', '一笔 = 建仓→加仓→清仓;总览里的「交易 N 笔」按每次卖出计数,两个数不一样是正常的')
+  kv('净损益', '已扣手续费。扣费前的数在「本笔扣费前损益」列')
+  kv('手续费', h.fee_note)
+  kv('注意', h.scope_note)
+  kv('数值列', '不带货币符号与百分号,可直接在 Excel 里求和')
+  kv('评级', '进场当天由规则算出的档位(S/A/B/C),仓位大小按它定 —— 只有带评分引擎的迭代方向有,' +
+     '其余方向这两列是空的(是这个方向没有这一步,不是数据缺失)')
+  kv('评级过程', '五个维度各自的档位与明细(形态 / 量价配合 / 抗跌 / 盈亏比 / MACD)→ ' +
+     '由它定的仓位、止损位、买入股数、这一笔的开放风险。原文照抄,没有二次加工')
+  if (Number.isFinite(h.pnl_gross_total)) {
+    kv('合计(扣费前)', h.pnl_gross_total)
+    kv('合计(手续费)', h.fee_total)
+    kv('合计(扣费后)', h.pnl_net_total)
+  }
+  rows.push([])
+
+  rows.push(CSV_HEAD)
+  items.forEach(function (r) {
+    const legs = Array.isArray(r.legs) ? r.legs : []
+    const scan = Array.isArray(r.scan_dates) ? r.scan_dates.join(' ') : ''
+    legs.forEach(function (g2) {
+      // 这就是用户要的「当时是怎么触发的」+「评级过程」—— 后端按成交与行情表算好的数字,
+      // 不是模型编的(仓内铁律:用户可见的数字不许 LLM 自由生成)
+      const parts = splitGrading(g2.rationale)
+      rows.push([
+        r.no, r.symbol, r.grade ? r.grade + ' 级' : '',
+        r.side === 'long' ? '做多' : (r.side || ''),
+        g2.kind === 'entry' ? '入场' : (g2.kind === 'exit' ? '出场' : ''),
+        g2.date, g2.rule_id, g2.rule_name, g2.rule_text,
+        parts[0], parts[1], g2.price, g2.shares, g2.fee, g2.followup,
+        r.shares, r.amount, r.pnl_abs, r.pnl_pct, r.fee, r.pnl_gross,
+        r.hold_days, r.adds, r.entry_date, r.exit_date, scan,
+      ])
+    })
+  })
+  return csvRows(rows)
+}
+
+function nowSh() {
+  try {
+    return new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) + ' (上海)'
+  } catch (e) { return new Date().toISOString() }
+}
+
+// 下载。UTF-8 BOM 必须加 —— 不加的话 Excel 按本地编码打开,中文全是乱码
+// (这是 Excel 的老毛病,不是文件坏了)。
+function exportHistoryCsv(d) {
+  const text = buildHistoryCsv(d)
+  const name = '小鹿智能体_历史交易记录_' + ((d && d.branch) || 'base') + '_' +
+    new Date().toISOString().slice(0, 10) + '.csv'
+  const blob = new Blob(['\ufeff' + text], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  setTimeout(function () { URL.revokeObjectURL(url) }, 1000)
+}
+
 // ═══ ⑧-2 历史交易记录 ══════════════════════════════════════════════
 // 一个持仓周期一条,组内每次买卖各占一行(类型 / 日期 / 信号 / 价格),
 // 编号 · 大小 · 净损益 · 回报用 rowspan 跨整组 —— 这四个是「这一笔」的属性。
@@ -767,7 +920,11 @@ function vHistory(d) {
         '<td class="n">' + num(g.price, 2) + '</td>' + tail + '</tr>'
     }).join('')
   }).join('')
-  const cnt = (has ? esc(h.items.length + ' 笔') : NA) + ' · 已平仓'
+  const cnt = (has ? esc(h.items.length + ' 笔') : NA) + ' · 已平仓' +
+    (has && h.items.length
+      ? '<button class="ag-exp" id="ag-export" title="导出 CSV:前几行是完整策略与规则手册,' +
+        '表里每条腿都带当时的触发情况">导出 CSV</button>'
+      : '')
   return panel('历史交易记录', cnt,
     '<div class="ag-scroll"><table class="ag-tb ag-hb"><thead><tr>' +
     '<th>编号</th><th>代号</th><th>类型</th><th>日期</th><th>信号</th>' +
@@ -949,7 +1106,9 @@ function vBanner(n) {
     '<span>' + n.html + '</span>' +
     (n.action ? '<button class="btn small" id="' + n.action.id + '">' + n.action.label + '</button>' : '') + '</div>'
 }
+let LAST_D = null       // 导出 CSV 要用最近一次拿到的整份数据(策略 / 护栏 / 规则手册都在里面)
 function render(d, notice) {
+  LAST_D = d || {}
   // 返回 html 而不只是写进 container:render_check.js 靠这个返回值断言区块顺序
   const html = '<div class="ag-wrap">' + vBanner(notice) +
     vStatus(d) + vBranches(d) + vStrategy(d) + vGuard(d) + vPipeline(d) + vKpi(d) + vNav(d) +
@@ -1061,6 +1220,15 @@ function bindOps() {
     window.addEventListener('resize', fitBoth)
     try { document.fonts.ready.then(fitBoth) } catch (e) { /* 老浏览器 / 假 DOM 没有 fonts */ }
   }
+  const exp = document.getElementById('ag-export')
+  if (exp) exp.addEventListener('click', function () {
+    try {
+      exportHistoryCsv(LAST_D)
+    } catch (e) {
+      // 导出失败要说话 —— 浏览器拦下载是静默的,不提示的话用户以为按钮没反应
+      alert('导出失败:' + ((e && e.message) || e))
+    }
+  })
   const rules = document.getElementById('ag-rules')
   const goto = document.getElementById('ag-goto-rules')
   if (goto && rules) goto.addEventListener('click', function () { rules.scrollIntoView({ behavior: 'smooth', block: 'start' }) })
