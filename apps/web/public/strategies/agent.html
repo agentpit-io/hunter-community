@@ -152,7 +152,19 @@
       color:var(--brand-dark);border-radius:5px;padding:2px 6px;border:0;cursor:help;display:inline-block}
     .ag-rule:hover{background:var(--brand);color:#fff}
 
+    /* 观察列表可能有几十只 —— 限高到 5 张卡片,其余滚动。不限高的话右栏比左栏长出一大截,
+       左边整片空白(2026-09-12 用户反馈)。max-height 不能写死像素:卡片里的 gap 文案会换行,
+       窄屏下切出半行,所以由 JS 按前 5 张卡片的实际高度算(见 fitWatch)。
+       overscroll-behavior:contain 掐断滚动链 —— 鼠标在卡片内滚就只滚列表(滚到底也不把页面带着走),
+       鼠标离开卡片滚的就是页面。这是浏览器默认行为加一道闸门,不需要 JS 拦 wheel。 */
     .ag-wl{display:flex;flex-direction:column;gap:8px}
+    .ag-wl.scr{overflow-y:auto;overscroll-behavior:contain;padding-right:8px;margin-right:-8px}
+    /* 底部渐隐 = 「下面还有」的提示;滚到底由 JS 摘掉 more,免得最后一张一直糊着 */
+    .ag-wl.scr.more{-webkit-mask-image:linear-gradient(#000 calc(100% - 20px),transparent);
+      mask-image:linear-gradient(#000 calc(100% - 20px),transparent)}
+    .ag-wl.scr::-webkit-scrollbar{width:6px}
+    .ag-wl.scr::-webkit-scrollbar-thumb{background:#dbcdb8;border-radius:3px}
+    .ag-wl.scr::-webkit-scrollbar-track{background:transparent}
     .ag-w{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:#fff}
     .ag-w.blocked{opacity:.72}
     .ag-w .r1{display:flex;align-items:baseline;gap:8px}
@@ -633,13 +645,30 @@ function vHoldings(d) {
     '个股夏普用持有期日收益算,四五天的样本得出的数字会在 0.2 和 3.0 之间乱跳,写出来只会误导。' +
     '组合级夏普在上面的总览里。</div>')
 }
+// 观察列表按评分从高到低排 —— 一屏只放得下 5 张卡片,谁排前面就决定了用户先看到谁。
+// 契约(docs/agent-dashboard-contract.md 3.9)规定 blocked(被护栏否决)一律排最后:
+// 它们不是候选,但必须看得见,否则用户以为智能体漏了机会。
+// 没有 score 的排在有 score 的后面 —— 不拿 0 分顶替缺失值(缺失不是 0 分)。
+// 同组内保持后端给的顺序(显式带下标比较,不依赖引擎的稳定排序)。
+function sortWatch(items) {
+  return items.map(function (it, i) { return { it: it, i: i } }).sort(function (a, b) {
+    const ab = a.it.blocked ? 1 : 0
+    const bb = b.it.blocked ? 1 : 0
+    if (ab !== bb) return ab - bb
+    const af = Number.isFinite(a.it.score)
+    const bf = Number.isFinite(b.it.score)
+    if (af !== bf) return af ? -1 : 1
+    if (af && bf && a.it.score !== b.it.score) return b.it.score - a.it.score
+    return a.i - b.i
+  }).map(function (x) { return x.it })
+}
 function vWatch(d) {
   const w = d.watchlist || {}
   const has = Array.isArray(w.items)
   if (has && !w.items.length) {
     return panel('今日观察列表', '0 只', missing('今日没有候选', '所有标的都不满足当前规则的预备条件'))
   }
-  const cards = (has ? w.items : SKELETON_ROW).map(function (it) {
+  const cards = (has ? sortWatch(w.items) : SKELETON_ROW).map(function (it) {
     if (it.blocked) {
       return '<div class="ag-w blocked"><div class="r1"><span class="sy">' + txt(it.symbol) + '</span>' +
         '<span class="chip warn">已否决</span><span class="px">' + num(it.price, 2) + '</span></div>' +
@@ -657,8 +686,9 @@ function vWatch(d) {
   }).join('')
   return panel('今日观察列表',
     (has ? esc(w.items.length + ' 只') : NA) +
-    (d.strategy && d.strategy.version ? ' · 按 ' + esc(d.strategy.version) + ' 规则筛' : ''),
-    '<div class="ag-wl">' + cards + '</div>' +
+    (d.strategy && d.strategy.version ? ' · 按 ' + esc(d.strategy.version) + ' 规则筛' : '') +
+    ' · 按评分排序' + (has && w.items.length > WATCH_ROWS ? ',列表内可滚' : ''),
+    '<div class="ag-wl" id="ag-watch">' + cards + '</div>' +
     '<div class="ag-note" style="margin-top:11px">观察列表写的是<b>还差什么才买</b>,不是一串代码 —— ' +
     '否则用户看不出智能体在等什么、也无法判断它等得对不对。</div>')
 }
@@ -852,7 +882,36 @@ function errNotice(msg) {
     action: { id: 'ag-retry', label: '重试' } }
 }
 
+// 观察列表只露 5 张卡片,其余滚动。高度必须渲染完再量:卡片里的 gap 文案会换行,
+// 写死像素会在窄屏切掉半行。量的是「第 5 张的底边到第 1 张的顶边」,
+// 用相对差消掉 offsetParent 是谁的问题。窗口宽度变了换行数会变,所以 resize 要重算。
+const WATCH_ROWS = 5
+function fitWatch() {
+  const wl = document.getElementById('ag-watch')
+  if (!wl) return
+  const cs = wl.children || []
+  const last = cs.length > WATCH_ROWS ? cs[WATCH_ROWS - 1] : null
+  // 卡片不足 5 张、或拿不到布局信息(render_check 的假 DOM)时不限高,保持原样
+  if (!last || typeof last.offsetTop !== 'number') {
+    wl.className = 'ag-wl'
+    wl.style.maxHeight = ''
+    return
+  }
+  wl.style.maxHeight = (last.offsetTop + last.offsetHeight - cs[0].offsetTop) + 'px'
+  wl.className = 'ag-wl scr more'
+  wl.addEventListener('scroll', function () {
+    const atEnd = wl.scrollTop + wl.clientHeight >= wl.scrollHeight - 2
+    wl.className = atEnd ? 'ag-wl scr' : 'ag-wl scr more'
+  })
+}
+let watchFitBound = false
 function bindOps() {
+  fitWatch()
+  // resize 监听只挂一次:bindOps 每次重渲染都跑,重复挂会越积越多
+  if (!watchFitBound) {
+    watchFitBound = true
+    window.addEventListener('resize', fitWatch)
+  }
   const rules = document.getElementById('ag-rules')
   const goto = document.getElementById('ag-goto-rules')
   if (goto && rules) goto.addEventListener('click', function () { rules.scrollIntoView({ behavior: 'smooth', block: 'start' }) })

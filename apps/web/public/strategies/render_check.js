@@ -303,9 +303,14 @@ try {
          bench_pct:2.1, sharpe:1.94, entry_rule:'R-02', entry_rule_text:'财报后放量突破'},
         {symbol:'COST', name:'好市多', cost:903.1, price:918.44, pnl_pct:1.7, hold_days:9,
          bench_pct:0.9, sharpe:null, sharpe_na_reason:'持有 9 日,样本不足', entry_rule:'R-04'}]},
+      // 故意乱序 + 混进「没评分」和「被否决」两种边界,用来测排序(见 ⑤)
       watchlist:{items:[
+        {symbol:'IFF', score:70, price:83.61, rule_id:'R-01', progress_pct:50, gap:'还在枢轴下方 5.7%'},
+        {symbol:'SMCI', score:90, price:41.88, blocked:true, blocked_reason:'波动率 68% 超风险预算'},
+        {symbol:'NOSC', price:12.5, rule_id:'R-01', progress_pct:30, gap:'评分还没算出来'},
         {symbol:'MU', score:92, price:142.3, rule_id:'R-02', progress_pct:82, gap:'距 20 日高还差 0.8%'},
-        {symbol:'SMCI', price:41.88, blocked:true, blocked_reason:'波动率 68% 超风险预算'}]},
+        {symbol:'ZD', score:87, price:56.22, rule_id:'R-01', progress_pct:50, gap:'还差 C-01 收盘'},
+        {symbol:'VOYA', score:83, price:103.41, rule_id:'R-01', progress_pct:50, gap:'还在枢轴下方 2.1%'}]},
       trades:{date:'2026-09-09', items:[
         {ts_market:'09:31', ts_market_tz:'ET', ts_local:'21:31 沪', side:'buy', symbol:'SHOP',
          shares:41, price:121.55, amount:4983, position_pct:12.4, rule_id:'R-02',
@@ -419,6 +424,18 @@ try {
   else { failed++; console.log('FAIL 智能体 · 骨架凭空写了买卖方向') }
   if (!/亏损教训|验证通过/.test(S)) console.log('PASS 智能体 · 骨架不猜教训类型')
   else { failed++; console.log('FAIL 智能体 · 骨架凭空写了教训类型') }
+  // ⑤ 观察列表排序(用户 2026-09-12 要求):评分高的在前,没评分的殿后,blocked 一律最后。
+  //   列表只露 5 张卡片、其余滚动,所以排序直接决定了用户先看到谁 ——
+  //   排错等于把最好的候选藏进滚动区里,比排版难看严重得多,必须钉死。
+  const WL = (H.match(/class="sy">([A-Z]+)</g) || []).map(s => s.replace(/[^A-Z]/g, ''))
+  const WANT = ['MU', 'ZD', 'VOYA', 'IFF', 'NOSC', 'SMCI']
+  if (WL.join(',') === WANT.join(',')) console.log('PASS 智能体 · 观察列表按评分降序、缺分殿后、否决最末')
+  else { failed++; console.log('FAIL 智能体 · 观察列表顺序不对:', WL.join(',') , '应为', WANT.join(',')) }
+  // 限高靠 JS 量完再设(fitWatch 按 id 找容器),id 丢了就退化成一条长列表,且不会报错 —— 只能靠断言
+  if (/class="ag-wl" id="ag-watch"/.test(H)) console.log('PASS 智能体 · 观察列表容器带 id(限高脚本靠它)')
+  else { failed++; console.log('FAIL 智能体 · 观察列表容器丢了 id=ag-watch,限高会失效') }
+  if (/按评分排序/.test(H)) console.log('PASS 智能体 · 表头写明了排序口径')
+  else { failed++; console.log('FAIL 智能体 · 表头没写排序口径') }
   // 护栏尤其不能猜:用户会据此判断风险敞口
   if (!/只做多|可做空/.test(S)) console.log('PASS 智能体 · 骨架不猜交易方向')
   else { failed++; console.log('FAIL 智能体 · 骨架凭空写了交易方向') }
