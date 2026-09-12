@@ -29,7 +29,7 @@ def pooled_watch(dates: list[date], screen_of: dict, pool_days: int) -> dict:
     return out
 
 
-def build_cache(dates: list[date], pool: dict, bars_of, p: dict = av.PARAMS) -> dict:
+def build_cache(dates: list[date], pool: dict, bars_of, engine=av) -> dict:
     """{(code, date): 指标 | None}。每只票从首次进池那天算到最后一天(持仓可能拿到很久以后)。"""
     first: dict = {}
     for d in dates:
@@ -45,22 +45,23 @@ def build_cache(dates: list[date], pool: dict, bars_of, p: dict = av.PARAMS) -> 
             if d < d0:
                 continue
             i = idx.get(d)
-            cache[(code, d)] = av.indicators(bars[:i + 1], p) if i is not None else None
+            cache[(code, d)] = engine.indicators(bars[:i + 1]) if i is not None else None
     return cache
 
 
-def simulate(p: dict, g: dict, dates: list[date], pool: dict, cache: dict,
+def simulate(engine, p: dict, g: dict, dates: list[date], pool: dict, cache: dict,
              start_cash: float | None = None, positions=None, consec: int = 0,
              prev_equity: float | None = None) -> dict:
-    """从 dates[0] 跑到 dates[-1]。→ {equity: [(date, eq)], trades: [...], positions, cycles, metrics}"""
+    """从 dates[0] 跑到 dates[-1]。engine = agent_vcp | agent_vcp3(同一接口)。
+    → {equity: [(date, eq)], trades: [...], positions, cycles, metrics}"""
     cash = float(start_cash if start_cash is not None else g["initial_capital"])
     positions = list(positions or [])
     equity: list[tuple] = []
     trades: list[dict] = []
     for d in dates:
         watch = [(c, n, s) for c, n, s, _since in pool.get(d, [])]
-        r = av.run_day(str(d), positions, cash, lambda c: [], watch, prev_equity, consec, p, g,
-                       ind_of=lambda c, _d=d: cache.get((c, _d)))
+        r = engine.run_day(str(d), positions, cash, lambda c: [], watch, prev_equity, consec, p, g,
+                           ind_of=lambda c, _d=d: cache.get((c, _d)), want_text=False)
         for f in r["fills"]:
             f["date"] = str(d)
         trades += r["fills"]

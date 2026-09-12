@@ -174,7 +174,8 @@ def vcp_stats(bars: list[tuple]) -> dict | None:
     n = len(bars)
     out = {"as_of": bars[-1][0], "contractions": 0, "depths": "", "first_depth": None,
            "last_depth": None, "vol_declining": None, "last_vol_ratio": None,
-           "low_vol_ratio": None, "pivot": None, "pivot_dist": None, "base_days": None}
+           "low_vol_ratio": None, "pivot": None, "pivot_dist": None, "base_days": None,
+           "last_low": None}      # 最后一次收缩的低点(小鹿方向 C 的止损基准,不进筛选字段)
 
     cons = [c for c in _contractions(highs, lows) if c[0] >= n - BASE_MAX]
     if not cons:
@@ -203,6 +204,7 @@ def vcp_stats(bars: list[tuple]) -> dict | None:
     out["last_depth"] = round(depths[-1], 2)
     out["base_days"] = n - 1 - seq[0][0]
     out["pivot"] = pivot
+    out["last_low"] = seq[-1][3]
     out["pivot_dist"] = round((pivot - closes[-1]) / pivot * 100.0, 2)
 
     seg_vol = [_mean(vols[c[0]:c[2] + 1]) for c in seq]

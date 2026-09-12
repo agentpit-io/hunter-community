@@ -48,6 +48,25 @@ check("候选 · 基准方向没有候选", ao.candidates("base", BASE) == [])
 cur2 = dict(BASE, max_stop_pct=0.06)
 check("候选 · 已收紧到 6% 后不会再出 7%/8% 的候选(那是放宽)", all(v < 0.06 for k, v in [(c["key"], c["value"]) for c in ao.candidates("sell", cur2) if c["key"] == "max_stop_pct"]))
 
+# ── 同参数不许来回改 / 邻域 ─────────────────────────────────────
+hist = [{"key": "time1_days", "old": 5, "value": 7, "version": 2}]
+cs2 = ao.candidates("sell", dict(BASE, time1_days=7), versions=hist)
+check("⭐候选 · 最近改过的参数冻结(time1_days 不再当候选)", not any(c["key"] == "time1_days" for c in cs2))
+hist2 = [{"key": "time1_days", "old": 5, "value": 7, "version": 2}, {"key": "tp1", "old": 0.10, "value": 0.12, "version": 3},
+         {"key": "tp2", "old": 0.15, "value": 0.18, "version": 4}]
+cs3 = ao.candidates("sell", dict(BASE, time1_days=7, tp1=0.12, tp2=0.18), versions=hist2)
+vals = [c["value"] for c in cs3 if c["key"] == "time1_days"]
+check("⭐候选 · 冻结期过了也不许改回历史旧值(5 天不再出现)", vals and 5 not in vals, str(vals))
+nb = ao.neighbors("sell", BASE, "time1_days", 7)
+check("邻域 · 7 天的邻档是 5(当前,跳过)和无 → 空;3 天的邻档是 5(当前)→ 空", nb == [] and ao.neighbors("sell", BASE, "time1_days", 3) == [])
+nb2 = ao.neighbors("buy", BASE, "vol_boost", 1.7)
+check("邻域 · 1.7 的邻档是 1.4(当前,跳过)→ 空;1.2 的邻档 1.4 也是当前 → 空", nb2 == [] and ao.neighbors("buy", BASE, "vol_boost", 1.2) == [])
+nb3 = ao.neighbors("c", c3_base := dict(ao.engine_of("c").PARAMS), "time_days", 20)
+check("邻域 · C 方向 time_days 20 的邻档是 15(当前)→ 空;10 的邻档 15(当前)→ 空", nb3 == [] and ao.neighbors("c", c3_base, "time_days", 10) == [])
+csc = ao.candidates("c", c3_base)
+check("候选 · 方向 C 有候选且止损只收紧(stop_atr 只出 0.25)", csc and [c["value"] for c in csc if c["key"] == "stop_atr"] == [0.25], str([(c["key"], c["value"]) for c in csc if c["key"] == "stop_atr"]))
+check("常量 · 观察期 10 天", ao.OBS_DAYS == 10)
+
 
 # ── 模拟器:和实盘同一段代码、可复现 ─────────────────────────
 def mk(closes, start=date(2026, 1, 5), vol=1_000_000.0, rng=0.01):
@@ -72,14 +91,14 @@ pool = agent_sim.pooled_watch(dates, screen, 10)
 check("观察池 · 并集里每天都有 AAA 且 since = 窗口内首次入选日", all(len(pool[d]) == 1 and pool[d][0][3] == dates[max(0, i - 9)] for i, d in enumerate(dates)))
 cache = agent_sim.build_cache(dates, pool, lambda c: bars if c == "AAA" else [])
 check("缓存 · 每个交易日都有指标", all((("AAA", d) in cache) for d in dates))
-r1 = agent_sim.simulate(BASE, av.GUARDS, dates, pool, cache)
-r2 = agent_sim.simulate(BASE, av.GUARDS, dates, pool, cache)
+r1 = agent_sim.simulate(av, BASE, av.GUARDS, dates, pool, cache)
+r2 = agent_sim.simulate(av, BASE, av.GUARDS, dates, pool, cache)
 check("模拟 · 可复现(两次结果逐位相同)", r1["equity"] == r2["equity"] and len(r1["trades"]) == len(r2["trades"]))
 check("模拟 · 教科书走势有买有卖", any(t["side"] == "buy" for t in r1["trades"]) and any(t["side"] == "sell" for t in r1["trades"]), str([(t["date"], t["side"], t["rule_id"]) for t in r1["trades"]]))
 m = r1["metrics"]
 check("指标 · 完整周期数与胜率是数字", isinstance(m["cycles"], int) and (m["win_rate"] is None or 0 <= m["win_rate"] <= 100), str(m))
 # 更早止盈(tp1 8%)的模拟结果应当不同
-r3 = agent_sim.simulate(dict(BASE, tp1=0.08), av.GUARDS, dates, pool, cache)
+r3 = agent_sim.simulate(av, dict(BASE, tp1=0.08), av.GUARDS, dates, pool, cache)
 check("模拟 · 改参数结果不同(tp1 10% → 8%)", r3["equity"] != r1["equity"] or r3["trades"] != r1["trades"])
 
 # ── 优化器 step:门槛逐条 ────────────────────────────────────
@@ -114,7 +133,7 @@ r = ao.step("sell", st2, dates[-1], dates, pool, cache, av.GUARDS)
 check("step · 观察期没满就一直观察,不换版", r["action"] == "observing" and st2["observing"] is not None and st2["version"] == 1, str(r))
 
 # compare:两段都要赢
-cur_res = agent_sim.simulate(BASE, av.GUARDS, dates, pool, cache)
+cur_res = agent_sim.simulate(av, BASE, av.GUARDS, dates, pool, cache)
 same = ao.compare(cur_res, cur_res, dates, av.GUARDS)
 check("compare · 和自己比不算更好", not same["ok"] and "训练段" in same["why"])
 fake = {"equity": [(d, e + (200 if i >= len(dates) // 2 else 0)) for i, (d, e) in enumerate(cur_res["equity"])],

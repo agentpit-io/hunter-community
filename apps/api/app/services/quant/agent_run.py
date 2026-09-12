@@ -6,8 +6,9 @@
 
 ## 三个方向并行(用户 2026-09-12 要求,agent_opt.BRANCHES)
 
-base 基准 v1 规则固定 · buy 固定卖出只调买入 · sell 固定买入只调卖出(止损只许收紧)。
-每个方向各有自己的现金 / 持仓 / 成交 / 净值 / 版本;观察列表(筛选结果)三个方向共用一份(agent_watch)。
+base 基准 v1 规则固定 · buy 固定卖出只调买入 · sell 固定买入只调卖出(止损只许收紧)· c Claude 自设计的三段式(agent_vcp3)。
+每个方向各有自己的现金 / 持仓 / 成交 / 净值 / 版本;观察列表(筛选结果)所有方向共用一份(agent_watch)。
+引擎按 agent_opt.BRANCHES[branch]["engine"] 选,两个引擎接口相同。
 
 ## 一天怎么跑(收盘后,美股在上海时间 06:30 由 rs_history_nightly.sh 接着触发)
 
@@ -121,6 +122,8 @@ CREATE TABLE IF NOT EXISTS agent_position (
     sharpe_na    TEXT
 );
 ALTER TABLE agent_position ADD COLUMN IF NOT EXISTS branch TEXT NOT NULL DEFAULT 'base';
+ALTER TABLE agent_position ADD COLUMN IF NOT EXISTS stop DOUBLE PRECISION NOT NULL DEFAULT 0;
+ALTER TABLE agent_position ADD COLUMN IF NOT EXISTS risk DOUBLE PRECISION NOT NULL DEFAULT 0;
 ALTER TABLE agent_position DROP CONSTRAINT IF EXISTS agent_position_pkey;
 CREATE UNIQUE INDEX IF NOT EXISTS agent_position_uq ON agent_position (branch, code);
 """
@@ -163,7 +166,7 @@ def _meta_set(cur, key, value):
 def _branch_state(cur, branch: str) -> dict:
     st = _meta_get(cur, f"branch:{branch}")
     if not st:
-        st = {"params": dict(av.PARAMS), "version": 1, "versions": [], "observing": None,
+        st = {"params": dict(ao.engine_of(branch).PARAMS), "version": 1, "versions": [], "observing": None,
               "cooldown_days_left": 0, "days_since_eval": 0}
     return st
 
@@ -212,7 +215,7 @@ class Ctx:
         self.snap = {r["_code"]: r for r in self.rows}
         self.store = screen_asof.get_store(MARKET, self.perf)
         self.screen_of: dict = {}          # date → [[code, name, score]]
-        self.cache: dict = {}              # (code, date) → 指标
+        self.cache: dict = {k: {} for k in ao.ENGINES}      # 引擎 → {(code, date): 指标}
         self.cache_dates: set = set()
         self.seen: set = set()
 
@@ -234,14 +237,15 @@ class Ctx:
         new_dates = [d for d in dates if d not in self.cache_dates]
         for code, d0 in first.items():
             scan = dates if code not in self.seen else new_dates
-            need = [d for d in scan if d >= d0 and (code, d) not in self.cache]
+            need = [d for d in scan if d >= d0 and (code, d) not in self.cache["vcp"]]
             if not need:
                 continue
             bars = self.bars_of(code)
             idx = {b[0]: i for i, b in enumerate(bars)}
             for d in need:
                 i = idx.get(d)
-                self.cache[(code, d)] = av.indicators(bars[:i + 1]) if i is not None else None
+                for name, eng in ao.ENGINES.items():
+                    self.cache[name][(code, d)] = eng.indicators(bars[:i + 1]) if i is not None else None
             self.seen.add(code)
         self.cache_dates.update(dates)
 
@@ -252,10 +256,10 @@ class Ctx:
 
 def _load_positions(cur, branch: str) -> list[av.Position]:
     cur.execute("SELECT code, name, size, initial_size, entry_price, entry_date, avg_cost, highest, level, "
-                "bars_held, entry_rule FROM agent_position WHERE branch=%s ORDER BY entry_date, code", (branch,))
+                "bars_held, entry_rule, stop, risk FROM agent_position WHERE branch=%s ORDER BY entry_date, code", (branch,))
     return [av.Position(code=r[0], name=r[1], size=r[2], initial_size=r[3], entry_price=r[4],
                         entry_date=str(r[5]), avg_cost=r[6], highest=r[7], level=r[8], bars_held=r[9],
-                        entry_rule=r[10] or "R-04") for r in cur.fetchall()]
+                        entry_rule=r[10] or "R-04", stop=r[11] or 0.0, risk=r[12] or 0.0) for r in cur.fetchall()]
 
 
 def run_date(d: date, ctx: Ctx | None = None) -> dict:
@@ -308,6 +312,8 @@ def run_date(d: date, ctx: Ctx | None = None) -> dict:
             continue
         st = _branch_state(cur, branch)
         p = st["params"]
+        eng = ao.engine_of(branch)
+        eng_name = ao.BRANCHES[branch]["engine"]
         positions = _load_positions(cur, branch)
         cur.execute("SELECT equity, consec_losses FROM agent_day WHERE branch=%s ORDER BY trade_date DESC LIMIT 1", (branch,))
         prev = cur.fetchone()
@@ -318,8 +324,8 @@ def run_date(d: date, ctx: Ctx | None = None) -> dict:
             cash = av.GUARDS["initial_capital"]
             if _meta_get(cur, "started") is None:
                 _meta_set(cur, "started", str(d))
-        res = av.run_day(str(d), positions, float(cash), lambda c: [], watch_today, prev_equity, consec, p, av.GUARDS,
-                         ind_of=lambda c, _d=d: ctx.cache.get((c, _d)))
+        res = eng.run_day(str(d), positions, float(cash), lambda c: [], watch_today, prev_equity, consec, p, av.GUARDS,
+                          ind_of=lambda c, _d=d, _e=eng_name: ctx.cache[_e].get((c, _d)))
         for w in res["watch_items"]:
             w["since"] = since_of.get(w["symbol"], str(d))
             if w["symbol"] in since_of:
@@ -347,10 +353,10 @@ def run_date(d: date, ctx: Ctx | None = None) -> dict:
             bench_pct = round((bench[d] / b0 - 1) * 100, 2) if b0 else None
             sh, sh_na = _stock_sharpe(bars, entry)
             cur.execute("INSERT INTO agent_position (branch, code, name, size, initial_size, entry_price, entry_date, avg_cost, "
-                        "highest, level, bars_held, entry_rule, last_price, bench_pct, sharpe, sharpe_na) "
-                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                        "highest, level, bars_held, entry_rule, last_price, bench_pct, sharpe, sharpe_na, stop, risk) "
+                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                         (branch, pos.code, pos.name, pos.size, pos.initial_size, pos.entry_price, entry, pos.avg_cost,
-                         pos.highest, pos.level, pos.bars_held, pos.entry_rule, last, bench_pct, sh, sh_na))
+                         pos.highest, pos.level, pos.bars_held, pos.entry_rule, last, bench_pct, sh, sh_na, pos.stop, pos.risk))
         for i, f in enumerate(fills):
             cur.execute("INSERT INTO agent_trade (branch, trade_date, seq, side, code, name, shares, price, amount, position_pct, "
                         "pnl_abs, pnl_pct, hold_days, rule_id, rule_name, rationale, entry_date, level) "
@@ -362,7 +368,7 @@ def run_date(d: date, ctx: Ctx | None = None) -> dict:
 
         # 4. 调整策略(优化器)—— 在今天的成交落库之后跑,它只看历史
         t4 = time.time()
-        opt = ao.step(branch, st, d, dates, pool, ctx.cache, av.GUARDS)
+        opt = ao.step(branch, st, d, dates, pool, ctx.cache[eng_name], av.GUARDS)
         _meta_set(cur, f"branch:{branch}", st)
         adjust = {"key": "adjust", "name": "调整策略", "status": "warn" if opt["action"] in ("observe", "observing") else "ok",
                   "at": _hm(), "duration_ms": int((time.time() - t4) * 1000),
@@ -370,7 +376,7 @@ def run_date(d: date, ctx: Ctx | None = None) -> dict:
 
         # 3. 复盘总结
         t3 = time.time()
-        lesson = _lesson(cur, branch, d, fills, res, ws, followups, opt, st)
+        lesson = _lesson(cur, branch, d, fills, res, ws, followups, opt, st, eng)
         review = {"key": "review", "name": "复盘总结", "status": "ok", "at": _hm(),
                   "duration_ms": int((time.time() - t3) * 1000), "summary": lesson["title"]}
 
@@ -437,7 +443,7 @@ def _cum_stats(cur, branch: str, upto: date) -> dict:
 
 
 def _lesson(cur, branch: str, d: date, fills: list[dict], res: dict, ws: dict, followups: list[dict],
-            opt: dict, st: dict) -> dict:
+            opt: dict, st: dict, eng=av) -> dict:
     sells = [f for f in fills if f["side"] == "sell"]
     buys = [f for f in fills if f["side"] == "buy"]
     realized = sum(f.get("pnl_abs") or 0 for f in sells)
@@ -446,8 +452,9 @@ def _lesson(cur, branch: str, d: date, fills: list[dict], res: dict, ws: dict, f
     n_watch = len(res["watch_items"])
     n_blocked = sum(1 for w in res["watch_items"] if w.get("blocked"))
     miss: dict = {}
+    entry_ids = [r["id"] for r in eng.RULES if r["kind"] == "buy"]
     for w in res["watch_items"]:
-        for rid in ("R-01", "R-02", "R-03", "R-04", "R-05"):
+        for rid in entry_ids:
             if rid in (w.get("gap") or "") and "还差" in (w.get("gap") or ""):
                 miss[rid] = miss.get(rid, 0) + 1
     top_miss = max(miss.items(), key=lambda kv: kv[1]) if miss else None
@@ -474,9 +481,9 @@ def _lesson(cur, branch: str, d: date, fills: list[dict], res: dict, ws: dict, f
         by = {}
         for f in sells:
             by[f["rule_id"]] = by.get(f["rule_id"], 0) + 1
-        why_parts.append("卖出触发的规则:" + "、".join(f"{k} {av.RULE_NAME.get(k, k)} ×{v}" for k, v in by.items()))
+        why_parts.append("卖出触发的规则:" + "、".join(f"{k} {eng.RULE_NAME.get(k, k)} ×{v}" for k, v in by.items()))
     if top_miss:
-        cond = {r["id"]: r["condition"] for r in av.RULES}[top_miss[0]].split(":")[0]
+        cond = {r["id"]: r["condition"] for r in eng.RULES}[top_miss[0]].split(":")[0]
         why_parts.append(f"候选里最常差的一条是 {top_miss[0]}({cond}),{top_miss[1]} 只卡在这里")
     if res["halt_reason"]:
         why_parts.append("护栏:" + res["halt_reason"])
@@ -491,7 +498,7 @@ def _lesson(cur, branch: str, d: date, fills: list[dict], res: dict, ws: dict, f
         learned_parts.append(f"{fu['sold']} 按 {fu['rule_id']} 卖出的 {fu['code']},5 日后 {fu['chg']:+.1f}% —— {fu['verdict']}")
     if today["by_rule"]:
         k, v = max(today["by_rule"].items(), key=lambda kv: kv[1])
-        learned_parts.append(f"到今天为止触发最多的出场规则是 {k}({av.RULE_NAME.get(k, k)},{v} 次)")
+        learned_parts.append(f"到今天为止触发最多的出场规则是 {k}({eng.RULE_NAME.get(k, k)},{v} 次)")
     learned_parts.append("优化器:" + opt["text"])
     learned = ";".join(learned_parts) + "。"
     if opt["action"] == "promoted":
@@ -577,13 +584,15 @@ def dashboard(branch: str = "base") -> dict:
     state = _meta_get(cur, "state", "never_started")
     st = _branch_state(cur, branch)
     p = st["params"]
+    eng = ao.engine_of(branch)
     branches = [_branch_summary(cur, b, b == branch) for b in BRANCHES]
     if not days:
         cur.close()
         conn.close()
         return {"enabled": False, "state": "never_started", "paper": True, "version": f"v{st['version']}",
                 "branch": branch, "branches": branches,
-                "strategy": _strategy_block(None, st), "guardrails": _guard_block(None, p), "rules": _rules_block([], [], [], p)}
+                "strategy": _strategy_block(None, st, branch), "guardrails": _guard_block(None, p),
+                "rules": _rules_block([], [], [], p, None, eng)}
     L = days[-1]
     init = av.GUARDS["initial_capital"]
     eq = [r[1] for r in days]
@@ -603,7 +612,7 @@ def dashboard(branch: str = "base") -> dict:
     cur.close()
     conn.close()
 
-    rules = av.rules_for(p)
+    rules = eng.rules_for(p)
     rule_cond = {r["id"]: r["condition"] for r in rules}
     holdings = []
     for x in poss:
@@ -611,19 +620,19 @@ def dashboard(branch: str = "base") -> dict:
                          "price": round(x[8], 2) if x[8] is not None else None,
                          "pnl_pct": round((x[8] / x[5] - 1) * 100, 2) if x[8] and x[5] else None,
                          "hold_days": x[6], "bench_pct": x[9], "sharpe": x[10], "sharpe_na_reason": x[11],
-                         "entry_rule": x[7] or "R-04", "entry_rule_text": rule_cond.get(x[7] or "R-04")})
+                         "entry_rule": x[7] or eng.ENTRY_RULE, "entry_rule_text": rule_cond.get(x[7] or eng.ENTRY_RULE)})
     today_trades = [_trade_item(t) for t in trades if t[0] == L[0]]
     lessons = [r[7] for r in reversed(days[-7:]) if r[7]]
     started = days[0][0]
     date_index = {str(r[0]): i for i, r in enumerate(days)}
-    versions, marks = _versions_block(st, started, days)
+    versions, marks = _versions_block(st, started, days, branch)
     return {
         "enabled": True, "state": state, "paper": True, "version": f"v{st['version']}",
         "branch": branch, "branches": branches,
         "day_count": len(days), "iteration_count": st["version"] - 1,
         "last_run_text": (_fmt_sh(L[9]) or "") + f" · 按 {L[0].strftime('%m-%d')} 美股收盘",
         "next_run_text": _next_run_text(),
-        "strategy": _strategy_block(len(L[5] or []), st),
+        "strategy": _strategy_block(len(L[5] or []), st, branch),
         "guardrails": _guard_block(L[8], p),
         "pipeline": L[6],
         "overview": {
@@ -647,7 +656,7 @@ def dashboard(branch: str = "base") -> dict:
             "version_marks": [{"index": date_index[m["date"]], "version": m["version"]} for m in marks if m["date"] in date_index],
             "drawdown": {"from_index": dd_from, "to_index": dd_to, "pct": round(dd_pct, 2)} if dd_pct < 0 else None,
         },
-        "rules": _rules_block(trades, poss, days, p, st),
+        "rules": _rules_block(trades, poss, days, p, st, eng),
         "holdings": {"as_of": f"{L[0].strftime('%m-%d')} 收盘", "quote_delay_min": None, "items": holdings},
         "watchlist": {"items": L[5] or []},
         "trades": {"date": str(L[0]), "items": today_trades},
@@ -656,12 +665,19 @@ def dashboard(branch: str = "base") -> dict:
     }
 
 
-def _versions_block(st: dict, started: date, days) -> tuple[list[dict], list[dict]]:
+_V1 = {
+    "vcp": ("VCP 波段交易 —— 移植用户提供的 Backtrader 策略(5 条买入过滤 / 9 条出场 / 倒三角加仓)",
+            "用户 2026-09-12 指定;观察列表 = 筛选器「VCP 波段收缩」近 10 天并集"),
+    "vcp3": ("VCP 三段式 —— 枢轴 + ATR 触发、3 天内放量确认、底部低点止损、1R 后移动止损、15 天时间止损",
+             "Claude 2026-09-12 按全年回测的三个事实自设计,用户同意后实现;同一份观察列表"),
+}
+
+
+def _versions_block(st: dict, started: date, days, branch: str) -> tuple[list[dict], list[dict]]:
     """策略演进 + 换版竖线。每一版都带 reason(优化器的两段数字)和 effect(换版后到今天的净值变化)。"""
     eq_at = {str(r[0]): r[1] for r in days}
-    versions = [{"label": "v1", "date": started.strftime("%m-%d"),
-                 "change": "VCP 波段交易 —— 移植用户提供的 Backtrader 策略(5 条买入过滤 / 9 条出场 / 倒三角加仓)",
-                 "reason": "用户 2026-09-12 指定;观察列表 = 筛选器「VCP 波段收缩」近 10 天并集",
+    change, reason = _V1[ao.BRANCHES[branch]["engine"]]
+    versions = [{"label": "v1", "date": started.strftime("%m-%d"), "change": change, "reason": reason,
                  "effect": None, "status": "current" if st["version"] == 1 else "released"}]
     marks = [{"date": str(started), "version": "v1"}]
     last_eq = days[-1][1]
@@ -693,14 +709,11 @@ def _trade_item(t) -> dict:
     return it
 
 
-def _strategy_block(universe_size, st: dict) -> dict:
+def _strategy_block(universe_size, st: dict, branch: str = "base") -> dict:
     p = st["params"]
-    return {"name": STRATEGY_NAME, "version": f"v{st['version']}",
-            "summary": (f"只买 VCP 收缩后的放量突破:趋势向上(EMA8 > EMA21)、突破前一天 5 日振幅低于 20 日的 {p['atr_compact'] * 100:.0f}%、"
-                        f"收盘突破 20 日枢轴且不追高 {(p['chase_limit'] - 1) * 100:.0f}%、量能 {p['vol_boost']:.1f} 倍以上才进;"
-                        f"初始仓位 8%,盈利后倒三角加仓;-{p['half_loss_pct'] * 100:.0f}% 减半、-{p['max_stop_pct'] * 100:.0f}% 清仓、"
-                        f"+{p['tp1'] * 100:.0f}% / +{p['tp2'] * 100:.0f}% 分批止盈、+{p['tp3'] * 100:.0f}% 清仓,"
-                        f"{p['time2_days']} 天不涨 {p['pullback_trigger'] * 100:.0f}% 也走。"),
+    eng = ao.engine_of(branch)
+    return {"name": STRATEGY_NAME if eng is av else "VCP 三段式(方向 C)", "version": f"v{st['version']}",
+            "summary": eng.summary(p),
             "market_label": "美股", "market_note": "纸上交易 · 日线收盘价成交",
             "universe": "筛选器「VCP 波段收缩」近 10 天结果并集", "universe_size": universe_size,
             "rebalance": "每个交易日收盘后跑一次 · 信号当天收盘价成交",
@@ -709,14 +722,15 @@ def _strategy_block(universe_size, st: dict) -> dict:
 
 def _guard_block(halt_reason, p: dict) -> dict:
     g = av.GUARDS
-    return {"initial_capital": g["initial_capital"], "max_position_pct": int(p["max_single_stock_pct"] * 100),
+    return {"initial_capital": g["initial_capital"],
+            "max_position_pct": int(p.get("max_single_stock_pct", p.get("max_pos_pct", 0)) * 100),
             "max_holdings": p["max_holdings"], "daily_loss_halt_pct": g["daily_loss_halt_pct"],
             "consecutive_loss_pause": g["consecutive_loss_pause"], "long_only": True,
             "triggered_today": bool(halt_reason) if halt_reason is not None else False,
             "triggered_text": halt_reason}
 
 
-def _rules_block(trades, poss, days, p: dict, st: dict | None = None) -> list[dict]:
+def _rules_block(trades, poss, days, p: dict, st: dict | None = None, eng=av) -> list[dict]:
     by_rule: dict = {}
     for t in trades:
         by_rule.setdefault(t[12], []).append(t)
@@ -727,28 +741,29 @@ def _rules_block(trades, poss, days, p: dict, st: dict | None = None) -> list[di
             cycles[k] = cycles.get(k, 0) + (t[9] or 0)
     open_keys = {(x[0], str(x[4])) for x in poss}
     done = {k: v for k, v in cycles.items() if k not in open_keys}
+    entry_ids = [r["id"] for r in eng.RULES if r["kind"] == "buy"]
+    all_ids = [r["id"] for r in eng.RULES]
     blocked: dict = {}
     for r in days:
         for w in (r[5] or []):
             gap = w.get("gap") or ""
             if "还差" in gap:
-                for rid in ("R-01", "R-02", "R-03", "R-04", "R-05"):
+                for rid in entry_ids:
                     if rid in gap:
                         blocked[rid] = blocked.get(rid, 0) + 1
             br = w.get("blocked_reason") or ""
-            for rid in ("R-18", "R-19"):
+            for rid in all_ids:
                 if rid in br:
                     blocked[rid] = blocked.get(rid, 0) + 1
     changed = {v["key"]: v for v in (st or {}).get("versions", [])}
-    key_of_rule = {"R-03": "atr_compact", "R-05": "vol_boost", "R-04": "chase_limit", "R-02": "min_adtv",
-                   "R-11": "tp1", "R-12": "tp2", "R-13": "tp3", "R-14": "time1_days", "R-15": "time2_days",
-                   "R-07": "pullback_trigger", "R-09": "max_stop_pct", "R-08": "half_loss_pct", "R-10": "sma_stop_pct"}
+    key_of_rule = eng.RULE_PARAM_KEY
+    entry_rule = eng.ENTRY_RULE
     out = []
-    for r in av.rules_for(p):
+    for r in eng.rules_for(p):
         rid = r["id"]
         stats = []
-        if rid == "R-04":
-            stats.append({"label": "触发(开仓)", "value": len(by_rule.get("R-04", []))})
+        if rid == entry_rule:
+            stats.append({"label": "触发(开仓)", "value": len(by_rule.get(entry_rule, []))})
             if done:
                 w = sum(1 for v in done.values() if v > 0)
                 stats.append({"label": "触发后胜率", "value": f"{w / len(done) * 100:.0f}%"})
@@ -756,9 +771,9 @@ def _rules_block(trades, poss, days, p: dict, st: dict | None = None) -> list[di
             else:
                 stats.append({"label": "触发后胜率", "value": None})
                 stats.append({"label": "样本", "value": "还没有走完的持仓周期", "dim": True})
-        elif rid in ("R-01", "R-02", "R-03", "R-05"):
+        elif r["kind"] == "buy" and rid != "R-16":
             stats.append({"label": "挡下候选", "value": blocked.get(rid, 0)})
-            stats.append({"label": "说明", "value": "买入要五条同时满足,单条不单独产生交易", "dim": True})
+            stats.append({"label": "说明", "value": "买入条件要同时满足,单条不单独产生交易", "dim": True})
         elif r["kind"] == "sell" or rid == "R-16":
             ts = by_rule.get(rid, [])
             stats.append({"label": "触发", "value": len(ts)})
@@ -766,7 +781,7 @@ def _rules_block(trades, poss, days, p: dict, st: dict | None = None) -> list[di
                 pn = [t[10] for t in ts if t[10] is not None]
                 stats.append({"label": "平均盈亏", "value": f"{sum(pn) / len(pn):+.1f}%" if pn else None})
                 stats.append({"label": "触发后胜率", "value": f"{sum(1 for x in pn if x > 0) / len(pn) * 100:.0f}%" if pn else None})
-        elif rid in ("R-18", "R-19"):
+        elif rid in ("R-18", "R-19", "C-07", "C-03"):
             stats.append({"label": "挡下候选", "value": blocked.get(rid, 0)})
         else:
             stats.append({"label": "说明", "value": "仓位算法,每次开仓 / 加仓都经过", "dim": True})

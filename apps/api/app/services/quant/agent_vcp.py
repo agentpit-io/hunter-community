@@ -132,6 +132,19 @@ RULE_NAME = {
     "R-14": "5 日不涨减半", "R-15": "10 日不涨清仓", "R-16": "倒三角加仓",
 }
 ENTRY_RULE_IDS = ("R-01", "R-02", "R-03", "R-04", "R-05")
+ENTRY_RULE = "R-04"
+# 规则 ↔ 优化器能动的参数(面板上标「vN 改」「观察期」用)
+RULE_PARAM_KEY = {"R-03": "atr_compact", "R-05": "vol_boost", "R-04": "chase_limit", "R-02": "min_adtv",
+                  "R-11": "tp1", "R-12": "tp2", "R-13": "tp3", "R-14": "time1_days", "R-15": "time2_days",
+                  "R-07": "pullback_trigger", "R-09": "max_stop_pct", "R-08": "half_loss_pct", "R-10": "sma_stop_pct"}
+
+
+def summary(p: dict = PARAMS) -> str:
+    return (f"只买 VCP 收缩后的放量突破:趋势向上(EMA8 > EMA21)、突破前一天 5 日振幅低于 20 日的 {p['atr_compact'] * 100:.0f}%、"
+            f"收盘突破 20 日枢轴且不追高 {(p['chase_limit'] - 1) * 100:.0f}%、量能 {p['vol_boost']:.1f} 倍以上才进;"
+            f"初始仓位 8%,盈利后倒三角加仓;-{p['half_loss_pct'] * 100:.0f}% 减半、-{p['max_stop_pct'] * 100:.0f}% 清仓、"
+            f"+{p['tp1'] * 100:.0f}% / +{p['tp2'] * 100:.0f}% 分批止盈、+{p['tp3'] * 100:.0f}% 清仓,"
+            f"{p['time2_days']} 天不涨 {p['pullback_trigger'] * 100:.0f}% 也走。")
 
 
 @dataclass
@@ -147,6 +160,8 @@ class Position:
     level: int               # 1..3 加仓档;-1 / -2 止盈状态
     bars_held: int = 0       # 持有的交易日数(入场当天 0)
     entry_rule: str = "R-04"
+    stop: float = 0.0        # 方向 C(agent_vcp3)用:当前止损位;A/B 不用
+    risk: float = 0.0        # 方向 C 用:初始风险 1R = 入场价 − 初始止损
 
     def to_dict(self) -> dict:
         return asdict(self)
