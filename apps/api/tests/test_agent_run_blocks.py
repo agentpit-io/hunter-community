@@ -4,8 +4,11 @@
 2026-09-12 线上发现 C-08(评分)那条规则的每档统计从来没显示过:分支排在通用「买入规则」分支后面,
 C-08 的 kind 也是 buy,永远轮不到。单元测试盯住「按 id 特判的分支要排在按 kind 的通用分支前面」。
 """
+import os
+import sys
 from datetime import date
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.services.quant import agent_run as ar, agent_vcp3 as c3
 
 

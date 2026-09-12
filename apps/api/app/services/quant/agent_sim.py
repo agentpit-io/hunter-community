@@ -29,7 +29,7 @@ def pooled_watch(dates: list[date], screen_of: dict, pool_days: int) -> dict:
     return out
 
 
-def build_cache(dates: list[date], pool: dict, bars_of, engine=av) -> dict:
+def build_cache(dates: list[date], pool: dict, bars_of, engine=av, bench: dict | None = None) -> dict:
     """{(code, date): 指标 | None}。每只票从首次进池那天算到最后一天(持仓可能拿到很久以后)。"""
     first: dict = {}
     for d in dates:
@@ -45,7 +45,7 @@ def build_cache(dates: list[date], pool: dict, bars_of, engine=av) -> dict:
             if d < d0:
                 continue
             i = idx.get(d)
-            cache[(code, d)] = engine.indicators(bars[:i + 1]) if i is not None else None
+            cache[(code, d)] = engine.indicators(bars[:i + 1], bench=bench) if i is not None else None
     return cache
 
 

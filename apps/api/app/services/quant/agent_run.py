@@ -104,6 +104,7 @@ CREATE TABLE IF NOT EXISTS agent_trade (
 );
 ALTER TABLE agent_trade ADD COLUMN IF NOT EXISTS branch TEXT NOT NULL DEFAULT 'base';
 ALTER TABLE agent_trade ADD COLUMN IF NOT EXISTS grade TEXT;
+ALTER TABLE agent_trade ADD COLUMN IF NOT EXISTS grade_detail TEXT;
 CREATE INDEX IF NOT EXISTS agent_trade_date_idx ON agent_trade (branch, trade_date);
 CREATE TABLE IF NOT EXISTS agent_position (
     code         TEXT NOT NULL,
@@ -246,7 +247,7 @@ class Ctx:
             for d in need:
                 i = idx.get(d)
                 for name, eng in ao.ENGINES.items():
-                    self.cache[name][(code, d)] = eng.indicators(bars[:i + 1]) if i is not None else None
+                    self.cache[name][(code, d)] = eng.indicators(bars[:i + 1], bench=self.store["bench"]) if i is not None else None
             self.seen.add(code)
         self.cache_dates.update(dates)
 
@@ -360,11 +361,12 @@ def run_date(d: date, ctx: Ctx | None = None) -> dict:
                          pos.highest, pos.level, pos.bars_held, pos.entry_rule, last, bench_pct, sh, sh_na, pos.stop, pos.risk))
         for i, f in enumerate(fills):
             cur.execute("INSERT INTO agent_trade (branch, trade_date, seq, side, code, name, shares, price, amount, position_pct, "
-                        "pnl_abs, pnl_pct, hold_days, rule_id, rule_name, rationale, entry_date, level, grade) "
-                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                        "pnl_abs, pnl_pct, hold_days, rule_id, rule_name, rationale, entry_date, level, grade, grade_detail) "
+                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                         (branch, d, i, f["side"], f["symbol"], f.get("name"), f["shares"], f["price"], f.get("amount"),
                          f.get("position_pct"), f.get("pnl_abs"), f.get("pnl_pct"), f.get("hold_days"),
-                         f["rule_id"], f["rule_name"], f["rationale"], f.get("entry_date"), f.get("level"), f.get("grade")))
+                         f["rule_id"], f["rule_name"], f["rationale"], f.get("entry_date"), f.get("level"), f.get("grade"),
+                         f.get("grade_detail")))
         followups = _backfill_followups(cur, branch, d, lambda c: ctx.bars_of(c, d))
 
         # 4. 调整策略(优化器)—— 在今天的成交落库之后跑,它只看历史

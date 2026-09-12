@@ -40,10 +40,24 @@
 1. **止损被封顶就不进**(C-04):底部低点下方 stop_atr 个 ATR 若超过 max_stop_pct,说明形态不够紧,跳过。
 2. **组合总风险上限**(C-09):所有持仓的 (现价 − 止损) × 股数 之和 ≤ heat_cap 总资产;新仓放不下就按余额缩,缩到 0 股就不进。
    移动止损上移后开放风险自然下降,额度会腾出来 —— 比粗暴限制持仓数好。
-3. **评分定仓位**(C-08 / C-03):五个形态特征各 0~2 分(见 grade),S ≥ 8 → 20% 总资产,A 6~7 → 15%,B 4~5 → 10%,
-   C 2~3 → 5%,D < 2 → 不买(达到信号也不买:结构松散、止损成本高、盈亏比差)。
-   **特征和档位是先按形态逻辑定的,再拿历史 45 笔验证是否单调**,不是反过来按结果调 —— 那是过拟合的正门。
-   验证结果写在提交说明和 CLAUDE.md 里,不单调的地方如实写。
+3. **评分定仓位**(C-08 / C-03):S → 20% 总资产,A → 15%,B → 10%,C → 5%,D → 不买(达到信号也不买:
+   结构松散、止损成本高、盈亏比差)。
+
+## 评分(2026-09-12 深夜,用户给的五项 500 分制,替换掉第一版的 10 分制)
+
+五项各评 S/A/B/C/D → 100/80/60/40/0 分,总分 ≥350 S、≥300 A、≥250 B、≥200 C、<200 D。
+1. 形态:第一版那五个特征(紧凑度 / 收缩结构 / 量能枯竭 / 突破质量 / 相对强度 RS,各 0~2 分)→ ≥8 S、6~7 A、4~5 B、2~3 C、<2 D。
+2. 量价配合:最近 63 个交易日,(涨且量 > 50 日均量)+(跌且量 < 50 日均量)−(涨且量 < 均量)−(跌且量 > 均量);
+   >5 S、>4 A、>3 B、>2 C、≤2 D。
+3. 抗跌:最近 63 个交易日里标普 500 下跌的日子,这只票收盘不跌(≥ 前收)的次数;>15 S、>10 A、>5 B、>2 C、≤2 D。
+4. 盈亏比:预期涨幅 ÷ 止损距离;≥5 S、≥4 A、≥3 B、≥2 C、≥1 D(不足 1:1 也是 D)。
+   **预期涨幅按底部量度目标**(用户没定目标价,这是 Claude 的口径):枢轴 × 第一次收缩深度 = 底部高度,从枢轴往上投射,
+   目标 = 枢轴 × (1 + 首次收缩深度)。止损距离 = 收盘 − C-04 的止损位。
+5. MACD 金叉(突破时):日线 + 周线都金叉 S、只有周线 A、只有日线 B、没有 C(此项没有 D)。
+   「突破时」= 日线在最近 5 个交易日内 DIF 上穿 DEA 且现在仍在其上;周线在最近 3 根周 K(含本周未收完的)内上穿。
+   周线 MACD 要 ≥ 48 根周 K,日线不够长就当没有周线金叉。
+算不出的项(日线不足 113 根、没有基准)按 D 计 0 分并在说明里写明原因,不拿别的值顶替。
+项目 2、3 的窗口和阈值、项目 4 的档位、项目 5 的组合都是用户定的,**不进优化器**(不在 RULE_PARAM_KEY 里)。
 """
 from __future__ import annotations
 
@@ -60,7 +74,16 @@ PARAMS = {
     "heat_cap": 0.04,                          # 组合开放风险上限(占总资产)
     "grade_size": {"S": 0.20, "A": 0.15, "B": 0.10, "C": 0.05, "D": 0.0},   # 按评分定仓位(占总资产)
 }
-GRADE_MIN = {"S": 8, "A": 6, "B": 4, "C": 2}   # 10 分制的档位下限;<2 = D
+SUB_POINTS = {"S": 100, "A": 80, "B": 60, "C": 40, "D": 0}       # 每一项的档位 → 分数
+GRADE_MIN = {"S": 350, "A": 300, "B": 250, "C": 200}                 # 五项总分(满分 500)的档位下限;<200 = D
+FORM_MIN = {"S": 8, "A": 6, "B": 4, "C": 2}                          # 第 1 项形态(10 分制)的档位下限
+VP_MIN = {"S": 6, "A": 5, "B": 4, "C": 3}                            # 第 2 项量价净次数:>5 S、>4 A、>3 B、>2 C
+DEF_MIN = {"S": 16, "A": 11, "B": 6, "C": 3}                         # 第 3 项抗跌次数:>15 S、>10 A、>5 B、>2 C
+RR_MIN = {"S": 5.0, "A": 4.0, "B": 3.0, "C": 2.0}                    # 第 4 项盈亏比;<2 一律 D(含不足 1:1)
+LOOKBACK = 63                 # 「最近 3 个月」= 63 个交易日
+VOL_SMA = 50                  # 第 2 项的成交量均线
+MACD_DAILY_WITHIN = 5         # 第 5 项:日线金叉要在最近 5 个交易日内
+MACD_WEEKLY_WITHIN = 3        # 第 5 项:周线金叉要在最近 3 根周 K 内(含本周)
 STOP_KEYS = ("stop_atr", "max_stop_pct")     # 数值越小越紧;只许收紧
 MIN_BARS = 60
 _MAX_CONFIRM = 5
@@ -74,7 +97,7 @@ RULES = [
     {"id": "C-05", "kind": "sell", "condition": "保本 + 移动止损:涨到 1R 后止损上移到成本,之后按前 10 日最低价跟踪"},
     {"id": "C-06", "kind": "sell", "condition": "时间止损:持有 15 个交易日仍没涨过 1R,清仓"},
     {"id": "C-07", "kind": "risk", "condition": "护栏:单日权益回撤达 -3% 当天停止开仓;连亏 3 笔后下一个交易日不开仓"},
-    {"id": "C-08", "kind": "buy", "condition": "评分(10 分):紧凑度 / 收缩结构 / 量能枯竭 / 突破质量 / 相对强度各 0~2;S ≥8 · A 6~7 · B 4~5 · C 2~3 · D <2 不买"},
+    {"id": "C-08", "kind": "buy", "condition": "评分(500 分):形态 / 量价配合 / 抗跌 / 盈亏比 / MACD 金叉五项各评 S~D 计 100/80/60/40/0;总分 ≥350 S · ≥300 A · ≥250 B · ≥200 C · <200 D 不买"},
     {"id": "C-09", "kind": "risk", "condition": "组合总风险:所有持仓 (现价−止损)×股数 之和 ≤ 4% 总资产,放不下就缩仓或不进"},
 ]
 RULE_NAME = {"C-01": "VCP 枢轴突破买入", "C-04": "初始止损", "C-05": "移动止损", "C-06": "时间止损"}
@@ -115,7 +138,7 @@ def summary(p: dict = PARAMS) -> str:
     return (f"从筛选器的 VCP 候选里,只在收盘站上枢轴、高出不超过 {p['atr_chase']:.1f} 个 ATR 时进,"
             f"要求 {p['confirm_days']} 天内放量 {p['vol_boost']:.1f} 倍确认;止损挂在底部低点下方 {p['stop_atr']:.1f} 个 ATR,"
             f"比 -{p['max_stop_pct'] * 100:.0f}% 还远就不进;按形态评分定仓位(S {gs['S'] * 100:.0f}% / A {gs['A'] * 100:.0f}% / "
-            f"B {gs['B'] * 100:.0f}% / C {gs['C'] * 100:.0f}%,D 不买),组合总风险 ≤ {p['heat_cap'] * 100:.0f}%;"
+            f"B {gs['B'] * 100:.0f}% / C {gs['C'] * 100:.0f}%,D 不买;五项 500 分制),组合总风险 ≤ {p['heat_cap'] * 100:.0f}%;"
             f"涨到 1R 后保本、按前 {p['trail_days']} 日最低价跟踪,不设固定止盈;{p['time_days']} 天没到 1R 就走。")
 
 
@@ -123,7 +146,84 @@ def summary(p: dict = PARAMS) -> str:
 # 指标
 # ═══════════════════════════════════════════════════════════════
 
-def indicators(bars: list[tuple], p: dict = PARAMS) -> dict | None:
+def _ema_series(xs: list[float], n: int) -> list:
+    """逐根 EMA(前 n 根 SMA 做种子,和 av._ema 同口径),不够 n 根的位置是 None。"""
+    a = 2.0 / (n + 1)
+    out, e = [], None
+    for i, x in enumerate(xs):
+        if i < n - 1:
+            out.append(None)
+            continue
+        e = sum(xs[:n]) / n if e is None else a * x + (1 - a) * e
+        out.append(e)
+    return out
+
+
+def _macd_cross(closes: list[float], within: int, fast: int = 12, slow: int = 26, sig: int = 9):
+    """DIF 在最近 within 根里上穿 DEA、且现在仍在 DEA 之上 → True;早就在上方 / 在下方 → False;根数不够 → None。"""
+    if len(closes) < slow + sig + within + 10:
+        return None
+    ef, es = _ema_series(closes, fast), _ema_series(closes, slow)
+    dif = [None if (a is None or b is None) else a - b for a, b in zip(ef, es)]
+    off = next(i for i, x in enumerate(dif) if x is not None)
+    dea_tail = _ema_series(dif[off:], sig)
+    dea = [None] * off + dea_tail
+    n = len(closes)
+    if dea[-1] is None or dif[-1] <= dea[-1]:
+        return False
+    for i in range(max(n - within, 1), n):
+        if None in (dif[i - 1], dea[i - 1], dif[i], dea[i]):
+            continue
+        if dif[i - 1] <= dea[i - 1] and dif[i] > dea[i]:
+            return True
+    return False
+
+
+def _weekly_closes(bars: list[tuple]) -> list[float]:
+    """日线 → 周收盘(按 ISO 周分组,最后一周可以没走完)。"""
+    out, key = [], None
+    for b in bars:
+        k = b[0].isocalendar()[:2]
+        if k != key:
+            out.append(b[1])
+            key = k
+        else:
+            out[-1] = b[1]
+    return out
+
+
+def _vp_net(closes: list[float], vols: list[float], look: int = LOOKBACK, n: int = VOL_SMA):
+    """最近 look 天:(涨且量 > n 日均量)+(跌且量 < 均量)−(涨且量 < 均量)−(跌且量 > 均量)。平盘 / 量等于均量的天不计。"""
+    if len(closes) < look + n:
+        return None
+    good = bad = 0
+    for i in range(len(closes) - look, len(closes)):
+        sma = sum(vols[i - n + 1:i + 1]) / n
+        up, dn = closes[i] > closes[i - 1], closes[i] < closes[i - 1]
+        hi, lo = vols[i] > sma, vols[i] < sma
+        if (up and hi) or (dn and lo):
+            good += 1
+        elif (up and lo) or (dn and hi):
+            bad += 1
+    return good - bad
+
+
+def _defense(bars: list[tuple], bench: dict | None, look: int = LOOKBACK):
+    """最近 look 天里基准下跌的日子,这只票收盘不跌(≥ 前收)的次数 → (次数, 基准下跌天数);没有基准 / 不够根数 → None。"""
+    if not bench or len(bars) < look + 1:
+        return None
+    cnt = down = 0
+    for i in range(len(bars) - look, len(bars)):
+        b, bp = bench.get(bars[i][0]), bench.get(bars[i - 1][0])
+        if b is None or bp is None or b >= bp:
+            continue
+        down += 1
+        if bars[i][1] >= bars[i - 1][1]:
+            cnt += 1
+    return cnt, down
+
+
+def indicators(bars: list[tuple], p: dict = PARAMS, bench: dict | None = None) -> dict | None:
     if len(bars) < MIN_BARS:
         return None
     c = [b[1] for b in bars]
@@ -133,12 +233,19 @@ def indicators(bars: list[tuple], p: dict = PARAMS) -> dict | None:
     if any(x is None for x in h[-60:] + lo[-60:] + v[-60:]):
         return None
     vs = vcp.vcp_stats(bars) or {}
+    vp = _vp_net(c, v) if all(x is not None for x in v[-(LOOKBACK + VOL_SMA):]) else None
     return {
         "close": c[-1], "high": h[-1], "low": lo[-1], "volume": v[-1],
         "atr20": av._atr(bars[-61:], 20),
         "vol_sma20": av._sma(v, 20),
         "pivot": vs.get("pivot"), "base_low": vs.get("last_low"), "contractions": vs.get("contractions"),
         "last_depth": vs.get("last_depth"), "low_vol_ratio": vs.get("low_vol_ratio"),
+        "first_depth": vs.get("first_depth"),
+        # 五项评分里的 2 / 3 / 5 项(第 1、4 项从上面的字段现算)
+        "vp_net_63": vp,
+        "defense_63": _defense(bars, bench),
+        "macd_d": _macd_cross(c, MACD_DAILY_WITHIN),
+        "macd_w": _macd_cross(_weekly_closes(bars), MACD_WEEKLY_WITHIN),
         "recent_closes": c[-_MAX_CONFIRM - 1:],          # 含今天
         "recent_vols": v[-_MAX_CONFIRM:],                 # 含今天
         "lows_prior": lo[-_MAX_TRAIL - 1:-1],             # 不含今天
@@ -174,8 +281,18 @@ def stop_of(ind: dict, p: dict = PARAMS) -> tuple[float | None, bool]:
     return max(raw, cap), raw < cap
 
 
-def grade(ind: dict, p: dict = PARAMS, score=None) -> dict:
-    """形态评分(10 分制)→ {grade, points, factors:[(名, 分, 说明)]}。档位先定、后验证,见文件头。
+def _tier(x, mins: dict):
+    """按档位下限归档(S→C 依次比),都够不上 → D;算不出 → None。"""
+    if x is None:
+        return None
+    for k in ("S", "A", "B", "C"):
+        if x >= mins[k]:
+            return k
+    return "D"
+
+
+def form_grade(ind: dict, p: dict = PARAMS, score=None) -> tuple[str, int, list]:
+    """第 1 项 · 形态(10 分制)→ (档位, 分, [(名, 分, 说明)])。第一版评分原样保留。
 
     五个特征都是「进场前就知道」的:
     1 紧凑度  止损距离(收盘到止损)≤4% → 2;≤6% → 1;否则 0
@@ -203,13 +320,42 @@ def grade(ind: dict, p: dict = PARAMS, score=None) -> dict:
     pt = 2 if score is not None and score >= 90 else 1 if score is not None and score >= 80 else 0
     factors.append(("相对强度", pt, f"RS {score:.0f}" if score is not None else "RS 缺"))
     total = sum(x[1] for x in factors)
-    g = "D"
-    for k in ("S", "A", "B", "C"):
-        if total >= GRADE_MIN[k]:
-            g = k
-            break
-    return {"grade": g, "points": total, "factors": factors,
-            "text": f"{g} 级({total}/10):" + "、".join(f"{a} {b}({c})" for a, b, c in factors)}
+    return _tier(total, FORM_MIN), total, factors
+
+
+def rr_ratio(ind: dict, p: dict = PARAMS) -> tuple[float | None, float | None]:
+    """第 4 项 · 盈亏比 = 预期涨幅 ÷ 止损距离 → (比值, 目标价)。预期涨幅按底部量度目标(见文件头),算不出 → (None, None)。"""
+    stop, _ = stop_of(ind, p)
+    fd, ph, px = ind.get("first_depth"), ind.get("pivot"), ind["close"]
+    if stop is None or stop >= px or fd is None or ph is None:
+        return None, None
+    target = ph * (1 + fd / 100)
+    return max(target - px, 0.0) / (px - stop), target
+
+
+def grade(ind: dict, p: dict = PARAMS, score=None) -> dict:
+    """五项 500 分制(用户定的,见文件头)→ {grade, points, factors:[(项, 档位, 分, 说明)], form_points, text}。
+
+    算不出的项按 D 计 0 分,说明里写原因;第 5 项没有 D,周线算不出就当没有周线金叉。
+    """
+    fg, fpts, ff = form_grade(ind, p, score)
+    items = [("形态", fg, f"{fpts}/10:" + "、".join(f"{a} {b}({c})" for a, b, c in ff))]
+    vp = ind.get("vp_net_63")
+    items.append(("量价配合", _tier(vp, VP_MIN), f"近 {LOOKBACK} 天净 {vp:+d} 次" if vp is not None else f"日线不足 {LOOKBACK + VOL_SMA} 根,算不出"))
+    df = ind.get("defense_63")
+    items.append(("抗跌", _tier(df[0], DEF_MIN) if df else None,
+                  f"标普下跌 {df[1]} 天里 {df[0]} 天不跌" if df else "没有基准日线,算不出"))
+    rr, target = rr_ratio(ind, p)
+    items.append(("盈亏比", _tier(rr, RR_MIN), f"{rr:.1f}:1(量度目标 ${target:.2f})" if rr is not None else "首次收缩深度或止损算不出"))
+    md, mw = bool(ind.get("macd_d")), bool(ind.get("macd_w"))
+    g5 = "S" if md and mw else "A" if mw else "B" if md else "C"
+    items.append(("MACD 金叉", g5, "日线 + 周线" if md and mw else "只有周线" if mw else "只有日线" if md else
+                  ("没有金叉" if ind.get("macd_w") is not None else "日线没有;周线不够 48 根算不出")))
+    factors = [(name, t or "D", SUB_POINTS[t or "D"], txt) for name, t, txt in items]
+    total = sum(x[2] for x in factors)
+    g = _tier(total, GRADE_MIN)
+    return {"grade": g, "points": total, "factors": factors, "form_points": fpts,
+            "text": f"{g} 级({total}/500):" + "、".join(f"{a} {b}{c}({d})" for a, b, c, d in factors)}
 
 
 def entry_ok(ind: dict, p: dict = PARAMS) -> bool:
@@ -346,7 +492,8 @@ def try_entry(code, name, ind, state: dict, p: dict = PARAMS, want_text: bool = 
                       entry_date=state["date"], avg_cost=px, highest=px, level=1, bars_held=0,
                       entry_rule=ENTRY_RULE, stop=stop, risk=risk)
     state["positions"].append(pos)
-    extra = {"amount": round(cost, 2), "position_pct": round(cost / equity * 100, 2), "grade": gr["grade"], "points": gr["points"]}
+    extra = {"amount": round(cost, 2), "position_pct": round(cost / equity * 100, 2), "grade": gr["grade"], "points": gr["points"],
+             "grade_detail": gr["text"]}
     if not want_text:
         return _fill("buy", pos, size, px, ENTRY_RULE, "", **extra), None
     t = {c["rule"]: c["text"] for c in entry_checks(ind, p)}

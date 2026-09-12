@@ -203,8 +203,8 @@ def _atr(bars, n):
     return a
 
 
-def indicators(bars: list[tuple], p: dict = PARAMS) -> dict | None:
-    """一只票截到今天的日线 → 今天的指标;不够根数或缺高低量 → None。"""
+def indicators(bars: list[tuple], p: dict = PARAMS, bench: dict | None = None) -> dict | None:
+    """一只票截到今天的日线 → 今天的指标;不够根数或缺高低量 → None。bench 这个引擎用不到(方向 C 的抗跌项要),保留是为了两个引擎接口一致。"""
     if len(bars) < MIN_BARS:
         return None
     c = [b[1] for b in bars]
