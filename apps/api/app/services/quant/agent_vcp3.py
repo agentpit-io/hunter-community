@@ -50,15 +50,14 @@
 2. 量价配合:最近 63 个交易日,(涨且量 > 50 日均量)+(跌且量 < 50 日均量)−(涨且量 < 均量)−(跌且量 > 均量);
    >5 S、>4 A、>3 B、>2 C、≤2 D。
 3. 抗跌:最近 63 个交易日里标普 500 下跌的日子,这只票收盘不跌(≥ 前收)的次数;>15 S、>10 A、>5 B、>2 C、≤2 D。
-4. 盈亏比:(目标价 − 收盘)÷(收盘 − C-04 止损位);≥5 S、≥4 A、≥3 B、≥2 C、不足 2 是 D。
-   **目标价按用户 2026-09-12 给的四维法,永远取最保守(最小)的那个**:
-   - T_level 日线结构:近 252 根里上方最近的前高(5 根摆动高点)、未回补的向下跳空缺口下沿、整数关口,三者取最小;
-     离收盘不足 0.5 ATR 的忽略(那是噪声,不是阻力)。整数关口的步长按价位:<10 → 1,<50 → 5,<200 → 10,<1000 → 50,其余 100。
-   - T_volume 成交量分布:近 30 根的 Volume Profile(每根的量按高低区间均摊到价格格子,格宽 = max(ATR/4, 区间/40)),
-     高成交量节点 = 量 ≥ 均值 1.5 倍的格子;取收盘上方第一个不含收盘的节点簇的下沿。上方没有节点就没有这一维。
-   - T_volatility 波动上限:收盘 + ATR × 倍数,倍数 = √RVOL(RVOL = 今日量 ÷ 20 日均量),限在 1~3 之间。
-     用户例子「ATR 0.5、RVOL 6 倍 → 放大 2.5 倍」与 √6 = 2.45 吻合,倍数公式是 Claude 从这个例子反推的。
-   - T_ai(催化剂评分 + 流通盘匹配历史涨幅上限)**没有数据源,不算**,不用别的值顶替;min 只在算得出的维度里取。
+4. 盈亏比(R 倍数):R = 收盘 − C-04 止损位,盈亏比 = (目标价 − 收盘)÷ R;≥5 S、≥4 A、≥3 B、≥2 C、不足 2 是 D。
+   **目标价 = 收盘上方最近的显著阻力**(用户 2026-09-12 第三版拍板「直接用 R 倍数目标」,具体口径是 Claude 定的):
+   - 显著阻力只认两种:近 252 根(不含今天)的最高价 = 52 周高点;未回补的向下跳空缺口下沿(回补到哪下沿抬到哪)。两者取近的。
+     离收盘不足 0.5 ATR 的不算。**整数关口、ATR 波动上限、30 根量能节点不再参与** —— 第二版(四维取最保守)实测 20 笔盈亏比全在
+     0.2~0.6:1,就是这三样把目标压在 1 个 ATR 内,而 VCP 的止损离收盘 3~5 个 ATR。四维的函数(t_level / t_volume / t_volatility)
+     保留着没删,不再被 indicators 调用。
+   - 上方没有显著阻力(已在 52 周新高之上)→ 目标 = 底部量度目标 = 枢轴 × (1 + 首次收缩深度)。
+   - 这一项算的是「到下一道阻力有几个 R 的空间」;前两版分别是量度目标(26/29 笔 D)和四维最保守(20/20 笔 D)。
 5. MACD 金叉(突破时):日线 + 周线都金叉 S、只有周线 A、只有日线 B、没有 C(此项没有 D)。
    「突破时」= 日线在最近 5 个交易日内 DIF 上穿 DEA 且现在仍在其上;周线在最近 3 根周 K(含本周未收完的)内上穿。
    周线 MACD 要 ≥ 48 根周 K,日线不够长就当没有周线金叉。
@@ -302,6 +301,26 @@ def t_volatility(px: float, atr: float, rvol: float | None) -> tuple[float, floa
     return px + atr * mult, mult
 
 
+def res_above(bars: list[tuple], px: float, atr: float, n: int = LEVEL_BARS) -> tuple[float, str] | None:
+    """收盘上方最近的显著阻力:近 n 根(不含今天)的最高价、未回补的向下缺口下沿,取近的 → (价, 来源);没有 → None。"""
+    win = bars[-n - 1:-1] if len(bars) > 1 else []
+    if not win:
+        return None
+    floor = px + 0.5 * atr
+    cands = []
+    hi = max(b[2] for b in win)
+    if hi > floor:
+        cands.append((hi, "52 周高点"))
+    h = [b[2] for b in win]
+    lo = [b[3] for b in win]
+    for i in range(1, len(win)):
+        if lo[i - 1] > h[i]:
+            edge = max(h[i:])
+            if floor < edge < lo[i - 1]:
+                cands.append((edge, "缺口下沿"))
+    return min(cands) if cands else None
+
+
 def targets(bars: list[tuple], px: float, atr: float | None, rvol: float | None) -> dict | None:
     """四维目标价里算得出的三维 → {"level": (价, 来源), "volume": 价|None, "vol": (价, 倍数), "final": (价, 维度名)}。"""
     if not atr or len(bars) < MIN_BARS:
@@ -339,7 +358,7 @@ def indicators(bars: list[tuple], p: dict = PARAMS, bench: dict | None = None) -
         "defense_63": _defense(bars, bench),
         "macd_d": _macd_cross(c, MACD_DAILY_WITHIN),
         "macd_w": _macd_cross(_weekly_closes(bars), MACD_WEEKLY_WITHIN),
-        "targets": targets(bars, c[-1], atr, (v[-1] / vs20) if (vs20 and v[-1] is not None) else None),
+        "res_above": res_above(bars, c[-1], atr) if atr else None,
         "recent_closes": c[-_MAX_CONFIRM - 1:],          # 含今天
         "recent_vols": v[-_MAX_CONFIRM:],                 # 含今天
         "lows_prior": lo[-_MAX_TRAIL - 1:-1],             # 不含今天
@@ -418,18 +437,21 @@ def form_grade(ind: dict, p: dict = PARAMS, score=None) -> tuple[str, int, list]
 
 
 def rr_ratio(ind: dict, p: dict = PARAMS) -> tuple[float | None, float | None, str]:
-    """第 4 项 · 盈亏比 = (目标价 − 收盘)÷(收盘 − 止损)→ (比值, 目标价, 说明)。目标价 = 四维里最保守的(见文件头)。"""
+    """第 4 项 · 盈亏比(R 倍数)= (目标价 − 收盘)÷ R → (比值, 目标价, 说明)。目标 = 上方最近的显著阻力,没有就用底部量度目标(见文件头)。"""
     stop, _ = stop_of(ind, p)
-    tg, px = ind.get("targets"), ind["close"]
-    if stop is None or stop >= px or not tg:
-        return None, None, "止损或目标价算不出"
-    target, src = tg["final"]
-    parts = [f"前高/缺口/关口 ${tg['level'][0]:.2f}", f"波动上限 ${tg['vol'][0]:.2f}(√RVOL={tg['vol'][1]:.1f})"]
-    if tg["volume"] is not None:
-        parts.append(f"量能节点 ${tg['volume']:.2f}")
+    px = ind["close"]
+    if stop is None or stop >= px:
+        return None, None, "止损算不出"
+    r1 = px - stop
+    ra = ind.get("res_above")
+    if ra:
+        target, src = ra
     else:
-        parts.append("量能节点上方无")
-    return max(target - px, 0.0) / (px - stop), target, f"目标 ${target:.2f} 取最保守的「{src}」;" + "、".join(parts) + ";AI 相似度维度无数据不算"
+        fd, ph = ind.get("first_depth"), ind.get("pivot")
+        if fd is None or ph is None:
+            return None, None, "上方无阻力且底部深度算不出"
+        target, src = ph * (1 + fd / 100), "已创 52 周新高,用底部量度目标"
+    return max(target - px, 0.0) / r1, target, f"R = ${r1:.2f};目标 ${target:.2f}({src}),空间 {max(target - px, 0.0) / r1:.1f}R"
 
 
 def grade(ind: dict, p: dict = PARAMS, score=None) -> dict:

@@ -73,15 +73,23 @@ check("评分 · 五项各 S~D 计 100/80/60/40/0,总分 0~500", len(gr["factors
 fg, fpts, ff = c3.form_grade(ind2, c3.PARAMS, 95)
 check("评分 · 第 1 项形态 = 第一版 10 分制", len(ff) == 5 and 0 <= fpts <= 10 and gr["factors"][0][1] == fg and gr["form_points"] == fpts, str((fg, fpts)))
 check("评分 · 教科书形态 + RS 95 + 基准(抗跌 S)至少 B 级", gr["grade"] in ("S", "A", "B") and gr["factors"][2][1] == "S", gr["text"])
-tg = ind2["targets"]
-check("评分 · ⭐目标价 = 三个算得出的维度里最小的,且都在收盘上方", tg and tg["final"][0] == min([tg["level"][0], tg["vol"][0]] + ([tg["volume"]] if tg["volume"] is not None else []))
-      and tg["final"][0] > ind2["close"] and abs(c3.rr_ratio(ind2)[1] - tg["final"][0]) < 1e-9, str(tg))
-check("评分 · 盈亏比 = (目标 − 收盘) ÷ (收盘 − 止损)", abs(c3.rr_ratio(ind2)[0] - (tg["final"][0] - ind2["close"]) / (ind2["close"] - stop0)) < 1e-9, str(c3.rr_ratio(ind2)))
-check("评分 · 盈亏比说明写明取了哪一维、AI 维度无数据", "最保守" in c3.rr_ratio(ind2)[2] and "AI" in c3.rr_ratio(ind2)[2], c3.rr_ratio(ind2)[2])
-# T_level:前高 / 缺口 / 整数关口
+ra = ind2["res_above"]
+check("评分 · ⭐上方最近的显著阻力 = 52 周高点(教科书形态里是第一段涨到 100 的那根,高 102)", ra and ra[1] == "52 周高点" and abs(ra[0] - max(b[2] for b in brk[:-1])) < 1e-9, str(ra))
+rr = c3.rr_ratio(ind2)
+check("评分 · ⭐盈亏比 = (阻力 − 收盘) ÷ R,R = 收盘 − 止损", abs(rr[0] - (ra[0] - ind2["close"]) / (ind2["close"] - stop0)) < 1e-9 and abs(rr[1] - ra[0]) < 1e-9, str(rr))
+check("评分 · 盈亏比说明写 R、目标、空间几 R", "R =" in rr[2] and "空间" in rr[2] and "52 周高点" in rr[2], rr[2])
+rr_nh = c3.rr_ratio(dict(ind2, res_above=None))
+check("评分 · ⭐已创 52 周新高 → 目标 = 底部量度目标 枢轴 × (1 + 首次收缩深度)", abs(rr_nh[1] - ind2["pivot"] * (1 + ind2["first_depth"] / 100)) < 1e-9 and "量度目标" in rr_nh[2], str(rr_nh))
+# 显著阻力:52 周高点 / 未回补缺口下沿;没有就 None
 d0 = date(2026, 1, 5)
 flat = [(d0 + timedelta(days=i), 20.0, 20.3, 19.7, 1000.0) for i in range(80)]
 with_high = flat[:40] + [(flat[40][0], 20.0, 23.0, 19.7, 1000.0)] + flat[41:]        # 40 天前一根冲到 23 的前高
+check("评分 · ⭐res_above:上方的 52 周高点 23", c3.res_above(with_high, 20.0, 0.6) == (23.0, "52 周高点"), str(c3.res_above(with_high, 20.0, 0.6)))
+check("评分 · res_above:上方没有阻力(已创新高)→ None;离收盘不足 0.5 ATR 的不算", c3.res_above(flat, 20.4, 0.6) is None and c3.res_above(with_high, 22.8, 0.6) is None)
+gapped0 = ([(d0 + timedelta(days=i), 26.0, 26.3, 25.7, 1000.0) for i in range(30)]
+           + [(d0 + timedelta(days=i), 20.0, 20.1, 19.7, 1000.0) for i in range(30, 80)])
+check("评分 · ⭐res_above:未回补缺口下沿 20.1 比 52 周高点 26.3 近", c3.res_above(gapped0, 19.7, 0.6) == (20.1, "缺口下沿"), str(c3.res_above(gapped0, 19.7, 0.6)))
+# 下面是第二版四维目标价法的函数(已不参与评分,保留)
 check("评分 · T_level:上方最近的前高 23(比整数关口 25 近)", c3.t_level(with_high, 20.0, 0.6) == (23.0, "前高"), str(c3.t_level(with_high, 20.0, 0.6)))
 check("评分 · T_level:没有前高就是整数关口(20 → 25,步长 5)", c3.t_level(flat, 20.0, 0.6) == (25.0, "整数关口"), str(c3.t_level(flat, 20.0, 0.6)))
 gapped = ([(d0 + timedelta(days=i), 26.0, 26.3, 25.7, 1000.0) for i in range(30)]
@@ -110,8 +118,7 @@ check("买入 · ⭐止损被 -8% 封顶的形态不进,并说明(C-04)", capped
 ind_bad = dict(ind2, contractions=1, last_depth=15.0, low_vol_ratio=1.2, close=ind2["pivot"] + 0.8 * atr,
                recent_vols=[ind2["vol_sma20"] * 1.35] * len(ind2["recent_vols"]),   # 突破质量只有 1 分(放量 1.35×、高出 0.8 ATR)
                vp_net_63=0, defense_63=(1, 30), macd_d=False, macd_w=False,
-               targets={"level": (ind2["pivot"] + 0.9 * atr, "前高"), "volume": None, "vol": (ind2["pivot"] + 2 * atr, 1.0),
-                        "final": (ind2["pivot"] + 0.9 * atr, "日线结构·前高")})   # 量价 D、抗跌 D、盈亏比 <1 D、无金叉 C
+               res_above=(ind2["pivot"] + 0.9 * atr, "52 周高点"))   # 量价 D、抗跌 D、盈亏比 <1 D、无金叉 C
 gd = c3.grade(ind_bad, c3.PARAMS, 60)
 st_b = dict(state, positions=[], cash=100_000.0, open_risk=0.0)
 fb, bb = c3.try_entry("BBB", "乙", ind_bad, st_b, score=60)
