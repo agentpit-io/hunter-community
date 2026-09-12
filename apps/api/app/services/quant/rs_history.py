@@ -502,6 +502,7 @@ def _upsert(conn, market: str, code: str, bars: list[tuple], replace_window: boo
     if bars and replace_window:
         cur.execute("DELETE FROM rs_daily WHERE market=%s AND code=%s AND trade_date >= %s",
                     (market, code, bars[0][0]))
+    if bars:
         execute_values(cur,
                        "INSERT INTO rs_daily (market, code, trade_date, close, high, low, volume) VALUES %s "
                        "ON CONFLICT (market, code, trade_date) DO UPDATE SET close=EXCLUDED.close, "
