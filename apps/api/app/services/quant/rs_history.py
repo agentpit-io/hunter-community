@@ -423,7 +423,7 @@ def _session():
     return s
 
 
-def fetch_bars(sym: str, n: int = _BARS) -> list[tuple] | None:
+def fetch_bars(sym: str, n: int = _BARS, end: str = "") -> list[tuple] | None:
     """→ [(trade_date, close, high, low, volume), …];None = 请求失败(与"确实没数据"区分开,后者返回 [])
 
     high / low / volume 某根缺了就是 None —— 下游 VCP 算不出就给空,不拿收盘价顶替。
@@ -435,7 +435,9 @@ def fetch_bars(sym: str, n: int = _BARS) -> list[tuple] | None:
     for attempt in range(_RETRY):
         _throttle()
         try:
-            r = sess.get(_KLINE, params={"param": f"{sym},day,,,{n},qfq"},
+            # end 非空 = 拿「截至 end 的 n 根」:2026-09-12 实测接口支持按结束日期往前翻页,
+            # 用来一次性把历史补到两年多(小鹿智能体要从年初回测);日常还是空 end 拿最新窗口
+            r = sess.get(_KLINE, params={"param": f"{sym},day,,{end},{n},qfq"},
                          headers=_UA, timeout=_TIMEOUT)
         except Exception as e:                                # noqa: BLE001  网络错误才重试
             if attempt == _RETRY - 1:
@@ -492,11 +494,12 @@ def universe(market: str) -> list[tuple[str, str]]:
     return out
 
 
-def _upsert(conn, market: str, code: str, bars: list[tuple]) -> None:
+def _upsert(conn, market: str, code: str, bars: list[tuple], replace_window: bool = True) -> None:
     from psycopg2.extras import execute_values
     cur = conn.cursor()
-    # 整窗覆盖:先删这只票窗口内的旧行再插 —— 复权基准变了的话旧值必须全部作废
-    if bars:
+    # 整窗覆盖:先删这只票窗口内的旧行再插 —— 复权基准变了的话旧值必须全部作废。
+    # replace_window=False 给补历史用:老窗口只往前追加,不能把已有的新窗口删了
+    if bars and replace_window:
         cur.execute("DELETE FROM rs_daily WHERE market=%s AND code=%s AND trade_date >= %s",
                     (market, code, bars[0][0]))
         execute_values(cur,
@@ -568,7 +571,9 @@ def fetch_market(market: str, limit: int | None = None) -> dict:
 
     # 留 ~480 个自然日(>320 个交易日)—— 更早的对 252 天 ROC 和 21 日均线都没用了
     cur = conn.cursor()
-    cur.execute("DELETE FROM rs_daily WHERE market=%s AND trade_date < now()::date - 480",
+    # 2026-09-12 从 480 天放到 900 天:小鹿智能体要从年初回测,且 RS 评级要 253 根,
+    # 多留一年历史才不会一到年初就整批算不出。存量约 1.2M 行 → 2.4M 行,库能扛
+    cur.execute("DELETE FROM rs_daily WHERE market=%s AND trade_date < now()::date - 900",
                 (market,))
     conn.commit()
     cur.close()
@@ -582,6 +587,44 @@ def fetch_market(market: str, limit: int | None = None) -> dict:
 # ═══════════════════════════════════════════════════════════════
 # 计算 rs_line_stat
 # ═══════════════════════════════════════════════════════════════
+
+def fetch_older(market: str, end: date, limit: int | None = None) -> dict:
+    """一次性补历史:给池里每只票(和基准)拿「截至 end 的 320 根」,只追加不覆盖。
+
+    2026-09-12 为小鹿智能体从年初回测加的。同一把腾讯锁、同一个 1 次/秒节流。
+    池外的票不补(和每晚任务同一口径)。已经有比 end 更早日线的票跳过(重跑幂等)。
+    """
+    from app.services.database import get_conn
+    conn = get_conn()
+    _ensure_tables(conn)
+    cur = conn.cursor()
+    cur.execute("SELECT code, MIN(trade_date) FROM rs_daily WHERE market=%s GROUP BY code", (market,))
+    first = dict(cur.fetchall())
+    cur.close()
+    t0 = time.time()
+    end_s = end.isoformat()
+    stat = {"ok": 0, "empty": 0, "fail": 0, "skip": 0}
+    items = [(BENCH_CODE, BENCH[market])] + universe(market)
+    if limit:
+        items = items[:limit + 1]
+    for i, (code, sym) in enumerate(items, 1):
+        if first.get(code) and first[code] < end:
+            stat["skip"] += 1
+            continue
+        bars = fetch_bars(sym, _BARS, end_s)        # 被封会直接抛 WafBlocked,整轮中止
+        if bars is None:
+            stat["fail"] += 1
+        elif not bars:
+            stat["empty"] += 1
+        else:
+            stat["ok"] += 1
+            _upsert(conn, market, code, [b for b in bars if b[0] <= end], replace_window=False)
+        if i % 250 == 0:
+            log.info("[rs_history] 补历史 %s 进度 %d/%d · %s · %.0fs", market, i, len(items), stat, time.time() - t0)
+    conn.close()
+    stat.update({"market": market, "end": end_s, "seconds": round(time.time() - t0)})
+    return stat
+
 
 def compute_market(market: str) -> dict:
     from app.services.database import get_conn
@@ -750,12 +793,13 @@ def load_stats(market: str) -> tuple[dict, dict]:
 def _main(argv=None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     p = argparse.ArgumentParser(prog="rs_history")
-    p.add_argument("cmd", choices=["fetch", "compute", "run"])
+    p.add_argument("cmd", choices=["fetch", "compute", "run", "fetch-older"])
+    p.add_argument("--end", default=None, help="fetch-older:补「截至这天」的 320 根(YYYY-MM-DD)")
     p.add_argument("--market", required=True, choices=["us", "a", "hk"])
     p.add_argument("--limit", type=int, default=None, help="只拉前 N 只(试跑用)")
     a = p.parse_args(argv)
 
-    if a.cmd in ("fetch", "run"):
+    if a.cmd in ("fetch", "run", "fetch-older"):
         # 和数据页的美股下载、每晚美股刷新共用一把锁(us_kline.tencent_lock)——
         # 三者都打腾讯 ifzq,同时跑就是各 1 次/秒叠加,限速等于白设(2026-09-11 WAF 事故)。
         # 宿主机 crontab 的 flock 只管得住本脚本自己,管不到 api 进程里的下载任务
@@ -771,6 +815,10 @@ def _main(argv=None) -> int:
             log.error("[rs_history] 等了 90 分钟腾讯通道仍被占用 · 本轮不跑")
             return 4
         try:
+            if a.cmd == "fetch-older":
+                st = fetch_older(a.market, date.fromisoformat(a.end), a.limit)
+                log.info("[rs_history] 补历史完成 %s", st)
+                return 0
             st = fetch_market(a.market, a.limit)
         except WafBlocked as e:
             log.error("[rs_history] %s", e)
