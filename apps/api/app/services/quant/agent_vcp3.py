@@ -32,6 +32,18 @@
 - C-07 护栏:与 A/B 同一套(单日 -3% 熔断、连亏 3 笔停一天)。
 
 收盘后决策、信号当天收盘价成交,和 A/B 同一口径。不做加仓。
+
+## 2026-09-12 晚(全年回撤归因之后,用户拍板)的三处改动
+
+回撤 -10.4% 的主因是敞口:平均仓位 63%(基准 12%)、单笔 12.8%、同时 4~8 只;47 笔里 22 笔止损被 -8% 封顶接管,
+形态的紧凑没换来更近的止损,仓位却按 1% ÷ 8% 给足 —— 这一半只赚了 +$712,另一半(止损来自形态)赚了 +$6,296。
+1. **止损被封顶就不进**(C-04):底部低点下方 stop_atr 个 ATR 若超过 max_stop_pct,说明形态不够紧,跳过。
+2. **组合总风险上限**(C-09):所有持仓的 (现价 − 止损) × 股数 之和 ≤ heat_cap 总资产;新仓放不下就按余额缩,缩到 0 股就不进。
+   移动止损上移后开放风险自然下降,额度会腾出来 —— 比粗暴限制持仓数好。
+3. **评分定仓位**(C-08 / C-03):五个形态特征各 0~2 分(见 grade),S ≥ 8 → 20% 总资产,A 6~7 → 15%,B 4~5 → 10%,
+   C 2~3 → 5%,D < 2 → 不买(达到信号也不买:结构松散、止损成本高、盈亏比差)。
+   **特征和档位是先按形态逻辑定的,再拿历史 45 笔验证是否单调**,不是反过来按结果调 —— 那是过拟合的正门。
+   验证结果写在提交说明和 CLAUDE.md 里,不单调的地方如实写。
 """
 from __future__ import annotations
 
@@ -44,7 +56,11 @@ PARAMS = {
     "stop_atr": 0.5, "max_stop_pct": 0.08,
     "trail_days": 10, "time_days": 15,
     "watch_pool_days": av.PARAMS["watch_pool_days"],
+    "skip_capped": True,                       # 止损被 -8% 封顶就不进
+    "heat_cap": 0.04,                          # 组合开放风险上限(占总资产)
+    "grade_size": {"S": 0.20, "A": 0.15, "B": 0.10, "C": 0.05, "D": 0.0},   # 按评分定仓位(占总资产)
 }
+GRADE_MIN = {"S": 8, "A": 6, "B": 4, "C": 2}   # 10 分制的档位下限;<2 = D
 STOP_KEYS = ("stop_atr", "max_stop_pct")     # 数值越小越紧;只许收紧
 MIN_BARS = 60
 _MAX_CONFIRM = 5
@@ -53,11 +69,13 @@ _MAX_TRAIL = 15
 RULES = [
     {"id": "C-01", "kind": "buy", "condition": "触发:收盘在枢轴(最后一次收缩的高点)上方,且高出不超过 1.0 个 ATR(20)"},
     {"id": "C-02", "kind": "buy", "condition": "确认:突破是新鲜的(前 3 天里有收盘在枢轴下方),且这 3 天里任一天成交量 ≥ 20 日均量 1.3 倍"},
-    {"id": "C-03", "kind": "risk", "condition": "仓位:单笔风险 1% 总资产 ÷ 止损距离;单股 ≤20%;最多 8 只"},
-    {"id": "C-04", "kind": "sell", "condition": "初始止损:底部低点下方 0.5 个 ATR,最深不超过 -8%"},
+    {"id": "C-03", "kind": "risk", "condition": "仓位按评分:S 20% / A 15% / B 10% / C 5% 总资产,D 不买;最多 8 只"},
+    {"id": "C-04", "kind": "sell", "condition": "初始止损:底部低点下方 0.5 个 ATR;若这个位置比 -8% 还远,形态不够紧,不进"},
     {"id": "C-05", "kind": "sell", "condition": "保本 + 移动止损:涨到 1R 后止损上移到成本,之后按前 10 日最低价跟踪"},
     {"id": "C-06", "kind": "sell", "condition": "时间止损:持有 15 个交易日仍没涨过 1R,清仓"},
     {"id": "C-07", "kind": "risk", "condition": "护栏:单日权益回撤达 -3% 当天停止开仓;连亏 3 笔后下一个交易日不开仓"},
+    {"id": "C-08", "kind": "buy", "condition": "评分(10 分):紧凑度 / 收缩结构 / 量能枯竭 / 突破质量 / 相对强度各 0~2;S ≥8 · A 6~7 · B 4~5 · C 2~3 · D <2 不买"},
+    {"id": "C-09", "kind": "risk", "condition": "组合总风险:所有持仓 (现价−止损)×股数 之和 ≤ 4% 总资产,放不下就缩仓或不进"},
 ]
 RULE_NAME = {"C-01": "VCP 枢轴突破买入", "C-04": "初始止损", "C-05": "移动止损", "C-06": "时间止损"}
 RULE_PARAM_KEY = {"C-01": "atr_chase", "C-02": "vol_boost", "C-04": "stop_atr", "C-05": "trail_days", "C-06": "time_days"}
@@ -75,9 +93,15 @@ def rules_for(p: dict = PARAMS) -> list[dict]:
             c["condition"] = (f"确认:突破是新鲜的(前 {p['confirm_days']} 天里有收盘在枢轴下方),"
                               f"且这 {p['confirm_days']} 天里任一天成交量 ≥ 20 日均量 {p['vol_boost']:.1f} 倍")
         elif rid == "C-03":
-            c["condition"] = f"仓位:单笔风险 {p['risk_pct'] * 100:.0f}% 总资产 ÷ 止损距离;单股 ≤{p['max_pos_pct'] * 100:.0f}%;最多 {p['max_holdings']} 只"
+            gs = p["grade_size"]
+            c["condition"] = (f"仓位按评分:S {gs['S'] * 100:.0f}% / A {gs['A'] * 100:.0f}% / B {gs['B'] * 100:.0f}% / C {gs['C'] * 100:.0f}% 总资产,"
+                              f"D 不买;最多 {p['max_holdings']} 只")
         elif rid == "C-04":
-            c["condition"] = f"初始止损:底部低点下方 {p['stop_atr']:.2f} 个 ATR,最深不超过 -{p['max_stop_pct'] * 100:.0f}%"
+            c["condition"] = (f"初始止损:底部低点下方 {p['stop_atr']:.2f} 个 ATR"
+                              + (f";若这个位置比 -{p['max_stop_pct'] * 100:.0f}% 还远,形态不够紧,不进" if p.get("skip_capped")
+                                 else f",最深不超过 -{p['max_stop_pct'] * 100:.0f}%"))
+        elif rid == "C-09":
+            c["condition"] = f"组合总风险:所有持仓 (现价−止损)×股数 之和 ≤ {p['heat_cap'] * 100:.0f}% 总资产,放不下就缩仓或不进"
         elif rid == "C-05":
             c["condition"] = f"保本 + 移动止损:涨到 1R 后止损上移到成本,之后按前 {p['trail_days']} 日最低价跟踪"
         elif rid == "C-06":
@@ -87,10 +111,12 @@ def rules_for(p: dict = PARAMS) -> list[dict]:
 
 
 def summary(p: dict = PARAMS) -> str:
+    gs = p["grade_size"]
     return (f"从筛选器的 VCP 候选里,只在收盘站上枢轴、高出不超过 {p['atr_chase']:.1f} 个 ATR 时进,"
-            f"要求 {p['confirm_days']} 天内放量 {p['vol_boost']:.1f} 倍确认;止损挂在底部低点下方 {p['stop_atr']:.1f} 个 ATR(最深 -{p['max_stop_pct'] * 100:.0f}%),"
-            f"每笔只冒 {p['risk_pct'] * 100:.0f}% 总资产的险;涨到 1R 后保本、按前 {p['trail_days']} 日最低价跟踪,不设固定止盈;"
-            f"{p['time_days']} 天没到 1R 就走。")
+            f"要求 {p['confirm_days']} 天内放量 {p['vol_boost']:.1f} 倍确认;止损挂在底部低点下方 {p['stop_atr']:.1f} 个 ATR,"
+            f"比 -{p['max_stop_pct'] * 100:.0f}% 还远就不进;按形态评分定仓位(S {gs['S'] * 100:.0f}% / A {gs['A'] * 100:.0f}% / "
+            f"B {gs['B'] * 100:.0f}% / C {gs['C'] * 100:.0f}%,D 不买),组合总风险 ≤ {p['heat_cap'] * 100:.0f}%;"
+            f"涨到 1R 后保本、按前 {p['trail_days']} 日最低价跟踪,不设固定止盈;{p['time_days']} 天没到 1R 就走。")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -112,6 +138,7 @@ def indicators(bars: list[tuple], p: dict = PARAMS) -> dict | None:
         "atr20": av._atr(bars[-61:], 20),
         "vol_sma20": av._sma(v, 20),
         "pivot": vs.get("pivot"), "base_low": vs.get("last_low"), "contractions": vs.get("contractions"),
+        "last_depth": vs.get("last_depth"), "low_vol_ratio": vs.get("low_vol_ratio"),
         "recent_closes": c[-_MAX_CONFIRM - 1:],          # 含今天
         "recent_vols": v[-_MAX_CONFIRM:],                 # 含今天
         "lows_prior": lo[-_MAX_TRAIL - 1:-1],             # 不含今天
@@ -135,6 +162,54 @@ def entry_flags(ind: dict, p: dict = PARAMS) -> dict:
     return {"C-01": bool(ph is not None and (ind["contractions"] or 0) >= 1 and chase_ok),
             "C-02": bool(fresh and vol_ok), "above": above, "fresh": fresh, "vr": vr,
             "dist_atr": ((close - ph) / atr) if (ph is not None and atr) else None}
+
+
+def stop_of(ind: dict, p: dict = PARAMS) -> tuple[float | None, bool]:
+    """→ (止损位, 是否被 -max_stop_pct 封顶)。底部低点下方 stop_atr 个 ATR;比封顶线还远 = 封顶。"""
+    if ind.get("base_low") is None or not ind.get("atr20"):
+        return None, False
+    px = ind["close"]
+    raw = ind["base_low"] - p["stop_atr"] * ind["atr20"]
+    cap = px * (1 - p["max_stop_pct"])
+    return max(raw, cap), raw < cap
+
+
+def grade(ind: dict, p: dict = PARAMS, score=None) -> dict:
+    """形态评分(10 分制)→ {grade, points, factors:[(名, 分, 说明)]}。档位先定、后验证,见文件头。
+
+    五个特征都是「进场前就知道」的:
+    1 紧凑度  止损距离(收盘到止损)≤4% → 2;≤6% → 1;否则 0
+    2 收缩结构  收缩 ≥3 次且末次深度 ≤8% → 2;收缩 ≥2 次 → 1;否则 0
+    3 量能枯竭  最低点量比 ≤0.6 → 2;≤0.8 → 1;否则 0
+    4 突破质量  高出枢轴 ≤0.5 ATR 且放量 ≥1.5 倍 → 2;放量 ≥1.3 倍 → 1;否则 0
+    5 相对强度  筛选器的 RS 评级 ≥90 → 2;≥80 → 1;否则 0
+    """
+    f = entry_flags(ind, p)
+    stop, _capped = stop_of(ind, p)
+    px = ind["close"]
+    factors = []
+    dist = (1 - stop / px) * 100 if stop else None
+    pt = 2 if dist is not None and dist <= 4 else 1 if dist is not None and dist <= 6 else 0
+    factors.append(("紧凑度", pt, f"止损距离 {dist:.1f}%" if dist is not None else "止损算不出"))
+    n, ld = ind.get("contractions") or 0, ind.get("last_depth")
+    pt = 2 if n >= 3 and ld is not None and ld <= 8 else 1 if n >= 2 else 0
+    factors.append(("收缩结构", pt, f"收缩 {n} 次" + (f",末次 {ld:.1f}%" if ld is not None else "")))
+    lv = ind.get("low_vol_ratio")
+    pt = 2 if lv is not None and lv <= 0.6 else 1 if lv is not None and lv <= 0.8 else 0
+    factors.append(("量能枯竭", pt, f"最低点量比 {lv:.2f}" if lv is not None else "量比算不出"))
+    da, vr = f.get("dist_atr"), f.get("vr")
+    pt = 2 if da is not None and da <= 0.5 and vr is not None and vr >= 1.5 else 1 if vr is not None and vr >= 1.3 else 0
+    factors.append(("突破质量", pt, (f"高出枢轴 {da:.1f} ATR" if da is not None else "") + (f",放量 {vr:.2f}×" if vr is not None else "")))
+    pt = 2 if score is not None and score >= 90 else 1 if score is not None and score >= 80 else 0
+    factors.append(("相对强度", pt, f"RS {score:.0f}" if score is not None else "RS 缺"))
+    total = sum(x[1] for x in factors)
+    g = "D"
+    for k in ("S", "A", "B", "C"):
+        if total >= GRADE_MIN[k]:
+            g = k
+            break
+    return {"grade": g, "points": total, "factors": factors,
+            "text": f"{g} 级({total}/10):" + "、".join(f"{a} {b}({c})" for a, b, c in factors)}
 
 
 def entry_ok(ind: dict, p: dict = PARAMS) -> bool:
@@ -229,19 +304,34 @@ def manage_position(pos: av.Position, ind: dict, state: dict, p: dict = PARAMS, 
     return fills
 
 
-def try_entry(code, name, ind, state: dict, p: dict = PARAMS, want_text: bool = True):
+def try_entry(code, name, ind, state: dict, p: dict = PARAMS, want_text: bool = True, score=None):
     if not entry_ok(ind, p):
         return None, None
     if len(state["positions"]) >= p["max_holdings"]:
         return None, f"两条全满足,但已持有 {len(state['positions'])} 只,达到上限(C-03)"
     if state.get("halt_reason"):
         return None, f"两条全满足,但护栏挡下:{state['halt_reason']}(C-07)"
-    equity, px, atr = state["equity"], ind["close"], ind["atr20"]
-    stop = max(ind["base_low"] - p["stop_atr"] * atr, px * (1 - p["max_stop_pct"]))
-    if stop >= px:
+    equity, px = state["equity"], ind["close"]
+    stop, capped = stop_of(ind, p)
+    if stop is None or stop >= px:
         return None, "两条全满足,但止损位不低于收盘(底部低点在收盘之上),形态不成立"
+    if capped and p.get("skip_capped"):
+        raw = ind["base_low"] - p["stop_atr"] * ind["atr20"]
+        return None, (f"两条全满足,但底部低点下方 {p['stop_atr']:.1f} ATR 在 ${raw:.2f},距收盘 {(1 - raw / px) * 100:.1f}% "
+                      f"超过 {p['max_stop_pct'] * 100:.0f}% —— 形态不够紧,不进(C-04)")
     risk = px - stop
-    size = min(int(equity * p["risk_pct"] / risk), int(equity * p["max_pos_pct"] / px))
+    gr = grade(ind, p, score)
+    pct = p["grade_size"].get(gr["grade"], 0.0)
+    if pct <= 0:
+        return None, f"两条全满足,但评分 {gr['text']} —— D 级不买(C-08)"
+    size = int(equity * pct / px)
+    # 组合总风险上限:已有持仓的开放风险 + 这一笔 ≤ heat_cap
+    room = equity * p["heat_cap"] - state.get("open_risk", 0.0)
+    if size * risk > room:
+        size = int(room / risk) if room > 0 else 0
+        if size <= 0:
+            return None, (f"两条全满足({gr['grade']} 级),但组合开放风险已达 {state.get('open_risk', 0.0) / equity * 100:.1f}% "
+                          f"总资产,上限 {p['heat_cap'] * 100:.0f}%,放不下(C-09)")
     if size <= 0:
         return None, "两条全满足,但按仓位算法算出的股数为 0"
     cost = size * px
@@ -251,17 +341,20 @@ def try_entry(code, name, ind, state: dict, p: dict = PARAMS, want_text: bool = 
         if size <= 0:
             return None, f"两条全满足,但现金只剩 ${state['cash']:.0f},买不起 1 股"
     state["cash"] -= cost
+    state["open_risk"] = state.get("open_risk", 0.0) + size * risk
     pos = av.Position(code=code, name=name or code, size=size, initial_size=size, entry_price=px,
                       entry_date=state["date"], avg_cost=px, highest=px, level=1, bars_held=0,
                       entry_rule=ENTRY_RULE, stop=stop, risk=risk)
     state["positions"].append(pos)
+    extra = {"amount": round(cost, 2), "position_pct": round(cost / equity * 100, 2), "grade": gr["grade"], "points": gr["points"]}
     if not want_text:
-        return _fill("buy", pos, size, px, ENTRY_RULE, "", amount=round(cost, 2), position_pct=round(cost / equity * 100, 2)), None
+        return _fill("buy", pos, size, px, ENTRY_RULE, "", **extra), None
     t = {c["rule"]: c["text"] for c in entry_checks(ind, p)}
-    rationale = (f"{t['C-01']};{t['C-02']}。止损挂在底部低点 ${ind['base_low']:.2f} 下方 {p['stop_atr']:.1f} 个 ATR "
-                 f"= ${stop:.2f}(距收盘 {(1 - stop / px) * 100:.1f}%,上限 {p['max_stop_pct'] * 100:.0f}%);"
-                 f"单笔风险 {p['risk_pct'] * 100:.0f}% 总资产 ${equity * p['risk_pct']:.0f} ÷ ${risk:.2f} = {size} 股,占总资产 {cost / equity * 100:.1f}%。")
-    return _fill("buy", pos, size, px, ENTRY_RULE, rationale, amount=round(cost, 2), position_pct=round(cost / equity * 100, 2)), None
+    rationale = (f"{t['C-01']};{t['C-02']}。评分 {gr['text']} → 仓位 {pct * 100:.0f}% 总资产;"
+                 f"止损挂在底部低点 ${ind['base_low']:.2f} 下方 {p['stop_atr']:.1f} 个 ATR = ${stop:.2f}(距收盘 {(1 - stop / px) * 100:.1f}%);"
+                 f"买入 {size} 股,占总资产 {cost / equity * 100:.1f}%,这一笔开放风险 ${size * risk:.0f}"
+                 f"(组合合计 {state['open_risk'] / equity * 100:.1f}%,上限 {p['heat_cap'] * 100:.0f}%)。")
+    return _fill("buy", pos, size, px, ENTRY_RULE, rationale, **extra), None
 
 
 def run_day(date_iso: str, positions, cash: float, bars_of, watch, prev_equity, consec_losses: int,
@@ -289,6 +382,10 @@ def run_day(date_iso: str, positions, cash: float, bars_of, watch, prev_equity, 
             continue
         fills += manage_position(pos, ind, state, p, want_text)
     state["positions"] = [x for x in state["positions"] if x.size > 0]
+    # 今天收盘后的组合开放风险(移动止损已上移的,风险自然变小)
+    state["open_risk"] = sum(
+        pos.size * max((ind_cache[pos.code]["close"] if ind_cache.get(pos.code) else pos.avg_cost) - pos.stop, 0.0)
+        for pos in state["positions"])
     held = {x.code for x in state["positions"]}
     watch_items = []
     for code, name, score in watch:
@@ -296,7 +393,7 @@ def run_day(date_iso: str, positions, cash: float, bars_of, watch, prev_equity, 
         ind_cache[code] = ind
         blocked = None
         if code not in held and ind is not None:
-            f, blocked = try_entry(code, name, ind, state, p, want_text)
+            f, blocked = try_entry(code, name, ind, state, p, want_text, score)
             if f:
                 fills.append(f)
                 held.add(code)

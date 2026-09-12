@@ -103,6 +103,7 @@ CREATE TABLE IF NOT EXISTS agent_trade (
     followup     TEXT
 );
 ALTER TABLE agent_trade ADD COLUMN IF NOT EXISTS branch TEXT NOT NULL DEFAULT 'base';
+ALTER TABLE agent_trade ADD COLUMN IF NOT EXISTS grade TEXT;
 CREATE INDEX IF NOT EXISTS agent_trade_date_idx ON agent_trade (branch, trade_date);
 CREATE TABLE IF NOT EXISTS agent_position (
     code         TEXT NOT NULL,
@@ -359,11 +360,11 @@ def run_date(d: date, ctx: Ctx | None = None) -> dict:
                          pos.highest, pos.level, pos.bars_held, pos.entry_rule, last, bench_pct, sh, sh_na, pos.stop, pos.risk))
         for i, f in enumerate(fills):
             cur.execute("INSERT INTO agent_trade (branch, trade_date, seq, side, code, name, shares, price, amount, position_pct, "
-                        "pnl_abs, pnl_pct, hold_days, rule_id, rule_name, rationale, entry_date, level) "
-                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                        "pnl_abs, pnl_pct, hold_days, rule_id, rule_name, rationale, entry_date, level, grade) "
+                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                         (branch, d, i, f["side"], f["symbol"], f.get("name"), f["shares"], f["price"], f.get("amount"),
                          f.get("position_pct"), f.get("pnl_abs"), f.get("pnl_pct"), f.get("hold_days"),
-                         f["rule_id"], f["rule_name"], f["rationale"], f.get("entry_date"), f.get("level")))
+                         f["rule_id"], f["rule_name"], f["rationale"], f.get("entry_date"), f.get("level"), f.get("grade")))
         followups = _backfill_followups(cur, branch, d, lambda c: ctx.bars_of(c, d))
 
         # 4. 调整策略(优化器)—— 在今天的成交落库之后跑,它只看历史
@@ -599,7 +600,7 @@ def dashboard(branch: str = "base") -> dict:
     b0 = next((r[3] for r in days if r[3]), None)
     dd_pct, dd_abs, dd_from, dd_to = _max_dd(eq)
     cur.execute("SELECT trade_date, seq, side, code, name, shares, price, amount, position_pct, pnl_abs, pnl_pct, "
-                "hold_days, rule_id, rule_name, rationale, entry_date, level, followup FROM agent_trade "
+                "hold_days, rule_id, rule_name, rationale, entry_date, level, followup, grade FROM agent_trade "
                 "WHERE branch=%s ORDER BY trade_date, seq", (branch,))
     trades = cur.fetchall()
     sells = [t for t in trades if t[2] == "sell"]
@@ -819,6 +820,8 @@ def _trade_item(t) -> dict:
           "rule_id": t[12], "rule_name": t[13], "rationale": t[14], "followup": None, "adjustment": None}
     if t[2] == "buy":
         it.update({"amount": t[7], "position_pct": t[8]})
+        if len(t) > 18 and t[18]:
+            it["rule_name"] = f"{t[13]} · {t[18]} 级"
     else:
         it.update({"pnl_abs": t[9], "pnl_pct": t[10], "hold_days": t[11],
                    "followup": t[17] or "事后跟踪 · 卖出后 T+5 会自动回填,判断这次是「卖早了」还是「躲过了」"})
@@ -897,7 +900,15 @@ def _rules_block(trades, poss, days, p: dict, st: dict | None = None, eng=av) ->
                 pn = [t[10] for t in ts if t[10] is not None]
                 stats.append({"label": "平均盈亏", "value": f"{sum(pn) / len(pn):+.1f}%" if pn else None})
                 stats.append({"label": "触发后胜率", "value": f"{sum(1 for x in pn if x > 0) / len(pn) * 100:.0f}%" if pn else None})
-        elif rid in ("R-18", "R-19", "C-07", "C-03"):
+        elif rid == "C-08":
+            # 每档的完整周期结果:评分记在买入那笔上,周期盈亏按 (code, entry_date) 加总
+            g_of = {(t[3], str(t[15])): t[18] for t in trades if t[2] == "buy" and len(t) > 18 and t[18]}
+            for gk in ("S", "A", "B", "C"):
+                pn = [v for k, v in done.items() if g_of.get(k) == gk]
+                stats.append({"label": f"{gk} 级", "value": (f"{len(pn)} 笔 · 胜率 {sum(1 for x in pn if x > 0) / len(pn) * 100:.0f}% · "
+                                                              f"均 {sum(pn) / len(pn):+.0f}") if pn else "0 笔"})
+            stats.append({"label": "D 级挡下", "value": blocked.get("C-08", 0)})
+        elif rid in ("R-18", "R-19", "C-07", "C-03", "C-09", "C-04"):
             stats.append({"label": "挡下候选", "value": blocked.get(rid, 0)})
         else:
             stats.append({"label": "说明", "value": "仓位算法,每次开仓 / 加仓都经过", "dim": True})

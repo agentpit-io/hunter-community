@@ -42,9 +42,12 @@ def path(legs, start=50.0, vol=1000.0):
 BASE = [(40, 100.0, 1000.0, 0.02),
         (15, 75.0, 1000.0, 0.02), (15, 99.0, 800.0, 0.02),
         (10, 87.0, 700.0, 0.015), (10, 98.0, 700.0, 0.015),
-        (6, 93.0, 400.0, 0.01), (6, 97.0, 500.0, 0.01),
+        (6, 95.5, 400.0, 0.01), (6, 97.0, 500.0, 0.01),
         (4, 97.5, 450.0, 0.006)]
 bars = path(BASE)
+# 同一形态但末次收缩很深(93):止损离收盘超过 8%,会被封顶 → 新规则下不进
+DEEP = BASE[:5] + [(6, 91.0, 400.0, 0.01), (6, 97.0, 500.0, 0.01), (4, 97.5, 450.0, 0.006)]
+bars_deep = path(DEEP)
 ind = c3.indicators(bars)
 check("指标 · 有枢轴与底部低点", ind and ind["pivot"] is not None and ind["base_low"] is not None, str(ind and (ind["pivot"], ind["base_low"])))
 check("指标 · 底部低点 < 收盘 < 枢轴(还没突破)", ind and ind["base_low"] < ind["close"] < ind["pivot"], str((ind["base_low"], ind["close"], ind["pivot"])))
@@ -59,14 +62,37 @@ while brk[-1][0].weekday() >= 5:
 ind2 = c3.indicators(brk)
 f2 = c3.entry_flags(ind2)
 check("买入 · ⭐突破日收盘站上枢轴 0.5 ATR + 放量 → 两条都过", f2["C-01"] and f2["C-02"], str(f2))
-state = {"date": str(brk[-1][0]), "cash": 100_000.0, "positions": [], "closed": [], "closed_pnl": [], "equity": 100_000.0, "halt_reason": None}
-fill, blocked = c3.try_entry("AAA", "甲", ind2, state)
-exp_stop = max(ind2["base_low"] - 0.5 * ind2["atr20"], ind2["close"] * 0.92)
-check("买入 · 成交挂 C-01,止损 = 底部低点下方 0.5 ATR 与 -8% 取高(这里 -8% 更近,封顶生效)",
-      fill and fill["rule_id"] == "C-01" and abs(state["positions"][0].stop - exp_stop) < 1e-9, str(fill))
+state = {"date": str(brk[-1][0]), "cash": 100_000.0, "positions": [], "closed": [], "closed_pnl": [], "equity": 100_000.0, "halt_reason": None, "open_risk": 0.0}
+stop0, capped0 = c3.stop_of(ind2)
+check("止损 · 底部低点下方 0.5 ATR,没被封顶", not capped0 and abs(stop0 - (ind2["base_low"] - 0.5 * ind2["atr20"])) < 1e-9, str((stop0, capped0, ind2["close"])))
+gr = c3.grade(ind2, c3.PARAMS, 95)
+check("评分 · 五个特征各 0~2,总分 0~10", len(gr["factors"]) == 5 and 0 <= gr["points"] <= 10 and all(0 <= x[1] <= 2 for x in gr["factors"]), str(gr))
+check("评分 · 教科书形态 + RS 95 至少 B 级", gr["grade"] in ("S", "A", "B"), gr["text"])
+fill, blocked = c3.try_entry("AAA", "甲", ind2, state, score=95)
+check("买入 · 成交挂 C-01,带评分,止损来自形态", fill and fill["rule_id"] == "C-01" and fill["grade"] == gr["grade"] and abs(state["positions"][0].stop - stop0) < 1e-9, str(fill))
 pos = state["positions"][0]
-check("买入 · ⭐股数 = 1% 总资产 ÷ 止损距离", pos.size == int(1000.0 / (pos.entry_price - pos.stop)), str((pos.size, pos.entry_price, pos.stop)))
-check("买入 · rationale 有枢轴、ATR、止损位、股数", "枢轴" in fill["rationale"] and "止损" in fill["rationale"] and "股" in fill["rationale"], fill["rationale"][:100])
+check("买入 · ⭐股数 = 评分对应仓位 × 总资产 ÷ 收盘(不超总风险上限)", pos.size == min(int(100_000 * c3.PARAMS["grade_size"][gr["grade"]] / pos.entry_price), int(4000.0 / (pos.entry_price - pos.stop))), str((pos.size, gr["grade"], pos.entry_price, pos.stop)))
+check("买入 · rationale 有评分、止损位、开放风险", "评分" in fill["rationale"] and "止损" in fill["rationale"] and "开放风险" in fill["rationale"], fill["rationale"][:160])
+# ⭐止损被封顶(末次收缩太深)→ 不进
+ind_deep = c3.indicators(bars_deep + [(brk[-1][0], c3.indicators(bars_deep)["pivot"] + 0.5 * atr, c3.indicators(bars_deep)["pivot"] + 0.7 * atr, c3.indicators(bars_deep)["pivot"] - 0.2 * atr, 1400.0)])
+_s, capped_d = c3.stop_of(ind_deep)
+st_d = dict(state, positions=[], cash=100_000.0, open_risk=0.0)
+fd, bd = c3.try_entry("DDD", "深", ind_deep, st_d, score=95)
+check("买入 · ⭐止损被 -8% 封顶的形态不进,并说明(C-04)", capped_d and fd is None and bd and "C-04" in bd, str((capped_d, bd)))
+# ⭐D 级不买
+ind_bad = dict(ind2, contractions=1, last_depth=15.0, low_vol_ratio=1.2, close=ind2["pivot"] + 0.8 * atr,
+               recent_vols=[ind2["vol_sma20"] * 1.35] * len(ind2["recent_vols"]))   # 突破质量只有 1 分(放量 1.35×、高出 0.8 ATR)
+gd = c3.grade(ind_bad, c3.PARAMS, 60)
+st_b = dict(state, positions=[], cash=100_000.0, open_risk=0.0)
+fb, bb = c3.try_entry("BBB", "乙", ind_bad, st_b, score=60)
+check("买入 · ⭐评分够不上 C 级(D)达到信号也不买", gd["grade"] == "D" and fb is None and bb and "D 级" in bb, str((gd["text"], bb)))
+# ⭐组合总风险上限:已有开放风险 3.9% 时只能放 0.1%
+st_h = dict(state, positions=[], cash=100_000.0, open_risk=3900.0)
+fh, bh = c3.try_entry("HHH", "热", ind2, st_h, score=95)
+check("买入 · ⭐组合开放风险快满时按余额缩仓", fh and fh["shares"] == int(100.0 / (fh["price"] - st_h["positions"][0].stop)), str((fh and fh["shares"], bh)))
+st_h2 = dict(state, positions=[], cash=100_000.0, open_risk=4000.0)
+fh2, bh2 = c3.try_entry("HHH", "热", ind2, st_h2, score=95)
+check("买入 · ⭐组合开放风险已满就不进并说明(C-09)", fh2 is None and bh2 and "C-09" in bh2, str(bh2))
 
 # 追高 2 个 ATR:不买
 hi = bars + [(brk[-1][0], ind["pivot"] + 2.0 * atr, ind["pivot"] + 2.2 * atr, ind["pivot"] + 1.5 * atr, 1400.0)]
