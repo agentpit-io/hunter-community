@@ -178,6 +178,9 @@ check("整合 · ⭐单日回撤 -3.8% 触发熔断,不开仓且被挡项说明"
 r3 = av.run_day("2026-04-24", [], 100_000.0, lambda c: bars_map.get(c), [("AAA", "甲", 90)], None, 3)
 check("整合 · 连亏 3 笔不开仓", not r3["fills"] and "连亏" in r3["watch_items"][0]["blocked_reason"], str(r3["watch_items"]))
 check("整合 · 被挡的排最后", r2["watch_items"][-1].get("blocked") is True)
+check("整合 · ⭐连亏停机只停一天:停过之后计数清零", r3["consec_losses"] == 0, str(r3["consec_losses"]))
+r4 = av.run_day("2026-04-24", [], 100_000.0, lambda c: bars_map.get(c), [("AAA", "甲", 90)], None, r3["consec_losses"])
+check("整合 · 第二天照常能开仓", [f["symbol"] for f in r4["fills"]] == ["AAA"], str(r4["fills"]))
 
 total = passed + len(fails)
 print(f"小鹿引擎用例 {total} 条")

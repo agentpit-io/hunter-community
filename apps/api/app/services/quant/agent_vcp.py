@@ -460,6 +460,9 @@ def run_day(date_iso: str, positions: list[Position], cash: float, bars_of, watc
         state["halt_reason"] = f"今日权益 {(equity / prev_equity - 1) * 100:+.1f}%,触及单日亏损熔断 {g['daily_loss_halt_pct']:.0f}%,今天不开新仓"
     elif consec_losses >= g["consecutive_loss_pause"]:
         state["halt_reason"] = f"此前连亏 {consec_losses} 笔,按护栏今天不开新仓"
+        # 「停一天」:停过这一天计数就清零,否则要等到下一笔盈利才解锁 —— 2026-09-12 三个月回填实测
+        # 7 月 24 日连亏到 6 笔之后一直到 9 月都没开过仓,护栏变成了永久停机
+        consec_losses = 0
 
     fills: list[dict] = []
     # 1. 持仓管理(出场 / 加仓)
