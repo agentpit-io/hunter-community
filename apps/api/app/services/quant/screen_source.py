@@ -390,6 +390,13 @@ def run_script(script: str, market_key: str = "us", limit: int = 100,
     hits, skipped, missing = screen_dsl.evaluate_detail(c, rows, cache)
     eval_ms = (time.time() - t1) * 1000
 
+    sort_note = None
+    if sort_by and asof_info is not None and sort_by not in want and sort_by not in screen_dsl._PRICE:
+        # 界面默认按市值排序,而回溯里没有市值这一列(2026-09-12 浏览器实测当场 400)。
+        # 换成按收盘价排,并告诉用户 —— 不能静默换,用户会以为看到的还是按市值排的
+        sort_note = (f"回溯模式没有「{screen_dsl.field_label_cn(sort_by) or sort_by}」这一列,"
+                     f"结果改按收盘价{'降' if descending else '升'}序。")
+        sort_by = "close"
     if sort_by:
         if sort_by not in want and sort_by not in screen_dsl._PRICE:
             raise ScreenError(f"排序字段 {sort_by!r} 不在这次请求的列里")
@@ -411,6 +418,8 @@ def run_script(script: str, market_key: str = "us", limit: int = 100,
                if asof_info["requested"] != a else "")
             + "固定窗口按 5 / 21 / 63 / 126 / 252 个交易日算;EMA / RSI 从可用日线起点递推,"
               "周期越长、回溯越远,与快照的差异越大;日线不够长的字段给空,不拿短窗口冒充。")
+        if sort_note:
+            warnings.append(sort_note)
         if asof_info["unavailable"]:
             names = "、".join(screen_dsl.field_label_cn(f) or f for f in asof_info["unavailable"])
             warnings.append(
