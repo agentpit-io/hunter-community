@@ -310,7 +310,22 @@ try {
         {symbol:'NOSC', price:12.5, rule_id:'R-01', progress_pct:30, gap:'评分还没算出来'},
         {symbol:'MU', score:92, price:142.3, rule_id:'R-02', progress_pct:82, gap:'距 20 日高还差 0.8%'},
         {symbol:'ZD', score:87, price:56.22, rule_id:'R-01', progress_pct:50, gap:'还差 C-01 收盘'},
-        {symbol:'VOYA', score:83, price:103.41, rule_id:'R-01', progress_pct:50, gap:'还在枢轴下方 2.1%'}]},
+        {symbol:'VOYA', score:83, price:103.41, rule_id:'R-01', progress_pct:50, gap:'还在枢轴下方 2.1%'},
+        {symbol:'FILL', price:9.9, filler:true, rs_pct:99.9, rs_raw_pct:412,
+         gap:'不是今天的候选 —— 它没过任何一条买入规则'}], matched:6, filled:1},
+      // 历史交易记录:第一笔是加过两次仓的(3 腿),第二笔是干净的一买一卖
+      history:{fee_note:'模拟盘按收盘价成交,不计手续费与滑点', items:[
+        {no:19, symbol:'ARMK', name:'ARMK', side:'long', entry_date:'2026-08-11', exit_date:'2026-08-25',
+         shares:232, amount:14134.64, pnl_abs:-263.36, pnl_pct:-1.86, hold_days:10, adds:2, legs:[
+           {kind:'entry', date:'2026-08-11', rule_id:'R-04', rule_name:'VCP 突破买入', price:60.47, shares:133},
+           {kind:'entry', date:'2026-08-13', rule_id:'R-16', rule_name:'倒三角加仓', price:61.11, shares:66},
+           {kind:'exit', date:'2026-08-25', rule_id:'R-15', rule_name:'10 日不涨清仓', price:59.08,
+            shares:232, pnl_abs:-263.36, pnl_pct:-1.86}]},
+        {no:18, symbol:'GS', name:'GS', side:'long', entry_date:'2026-07-02', exit_date:'2026-07-20',
+         shares:8, amount:7806.88, pnl_abs:412.5, pnl_pct:5.28, hold_days:13, adds:0, legs:[
+           {kind:'entry', date:'2026-07-02', rule_id:'R-04', rule_name:'VCP 突破买入', price:975.86, shares:8},
+           {kind:'exit', date:'2026-07-20', rule_id:'R-13', rule_name:'移动止盈', price:1027.42,
+            shares:8, pnl_abs:412.5, pnl_pct:5.28}]}]},
       trades:{date:'2026-09-09', items:[
         {ts_market:'09:31', ts_market_tz:'ET', ts_local:'21:31 沪', side:'buy', symbol:'SHOP',
          shares:41, price:121.55, amount:4983, position_pct:12.4, rule_id:'R-02',
@@ -345,6 +360,9 @@ try {
       holdings:{items:[{symbol:'X', name:null, cost:null, price:null, pnl_pct:null, hold_days:null,
                         bench_pct:null, sharpe:null, entry_rule:null}]},
       watchlist:{items:[{symbol:'Y', score:null, price:null, rule_id:null, progress_pct:null, gap:null}]},
+      history:{items:[{no:null, symbol:null, side:null, shares:null, amount:null, pnl_abs:null,
+                       pnl_pct:null, hold_days:null,
+                       legs:[{kind:'entry', date:null, rule_id:null, rule_name:null, price:null, shares:null}]}]},
       trades:{items:[{side:'buy', symbol:'Z', shares:null, price:null, rule_id:null, rationale:null}]},
       versions:[{label:null, date:null, change:null}],
       lessons:[{date:null, title:null, kind:'loss', what:null, landed:null}]
@@ -369,7 +387,8 @@ try {
     ['净值曲线在扫描筛选之前', at('净值 vs 基准'), at('扫描筛选 · 找候选票')],
     ['扫描筛选在规则之前', at('扫描筛选 · 找候选票'), at('当前生效的规则')],
     ['规则在持仓之前', at('当前生效的规则'), at('持仓明细')],
-    ['持仓在操作报告之前', at('持仓明细'), at('今日操作报告')],
+    ['持仓在历史交易记录之前', at('持仓明细'), at('历史交易记录')],
+    ['历史交易记录在操作报告之前', at('历史交易记录'), at('今日操作报告')],
     ['操作报告在策略演进之前', at('今日操作报告'), at('策略演进')],
     ['成长总结排最后', at('策略演进'), at('每日成长总结')],
   ]
@@ -410,10 +429,10 @@ try {
   // ④ 后端整个不存在时,骨架照常渲染 —— 不许整页换成一张说明卡。
   //   用户 2026-09-09 明确要求:「把没获取到后端数据的地方都用 — 表示」。
   //   整页替换掉的话,连这一页长什么样都看不见,而「这页会展示什么」本身就是信息。
-  const skel = ['当前基于', '护栏', '净值 vs 基准', '当前生效的规则', '持仓明细',
+  const skel = ['当前基于', '护栏', '净值 vs 基准', '当前生效的规则', '持仓明细', '历史交易记录',
     '今日观察列表', '今日操作报告', '策略演进', '每日成长总结']
   const lost = skel.filter(s => S.indexOf(s) < 0)
-  if (!lost.length) console.log('PASS 智能体 · 后端 404 时九个区块骨架都在')
+  if (!lost.length) console.log('PASS 智能体 · 后端 404 时十个区块骨架都在')
   else { failed++; console.log('FAIL 智能体 · 后端 404 时丢了区块:', lost.join(' / ')) }
   for (const [name, re] of banned) {
     if (!re.test(S)) console.log('PASS 智能体 · 骨架不出现', name)
@@ -428,7 +447,7 @@ try {
   //   列表只露 5 张卡片、其余滚动,所以排序直接决定了用户先看到谁 ——
   //   排错等于把最好的候选藏进滚动区里,比排版难看严重得多,必须钉死。
   const WL = (H.match(/class="sy">([A-Z]+)</g) || []).map(s => s.replace(/[^A-Z]/g, ''))
-  const WANT = ['MU', 'ZD', 'VOYA', 'IFF', 'NOSC', 'SMCI']
+  const WANT = ['MU', 'ZD', 'VOYA', 'IFF', 'NOSC', 'SMCI', 'FILL']
   if (WL.join(',') === WANT.join(',')) console.log('PASS 智能体 · 观察列表按评分降序、缺分殿后、否决最末')
   else { failed++; console.log('FAIL 智能体 · 观察列表顺序不对:', WL.join(',') , '应为', WANT.join(',')) }
   // 限高靠 JS 量完再设(fitWatch 按 id 找容器),id 丢了就退化成一条长列表,且不会报错 —— 只能靠断言
@@ -436,6 +455,34 @@ try {
   else { failed++; console.log('FAIL 智能体 · 观察列表容器丢了 id=ag-watch,限高会失效') }
   if (/按评分排序/.test(H)) console.log('PASS 智能体 · 表头写明了排序口径')
   else { failed++; console.log('FAIL 智能体 · 表头没写排序口径') }
+  // ⑥ RS 补位(用户 2026-09-12):观察列表凑不满 5 条时补几只 RS 最强的进来。
+  //   这些票**没过任何一条买入规则**,一旦长得跟真候选一样,用户就会以为智能体在等它们 ——
+  //   那是用排版编造了一个不存在的结论。所以补位卡片里不许出现评分 / 进度条 / 「距 R-xx 触发」。
+  const fi = H.indexOf('class="ag-w fill"')
+  const seg = fi < 0 ? '' : H.slice(fi, H.indexOf('</div></div>', fi) + 12)
+  if (seg) console.log('PASS 智能体 · 补位卡片渲染出来了')
+  else { failed++; console.log('FAIL 智能体 · 补位卡片没渲染') }
+  const dirty = [['评分', /评分/], ['进度条', /ag-gap/], ['触发进度', /触发/]]
+    .filter(([, re]) => re.test(seg)).map(([n]) => n)
+  if (seg && !dirty.length) console.log('PASS 智能体 · 补位卡片不冒充候选(无评分 / 进度条 / 触发进度)')
+  else if (seg) { failed++; console.log('FAIL 智能体 · 补位卡片里出现了', dirty.join(' / ')) }
+  if (/另补 1 只 RS 最强/.test(H)) console.log('PASS 智能体 · 表头把补位的只数单独报出来')
+  else { failed++; console.log('FAIL 智能体 · 表头没把补位只数和真候选分开报') }
+  // ⑦ 历史交易记录:一个持仓周期一组。加仓过的票有 3 腿,编号 / 大小 / 盈亏必须 rowspan 跨整组 ——
+  //   平铺成 3 条独立记录的话,「这一笔最后是赚是亏」就看不出来了。
+  if (/rowspan="3"/.test(H)) console.log('PASS 智能体 · 加仓周期的编号与盈亏跨整组(rowspan=3)')
+  else { failed++; console.log('FAIL 智能体 · 加仓周期没合并,退化成逐笔平铺') }
+  if (/rowspan="2"/.test(H)) console.log('PASS 智能体 · 一买一卖的周期是 2 腿')
+  else { failed++; console.log('FAIL 智能体 · 一买一卖的周期腿数不对') }
+  const need2 = [['净损益按笔算', /-\$263/], ['回报按笔算', /-1\.86%/], ['出场规则挂在腿上', /R-15</],
+    ['笔数与总览口径的差异写出来了', /总览按<b>每次卖出<\/b>计数/],
+    ['没有手续费列时说明为什么', /不计手续费与滑点/]]
+  for (const [name, re] of need2) {
+    if (re.test(H)) console.log('PASS 智能体 ·', name)
+    else { failed++; console.log('FAIL 智能体 ·', name) }
+  }
+  if (!/<th[^>]*>手续费/.test(H)) console.log('PASS 智能体 · 没凭空造手续费列')
+  else { failed++; console.log('FAIL 智能体 · 出现了手续费列,但数据源里没有这个字段') }
   // 护栏尤其不能猜:用户会据此判断风险敞口
   if (!/只做多|可做空/.test(S)) console.log('PASS 智能体 · 骨架不猜交易方向')
   else { failed++; console.log('FAIL 智能体 · 骨架凭空写了交易方向') }

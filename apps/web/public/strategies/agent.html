@@ -137,6 +137,18 @@
 
     /* 双栏 · 持仓 / 观察 */
     .ag-two{display:grid;grid-template-columns:1.5fr 1fr;gap:14px;align-items:start}
+    /* 左栏(持仓明细 + 历史交易记录)整体锁到右栏观察列表的高度 —— 用户 2026-09-12 要求两栏底边齐平。
+       高度由 JS 量右栏给(见 fitCols);这里只负责把这段高度在两个卡片之间分配:
+       持仓可收缩(flex 0 1),历史吃掉剩下的(flex 1 1),各自内部滚动。
+       min-height:0 是必须的 —— flex 子项默认 min-height:auto,内容再长也不收缩,
+       结果就是滚动条永远不出现、卡片一路撑破锁定的高度。 */
+    .ag-col{display:flex;flex-direction:column;gap:14px;min-height:0}
+    .ag-col>.panel{min-height:0;display:flex;flex-direction:column;overflow:hidden}
+    .ag-col>.panel>.ag-scroll{min-height:0;overflow:auto;overscroll-behavior:contain}
+    .ag-col>.panel>.p-hd,.ag-col>.panel>.ag-note,.ag-col>.panel>.ag-miss{flex:0 0 auto}
+    .ag-col .ag-hold{flex:0 1 auto}
+    .ag-col .ag-hist{flex:1 1 auto}
+    @media(max-width:1000px){.ag-col{height:auto!important}.ag-col>.panel{max-height:none}}
     @media(max-width:1000px){.ag-two{grid-template-columns:1fr}}
     .ag-scroll{overflow-x:auto}
     .ag-tb{width:100%;border-collapse:collapse;font-size:12.5px;min-width:560px}
@@ -151,6 +163,26 @@
     .ag-rule{font-family:ui-monospace,menlo,monospace;font-size:10.5px;background:var(--brand-pale);
       color:var(--brand-dark);border-radius:5px;padding:2px 6px;border:0;cursor:help;display:inline-block}
     .ag-rule:hover{background:var(--brand);color:#fff}
+
+    /* 历史交易记录:一个持仓周期一组,组内每次买/卖各一行(和券商对账单一个读法)。
+       编号 / 大小 / 净损益 / 回报 用 rowspan 跨整组 —— 它们是这一笔的属性,不是某一条腿的。 */
+    .ag-hb th,.ag-hb td{padding:7px 8px;font-size:12px}
+    .ag-hb tbody tr td{border-bottom:0}
+    .ag-hb tr.rd-first td{border-top:1px solid var(--line)}
+    .ag-hb tbody tr:first-child td{border-top:0}
+    .ag-hb .no{font-weight:650;font-size:12.5px;vertical-align:top;padding-top:9px}
+    .ag-hb .no s{display:block;text-decoration:none;color:var(--brand-dark);font-size:10.5px;
+      font-weight:500;margin-top:2px}
+    .ag-hb .leg{color:var(--muted);white-space:nowrap}
+    .ag-hb .leg.in{color:var(--text)}
+    .ag-hb .sig{color:var(--muted);font-size:11px}
+    .ag-hb .sz s{display:block;text-decoration:none;color:var(--muted);font-size:10.5px;margin-top:2px}
+    .ag-hb .mid{vertical-align:middle}
+    /* 补位卡片:虚线框 + 灰底,一眼看出它和上面那些真候选不是一回事 */
+    .ag-w.fill{border-style:dashed;background:#faf8f5}
+    .ag-w.fill .sy{color:var(--muted)}
+    .ag-w .chip.dim{background:#efe9e1;color:var(--muted)}
+    .ag-w .rsp{font-family:ui-monospace,menlo,monospace;font-size:10.5px;color:var(--brand-dark)}
 
     /* 观察列表可能有几十只 —— 限高到 5 张卡片,其余滚动。不限高的话右栏比左栏长出一大截,
        左边整片空白(2026-09-12 用户反馈)。max-height 不能写死像素:卡片里的 gap 文案会换行,
@@ -303,8 +335,8 @@ function missing(what, why) {
   return '<div class="ag-miss"><div style="font-size:13px;color:var(--text)">' + esc(what) + '</div>' +
     (why ? '<div style="margin-top:6px">' + esc(why) + '</div>' : '') + '</div>'
 }
-function panel(title, cnt, body) {
-  return '<div class="panel"><div class="p-hd">' + esc(title) +
+function panel(title, cnt, body, cls) {
+  return '<div class="panel' + (cls ? ' ' + cls : '') + '"><div class="p-hd">' + esc(title) +
     (cnt ? '<span class="cnt">' + cnt + '</span>' : '') + '</div>' + body + '</div>'
 }
 
@@ -615,7 +647,7 @@ function vHoldings(d) {
   const h = d.holdings || {}
   const has = Array.isArray(h.items)
   if (has && !h.items.length) {
-    return panel('持仓明细', '0 只', missing('当前空仓', '没有持仓时这里是空的,不是出错'))
+    return panel('持仓明细', '0 只', missing('当前空仓', '没有持仓时这里是空的,不是出错'), 'ag-hold')
   }
   const rows = (has ? h.items : SKELETON_ROW).map(function (it) {
     // Sharpe 样本不足时显示 `—` 并说明原因:四五天的日收益样本算出来的夏普
@@ -636,14 +668,14 @@ function vHoldings(d) {
     (Number.isFinite(h.quote_delay_min) ? ' · 报价延迟 ' + int(h.quote_delay_min) + ' 分钟' : '') +
     (h.as_of ? ' · ' + esc(h.as_of) : '')
   return panel('持仓明细', cnt,
-    '<div class="ag-scroll"><table class="ag-tb"><thead><tr>' +
+    '<div class="ag-scroll" id="ag-hold-scroll"><table class="ag-tb"><thead><tr>' +
     '<th>股票</th><th style="text-align:right">买入价</th><th style="text-align:right">现价</th>' +
     '<th style="text-align:right">收益</th><th style="text-align:right">持有</th>' +
     '<th style="text-align:right">同期基准</th><th style="text-align:right">Sharpe</th><th>买入规则</th>' +
     '</tr></thead><tbody>' + rows + '</tbody></table></div>' +
     '<div class="ag-note" style="margin-top:10px"><b>Sharpe 列在样本不足时显示 —</b>:' +
     '个股夏普用持有期日收益算,四五天的样本得出的数字会在 0.2 和 3.0 之间乱跳,写出来只会误导。' +
-    '组合级夏普在上面的总览里。</div>')
+    '组合级夏普在上面的总览里。</div>', 'ag-hold')
 }
 // 观察列表按评分从高到低排 —— 一屏只放得下 5 张卡片,谁排前面就决定了用户先看到谁。
 // 契约(docs/agent-dashboard-contract.md 3.9)规定 blocked(被护栏否决)一律排最后:
@@ -652,8 +684,9 @@ function vHoldings(d) {
 // 同组内保持后端给的顺序(显式带下标比较,不依赖引擎的稳定排序)。
 function sortWatch(items) {
   return items.map(function (it, i) { return { it: it, i: i } }).sort(function (a, b) {
-    const ab = a.it.blocked ? 1 : 0
-    const bb = b.it.blocked ? 1 : 0
+    // 0 = 真候选 · 1 = 被护栏否决 · 2 = RS 补位(连候选都不是,排最后)
+    const ab = a.it.filler ? 2 : (a.it.blocked ? 1 : 0)
+    const bb = b.it.filler ? 2 : (b.it.blocked ? 1 : 0)
     if (ab !== bb) return ab - bb
     const af = Number.isFinite(a.it.score)
     const bf = Number.isFinite(b.it.score)
@@ -662,6 +695,57 @@ function sortWatch(items) {
     return a.i - b.i
   }).map(function (x) { return x.it })
 }
+// ═══ ⑧-2 历史交易记录 ══════════════════════════════════════════════
+// 一个持仓周期一条,组内每次买卖各占一行(类型 / 日期 / 信号 / 价格),
+// 编号 · 大小 · 净损益 · 回报用 rowspan 跨整组 —— 这四个是「这一笔」的属性。
+// 为什么不按成交逐笔平铺:倒三角加仓会让一只票有 2~3 次买入、2 次卖出,
+// 平铺出来是 5 行互不相干的记录,看不出「这一笔最后是赚是亏」。
+function vHistory(d) {
+  const h = d.history || {}
+  const has = Array.isArray(h.items)
+  if (has && !h.items.length) {
+    return panel('历史交易记录', '0 笔', missing('还没有平掉的交易',
+      '这里只记<b>已经平仓</b>的持仓周期;还拿在手里的在上面的持仓明细里'), 'ag-hist')
+  }
+  const rows = (has ? h.items : [{ legs: [{}] }]).map(function (r) {
+    const legs = Array.isArray(r.legs) && r.legs.length ? r.legs : [{}]
+    const n = legs.length
+    const span = ' rowspan="' + n + '"'
+    return legs.map(function (g, i) {
+      const isIn = g.kind === 'entry'
+      const head = i > 0 ? '' :
+        '<td class="no"' + span + '>' + (Number.isFinite(r.no) ? int(r.no) : NA) +
+          '<s>' + (r.side === 'long' ? '做多' : txt(r.side, '')) + '</s></td>'
+      const tail = i > 0 ? '' :
+        '<td class="n sz mid"' + span + '>' + (Number.isFinite(r.shares) ? int(r.shares) + ' 股' : NA) +
+          '<s>' + money(r.amount) + '</s></td>' +
+        '<td class="n mid ' + dir(r.pnl_abs) + '"' + span + '>' +
+          (Number.isFinite(r.pnl_abs) ? money(r.pnl_abs, true) : NA) + '</td>' +
+        '<td class="n mid ' + dir(r.pnl_pct) + '"' + span + '>' + pct(r.pnl_pct, 2, true) + '</td>'
+      // 信号 = 命中了哪条规则。规则号单独成 chip(hover 出条件原文),后面跟规则名
+      const sig = g.rule_id
+        ? ruleChip(g.rule_id, g.rule_text) + ' <span class="sig">' + txt(g.rule_name, '') + '</span>'
+        : NA
+      return '<tr' + (i === 0 ? ' class="rd-first"' : '') + '>' + head +
+        '<td class="leg' + (isIn ? ' in' : '') + '">' +
+          (g.kind === 'entry' ? '入场' : (g.kind === 'exit' ? '出场' : NA)) + '</td>' +
+        '<td class="leg">' + txt(g.date) + '</td>' +
+        '<td>' + sig + '</td>' +
+        '<td class="n">' + num(g.price, 2) + '</td>' + tail + '</tr>'
+    }).join('')
+  }).join('')
+  const cnt = (has ? esc(h.items.length + ' 笔') : NA) + ' · 已平仓'
+  return panel('历史交易记录', cnt,
+    '<div class="ag-scroll"><table class="ag-tb ag-hb"><thead><tr>' +
+    '<th>编号</th><th>类型</th><th>日期</th><th>信号</th><th style="text-align:right">价格</th>' +
+    '<th style="text-align:right">大小</th><th style="text-align:right">净损益</th>' +
+    '<th style="text-align:right">回报</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+    '<div class="ag-note" style="margin-top:10px">一行组 = <b>一个持仓周期</b>(建仓 → 加仓 → 清仓算一笔),' +
+    '所以这里的笔数比上面总览的「交易 N 笔」少 —— 总览按<b>每次卖出</b>计数,减半再清仓算两次。' +
+    (h.fee_note ? '<br>' + esc(h.fee_note) + ',所以没有手续费这一列(是没有这个数,不是 0)。' : '') +
+    '</div>', 'ag-hist')
+}
+
 function vWatch(d) {
   const w = d.watchlist || {}
   const has = Array.isArray(w.items)
@@ -669,6 +753,16 @@ function vWatch(d) {
     return panel('今日观察列表', '0 只', missing('今日没有候选', '所有标的都不满足当前规则的预备条件'))
   }
   const cards = (has ? sortWatch(w.items) : SKELETON_ROW).map(function (it) {
+    // 补位项**不是**候选:它没过任何一条买入规则,只是现在 RS 最强的票。
+    // 所以不给评分、不给进度条、不写「距 R-xx 触发」—— 那三样都会让人以为智能体在等它。
+    // 虚线框 + 灰底 + 「RS 补位」标签,和真候选在视觉上分开。
+    if (it.filler) {
+      return '<div class="ag-w fill"><div class="r1"><span class="sy">' + txt(it.symbol) + '</span>' +
+        '<span class="chip dim">RS 补位</span>' +
+        (Number.isFinite(it.rs_pct) ? '<span class="rsp">前 ' + fixed(100 - it.rs_pct, 1) + '%</span>' : '') +
+        '<span class="px">' + num(it.price, 2) + '</span></div>' +
+        '<div class="r2">' + txt(it.gap) + '</div></div>'
+    }
     if (it.blocked) {
       return '<div class="ag-w blocked"><div class="r1"><span class="sy">' + txt(it.symbol) + '</span>' +
         '<span class="chip warn">已否决</span><span class="px">' + num(it.price, 2) + '</span></div>' +
@@ -684,13 +778,20 @@ function vWatch(d) {
       '<div class="r2" style="margin-top:5px">距 ' + ruleChip(it.rule_id, it.rule_text) + ' 触发 ' +
         (p == null ? NA : '<b>' + p.toFixed(0) + '%</b>') + '</div></div>'
   }).join('')
+  // 副标题要把「筛出来的」和「补进来的」分开报数 —— 合成一个数会让人以为今天有 5 个候选
+  const nFill = Number.isFinite(w.filled) ? w.filled : 0
+  const nReal = Number.isFinite(w.matched) ? w.matched : (has ? w.items.length : null)
   return panel('今日观察列表',
-    (has ? esc(w.items.length + ' 只') : NA) +
+    (nReal == null ? NA : esc(nReal + ' 只')) +
+    (nFill ? ' · 另补 ' + int(nFill) + ' 只 RS 最强' : '') +
     (d.strategy && d.strategy.version ? ' · 按 ' + esc(d.strategy.version) + ' 规则筛' : '') +
     ' · 按评分排序' + (has && w.items.length > WATCH_ROWS ? ',列表内可滚' : ''),
     '<div class="ag-wl" id="ag-watch">' + cards + '</div>' +
     '<div class="ag-note" style="margin-top:11px">观察列表写的是<b>还差什么才买</b>,不是一串代码 —— ' +
-    '否则用户看不出智能体在等什么、也无法判断它等得对不对。</div>')
+    '否则用户看不出智能体在等什么、也无法判断它等得对不对。' +
+    (nFill ? '<br><b>虚线框的是补位</b>:今天只筛出 ' + int(nReal) + ' 只,不足 5 只的部分按 RS 排名补上最强的几只。' +
+      '它们<b>没过任何一条买入规则</b>,智能体不会因为它们出现在这里就买 —— 只是让你知道现在市场最强的是谁。' : '') +
+    '</div>')
 }
 
 // ═══ ⑨ 今日操作报告 ═══════════════════════════════════════════════
@@ -851,7 +952,7 @@ function render(d, notice) {
   const html = '<div class="ag-wrap">' + vBanner(notice) +
     vStatus(d) + vBranches(d) + vStrategy(d) + vGuard(d) + vPipeline(d) + vKpi(d) + vNav(d) +
     vScreener() + vRules(d) +
-    '<div class="ag-two">' + vHoldings(d) + vWatch(d) + '</div>' +
+    '<div class="ag-two"><div class="ag-col" id="ag-col">' + vHoldings(d) + vHistory(d) + '</div>' + vWatch(d) + '</div>' +
     vTrades(d) + vVersions(d) + vLessons(d) +
     '<div class="ag-note" style="text-align:center;padding:6px 0 0">' +
     '涨跌配色沿用站内中式惯例(<span style="color:var(--up);font-weight:650">红涨</span> · ' +
@@ -919,19 +1020,43 @@ function fitWatch() {
       const w = Math.round(es[0].contentRect.width)
       if (w === watchW) return
       watchW = w
-      fitWatch()
+      fitBoth()
     })
     watchRO.observe(wl)
   }
 }
+// 左栏(持仓明细 + 历史交易记录)整体锁到右栏观察列表卡片的高度 ——
+// 用户 2026-09-12 要求两栏底边齐平。高度分配交给 CSS 的 flex:
+// 持仓按内容、历史吃掉剩下的,各自内部滚动。
+// 窄屏(单栏)时不锁:上下排列时「底边齐平」没有意义,锁了只会把上面那张压扁。
+function fitCols() {
+  const col = document.getElementById('ag-col')
+  const wl = document.getElementById('ag-watch')
+  if (!col || !wl || typeof wl.closest !== 'function') return
+  const p = wl.closest('.panel')
+  if (!p || typeof p.offsetHeight !== 'number' || !p.offsetHeight) {
+    col.style.height = ''
+    return
+  }
+  if (typeof matchMedia === 'function' && matchMedia('(max-width:1000px)').matches) {
+    col.style.height = ''
+    return
+  }
+  col.style.height = p.offsetHeight + 'px'
+}
+// 顺序不能反:先把右栏限到 5 张卡片,右栏高度定下来了,左栏才知道该锁到多少
+function fitBoth() {
+  fitWatch()
+  fitCols()
+}
 let watchFitBound = false
 function bindOps() {
-  fitWatch()
+  fitBoth()
   // resize 监听只挂一次:bindOps 每次重渲染都跑,重复挂会越积越多
   if (!watchFitBound) {
     watchFitBound = true
-    window.addEventListener('resize', fitWatch)
-    try { document.fonts.ready.then(fitWatch) } catch (e) { /* 老浏览器 / 假 DOM 没有 fonts */ }
+    window.addEventListener('resize', fitBoth)
+    try { document.fonts.ready.then(fitBoth) } catch (e) { /* 老浏览器 / 假 DOM 没有 fonts */ }
   }
   const rules = document.getElementById('ag-rules')
   const goto = document.getElementById('ag-goto-rules')

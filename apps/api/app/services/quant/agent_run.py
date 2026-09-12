@@ -609,11 +609,22 @@ def dashboard(branch: str = "base") -> dict:
     cur.execute("SELECT code, name, size, entry_price, entry_date, avg_cost, bars_held, entry_rule, last_price, "
                 "bench_pct, sharpe, sharpe_na FROM agent_position WHERE branch=%s ORDER BY entry_date, code", (branch,))
     poss = cur.fetchall()
+    rules = eng.rules_for(p)
+    rule_cond = {r["id"]: r["condition"] for r in rules}
+    watch_items = list(L[5] or [])
+    # 观察列表不足 5 条就补 RS 最强的 —— 补位项带 filler,和真候选不是一回事
+    fillers = []
+    if len(watch_items) < WATCH_MIN:
+        try:
+            held = {x[0] for x in poss} | {w.get("symbol") for w in watch_items}
+            fillers = _rs_fillers(cur, WATCH_MIN - len(watch_items), held)
+        except Exception:                                     # noqa: BLE001
+            log.exception("[agent] RS 补位失败,观察列表按原样返回")
+            fillers = []
+    history = _trade_rounds(trades, rule_cond)
     cur.close()
     conn.close()
 
-    rules = eng.rules_for(p)
-    rule_cond = {r["id"]: r["condition"] for r in rules}
     holdings = []
     for x in poss:
         holdings.append({"symbol": x[0], "name": x[1], "cost": round(x[5], 2),
@@ -658,8 +669,9 @@ def dashboard(branch: str = "base") -> dict:
         },
         "rules": _rules_block(trades, poss, days, p, st, eng),
         "holdings": {"as_of": f"{L[0].strftime('%m-%d')} 收盘", "quote_delay_min": None, "items": holdings},
-        "watchlist": {"items": L[5] or []},
+        "watchlist": {"items": watch_items + fillers, "matched": len(watch_items), "filled": len(fillers)},
         "trades": {"date": str(L[0]), "items": today_trades},
+        "history": {"items": history, "fee_note": "模拟盘按收盘价成交,不计手续费与滑点"},
         "versions": versions,
         "lessons": lessons,
     }
@@ -695,6 +707,107 @@ def _versions_block(st: dict, started: date, days, branch: str) -> tuple[list[di
                          "change": obs["change"], "reason": obs["reason"],
                          "effect": f"观察 {ao.OBS_DAYS} 个交易日,期末不比当前差才并版", "status": "observing"})
     return versions, marks
+
+
+WATCH_MIN = 5          # 观察列表至少凑满 5 条(前端一屏正好 5 张卡片)
+
+
+def _rs_fillers(cur, need: int, exclude: set) -> list[dict]:
+    """观察列表不足 5 条时,补几只**全美股 RS 排名最高**的进来(用户 2026-09-12 要求)。
+
+    这些票**不是**智能体的候选 —— 它们没过任何一条买入规则,只是"现在最强的票"。
+    所以每条都带 filler=True,前端必须把它和真候选在视觉上分开,
+    否则用户会以为智能体在等它们(那就是用排版编造了一个不存在的结论)。
+
+    口径:rs_line_stat.rs_raw_exact = 0.4·ROC(63) + 0.2·ROC(126) + 0.2·ROC(189) + 0.2·ROC(252),
+    需要 252 个以上有效收盘价,次新股没有这个值、自然排除。百分位是在
+    "同一天有精确 RS Raw 的全部美股"里算的,分母写进文案,不让人以为是全市场。
+    """
+    if need <= 0:
+        return []
+    cur.execute("SELECT max(as_of) FROM rs_line_stat WHERE market='us'")
+    row = cur.fetchone()
+    as_of = row[0] if row else None
+    if not as_of:
+        return []
+    cur.execute("SELECT code, rs_raw_exact, "
+                "       100 * percent_rank() OVER (ORDER BY rs_raw_exact) "
+                "FROM rs_line_stat WHERE market='us' AND as_of=%s AND rs_raw_exact IS NOT NULL "
+                "ORDER BY rs_raw_exact DESC LIMIT %s", (as_of, need + len(exclude) + 10))
+    cand = [r for r in cur.fetchall() if r[0] not in exclude][:need]
+    if not cand:
+        return []
+    cur.execute("SELECT COUNT(*) FROM rs_line_stat WHERE market='us' AND as_of=%s AND rs_raw_exact IS NOT NULL", (as_of,))
+    total = cur.fetchone()[0]
+    codes = [c[0] for c in cand]
+    cur.execute("SELECT code, close FROM rs_daily WHERE market='us' AND trade_date=%s AND code = ANY(%s)", (as_of, codes))
+    px = dict(cur.fetchall())
+    out = []
+    for i, (code, raw, pct) in enumerate(cand):
+        out.append({
+            "symbol": code, "name": None, "filler": True,
+            "price": round(px[code], 2) if px.get(code) else None,
+            "score": None, "rule_id": None, "progress_pct": None,
+            "rs_rank": i + 1, "rs_pct": round(pct, 1), "rs_raw_pct": round(raw * 100, 1),
+            "gap": f"不是今天的候选 —— 它没过任何一条买入规则。近一年加权涨幅 {raw * 100:+.0f}%,"
+                   f"在 {total} 只有完整一年日线的美股里排第 {i + 1}",
+        })
+    return out
+
+
+def _trade_rounds(trades, rule_cond: dict) -> list[dict]:
+    """逐笔成交 → 一个持仓周期一条记录(历史交易记录卡片用)。
+
+    一个周期 = 同一只票从建仓到清仓的一整段,中间可能有多次买(倒三角加仓 level 1/2/3)
+    和多次卖(5 日不涨减半 → 10 日不涨清仓)。**不是 1 买 1 卖的配对**:
+    强行配成 1:1 会把"加了两次仓"显示成三笔独立交易,净损益和回报全错。
+
+    只输出**已经平掉**的周期(买入股数 = 卖出股数)。没平完的还在持仓明细里,
+    它的最终盈亏没发生,写进"历史交易记录"就是提前写结论。
+
+    净损益 = 该周期所有卖出的 pnl_abs 之和(逐笔算好的,这里不重算);
+    回报   = 净损益 ÷ 该周期买入总金额 —— 加仓过的票必须用总投入当分母,
+             用第一笔的成本会把回报算大。
+    模拟盘按收盘价成交,没有手续费和滑点这两个字段,所以不给这两列(不是 0,是没有)。
+    """
+    groups: dict = {}
+    for t in trades:
+        key = (t[3], t[15])                      # code + entry_date
+        if key[1] is None:
+            continue
+        groups.setdefault(key, []).append(t)
+    rounds = []
+    for (code, entry_date), ts in groups.items():
+        ts.sort(key=lambda x: (x[0], x[1]))
+        buys = [t for t in ts if t[2] == "buy"]
+        sells = [t for t in ts if t[2] == "sell"]
+        if not buys or not sells:
+            continue
+        if sum(t[5] for t in buys) != sum(t[5] for t in sells):
+            continue                             # 还没平完 —— 归持仓明细管
+        cost = sum(t[7] or (t[5] * t[6]) for t in buys)
+        pnl = sum(t[9] for t in sells if t[9] is not None)
+        legs = []
+        for t in ts:
+            leg = {"kind": "entry" if t[2] == "buy" else "exit", "date": str(t[0]),
+                   "rule_id": t[12], "rule_name": t[13],
+                   "rule_text": rule_cond.get(t[12]), "price": t[6], "shares": t[5]}
+            if t[2] == "sell":
+                leg.update({"pnl_abs": t[9], "pnl_pct": t[10]})
+            legs.append(leg)
+        rounds.append({
+            "symbol": code, "name": buys[0][4], "side": "long",
+            "entry_date": str(entry_date), "exit_date": str(sells[-1][0]),
+            "shares": sum(t[5] for t in buys), "amount": round(cost, 2),
+            "pnl_abs": round(pnl, 2), "pnl_pct": round(pnl / cost * 100, 2) if cost else None,
+            "hold_days": sells[-1][11], "adds": len(buys) - 1, "legs": legs,
+        })
+    # 按平仓日排;编号按时间正序给(1 = 第一笔),前端倒序显示,和券商对账单一个习惯
+    rounds.sort(key=lambda r: (r["exit_date"], r["entry_date"], r["symbol"]))
+    for i, r in enumerate(rounds):
+        r["no"] = i + 1
+    rounds.reverse()
+    return rounds
 
 
 def _trade_item(t) -> dict:
