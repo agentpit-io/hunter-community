@@ -624,7 +624,12 @@ def dashboard(branch: str = "base") -> dict:
         except Exception:                                     # noqa: BLE001
             log.exception("[agent] RS 补位失败,观察列表按原样返回")
             fillers = []
-    history = _trade_rounds(trades, rule_cond)
+    try:
+        scan_of = _scan_hits(cur)
+    except Exception:                                         # noqa: BLE001
+        log.exception("[agent] 读扫描命中日失败,悬停日K 上就没有蓝线,其余照常")
+        scan_of = {}
+    history = _trade_rounds(trades, rule_cond, scan_of)
     cur.close()
     conn.close()
 
@@ -766,7 +771,27 @@ def _rs_fillers(cur, need: int, exclude: set) -> list[dict]:
     return out
 
 
-def _trade_rounds(trades, rule_cond: dict) -> list[dict]:
+def _scan_hits(cur) -> dict:
+    """每只票被扫描筛选命中过的日子 —— {代码: [YYYY-MM-DD, …]}。
+
+    悬停日K 上那几条半透明蓝线就是它:用户要看的是「扫描什么时候盯上这只票、
+    盯了多久、第几天才买」。只给买入日和卖出日的话,看不出这一笔等了多久。
+
+    agent_watch 一天一行、items 是 [代码, 名称, 评分] 的数组,
+    实测 174 天一共 41 kB,全表读进来建映射比按代码去 JSONB 里查便宜得多。
+    """
+    cur.execute("SELECT trade_date, items FROM agent_watch ORDER BY trade_date")
+    out: dict = {}
+    for d, items in cur.fetchall():
+        for it in (items or []):
+            code = it[0] if isinstance(it, (list, tuple)) and it else (
+                it.get("symbol") if isinstance(it, dict) else None)
+            if code:
+                out.setdefault(code, []).append(str(d))
+    return out
+
+
+def _trade_rounds(trades, rule_cond: dict, scan_of: dict | None = None) -> list[dict]:
     """逐笔成交 → 一个持仓周期一条记录(历史交易记录卡片用)。
 
     一个周期 = 同一只票从建仓到清仓的一整段,中间可能有多次买(倒三角加仓 level 1/2/3)
@@ -835,6 +860,7 @@ def _trade_rounds(trades, rule_cond: dict) -> list[dict]:
             "pnl_abs": round(pnl, 2), "pnl_pct": round(pnl / cost * 100, 2) if cost else None,
             "pnl_gross": round(gross, 2), "fee": round(fee, 4),
             "hold_days": sells[-1][11], "adds": len(buys) - 1, "legs": legs,
+            "scan_dates": (scan_of or {}).get(code, []),
         })
     # 按平仓日排;编号按时间正序给(1 = 第一笔),前端倒序显示,和券商对账单一个习惯
     rounds.sort(key=lambda r: (r["exit_date"], r["entry_date"], r["symbol"]))

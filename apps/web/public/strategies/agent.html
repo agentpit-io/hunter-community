@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>小鹿智能体 · 猎鹿人 Hunter</title>
   <link rel="stylesheet" href="style.css" />
+  <!-- 悬停日K 用。版本与 screener.html / backtest.html 一致,别各引各的 -->
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
   <style>
     /* 小鹿智能体 · 页面私有样式(前缀 ag-,沿用 data.html 的 dc- 惯例) */
     .ag-wrap{padding:0 20px 40px;display:flex;flex-direction:column;gap:14px}
@@ -178,6 +180,10 @@
     .ag-hb .sig{color:var(--muted);font-size:11px}
     .ag-hb .sym{font-weight:650;font-size:12.5px;vertical-align:top;padding-top:9px;
       font-family:ui-monospace,menlo,monospace}
+    /* 代号能悬停看日K:虚线下划线 + 十字光标。入口不藏 hover —— 这条虚线就是入口的招牌 */
+    .ag-hb .sym[data-kchart]{cursor:crosshair}
+    .ag-hb .sym[data-kchart] b{font-weight:650;border-bottom:1px dotted var(--line-strong)}
+    .ag-hb .sym[data-kchart]:hover b{background:var(--brand-pale);color:var(--brand-dark)}
     /* 信号列收窄(用户 2026-09-12):规则号必须完整,规则名长了就省略号 ——
        名字截断还能 hover 看全,把编号 / 价格 / 盈亏挤出视野才是真丢信息 */
     .ag-hb td.sg{max-width:150px;overflow:hidden;text-overflow:ellipsis}
@@ -702,12 +708,25 @@ function vHistory(d) {
     const legs = Array.isArray(r.legs) && r.legs.length ? r.legs : [{}]
     const n = legs.length
     const span = ' rowspan="' + n + '"'
+    // 悬停日K 的标记(公共模块在 app.js):
+    //   scan 扫描筛选命中当天 —— 半透明蓝色竖带,看得出扫描盯了它多久才买
+    //   buy / sell 规则买卖当天 —— 绿 Buy / 红 Sell
+    // 日期全部来自成交与扫描记录,不是前端推的 —— 对不上日线的那天会被丢掉,不硬凑最近一根
+    const mark = {
+      scan: Array.isArray(r.scan_dates) ? r.scan_dates : [],
+      buy: legs.filter(function (g) { return g.kind === 'entry' && g.date }).map(function (g) { return g.date }),
+      sell: legs.filter(function (g) { return g.kind === 'exit' && g.date }).map(function (g) { return g.date }),
+    }
+    const kattr = r.symbol
+      ? ' data-kchart="' + esc(r.symbol) + '" data-kname="' + esc(r.name || '') + '"' +
+        ' data-kmark="' + esc(JSON.stringify(mark)) + '" title="悬停看近一年日K(含扫描命中 / 买卖标记)"'
+      : ''
     return legs.map(function (g, i) {
       const isIn = g.kind === 'entry'
       const head = i > 0 ? '' :
         '<td class="no"' + span + '>' + (Number.isFinite(r.no) ? int(r.no) : NA) +
           '<s>' + (r.side === 'long' ? '做多' : txt(r.side, '')) + '</s></td>' +
-        '<td class="sym"' + span + '>' + txt(r.symbol) + '</td>'
+        '<td class="sym"' + span + kattr + '><b>' + txt(r.symbol) + '</b></td>'
       // 净损益是**扣完手续费**的;毛利放 hover —— 两个数都要能看到,
       // 否则用户拿它和上面总览(引擎零费用口径)对不上,会以为哪边算错了
       const pnlTip = Number.isFinite(r.pnl_gross) && Number.isFinite(r.fee)
@@ -755,6 +774,10 @@ function vHistory(d) {
     (h.scope_note ? '<br><b>注意口径:</b>' + esc(h.scope_note) +
       ' —— 引擎是按收盘价、不扣现金跑出来的,要让净值曲线也扣费得改引擎重跑全部历史' +
       '(现金变少会买不起同样股数,仓位变了整条曲线和每一笔成交都会变)。' : '') +
+    '<br><b>把鼠标放到代号上</b>看这只票近一年的日K:' +
+    '<span style="color:#2E86DE">蓝色竖带</span>是扫描筛选命中的那些天,' +
+    '<span style="color:#1f9254">绿色 Buy</span> 与 <span style="color:#c0392b">红色 Sell</span> 是规则买卖的那天 —— ' +
+    '看得出扫描盯了它多久才买、买在什么位置。' +
     '<br><b>把鼠标放到信号上</b>看这一笔的买卖理由(以及卖出后的事后跟踪)—— ' +
     '理由里的数字来自成交记录与行情表,模型只负责把它们组织成人话、不参与计算。' +
     '</div>', 'ag-hist')
@@ -1021,6 +1044,7 @@ function fitBoth() {
 let watchFitBound = false
 function bindOps() {
   fitBoth()
+  bindKChart()          // 悬停日K(app.js)· 内部自带「只绑一次」的闸门
   // resize 监听只挂一次:bindOps 每次重渲染都跑,重复挂会越积越多
   if (!watchFitBound) {
     watchFitBound = true

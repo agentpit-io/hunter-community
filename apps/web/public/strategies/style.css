@@ -484,3 +484,29 @@ a{text-decoration:none;color:inherit}
   .factor-grid{grid-template-columns:1fr}
   .rp-layout{padding:14px}
 }
+
+/* ══ 悬停日K 弹层(公共 · screener 与 agent 都用,脚本在 app.js) ══════
+   鼠标停在代码上弹出近一年日K,滚轮缩放,十字星读数。
+   用 position:fixed —— 表格自己在容器里滚动,用 absolute 会跟着滚出可视区。
+   用 opacity 而不是 display:none:display:none 的容器尺寸为 0,
+   echarts 在里面 init 会画出一张 0×0 的图,再 resize 也回不来。 */
+.kc-pop{
+  position:fixed;z-index:120;width:560px;
+  background:#fff;border:1px solid var(--line,#E8E0D6);border-radius:12px;
+  box-shadow:0 18px 55px rgba(38,31,25,.16);padding:10px 12px 8px;
+  opacity:0;pointer-events:none;transition:opacity .12s
+}
+.kc-pop.on{opacity:1;pointer-events:auto}
+.kc-hd{display:flex;align-items:baseline;gap:8px;font-size:12.5px;margin-bottom:5px}
+.kc-hd .sy{font-family:ui-monospace,Menlo,monospace;font-weight:700;color:var(--brand-dark)}
+.kc-hd .nm{color:var(--muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kc-hd .px{font-family:ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums;font-weight:600}
+.kc-hd .px.up{color:var(--up,#a4332b)} .kc-hd .px.dn{color:var(--dn,#3f6b40)}
+.kc-box{height:252px}
+.kc-msg{height:252px;display:grid;place-items:center;text-align:center;
+  color:var(--muted);font-size:12.5px;line-height:1.9;padding:0 24px}
+.kc-ft{font-size:10.5px;color:var(--soft,#a2a49d);margin-top:3px;display:flex;gap:10px}
+.kc-ft .r{margin-left:auto}
+/* 图例的小色块 —— 三种标记各是什么,不写出来只能对着图猜 */
+.kc-ft i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px;
+  vertical-align:-1px}

@@ -319,6 +319,7 @@ try {
         fee_total:1.98, pnl_gross_total:149.14, pnl_net_total:147.16, items:[
         {no:19, symbol:'ARMK', name:'ARMK', side:'long', entry_date:'2026-08-11', exit_date:'2026-08-25',
          shares:232, amount:14134.64, pnl_abs:-265.34, pnl_pct:-1.88, pnl_gross:-263.36, fee:1.9775,
+         scan_dates:['2026-08-06','2026-08-07','2026-08-10'],
          hold_days:10, adds:2, legs:[
            {kind:'entry', date:'2026-08-11', rule_id:'R-04', rule_name:'VCP 突破买入', price:60.47, shares:133,
             rationale:'收盘 $60.47 突破前 20 日高点 $59.90 1.0%(<5%,未追高);量能 2.1 倍 50 日均量'},
@@ -495,7 +496,7 @@ try {
   //   必须有这一列,净损益必须是扣完费的,且扣费前的数要能 hover 到 ——
   //   只给净的,用户拿它和上面总览(引擎零费用口径)对不上,会以为哪边算错了
   const feeNeed = [['有手续费列', /<th[^>]*>手续费/], ['有代号列', /<th[^>]*>代号/],
-    ['代号填的是股票代码', /class="sym"[^>]*>ARMK</],
+    ['代号填的是股票代码', /class="sym"[^>]*><b>ARMK</],
     ['净损益是扣费后的数', /-\$265/], ['扣费前的数在 hover 里', /title="扣费前 -\$263[^"]*手续费 1\.98/],
     ['脚注说明了这一列不进净值曲线', /仍是引擎的零费用口径/],
     ['脚注给出两个口径的差额', /一共扣了 <b>\$2<\/b>/]]
@@ -505,6 +506,18 @@ try {
   }
   if (/class="sg/.test(H)) console.log('PASS 智能体 · 信号列带收窄样式')
   else { failed++; console.log('FAIL 智能体 · 信号列没有收窄样式') }
+  // ⑧ 悬停日K(用户 2026-09-12):代号上挂钩子 + 三种标记的日期。
+  //   日期是从成交与扫描记录里来的,不是前端推的 —— 钩子掉了不会报错、页面照常渲染,
+  //   只有断言能发现「悬停没反应了」。
+  const kNeed = [['代号挂了日K 钩子', /class="sym" rowspan="3" data-kchart="ARMK"/],
+    ['标记里有扫描命中日', /&quot;scan&quot;:\[&quot;2026-08-06&quot;/],
+    ['标记里有买入日', /&quot;buy&quot;:\[&quot;2026-08-11&quot;,&quot;2026-08-13&quot;\]/],
+    ['标记里有卖出日', /&quot;sell&quot;:\[&quot;2026-08-25&quot;\]/],
+    ['脚注说明了三种标记各是什么', /蓝色竖带<\/span>是扫描筛选命中的那些天/]]
+  for (const [name, re] of kNeed) {
+    if (re.test(H)) console.log('PASS 智能体 ·', name)
+    else { failed++; console.log('FAIL 智能体 ·', name) }
+  }
   // 护栏尤其不能猜:用户会据此判断风险敞口
   if (!/只做多|可做空/.test(S)) console.log('PASS 智能体 · 骨架不猜交易方向')
   else { failed++; console.log('FAIL 智能体 · 骨架凭空写了交易方向') }

@@ -876,3 +876,364 @@ function shareCurrentUrl() {
     () => toast('复制失败,请手动选中地址栏', 'warn')
   )
 }
+
+
+// ═════════════════════════════════════════════════════════════════
+// 悬停日K —— 鼠标停在代码上弹出近一年日线 · 滚轮缩放 · 十字星读数
+// ═════════════════════════════════════════════════════════════════
+// 2026-09-12 从 screener.html 搬到这里变成公共模块:智能体的历史交易记录
+// 也要用它,再抄一份迟早会漂移(前科:hermes 和 huntercode 两份 uzi_mcp.py)。
+// 搬进 app.js 而不是新建文件 —— render_check 只跑内联 script 和 app.js,
+// 新文件它不加载,里面的语法错就永远抓不到。
+//
+// 数据走现成的 GET /api/kline/{code}?period=daily&limit=250。
+// 那个端点内部按代码形态分派(A 股走 finance-data,港美股走免费通道)。
+//
+// 四个体验点,少一个都不像样:
+//   1. 悬停 180ms 才请求 —— 否则鼠标扫过一列会连打几十个请求
+//   2. 移出 260ms 才隐藏 —— 这段时间够鼠标从代码移进弹层
+//   3. 弹层自己 mouseenter 时取消隐藏 —— 否则滚轮还没碰到图它就没了
+//   4. 同一只票只请求一次,回头再看是瞬开的
+//
+// ⚠️ 用 opacity 而不是 display:none 来隐藏:display:none 的容器尺寸为 0,
+// echarts 在里面 init 会画出一张 0×0 的图,再 resize 也回不来。
+//
+// 标记(2026-09-12 加):元素上挂 data-kmark='{"buy":["2026-08-11"],"sell":[…],"scan":[…]}'
+//   scan  扫描筛选命中当天 —— 半透明蓝色竖线(markArea,占满整根K线的宽度)
+//   buy   规则买入当天 —— 绿色 Buy 标签
+//   sell  规则卖出当天 —— 红色 Sell 标签
+// 标记画在 K 线序列上,所以缩放平移时跟着走。
+const KC = { el: null, chart: null, cache: new Map(),
+             seq: 0, showT: null, hideT: null, cur: null, bound: false,
+             asOf: null }          // asOf: 回溯时只画到这天(screener 用)
+const KC_LIMIT = 250          // 一年大约 250 个交易日
+// 中式红涨绿跌,与站内其它页面一致(标的可能是美股,但全站配色统一)
+const KC_UP = '#a4332b', KC_DN = '#3f6b40'
+// 买卖标记反过来用国际习惯的绿买红卖 —— 它标的是「我的动作」不是「涨跌」,
+// 和 K 线的红绿不是一回事,用户 2026-09-12 明确指定了颜色
+const KC_BUY = '#1f9254', KC_SELL = '#c0392b'
+const KC_SCAN = 'rgba(46,134,222,.16)'    // 扫描命中:半透明蓝
+
+function kcEsc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+}
+function kcNum(v, d) {
+  return Number.isFinite(v) ? v.toFixed(d == null ? 2 : d) : '—'
+}
+function kcVol(v) {
+  if (!Number.isFinite(v)) return '—'
+  if (v >= 1e8) return (v / 1e8).toFixed(2) + '亿'
+  if (v >= 1e4) return (v / 1e4).toFixed(1) + '万'
+  return String(Math.round(v))
+}
+
+function kcEl() {
+  if (KC.el) return KC.el
+  const d = document.createElement('div')
+  d.className = 'kc-pop'
+  d.style.left = '-9999px'
+  d.style.top = '0px'
+  d.innerHTML =
+    '<div class="kc-hd"><span class="sy" id="kc-sy"></span>' +
+    '<span class="nm" id="kc-nm"></span><span class="px" id="kc-px"></span></div>' +
+    '<div class="kc-box" id="kc-box"></div>' +
+    '<div class="kc-ft"><span id="kc-lg">滚轮缩放 · 十字星读数</span><span class="r" id="kc-rg"></span></div>'
+  document.body.appendChild(d)
+  // 鼠标进了弹层就别关 —— 用户要在里面滚轮缩放
+  d.addEventListener('mouseenter', function () { clearTimeout(KC.hideT) })
+  d.addEventListener('mouseleave', kcHide)
+  KC.el = d
+  return d
+}
+
+function kcPlace(rect) {
+  const el = kcEl()
+  const W = el.offsetWidth || 560
+  const H = el.offsetHeight || 320
+  let x = rect.right + 14
+  if (x + W > window.innerWidth - 8) x = rect.left - W - 14   // 右边放不下就翻到左边
+  if (x < 8) x = 8
+  let y = rect.top + rect.height / 2 - H / 2
+  y = Math.max(8, Math.min(y, window.innerHeight - H - 8))     // 上下都夹住
+  el.style.left = Math.round(x) + 'px'
+  el.style.top = Math.round(y) + 'px'
+}
+
+function kcHide() {
+  clearTimeout(KC.showT)
+  KC.hideT = setTimeout(function () {
+    if (KC.el) KC.el.classList.remove('on')
+    KC.cur = null
+  }, 60)
+}
+
+function kcMsg(html) {
+  const box = document.getElementById('kc-box')
+  if (box) box.innerHTML = '<div class="kc-msg">' + html + '</div>'
+}
+
+// 把标记里的日期对到 K 线的下标上。日线只有交易日,而标记的日子一定是交易日
+// (它们本来就来自成交与扫描记录),对不上的直接丢掉 —— 硬凑到最近一根
+// 会把标记画在没发生那件事的那天上。
+function kcIndexOf(rows, want) {
+  const idx = {}
+  for (let i = 0; i < rows.length; i++) {
+    idx[String(rows[i].ts || rows[i].date || '').slice(0, 10)] = i
+  }
+  const out = []
+  for (const d of (want || [])) {
+    const i = idx[String(d).slice(0, 10)]
+    if (i != null) out.push(i)
+  }
+  return out
+}
+
+function kcMarkSeries(rows, mark) {
+  const out = []
+  if (!mark) return out
+  const scan = kcIndexOf(rows, mark.scan)
+  const buy = kcIndexOf(rows, mark.buy)
+  const sell = kcIndexOf(rows, mark.sell)
+  // 扫描命中:一根 K 线宽的竖向色带。用 markArea 而不是 markLine ——
+  // 竖线只有 1px,几十个命中日挤在一起看不出哪根是哪根
+  if (scan.length) {
+    out.push({
+      type: 'line', xAxisIndex: 0, yAxisIndex: 0, data: [], silent: true,
+      markArea: {
+        itemStyle: { color: KC_SCAN },
+        data: scan.map(function (i) { return [{ xAxis: i - 0.5 }, { xAxis: i + 0.5 }] }),
+      },
+    })
+  }
+  const tag = function (list, color, text, pos) {
+    if (!list.length) return
+    out.push({
+      type: 'line', xAxisIndex: 0, yAxisIndex: 0, data: [], silent: true,
+      markPoint: {
+        symbol: 'pin', symbolSize: 26, symbolOffset: [0, pos === 'top' ? -2 : 2],
+        itemStyle: { color: color },
+        label: { color: '#fff', fontSize: 9, fontWeight: 600, formatter: text },
+        data: list.map(function (i) {
+          const r = rows[i]
+          return { xAxis: i, yAxis: pos === 'top' ? r.high : r.low, name: text }
+        }),
+      },
+    })
+  }
+  tag(buy, KC_BUY, 'Buy', 'bottom')     // 买在低处标 —— 视觉上贴着 K 线的下沿
+  tag(sell, KC_SELL, 'Sell', 'top')
+  return out
+}
+
+function kcOption(rows, mark) {
+  const dates = rows.map(function (r) { return String(r.ts || r.date || '').slice(5) })
+  const ohlc = rows.map(function (r) { return [r.open, r.close, r.low, r.high] })
+  const vols = rows.map(function (r) { return r.volume })
+  const axisLbl = { fontSize: 10, color: '#777970' }
+  return {
+    animation: false,
+    // 两个 grid:主图 + 成交量。link 让两边的十字线一起动
+    axisPointer: { link: [{ xAxisIndex: 'all' }] },
+    grid: [{ left: 54, right: 12, top: 8, height: 158 },
+           { left: 54, right: 12, top: 182, height: 42 }],
+    xAxis: [
+      { type: 'category', data: dates, gridIndex: 0, boundaryGap: true,
+        axisLabel: { show: false }, axisTick: { show: false },
+        axisLine: { lineStyle: { color: '#deddd5' } },
+        axisPointer: { label: { show: false } } },
+      { type: 'category', data: dates, gridIndex: 1, boundaryGap: true,
+        axisLabel: axisLbl, axisTick: { show: false },
+        axisLine: { lineStyle: { color: '#deddd5' } } },
+    ],
+    yAxis: [
+      { scale: true, gridIndex: 0, axisLabel: axisLbl,
+        splitLine: { lineStyle: { color: '#f2f0ea' } },
+        axisLine: { show: false }, axisTick: { show: false } },
+      { gridIndex: 1, splitNumber: 2, axisLabel: { show: false },
+        splitLine: { show: false }, axisLine: { show: false }, axisTick: { show: false } },
+    ],
+    dataZoom: [{
+      type: 'inside', xAxisIndex: [0, 1], start: 0, end: 100,
+      zoomOnMouseWheel: true,
+      // ⚠️ 这两个必须关掉。开着的话鼠标一动图就平移,十字星根本读不了数 ——
+      // 而「十字星读数」正是这个弹层存在的理由。
+      moveOnMouseMove: false, moveOnMouseWheel: false,
+      minValueSpan: 8,        // 最多放大到 8 根,再放大就看不出形态了
+    }],
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'cross', lineStyle: { color: '#b56b2d', width: 1, type: 'dashed' },
+                     crossStyle: { color: '#b56b2d', width: 1, type: 'dashed' },
+                     label: { backgroundColor: '#8f4f1d', fontSize: 10.5 } },
+      backgroundColor: 'rgba(255,255,255,.97)',
+      borderColor: '#deddd5', borderWidth: 1, padding: [7, 9],
+      textStyle: { color: '#1f211f', fontSize: 11.5 },
+      formatter: function (ps) {
+        if (!ps || !ps.length) return ''
+        const i = ps[0].dataIndex
+        const r = rows[i]
+        if (!r) return ''
+        const prev = i > 0 ? rows[i - 1].close : r.open
+        const chg = (Number.isFinite(prev) && prev) ? (r.close - prev) / prev * 100 : null
+        const cls = chg == null ? '' : (chg >= 0 ? KC_UP : KC_DN)
+        const day = String(r.ts || r.date || '').slice(0, 10)
+        // 那天发生过什么,直接写进读数里 —— 光有色块还得对着图例猜
+        const evt = []
+        if (mark && (mark.scan || []).some(function (d) { return String(d).slice(0, 10) === day })) evt.push('扫描命中')
+        if (mark && (mark.buy || []).some(function (d) { return String(d).slice(0, 10) === day })) evt.push('<b style="color:' + KC_BUY + '">买入</b>')
+        if (mark && (mark.sell || []).some(function (d) { return String(d).slice(0, 10) === day })) evt.push('<b style="color:' + KC_SELL + '">卖出</b>')
+        return '<b>' + kcEsc(String(r.ts || r.date || '')) + '</b>' +
+          (evt.length ? '　' + evt.join(' · ') : '') + '<br>' +
+          '开 ' + kcNum(r.open) + '　高 ' + kcNum(r.high) + '<br>' +
+          '低 ' + kcNum(r.low) + '　收 <b>' + kcNum(r.close) + '</b><br>' +
+          '涨跌 <b style="color:' + cls + '">' +
+            (chg == null ? '—' : (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%') + '</b><br>' +
+          '量 ' + kcVol(r.volume)
+      },
+    },
+    series: [
+      { type: 'candlestick', data: ohlc, xAxisIndex: 0, yAxisIndex: 0,
+        itemStyle: { color: KC_UP, color0: KC_DN,
+                     borderColor: KC_UP, borderColor0: KC_DN, borderWidth: 1 } },
+      { type: 'bar', data: vols, xAxisIndex: 1, yAxisIndex: 1,
+        itemStyle: { color: function (p) {
+          const r = rows[p.dataIndex]
+          return (r && r.close >= r.open) ? 'rgba(164,51,43,.45)' : 'rgba(63,107,64,.45)'
+        } } },
+    ].concat(kcMarkSeries(rows, mark)),
+  }
+}
+
+function kcLegend(rows, mark) {
+  const lg = document.getElementById('kc-lg')
+  if (!lg) return
+  if (!mark) { lg.textContent = '滚轮缩放 · 十字星读数'; return }
+  const n = function (a) { return kcIndexOf(rows, a).length }
+  const parts = []
+  if (n(mark.scan)) parts.push('<i style="background:' + KC_SCAN + '"></i>扫描命中 ' + n(mark.scan) + ' 天')
+  if (n(mark.buy)) parts.push('<i style="background:' + KC_BUY + '"></i>买入 ' + n(mark.buy))
+  if (n(mark.sell)) parts.push('<i style="background:' + KC_SELL + '"></i>卖出 ' + n(mark.sell))
+  lg.innerHTML = parts.length ? parts.join('　') : '滚轮缩放 · 十字星读数'
+}
+
+function kcRender(code, name, payload, mark) {
+  const el = kcEl()
+  const sy = document.getElementById('kc-sy')
+  const nm = document.getElementById('kc-nm')
+  const px = document.getElementById('kc-px')
+  const rg = document.getElementById('kc-rg')
+  if (sy) sy.textContent = code
+  if (nm) nm.textContent = name || ''
+
+  let rows = (payload && payload.rows) || []
+  if (KC.asOf) {
+    // 回溯时只画到那天:图上露出之后的走势,等于把答案写在题目旁边
+    rows = rows.filter(function (r) { return String(r.ts || r.date || '').slice(0, 10) <= KC.asOf })
+  }
+  if (!rows.length) {
+    // 拿不到就明说,不要一直转圈 —— 与 routers/kline.py 那条注释同一个道理:
+    // 用户分不清「这只票没数据」和「还在加载」,只会一直等下去。
+    if (px) { px.textContent = ''; px.className = 'px' }
+    if (rg) rg.textContent = ''
+    kcMsg(kcEsc((payload && payload.error) || '暂无日线数据'))
+    if (KC.chart) { KC.chart.dispose(); KC.chart = null }
+    return
+  }
+
+  const last = rows[rows.length - 1]
+  const prev = rows.length > 1 ? rows[rows.length - 2].close : last.open
+  const chg = (Number.isFinite(prev) && prev) ? (last.close - prev) / prev * 100 : null
+  if (px) {
+    px.textContent = kcNum(last.close) + (chg == null ? '' :
+      '　' + (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%')
+    px.className = 'px' + (chg == null ? '' : (chg >= 0 ? ' up' : ' dn'))
+  }
+  if (rg) rg.textContent = String(rows[0].ts || '').slice(0, 10) + ' → ' +
+                           String(last.ts || '').slice(0, 10) + ' · ' + rows.length + ' 根'
+  kcLegend(rows, mark)
+
+  const box = document.getElementById('kc-box')
+  if (!box) return
+  box.innerHTML = ''
+  if (KC.chart) { KC.chart.dispose(); KC.chart = null }
+  if (!window.echarts) { kcMsg('图表库没加载出来'); return }
+  KC.chart = window.echarts.init(box)
+  KC.chart.setOption(kcOption(rows, mark))
+  kcPlace(el._rect || { right: 0, left: 0, top: 0, height: 0 })
+}
+
+async function kcFetch(code) {
+  if (KC.cache.has(code)) return KC.cache.get(code)
+  let out
+  try {
+    const r = await fetch('/api/kline/' + encodeURIComponent(code) +
+                          '?period=daily&limit=' + KC_LIMIT,
+                          { headers: apiHeaders(), cache: 'no-store' })
+    const j = await r.json()
+    out = Array.isArray(j)
+      ? { rows: j, error: null }
+      : { rows: [], error: (j && (j.message || j.error)) || ('HTTP ' + r.status) }
+  } catch (e) {
+    out = { rows: [], error: '请求失败:' + ((e && e.message) || e) }
+  }
+  // 失败也缓存 —— 否则鼠标每划过一次就重打一次必然失败的请求。
+  // 代价是这次会话里不会自动重试,用户刷新页面即可。
+  KC.cache.set(code, out)
+  return out
+}
+
+function kcMarkOf(td) {
+  const raw = td.dataset.kmark
+  if (!raw) return null
+  try { return JSON.parse(raw) } catch (e) { return null }
+}
+
+function kcShow(td) {
+  const code = td.dataset.kchart
+  // 同一只票、同一组标记才算「没变」—— 历史记录里一只票可能有两笔,
+  // 标记不同,只比代码的话第二笔会沿用第一笔的标记
+  const key = code + '|' + (td.dataset.kmark || '')
+  if (!code || key === KC.cur) { clearTimeout(KC.hideT); return }
+  clearTimeout(KC.hideT)
+  clearTimeout(KC.showT)
+  KC.showT = setTimeout(async function () {
+    const el = kcEl()
+    KC.cur = key
+    const seq = ++KC.seq
+    el._rect = td.getBoundingClientRect()
+    const sy = document.getElementById('kc-sy')
+    const nm = document.getElementById('kc-nm')
+    if (sy) sy.textContent = code
+    if (nm) nm.textContent = td.dataset.kname || ''
+    if (!KC.cache.has(code)) kcMsg('加载中…')
+    el.classList.add('on')
+    kcPlace(el._rect)
+    const payload = await kcFetch(code)
+    // 竞态:鼠标已经划到别的票上了,这次的响应直接丢掉
+    if (seq !== KC.seq) return
+    kcRender(code, td.dataset.kname, payload, kcMarkOf(td))
+  }, 180)
+}
+
+function bindKChart() {
+  if (KC.bound) return           // 表格每次都重渲染,所以委托绑在 document 上,只绑一次
+  KC.bound = true
+  document.addEventListener('mouseover', function (e) {
+    const td = e.target && e.target.closest ? e.target.closest('[data-kchart]') : null
+    if (td) kcShow(td)
+  })
+  document.addEventListener('mouseout', function (e) {
+    const td = e.target && e.target.closest ? e.target.closest('[data-kchart]') : null
+    if (!td) return
+    const to = e.relatedTarget
+    if (to && KC.el && KC.el.contains(to)) return    // 移进弹层了,别关
+    clearTimeout(KC.showT)
+    kcHide()
+  })
+  // 页面滚动 / 窗口变化时位置会失效,直接收起比错位好
+  window.addEventListener('scroll', function () {
+    if (KC.el && KC.el.classList.contains('on')) { KC.cur = null; KC.el.classList.remove('on') }
+  }, true)
+}
