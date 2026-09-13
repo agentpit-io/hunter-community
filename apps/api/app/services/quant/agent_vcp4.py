@@ -11,11 +11,18 @@
         **没有纳指 / QQQ 日线**,只用标普;「跟随日」「修正时减半」没做。
 - V-02 趋势模板:收盘 > 50 日 > 150 日 > 200 日均线,200 日线比 21 天前高,距 52 周高点 ≤ 15%,RS ≥ 80。
         **没有 EPS / 营收 / 利润率 / 机构持股 / 行业排名的数据源**,基本面加速和「行业前 3」做不了,不用别的字段顶替。
-- V-03 触发:VCP 收缩 2~4 次、末次 < 5%、量能枯竭(低点量比 ≤ 0.8);收盘站上枢轴、高出 0~0.25 ATR;
-        高出 0.25~0.5 ATR 等回踩(突破后 10 天内回到 0~0.25 ATR 仍可买),超过 0.5 ATR 放弃。
-- V-04 确认:**突破日**成交量 ≥ 1.5 × 50 日均量(不是 3 天内随便一天),且买入当天收盘在当日区间上 1/3。
+- V-03 触发:VCP 收缩 2~4 次、末次收缩**收盘口径** ≤ 10%(收盘口径算不出才用盘中口径 ≤ 15%)、低点量比 ≤ 1.1;
+        收盘站上枢轴:高出 0~0.25 ATR 全仓买,0.25~0.5 ATR **半仓**,0.5~0.75 只观察不买,超过 0.75 放弃;突破后 10 天内有效。
+- V-04 确认:**突破日**成交量 ≥ 1.0 × 50 日均量 **或** ≥ 1.3 × 20 日均量,且买入当天收盘在当日区间上 1/3。
 - V-05 评分:五项 = 方向 C 的五项,**加权** 形态 35% / 量价配合 20% / 抗跌 15% / 走廊 20% / MACD 10%(满分 500);
-        S ≥ 400 · A ≥ 350 · B ≥ 300 · C ≥ 250 · D 不买。**一票否决**:形态 < B、RS < 80、走廊 < 3R、止损距离 > 7%。
+        S ≥ 400 · A ≥ 350 · B ≥ 300 · C ≥ 250 · D 不买。**一票否决**:形态 < B、RS < 80、走廊 < 1.5R、止损距离 > 7%;
+        走廊 1.5~2R 的**半仓**(用户:走廊 <2R 不是 VCP 波段,是短线,不给正常仓位)。
+
+## 2026-09-13 第一轮放宽(用户拍板「直接跑这个」)
+
+草案原版(末次 <5% 盘中口径、量比 ≤0.8、突破日量 ≥1.5× 50 日、高出 ≤0.25 ATR、走廊 ≥3R)在两个池上全年 0 笔。
+第一轮放宽就是上面 V-03 / V-04 / V-05 现在写的数字。用户同一封信第九节还给了一组更严的(末次收盘口径 ≤8%、量比 ≤1.0、
+突破日量 ≥1.2×50 或 ≥1.5×20、走廊 ≥2R),留作对照只数信号,不当线上配置。追高半仓与走廊半仓可以叠加(两个都占就是 1/4)。
 - V-06 初始止损:突破日低点与枢轴下方 1 ATR 取高者;比 -7% 还远不进。**盘中触及即出**:日线最低 ≤ 止损 → 按止损价成交,
         当天最高也在止损下方(跳空)→ 按收盘成交。没有盘中数据,这是最接近「挂止损单」的近似。
 - V-07 仓位:风险优先 —— 单笔风险 S 1.0% / A 0.75% / B 0.5% / C 0.25% 总资产,股数 = 风险金额 ÷ (买入价 − 止损);
@@ -50,10 +57,10 @@ DIST_DROP = 0.002                      # 分布日:指数跌 ≥ 0.2% 且量比�
 DIST_WINDOW = 25
 
 PARAMS = {
-    "atr_chase": 0.25, "atr_abandon": 0.5, "breakout_window": 10,
-    "vol_boost": 1.5, "close_pos": 1 / 3,
-    "vcp_min_contr": 2, "vcp_max_contr": 4, "vcp_last_depth_max": 5.0, "low_vol_max": 0.8,
-    "near_high_pct": 0.15, "rs_min": 80, "corridor_min": 3.0, "form_min": "B",
+    "atr_chase": 0.25, "atr_half": 0.5, "atr_watch": 0.75, "breakout_window": 10,     # 高出枢轴:全仓 / 半仓 / 只观察 / 放弃 的分界
+    "vol_boost": 1.0, "vol_boost20": 1.3, "close_pos": 1 / 3,                          # 突破日量 ≥ vol_boost × 50 日 或 ≥ vol_boost20 × 20 日
+    "vcp_min_contr": 2, "vcp_max_contr": 4, "vcp_last_depth_max": 10.0, "vcp_last_depth_max_hl": 15.0, "low_vol_max": 1.1,
+    "near_high_pct": 0.15, "rs_min": 80, "corridor_min": 1.5, "corridor_full": 2.0, "form_min": "B",   # 走廊 <1.5R 否决,1.5~2R 半仓
     "dist_days_max": 5,
     "stop_atr": 1.0, "max_stop_pct": 0.07,
     "risk_pct": {"S": 0.010, "A": 0.0075, "B": 0.005, "C": 0.0025, "D": 0.0},
@@ -69,9 +76,9 @@ STOP_KEYS = ("stop_atr", "max_stop_pct")     # 越小越紧;只许收紧
 RULES = [
     {"id": "V-01", "kind": "risk", "condition": "市场过滤:标普 500 收盘 > 50 日 > 200 日,25 天内分布日 ≤ 5;否则不开新仓(只用标普,没有纳指数据)"},
     {"id": "V-02", "kind": "buy", "condition": "趋势模板:收盘 > 50 日 > 150 日 > 200 日,200 日线比 21 天前高,距 52 周高点 ≤ 15%,RS ≥ 80(没有基本面数据,EPS / 营收加速做不了)"},
-    {"id": "V-03", "kind": "buy", "condition": "触发:VCP 收缩 2~4 次、末次 <5%、低点量比 ≤0.8;收盘站上枢轴高出 0~0.25 ATR(0.25~0.5 等回踩,突破后 10 天内有效;>0.5 放弃)"},
-    {"id": "V-04", "kind": "buy", "condition": "确认:突破日成交量 ≥ 1.5 × 50 日均量,买入当天收盘在当日区间上 1/3"},
-    {"id": "V-05", "kind": "buy", "condition": "评分(加权 500):形态 35% / 量价 20% / 抗跌 15% / 走廊 20% / MACD 10%;S ≥400 · A ≥350 · B ≥300 · C ≥250 · D 不买;否决:形态 <B、RS <80、走廊 <3R、止损距离 >7%"},
+    {"id": "V-03", "kind": "buy", "condition": "触发:VCP 收缩 2~4 次、末次收缩收盘口径 ≤10%、低点量比 ≤1.1;收盘站上枢轴高出 0~0.25 ATR 全仓,0.25~0.5 半仓,0.5~0.75 只观察,>0.75 放弃;突破后 10 天内有效"},
+    {"id": "V-04", "kind": "buy", "condition": "确认:突破日成交量 ≥ 1.0 × 50 日均量 或 ≥ 1.3 × 20 日均量,买入当天收盘在当日区间上 1/3"},
+    {"id": "V-05", "kind": "buy", "condition": "评分(加权 500):形态 35% / 量价 20% / 抗跌 15% / 走廊 20% / MACD 10%;S ≥400 · A ≥350 · B ≥300 · C ≥250 · D 不买;否决:形态 <B、RS <80、走廊 <1.5R、止损距离 >7%;走廊 1.5~2R 半仓"},
     {"id": "V-06", "kind": "sell", "condition": "初始止损:突破日低点与枢轴下方 1.0 ATR 取高者,比 -7% 远不进;盘中触及即出(日线最低价近似,跳空按收盘)"},
     {"id": "V-07", "kind": "risk", "condition": "仓位:单笔风险 S 1.0% / A 0.75% / B 0.5% / C 0.25%,股数 = 风险 ÷ (买入价 − 止损);单票 ≤20%、总风险 ≤3%、最多 5 只、同板块 ≤2"},
     {"id": "V-08", "kind": "buy", "condition": "加仓(只对 S 级):首仓 1/2,涨到 1R 加 1/4 并保本,涨到 2R 再加 1/4、止损上移到 1R"},
@@ -110,11 +117,17 @@ def rules_for(p: dict = PARAMS) -> list[dict]:
         c = dict(r)
         rid = r["id"]
         if rid == "V-03":
-            c["condition"] = (f"触发:VCP 收缩 {p['vcp_min_contr']}~{p['vcp_max_contr']} 次、末次 <{p['vcp_last_depth_max']:.0f}%、"
-                              f"低点量比 ≤{p['low_vol_max']:.1f};收盘站上枢轴高出 0~{p['atr_chase']:.2f} ATR"
-                              f"({p['atr_chase']:.2f}~{p['atr_abandon']:.2f} 等回踩,突破后 {p['breakout_window']} 天内有效;>{p['atr_abandon']:.2f} 放弃)")
+            c["condition"] = (f"触发:VCP 收缩 {p['vcp_min_contr']}~{p['vcp_max_contr']} 次、末次收缩收盘口径 ≤{p['vcp_last_depth_max']:.0f}%、"
+                              f"低点量比 ≤{p['low_vol_max']:.1f};收盘站上枢轴高出 0~{p['atr_chase']:.2f} ATR 全仓,"
+                              f"{p['atr_chase']:.2f}~{p['atr_half']:.2f} 半仓,{p['atr_half']:.2f}~{p['atr_watch']:.2f} 只观察,>{p['atr_watch']:.2f} 放弃;"
+                              f"突破后 {p['breakout_window']} 天内有效")
         elif rid == "V-04":
-            c["condition"] = f"确认:突破日成交量 ≥ {p['vol_boost']:.1f} × 50 日均量,买入当天收盘在当日区间上 {p['close_pos'] * 100:.0f}%"
+            c["condition"] = (f"确认:突破日成交量 ≥ {p['vol_boost']:.1f} × 50 日均量 或 ≥ {p['vol_boost20']:.1f} × 20 日均量,"
+                              f"买入当天收盘在当日区间上 {p['close_pos'] * 100:.0f}%")
+        elif rid == "V-05":
+            c["condition"] = (f"评分(加权 500):形态 35% / 量价 20% / 抗跌 15% / 走廊 20% / MACD 10%;S ≥400 · A ≥350 · B ≥300 · C ≥250 · D 不买;"
+                              f"否决:形态 <{p['form_min']}、RS <{p['rs_min']}、走廊 <{p['corridor_min']:.1f}R、止损距离 >{p['max_stop_pct'] * 100:.0f}%;"
+                              f"走廊 {p['corridor_min']:.1f}~{p['corridor_full']:.0f}R 半仓")
         elif rid == "V-06":
             c["condition"] = (f"初始止损:突破日低点与枢轴下方 {p['stop_atr']:.2f} ATR 取高者,比 -{p['max_stop_pct'] * 100:.0f}% 远不进;"
                               f"盘中触及即出(日线最低价近似,跳空按收盘)")
@@ -131,8 +144,9 @@ def rules_for(p: dict = PARAMS) -> list[dict]:
 def summary(p: dict = PARAMS) -> str:
     rp = p["risk_pct"]
     return (f"先看市场(标普在 50 日 > 200 日之上、分布日 ≤{p['dist_days_max']})和趋势模板(均线多头、距 52 周高点 ≤{p['near_high_pct'] * 100:.0f}%、"
-            f"RS ≥{p['rs_min']}),再等 VCP 突破:高出枢轴 ≤{p['atr_chase']:.2f} ATR、突破日量 ≥{p['vol_boost']:.1f} 倍 50 日均量;"
-            f"加权评分(形态 35%)定档,形态 <B / 走廊 <{p['corridor_min']:.0f}R / 止损 >{p['max_stop_pct'] * 100:.0f}% 一票否决;"
+            f"RS ≥{p['rs_min']}),再等 VCP 突破:高出枢轴 ≤{p['atr_chase']:.2f} ATR 全仓、≤{p['atr_half']:.2f} 半仓,"
+            f"突破日量 ≥{p['vol_boost']:.1f} 倍 50 日均量或 ≥{p['vol_boost20']:.1f} 倍 20 日均量;"
+            f"加权评分(形态 35%)定档,形态 <B / 走廊 <{p['corridor_min']:.1f}R / 止损 >{p['max_stop_pct'] * 100:.0f}% 一票否决,走廊 <{p['corridor_full']:.0f}R 半仓;"
             f"单笔风险 S {rp['S'] * 100:.1f}% / A {rp['A'] * 100:.2f}% / B {rp['B'] * 100:.1f}% / C {rp['C'] * 100:.2f}%,总风险 ≤{p['heat_cap'] * 100:.0f}%;"
             f"S 级 1R / 2R 各加 1/4;止损盘中触及即出,1R 保本,2R 后跟 {p['trail2_sma']} 日线,3R 后跟 {p['trail3_sma']} 日线;"
             f"{p['time_newhigh_days']} 天不创新高又跌回枢轴就走。")
@@ -199,12 +213,16 @@ def indicators(bars: list[tuple], p: dict = PARAMS, bench: dict | None = None) -
             b = j + 1
             seg = v[b - 49:b + 1] if b >= 49 else []
             bv50 = (sum(seg) / 50) if seg and all(x is not None for x in seg) else None
-            brk = {"days_ago": n - 1 - b, "vol_ratio": (v[b] / bv50) if bv50 else None, "low": lo[b], "date": bars[b][0]}
+            seg20 = v[b - 19:b + 1] if b >= 19 else []
+            bv20 = (sum(seg20) / 20) if seg20 and all(x is not None for x in seg20) else None
+            brk = {"days_ago": n - 1 - b, "vol_ratio": (v[b] / bv50) if bv50 else None, "vol_ratio20": (v[b] / bv20) if bv20 else None,
+                   "low": lo[b], "date": bars[b][0]}
     rng = h[-1] - lo[-1]
     return {
         "close": c[-1], "high": h[-1], "low": lo[-1], "volume": v[-1], "atr20": atr, "vol_sma20": vs20, "vol_sma50": vs50,
         "pivot": pivot, "base_low": vs.get("last_low"), "contractions": vs.get("contractions"),
-        "last_depth": vs.get("last_depth"), "low_vol_ratio": vs.get("low_vol_ratio"), "first_depth": vs.get("first_depth"),
+        "last_depth": vs.get("last_depth"), "last_depth_close": vs.get("last_depth_close"),
+        "low_vol_ratio": vs.get("low_vol_ratio"), "first_depth": vs.get("first_depth"),
         "recent_closes": c[-c3._MAX_CONFIRM - 1:], "recent_vols": v[-c3._MAX_CONFIRM:],     # 方向 C 的形态评分要用
         "trend": trend, "breakout": brk,
         "close_pos": ((c[-1] - lo[-1]) / rng) if rng > 0 else 1.0,
@@ -228,17 +246,22 @@ def entry_flags(ind: dict, p: dict = PARAMS) -> dict:
     ph, atr, px = ind.get("pivot"), ind.get("atr20"), ind["close"]
     above = ph is not None and px > ph
     dist = ((px - ph) / atr) if (above and atr) else None
-    n, ld, lv = ind.get("contractions") or 0, ind.get("last_depth"), ind.get("low_vol_ratio")
-    vcp_ok = (p["vcp_min_contr"] <= n <= p["vcp_max_contr"] and ld is not None and ld < p["vcp_last_depth_max"]
-              and lv is not None and lv <= p["low_vol_max"])
-    chase_ok = dist is not None and dist <= p["atr_chase"]
-    wait = dist is not None and p["atr_chase"] < dist <= p["atr_abandon"]
+    n, lv = ind.get("contractions") or 0, ind.get("low_vol_ratio")
+    ldc, ldh = ind.get("last_depth_close"), ind.get("last_depth")
+    # 末次收缩优先按收盘口径;收盘口径算不出才用盘中口径(阈值放到 vcp_last_depth_max_hl)
+    depth_ok = (ldc <= p["vcp_last_depth_max"]) if ldc is not None else (ldh is not None and ldh <= p["vcp_last_depth_max_hl"])
+    vcp_ok = p["vcp_min_contr"] <= n <= p["vcp_max_contr"] and depth_ok and lv is not None and lv <= p["low_vol_max"]
+    chase_ok = dist is not None and dist <= p["atr_chase"]                       # 全仓
+    half = dist is not None and p["atr_chase"] < dist <= p["atr_half"]           # 半仓
+    watch = dist is not None and p["atr_half"] < dist <= p["atr_watch"]          # 只观察
     brk = ind.get("breakout")
     vr = brk["vol_ratio"] if brk else None
-    vol_ok = vr is not None and vr >= p["vol_boost"]
+    vr20 = brk.get("vol_ratio20") if brk else None
+    vol_ok = (vr is not None and vr >= p["vol_boost"]) or (vr20 is not None and vr20 >= p["vol_boost20"])
     pos_ok = ind.get("close_pos") is not None and ind["close_pos"] >= 1 - p["close_pos"]
-    return {"V-02": trend_ok, "V-03": bool(vcp_ok and chase_ok and brk), "V-04": bool(brk and vol_ok and pos_ok),
-            "above": above, "dist_atr": dist, "vcp_ok": vcp_ok, "wait": wait, "vr": vr, "vol_ok": vol_ok, "pos_ok": pos_ok}
+    return {"V-02": trend_ok, "V-03": bool(vcp_ok and (chase_ok or half) and brk), "V-04": bool(brk and vol_ok and pos_ok),
+            "above": above, "dist_atr": dist, "vcp_ok": vcp_ok, "half": half, "watch": watch, "vr": vr, "vr20": vr20,
+            "vol_ok": vol_ok, "pos_ok": pos_ok, "depth_close": ldc}
 
 
 def entry_ok(ind: dict, p: dict = PARAMS) -> bool:
@@ -297,13 +320,14 @@ def grade(ind: dict, p: dict = PARAMS, score=None) -> dict:
     if score is None or score < p["rs_min"]:
         vetoes.append(f"RS {score:.0f} 低于 {p['rs_min']}" if score is not None else "RS 缺")
     if corr is not None and corr < p["corridor_min"]:
-        vetoes.append(f"走廊 {corr:.1f}R 不足 {p['corridor_min']:.0f}R")
+        vetoes.append(f"走廊 {corr:.1f}R 不足 {p['corridor_min']:.1f}R")
+    corr_half = corr is not None and p["corridor_min"] <= corr < p["corridor_full"]     # 1.5~2R:短线,半仓
     stop, capped = stop_of(ind, p)
     if capped:
         vetoes.append(f"止损距离 {(1 - stop / ind['close']) * 100:.1f}% 超过 {p['max_stop_pct'] * 100:.0f}%")
-    return {"grade": g, "points": total, "factors": factors, "form_points": fpts, "vetoes": vetoes,
+    return {"grade": g, "points": total, "factors": factors, "form_points": fpts, "vetoes": vetoes, "corridor_half": corr_half,
             "text": f"{g} 级({total}/500 加权):" + "、".join(f"{a} {b}{c}({d})" for a, b, c, d in factors)
-                    + (";否决:" + "、".join(vetoes) if vetoes else "")}
+                    + (";否决:" + "、".join(vetoes) if vetoes else "") + (f";走廊不足 {p['corridor_full']:.0f}R 半仓" if corr_half else "")}
 
 
 def entry_checks(ind: dict, p: dict = PARAMS) -> list[dict]:
@@ -325,24 +349,28 @@ def entry_checks(ind: dict, p: dict = PARAMS) -> list[dict]:
     if ph is None:
         t3 = "筛选器没算出枢轴"
     elif not f["vcp_ok"]:
-        t3 = (f"形态不合格:收缩 {n} 次" + (f",末次 {ld:.1f}%" if ld is not None else "") + (f",低点量比 {lv:.2f}" if lv is not None else "")
-              + f"(要 {p['vcp_min_contr']}~{p['vcp_max_contr']} 次、末次 <{p['vcp_last_depth_max']:.0f}%、量比 ≤{p['low_vol_max']:.1f})")
+        ldc = f.get("depth_close")
+        t3 = (f"形态不合格:收缩 {n} 次" + (f",末次收盘口径 {ldc:.1f}%" if ldc is not None else (f",末次盘中口径 {ld:.1f}%" if ld is not None else ""))
+              + (f",低点量比 {lv:.2f}" if lv is not None else "")
+              + f"(要 {p['vcp_min_contr']}~{p['vcp_max_contr']} 次、末次 ≤{p['vcp_last_depth_max']:.0f}%、量比 ≤{p['low_vol_max']:.1f})")
     elif not f["above"]:
         t3 = f"收盘 ${px:.2f} 还在枢轴 ${ph:.2f} 下方 {(1 - px / ph) * 100:.1f}%"
-    elif f["wait"]:
-        t3 = f"已高出枢轴 {f['dist_atr']:.2f} ATR(>{p['atr_chase']:.2f}),等回踩到 {p['atr_chase']:.2f} ATR 以内"
-    elif f["dist_atr"] is not None and f["dist_atr"] > p["atr_abandon"]:
-        t3 = f"已高出枢轴 {f['dist_atr']:.2f} ATR,超过 {p['atr_abandon']:.2f} 放弃"
+    elif f["watch"]:
+        t3 = f"已高出枢轴 {f['dist_atr']:.2f} ATR({p['atr_half']:.2f}~{p['atr_watch']:.2f}),只观察不买"
+    elif f["dist_atr"] is not None and f["dist_atr"] > p["atr_watch"]:
+        t3 = f"已高出枢轴 {f['dist_atr']:.2f} ATR,超过 {p['atr_watch']:.2f} 放弃"
     elif not ind.get("breakout"):
         t3 = f"突破已超过 {p['breakout_window']} 天,不新鲜"
     else:
-        t3 = f"收盘 ${px:.2f} 站上枢轴 ${ph:.2f}(高出 {f['dist_atr']:.2f} ATR),突破日 {str(ind['breakout']['date'])[5:]}"
+        t3 = (f"收盘 ${px:.2f} 站上枢轴 ${ph:.2f}(高出 {f['dist_atr']:.2f} ATR{',半仓' if f['half'] else ''}),"
+              f"突破日 {str(ind['breakout']['date'])[5:]}")
     brk = ind.get("breakout")
     if not brk:
         t4 = "没有新鲜突破"
     else:
         t4 = ((f"突破日量 {brk['vol_ratio']:.2f}× 50 日均量" if brk["vol_ratio"] is not None else "50 日均量算不出")
-              + ("" if f["vol_ok"] else f" —— 要 ≥{p['vol_boost']:.1f}×")
+              + (f" / {brk['vol_ratio20']:.2f}× 20 日均量" if brk.get("vol_ratio20") is not None else "")
+              + ("" if f["vol_ok"] else f" —— 要 ≥{p['vol_boost']:.1f}×50 日或 ≥{p['vol_boost20']:.1f}×20 日")
               + (f";收盘在当日区间 {ind['close_pos'] * 100:.0f}% 处" + ("" if f["pos_ok"] else f",要在上 {p['close_pos'] * 100:.0f}% 内")))
     return [{"rule": "V-02", "ok": f["V-02"], "text": t2}, {"rule": "V-03", "ok": f["V-03"], "text": t3},
             {"rule": "V-04", "ok": f["V-04"], "text": t4}]
@@ -504,9 +532,17 @@ def try_entry(code, name, ind, state: dict, p: dict = PARAMS, want_text: bool = 
         if full <= 0:
             return None, (f"三条全满足({gr['grade']} 级),但组合开放风险已达 {state.get('open_risk', 0.0) / equity * 100:.1f}%,"
                           f"上限 {p['heat_cap'] * 100:.0f}%,放不下(V-07)")
+    f_ = entry_flags(ind, p)
+    halves = []
+    if f_["half"]:
+        halves.append(f"高出枢轴 {f_['dist_atr']:.2f} ATR 追高半仓")
+    if gr.get("corridor_half"):
+        halves.append(f"走廊不足 {p['corridor_full']:.0f}R 半仓")
+    for _ in halves:
+        full = full // 2
     size = int(full * p["initial_frac"]) if gr["grade"] == "S" else full
     if size <= 0:
-        return None, "三条全满足,但按风险算出的股数为 0"
+        return None, "三条全满足,但按风险算出的股数为 0" + (f"({'、'.join(halves)})" if halves else "")
     cost = size * px
     if cost > state["cash"]:
         size = int(state["cash"] / px)
@@ -527,6 +563,7 @@ def try_entry(code, name, ind, state: dict, p: dict = PARAMS, want_text: bool = 
     t = {c["rule"]: c["text"] for c in entry_checks(ind, p)}
     rationale = (f"{t['V-03']};{t['V-04']};{t['V-02']}。市场:{mk['text']}。评分 {gr['text']} → 单笔风险 {risk_pct * 100:.2f}% 总资产;"
                  f"止损 ${stop:.2f}(距收盘 {(1 - stop / px) * 100:.1f}%,盘中触及即出);计划 {full} 股"
+                 + (f"({'、'.join(halves)})" if halves else "")
                  + (f",S 级首仓一半 {size} 股" if gr["grade"] == "S" else f",买入 {size} 股")
                  + f",占总资产 {cost / equity * 100:.1f}%,这一笔开放风险 ${size * r1:.0f}"
                  f"(组合合计 {state['open_risk'] / equity * 100:.1f}%,上限 {p['heat_cap'] * 100:.0f}%)。")

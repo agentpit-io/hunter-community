@@ -57,8 +57,8 @@ BRANCHES: dict = {
     # 引擎 A 的那组买入档位留在 git 历史里(atr_compact / chase_limit / min_adtv)
     "buy": {"engine": "vcp4", "label": "方向 A · SEPA 优化",
             "direction": "用户按 Minervini SEPA 拆解方向 C 后的 v4:市场过滤 + 趋势模板 + 加权评分否决 + 风险定仓 + 加仓 + 盘中止损",
-            "tunable": {"atr_chase": [0.15, 0.25, 0.35], "vol_boost": [1.5, 1.8, 2.0],
-                        "breakout_window": [5, 10, 15], "vcp_last_depth_max": [4.0, 5.0, 6.0]}},
+            "tunable": {"atr_chase": [0.15, 0.25, 0.35], "vol_boost": [1.0, 1.2, 1.5],
+                        "breakout_window": [5, 10, 15], "vcp_last_depth_max": [8.0, 10.0, 12.0]}},
     "sell": {"engine": "vcp", "label": "方向 B · 调卖出", "direction": "固定买入时机,只优化卖出时机(止损只许收紧不许放宽)",
              "tunable": {"tp1": [0.08, 0.10, 0.12], "tp2": [0.13, 0.15, 0.18], "tp3": [0.18, 0.20, 0.25],
                          "time1_days": [3, 5, 7], "time2_days": [8, 10, 14],

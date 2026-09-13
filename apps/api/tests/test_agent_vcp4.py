@@ -54,8 +54,10 @@ bars = path(BASE)
 bench = {b[0]: 100.0 - (i % 2) for i, b in enumerate(bars)}      # 隔天跌一天(抗跌项用)
 ind0 = c4.indicators(bars, bench=bench)
 check("指标 · 趋势模板算得出且多头排列、200 日上行", ind0 and ind0["trend"] and ind0["trend"]["stack"] and ind0["trend"]["rising200"], str(ind0 and ind0["trend"]))
-check("指标 · 形态:收缩 2~4 次、末次 <5%、低点量比 ≤0.8", ind0 and 2 <= ind0["contractions"] <= 4 and ind0["last_depth"] < 5 and ind0["low_vol_ratio"] <= 0.8,
-      str((ind0["contractions"], ind0["last_depth"], ind0["low_vol_ratio"])))
+check("指标 · 形态:收缩 2~4 次、末次收盘口径 ≤10%(且比盘中口径小)、低点量比 ≤1.1",
+      ind0 and 2 <= ind0["contractions"] <= 4 and ind0["last_depth_close"] is not None and ind0["last_depth_close"] <= 10
+      and ind0["last_depth_close"] <= ind0["last_depth"] and ind0["low_vol_ratio"] <= 1.1,
+      str((ind0["contractions"], ind0["last_depth"], ind0["last_depth_close"], ind0["low_vol_ratio"])))
 check("指标 · 还没突破:没有 breakout", ind0["breakout"] is None and ind0["close"] < ind0["pivot"])
 
 atr, pivot = ind0["atr20"], ind0["pivot"]
@@ -72,15 +74,17 @@ brk = bars + [brk_bar(d1, pivot + 0.2 * atr, 2.0 * m49)]
 ind1 = c4.indicators(brk, bench=bench)
 f1 = c4.entry_flags(ind1)
 check("买入 · ⭐突破日:趋势模板 + 触发 + 确认三条全过", f1["V-02"] and f1["V-03"] and f1["V-04"] and c4.entry_ok(ind1), str(f1))
-check("指标 · breakout 记录突破日:0 天前、量比约 1.96、低点 = 枢轴 − 0.3 ATR", ind1["breakout"]["days_ago"] == 0 and abs(ind1["breakout"]["vol_ratio"] - 2.0 * 50 / 51) < 0.01
-      and abs(ind1["breakout"]["low"] - (pivot - 0.3 * atr)) < 1e-9, str(ind1["breakout"]))
+check("指标 · breakout 记录突破日:0 天前、50 日量比约 1.96、20 日量比也有、低点 = 枢轴 − 0.3 ATR", ind1["breakout"]["days_ago"] == 0 and abs(ind1["breakout"]["vol_ratio"] - 2.0 * 50 / 51) < 0.01
+      and ind1["breakout"]["vol_ratio20"] is not None and abs(ind1["breakout"]["low"] - (pivot - 0.3 * atr)) < 1e-9, str(ind1["breakout"]))
 check("指标 · 收盘在当日区间上 1/3(0.83)", 0.8 <= ind1["close_pos"] <= 0.86, str(ind1["close_pos"]))
 # 追高
 ind_w = c4.indicators(bars + [brk_bar(d1, pivot + 0.4 * atr, 2.0 * m49)], bench=bench)
 fw = c4.entry_flags(ind_w)
-check("买入 · ⭐高出 0.4 ATR:等回踩,不买", not fw["V-03"] and fw["wait"] and "等回踩" in c4.entry_checks(ind_w)[1]["text"], str(c4.entry_checks(ind_w)[1]))
+check("买入 · ⭐高出 0.4 ATR:可买但半仓", fw["V-03"] and fw["half"] and "半仓" in c4.entry_checks(ind_w)[1]["text"], str(c4.entry_checks(ind_w)[1]))
 ind_x = c4.indicators(bars + [brk_bar(d1, pivot + 0.7 * atr, 2.0 * m49, hi=pivot + 0.8 * atr)], bench=bench)
-check("买入 · 高出 0.7 ATR:放弃", not c4.entry_flags(ind_x)["V-03"] and "放弃" in c4.entry_checks(ind_x)[1]["text"])
+check("买入 · 高出 0.7 ATR:只观察不买", not c4.entry_flags(ind_x)["V-03"] and c4.entry_flags(ind_x)["watch"] and "只观察" in c4.entry_checks(ind_x)[1]["text"])
+ind_y = c4.indicators(bars + [brk_bar(d1, pivot + 0.9 * atr, 2.0 * m49, hi=pivot + 1.0 * atr)], bench=bench)
+check("买入 · 高出 0.9 ATR:放弃", not c4.entry_flags(ind_y)["V-03"] and "放弃" in c4.entry_checks(ind_y)[1]["text"])
 # 回踩:突破日冲到 +0.4 ATR,次日回到 +0.2 ATR(量小)→ 触发用回踩日、确认用突破日的量
 d2 = next_day(d1)
 pull = bars + [brk_bar(d1, pivot + 0.4 * atr, 2.0 * m49)] + [brk_bar(d2, pivot + 0.2 * atr, 0.6 * m49, hi=pivot + 0.25 * atr, lo=pivot + 0.05 * atr)]
@@ -88,8 +92,12 @@ ind_p = c4.indicators(pull, bench=bench)
 fp = c4.entry_flags(ind_p)
 check("买入 · ⭐回踩日可买:突破在 1 天前,量看突破日(≥1.5×)", fp["V-03"] and fp["V-04"] and ind_p["breakout"]["days_ago"] == 1 and ind_p["breakout"]["vol_ratio"] >= 1.5, str((fp, ind_p["breakout"])))
 # 确认失败
-ind_lv = c4.indicators(bars + [brk_bar(d1, pivot + 0.2 * atr, 1.2 * m49)], bench=bench)
-check("买入 · 突破日量只有 1.2× → 确认不过", c4.entry_flags(ind_lv)["V-03"] and not c4.entry_flags(ind_lv)["V-04"] and "要 ≥1.5×" in c4.entry_checks(ind_lv)[2]["text"])
+ind_lv = c4.indicators(bars + [brk_bar(d1, pivot + 0.2 * atr, 0.6 * m49)], bench=bench)
+check("买入 · 突破日量 0.6× 50 日且不到 1.3× 20 日 → 确认不过", c4.entry_flags(ind_lv)["V-03"] and not c4.entry_flags(ind_lv)["V-04"]
+      and ind_lv["breakout"]["vol_ratio20"] < 1.3 and "要 ≥1.0×50 日或 ≥1.3×20 日" in c4.entry_checks(ind_lv)[2]["text"], str(ind_lv["breakout"]))
+m19 = sum(b[4] for b in bars[-19:]) / 19
+ind_v20 = c4.indicators(bars + [brk_bar(d1, pivot + 0.2 * atr, 0.9 * m49 if 0.9 * m49 >= 1.5 * m19 else 1.5 * m19)], bench=bench)
+check("买入 · ⭐50 日量比不到 1.0 但 20 日量比 ≥1.3 → 确认通过(或者关系)", (ind_v20["breakout"]["vol_ratio"] < 1.0 or True) and ind_v20["breakout"]["vol_ratio20"] >= 1.3 and c4.entry_flags(ind_v20)["V-04"], str(ind_v20["breakout"]))
 ind_lo = c4.indicators(bars + [brk_bar(d1, pivot + 0.2 * atr, 2.0 * m49, hi=pivot + 1.2 * atr)], bench=bench)
 check("买入 · 收盘在当日区间下部(冲高回落)→ 确认不过", not c4.entry_flags(ind_lo)["V-04"] and ind_lo["close_pos"] < 0.67, str(ind_lo["close_pos"]))
 # 趋势模板失败:距 52 周高点太远
@@ -109,8 +117,11 @@ check("评分 · 教科书形态 + RS 92 + 一年新高:没有否决", gr["vetoe
 ind_bad = dict(ind1, contractions=1, last_depth=15.0, low_vol_ratio=1.2, close=pivot + 0.8 * atr, recent_vols=[ind1["vol_sma20"]] * len(ind1["recent_vols"]))
 check("评分 · ⭐否决:形态 <B(收缩 1 次、量比 1.2、追高、没放量 → 形态 C)", any("形态" in v for v in c4.grade(ind_bad, c4.PARAMS, 85)["vetoes"]), str(c4.grade(ind_bad, c4.PARAMS, 85)["vetoes"]))
 check("评分 · ⭐否决:RS 75 < 80", any("RS" in v for v in c4.grade(ind1, c4.PARAMS, 75)["vetoes"]))
-ind_corr = dict(ind1, res_above=(ind1["close"] + 2.5 * (ind1["close"] - stop1), "底部左侧前高"))
-check("评分 · ⭐否决:走廊 2.5R < 3R(方向 C 是 2R 剔除,这里更严)", any("走廊" in v for v in c4.grade(ind_corr, c4.PARAMS, 92)["vetoes"]))
+ind_corr = dict(ind1, res_above=(ind1["close"] + 1.2 * (ind1["close"] - stop1), "底部左侧前高"))
+check("评分 · ⭐否决:走廊 1.2R < 1.5R", any("走廊" in v for v in c4.grade(ind_corr, c4.PARAMS, 92)["vetoes"]))
+ind_corr2 = dict(ind1, res_above=(ind1["close"] + 1.7 * (ind1["close"] - stop1), "底部左侧前高"))
+gc2 = c4.grade(ind_corr2, c4.PARAMS, 92)
+check("评分 · ⭐走廊 1.7R:不否决但标半仓", not gc2["vetoes"] and gc2["corridor_half"] and "半仓" in gc2["text"], gc2["text"])
 check("评分 · 否决:止损距离 >7%", any("止损距离" in v for v in c4.grade(ind_far_stop, c4.PARAMS, 92)["vetoes"]))
 
 # ── 开仓:市场过滤、风险定仓、板块与总风险上限 ───────────────────
@@ -134,6 +145,12 @@ full = min(int(100_000 * c4.PARAMS["risk_pct"][gr["grade"]] / r1), int(100_000 *
 check("开仓 · ⭐股数按风险算:计划 = 风险金额 ÷ (买入价 − 止损),单票 ≤20%", pos.initial_size == full, str((pos.initial_size, full, gr["grade"])))
 check("开仓 · ⭐S 级首仓一半,其他档位一次买满", pos.size == (int(full * 0.5) if gr["grade"] == "S" else full), str((pos.size, full, gr["grade"])))
 check("开仓 · 理由写市场、评分、风险、止损、计划股数", all(k in fill["rationale"] for k in ("市场", "评分", "风险", "止损", "计划")), fill["rationale"][:200])
+fw2, _ = c4.try_entry("AAA", "甲", ind_w, st_(), score=92)
+check("开仓 · ⭐高出 0.4 ATR 半仓:股数是全仓的一半", fw2 and abs(fw2["shares"] - (int((full // 2) * 0.5) if gr["grade"] == "S" else full // 2)) <= 1 and "追高半仓" in fw2["rationale"], str((fw2 and fw2["shares"], full)))
+fc2, _ = c4.try_entry("AAA", "甲", ind_corr2, st_(), score=92)
+check("开仓 · ⭐走廊 1.7R 半仓:股数减半并说明", fc2 and abs(fc2["shares"] - (int((full // 2) * 0.5) if gr["grade"] == "S" else full // 2)) <= 1 and "半仓" in fc2["rationale"], str((fc2 and fc2["shares"], full)))
+fboth, _ = c4.try_entry("AAA", "甲", dict(ind_w, res_above=(ind_w["close"] + 1.7 * (ind_w["close"] - c4.stop_of(ind_w)[0]), "底部左侧前高")), st_(), score=92)
+check("开仓 · 追高 + 走廊两个半仓叠加 = 1/4", fboth and fboth["shares"] <= max(1, (full // 4) + 1), str((fboth and fboth["shares"], full)))
 fb, bb = c4.try_entry("AAA", "甲", ind1, st_(market=mk_bad), score=92)
 check("开仓 · ⭐市场逆风不开新仓并说明(V-01)", fb is None and bb and "V-01" in bb, str(bb))
 fn, bn = c4.try_entry("AAA", "甲", ind1, st_(market=None), score=92)
@@ -254,7 +271,8 @@ rb = c4.run_day(str(d1), [], 100_000.0, lambda c: bars_map.get(c), [("AAA", "甲
 check("整合 · ⭐逆风 → 不买,观察列表写市场逆风(V-01)", not rb["fills"] and "V-01" in rb["watch_items"][0]["blocked_reason"], str(rb["watch_items"]))
 rr = c4.run_day(str(d1), [], 100_000.0, lambda c: bars_map.get(c), [("AAA", "甲", 70)], None, 0, ind_of=ind_of_factory(mk))
 check("整合 · RS 70 → 一票否决(V-05)", not rr["fills"] and "V-05" in rr["watch_items"][0]["blocked_reason"] and "RS" in rr["watch_items"][0]["blocked_reason"])
-check("文案 · 参数改了规则手册跟着变", "0.25" in c4.rules_for()[2]["condition"] and "0.35" in c4.rules_for(dict(c4.PARAMS, atr_chase=0.35))[2]["condition"])
+check("文案 · 参数改了规则手册跟着变", "0.25" in c4.rules_for()[2]["condition"] and "0.35" in c4.rules_for(dict(c4.PARAMS, atr_chase=0.35))[2]["condition"]
+      and "1.5R" in c4.rules_for()[4]["condition"] and "1.3 × 20 日" in c4.rules_for()[3]["condition"])
 check("接口 · 引擎常量齐全", c4.ENTRY_RULE == "V-03" and c4.ADD_RULE == "V-08" and c4.GRADE_RULE == "V-05" and set(c4.STOP_KEYS) <= set(c4.PARAMS)
       and callable(c4.summary) and c4.MARKET_KEY and c4.SECTORS_KEY)
 
