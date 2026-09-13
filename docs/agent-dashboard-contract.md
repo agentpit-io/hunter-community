@@ -429,6 +429,51 @@ Prompt 里写「严禁编造」对 flash 模型完全无效,必须强校验。
 这是一次真正的重算,不是加一列 —— 没有用户点头不要自作主张做。
 前端必须把这个口径差异写在卡片里(`scope_note`)。
 
+### 3.10-3 `line` · 所属研究线(2026-09-13 新增)
+
+dashboard 顶层多一个 `line`,`branches[]` 只列**同一条研究线**里的方向(VCP 线 4 张卡、唐奇安线 1 张):
+
+```jsonc
+{ "key": "vcp", "label": "VCP 波段线", "status": "archived", "status_text": "封存",
+  "archived_at": "2026-09-13", "archive_tag": "vcp-archive-v3", "archive_reason": "…",
+  "verdict": null,                 // 回测关 / 30 笔判定的最近一次结论 {decision: wait|pass|kill, text, at}
+  "kill_text": null }              // 淘汰线原文(立项时写定)
+```
+
+前端据此画面包屑(研究台 › 研究线 › 方向)和状态条。封存的线状态条带「解除封存」。
+
+### 研究台接口 `GET /api/quant/agent/research`(免登录)
+
+```jsonc
+{
+  "common": { "start": "2026-01-02", "end": "2026-09-11", "days": 174, "bench_label": "标普500", "bench_pct": 11.64 },
+  "status_order": ["idea", "backtest", "paper", "archived", "killed"],
+  "kill_text": "…", "kill_min_cycles": 30,
+  "dates": ["2026-01-02", …],      // 共同日期轴(按对照组方向 C 的交易日)
+  "bench_nav": [0, …],             // 基准累计收益 %,与 dates 对齐
+  "lines": [{
+    "key": "donchian", "label": "唐奇安突破线", "status": "backtest", "status_text": "全年回测", "custom": false,
+    "hypothesis": "…", "rules_draft": "…", "pool": "…", "created_at": "2026-09-13",
+    "archived_at": null, "killed_at": null, "archive_tag": null, "archive_reason": null,
+    "kill_text": "…", "compare_text": "VCP 波段线 · 方向 C · 三段式",
+    "verdict": { "decision": "wait", "text": "全年回测进行中:已跑到 2026-05-01", "at": "…" },
+    "events": [{ "at": "…", "text": "…" }],          // 最近 5 条状态变化
+    "branches": [{ "key": "donchian", "label": "唐奇安 · 基准", "version": "v1" }],
+    "best_branch": "donchian", "best_label": "唐奇安 · 基准",
+    "metrics": {                    // 没跑过 → null
+      "pnl_pct": 0, "benchmark_pct": 0, "excess_pt": 0, "max_dd_pct": 0,
+      "sells": 0, "win_rate": null,          // 按每次卖出计,和方向卡同口径
+      "profit_factor": null, "sharpe": null,
+      "cycles": 0, "expectancy_net": null,   // 按持仓周期、已扣手续费 —— 判定用这两个
+      "fee_total": 0, "days": 0, "first": "…", "last": "…" },
+    "nav": [0, …]                  // 与 dates 对齐,那天没跑的位置是 null
+  }]
+}
+```
+
+写接口(都要登录):`POST /agent/research` 立项(`label` / `hypothesis` / `rules_draft` / `pool`,淘汰线固定并锁定)、
+`POST /agent/research/{key}/archive`、`POST /agent/research/{key}/unarchive`。**没有**改淘汰线的接口,是故意的。
+
 ### 3.11 `versions` · 策略演进
 
 ```jsonc

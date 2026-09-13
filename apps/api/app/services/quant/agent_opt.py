@@ -38,9 +38,10 @@ from datetime import date
 from app.services.quant import agent_vcp as av
 from app.services.quant import agent_vcp3 as av3
 from app.services.quant import agent_vcp4 as av4
+from app.services.quant import agent_donchian as ad
 from app.services.quant import agent_sim
 
-ENGINES = {"vcp": av, "vcp3": av3, "vcp4": av4}
+ENGINES = {"vcp": av, "vcp3": av3, "vcp4": av4, "donchian": ad}
 
 MIN_CYCLES = 8
 OBS_DAYS = 10           # 原 5,2026-09-12 全年回测后用户同意拉长
@@ -68,8 +69,13 @@ BRANCHES: dict = {
     "c": {"engine": "vcp3", "label": "方向 C · 三段式", "direction": "Claude 自设计:枢轴 + ATR 触发、底部止损、1R 后移动止损(止损只许收紧)",
           "tunable": {"atr_chase": [0.5, 1.0, 1.5], "vol_boost": [1.1, 1.3, 1.5], "confirm_days": [1, 3, 5],
                       "trail_days": [7, 10, 15], "time_days": [10, 15, 20], "stop_atr": [0.25, 0.5]}},
+    # 2026-09-13 研究台:唐奇安突破线(agent_research.LINES["donchian"])。规则固定,满 30 笔前不优化
+    "donchian": {"engine": "donchian", "label": "唐奇安 · 基准",
+                 "direction": "收盘第一次突破 55 日最高进;跌破 20 日最低或进场价 − 2 ATR 出;规则固定,满 30 笔前不优化",
+                 "tunable": {}},
 }
-BRANCH_ORDER = ["base", "buy", "sell", "c"]
+# 方向键全局唯一(四张表按方向分行,不分研究线)。归属哪条研究线看 agent_research.LINES
+BRANCH_ORDER = ["base", "buy", "sell", "c", "donchian"]
 
 
 def engine_of(branch: str):

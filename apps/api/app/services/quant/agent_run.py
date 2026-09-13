@@ -219,10 +219,22 @@ def _pool_script(pool: str) -> str:
     raise KeyError(f"没有这个池:{pool}")
 
 
+def _pool_limit(pool: str) -> int:
+    for eng in ao.ENGINES.values():
+        if getattr(eng, "POOL", None) == pool:
+            return int(getattr(eng, "POOL_LIMIT", 500))
+    return 500
+
+
+def _pool_days(eng_name: str) -> int:
+    """观察池并几天的筛选结果:默认 10 天(VCP 筛出来的是还没突破的票);唐奇安只用当天(突破是当天的事)。"""
+    return int(getattr(ao.ENGINES[eng_name], "WATCH_POOL_DAYS", av.PARAMS["watch_pool_days"]))
+
+
 def _screen(d: date, pool: str = PRESET) -> tuple[list, dict]:
     """回溯到 d 跑池子的筛选脚本 → [[code, name, rs_rating]], 摘要。"""
     from app.services.quant import screen_source
-    r = screen_source.run_script(_pool_script(pool), MARKET, 500, "rs_rating", True, d)
+    r = screen_source.run_script(_pool_script(pool), MARKET, _pool_limit(pool), "rs_rating", True, d)
     items = [[x["code"], x.get("name") or x["code"], x["fields"].get("rs_rating")] for x in r["picks"]]
     gate = next((w for w in r["warnings"] if "门槛" in w), None)
     return items, {"matched": r["matched"], "scanned": r["scanned"], "skipped": r["skipped_incomplete"],
@@ -318,11 +330,17 @@ def _load_positions(cur, branch: str) -> list[av.Position]:
 
 
 def run_date(d: date, ctx: Ctx | None = None) -> dict:
-    """跑 d 这一天(收盘后),三个方向都跑。已跑过 → 直接返回。"""
+    """跑 d 这一天(收盘后),**只跑这天还没跑过的方向**。全都跑过 → 直接返回。
+
+    2026-09-13 研究台加新方向时改的:原来按「这天的行数够不够方向数」判断,够不上就把全部方向的
+    池子和指标缓存都算一遍(已跑过的方向只是在落库前跳过)。给新方向回填 174 天时,VCP 那几个引擎的
+    指标(Volume Profile / 周线 MACD)会被白算 174 遍。现在池子、缓存、循环都只针对 todo 里的方向。"""
     conn = _conn()
     cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) FROM agent_day WHERE trade_date=%s", (d,))
-    if cur.fetchone()[0] >= len(BRANCHES):
+    cur.execute("SELECT branch FROM agent_day WHERE trade_date=%s", (d,))
+    done_b = {r[0] for r in cur.fetchall()}
+    todo = [b for b in BRANCHES if b not in done_b]
+    if not todo:
         cur.close()
         conn.close()
         return {"date": str(d), "ran": False, "reason": "这天已经跑过"}
@@ -339,8 +357,8 @@ def run_date(d: date, ctx: Ctx | None = None) -> dict:
 
     # 今天的筛选结果:按池算(默认池三个方向共用;方向 A 用自己的 SEPA 池)
     t1 = time.time()
-    needed: dict = {}                       # 池 → 用它的引擎
-    for b in BRANCHES:
+    needed: dict = {}                       # 池 → 用它的引擎(只算今天还没跑的方向)
+    for b in todo:
         en = ao.BRANCHES[b]["engine"]
         needed.setdefault(_pool_of(en), []).append(en)
     items_of, ws_of, ok_of = {}, {}, {}
@@ -365,15 +383,18 @@ def run_date(d: date, ctx: Ctx | None = None) -> dict:
                             (pool_key, d, json.dumps(items), json.dumps(ws, default=str)))
             screens[d] = items
         items_of[pool_key], ws_of[pool_key], ok_of[pool_key] = items, ws, scan_ok
-    dates = sorted(x for x in ctx.screens[PRESET] if x <= d)      # 日期轴按默认池(每个交易日都有)
+    # 日期轴按默认池(每个交易日都有;只回填新方向时默认池不在 needed 里,但库里存着)
+    dates = sorted({x for x in ctx.screens.get(PRESET, {}) if x <= d} | {d})
     pooled: dict = {}
+    pool_days: dict = {}
     for pool_key, engs in needed.items():
+        pool_days[pool_key] = max(_pool_days(e) for e in engs)
         pooled[pool_key] = agent_sim.pooled_watch(dates, {k: [tuple(x) for x in v] for k, v in ctx.screens[pool_key].items()},
-                                                  av.PARAMS["watch_pool_days"])
+                                                  pool_days[pool_key])
         ctx.ensure_cache(dates, pooled[pool_key], engs)
 
     out = {"date": str(d), "ran": True, "branches": {}}
-    for branch in BRANCHES:
+    for branch in todo:
         cur.execute("SELECT 1 FROM agent_day WHERE branch=%s AND trade_date=%s", (branch, d))
         if cur.fetchone():
             continue
@@ -410,7 +431,7 @@ def run_date(d: date, ctx: Ctx | None = None) -> dict:
         execute = {"key": "backtest", "name": "扫描与执行",
                    "status": ("fail" if not scan_ok else "warn" if gated else "ok"), "at": _hm(),
                    "duration_ms": int((time.time() - t1) * 1000),
-                   "summary": (f"「{_pool_label(pool_key)}」今天命中 {ws.get('matched')} 只,连同近 {av.PARAMS['watch_pool_days']} 天入选的共 {len(watch_today)} 只 → 观察列表;"
+                   "summary": (f"「{_pool_label(pool_key)}」今天命中 {ws.get('matched')} 只,{'当天' if pool_days[pool_key] <= 1 else '连同近 ' + str(pool_days[pool_key]) + ' 天入选的'}共 {len(watch_today)} 只 → 观察列表;"
                                f"买入 {n_buy} 笔、卖出 {n_sell} 笔" + (f",已实现 {realized:+.0f} 美元" if n_sell else "")
                                + (f";护栏:{res['halt_reason']}" if res["halt_reason"] else "")
                                + (f";市场:{res['market']['text']}" if res.get("market") else "")
@@ -444,7 +465,18 @@ def run_date(d: date, ctx: Ctx | None = None) -> dict:
 
         # 4. 调整策略(优化器)—— 在今天的成交落库之后跑,它只看历史
         t4 = time.time()
-        opt = ao.step(branch, st, d, dates, pool, ctx.cache[eng_name], av.GUARDS)
+        # 研究线封存 → 优化器冻结(照常纸上跑,当对照组);新研究线规则固定 → 满 30 笔前不开优化器
+        from app.services.quant import agent_research as research
+        line = research.line_of_branch(cur, branch)
+        if line and line.get("status") == "archived":
+            opt = {"evaluated": 0, "action": "archived",
+                   "text": (f"「{line['label']}」{line.get('archived_at') or ''} 已封存:优化器冻结在 v{st['version']},不再换版;"
+                            f"照常纸上跑,作为新研究线的对照组")}
+        elif line and not ao.BRANCHES[branch]["tunable"] and line["key"] != "vcp":
+            opt = {"evaluated": 0, "action": "fixed",
+                   "text": f"研究线「{line['label']}」规则固定:满 {research.KILL_MIN_CYCLES} 笔完整交易前不开优化器"}
+        else:
+            opt = ao.step(branch, st, d, dates, pool, ctx.cache[eng_name], av.GUARDS)
         _meta_set(cur, f"branch:{branch}", st)
         adjust = {"key": "adjust", "name": "调整策略", "status": "warn" if opt["action"] in ("observe", "observing") else "ok",
                   "at": _hm(), "duration_ms": int((time.time() - t4) * 1000),
@@ -661,12 +693,21 @@ def dashboard(branch: str = "base") -> dict:
     st = _branch_state(cur, branch)
     p = st["params"]
     eng = ao.engine_of(branch)
-    branches = [_branch_summary(cur, b, b == branch) for b in BRANCHES]
+    # 迭代方向卡只列同一条研究线里的方向(VCP 线 4 张、唐奇安线 1 张)
+    from app.services.quant import agent_research as research
+    line = research.line_of_branch(cur, branch)
+    line_block = ({"key": line["key"], "label": line.get("label"), "status": line.get("status"),
+                   "status_text": research.STATUS_TEXT.get(line.get("status"), line.get("status")),
+                   "archived_at": line.get("archived_at"), "archive_tag": line.get("archive_tag"),
+                   "archive_reason": line.get("archive_reason"), "verdict": line.get("verdict"),
+                   "kill_text": line.get("kill_text")} if line else None)
+    in_line = line["branches"] if line else [branch]
+    branches = [_branch_summary(cur, b, b == branch) for b in BRANCHES if b in in_line]
     if not days:
         cur.close()
         conn.close()
         return {"enabled": False, "state": "never_started", "paper": True, "version": f"v{st['version']}",
-                "branch": branch, "branches": branches,
+                "branch": branch, "branches": branches, "line": line_block,
                 "strategy": _strategy_block(None, st, branch), "guardrails": _guard_block(None, p),
                 "rules": _rules_block([], [], [], p, None, eng)}
     L = days[-1]
@@ -720,7 +761,7 @@ def dashboard(branch: str = "base") -> dict:
     versions, marks = _versions_block(st, started, days, branch)
     return {
         "enabled": True, "state": state, "paper": True, "version": f"v{st['version']}",
-        "branch": branch, "branches": branches,
+        "branch": branch, "branches": branches, "line": line_block,
         "day_count": len(days), "iteration_count": st["version"] - 1,
         "last_run_text": (_fmt_sh(L[9]) or "") + f" · 按 {L[0].strftime('%m-%d')} 美股收盘",
         "next_run_text": _next_run_text(),
@@ -773,6 +814,8 @@ _V1 = {
              "Claude 2026-09-12 按全年回测的三个事实自设计,用户同意后实现;同一份观察列表"),
     "vcp4": ("VCP · SEPA 优化 —— 市场过滤 + 趋势模板 + 加权评分与一票否决 + 风险定仓 + S 级加仓 + 盘中止损 + 分段跟踪",
              "用户 2026-09-13 按 Minervini SEPA 五根柱子拆解方向 C 后给的 v4 草案;没有基本面 / 行业数据源,那两块没做"),
+    "donchian": ("唐奇安通道突破 —— 收盘第一次突破 55 日最高进,跌破 20 日最低或 2 ATR 止损出,单笔风险 1% 定仓",
+                 "研究台方案(2026-09-13 用户批准)的第一条新研究线;和 VCP 差得最远,规则固定,满 30 笔前不优化"),
 }
 
 
@@ -962,12 +1005,15 @@ def _trade_item(t) -> dict:
 def _strategy_block(universe_size, st: dict, branch: str = "base") -> dict:
     p = st["params"]
     eng = ao.engine_of(branch)
-    names = {"vcp": STRATEGY_NAME, "vcp3": "VCP 三段式(方向 C)", "vcp4": "VCP · SEPA 优化(方向 A)"}
+    names = {"vcp": STRATEGY_NAME, "vcp3": "VCP 三段式(方向 C)", "vcp4": "VCP · SEPA 优化(方向 A)",
+             "donchian": "唐奇安通道突破"}
+    days_ = _pool_days(ao.BRANCHES[branch]["engine"])
+    span = "当天筛选结果" if days_ <= 1 else f"近 {days_} 天并集"
     return {"name": names.get(ao.BRANCHES[branch]["engine"], STRATEGY_NAME), "version": f"v{st['version']}",
             "summary": eng.summary(p),
             "market_label": "美股", "market_note": getattr(eng, "EXEC_NOTE", "纸上交易 · 日线收盘价成交"),
-            "universe": (f"{getattr(eng, 'POOL_LABEL')} · 近 10 天并集" if getattr(eng, "POOL", None)
-                         else "筛选器「VCP 波段收缩」近 10 天结果并集"), "universe_size": universe_size,
+            "universe": (f"{getattr(eng, 'POOL_LABEL')} · {span}" if getattr(eng, "POOL", None)
+                         else f"筛选器「VCP 波段收缩」{span}"), "universe_size": universe_size,
             "rebalance": "每个交易日收盘后跑一次 · 信号当天收盘价成交" + getattr(eng, "REBALANCE_SUFFIX", ""),
             "data_source": "自家全市场日线(每晚落库,拆股已核对)+ 标普500 基准 · 不含盘中"}
 
@@ -1082,7 +1128,51 @@ def run_latest() -> dict:
     ctx = Ctx()
     if not ctx.store["last"]:
         return {"ran": False, "reason": "还没有日线"}
-    return run_date(ctx.store["last"], ctx)
+    out = run_date(ctx.store["last"], ctx)
+    out["research"] = research_evaluate()
+    return out
+
+
+# ═══════════════════════════════════════════════════════════════
+# 研究台(agent_research)
+# ═══════════════════════════════════════════════════════════════
+
+def _with_cur(fn, commit: bool = False):
+    conn = _conn()
+    cur = conn.cursor()
+    try:
+        r = fn(cur)
+        if commit:
+            conn.commit()
+        return r
+    finally:
+        cur.close()
+        conn.close()
+
+
+def research_evaluate() -> list[dict]:
+    """回测关 / 30 笔判定,状态有变就落库。每日跑完、研究线回填完各调一次。失败只记日志,不影响当天的运行结果。"""
+    from app.services.quant import agent_research as research
+    try:
+        return _with_cur(research.evaluate, commit=True)
+    except Exception:                                         # noqa: BLE001
+        log.exception("[agent] 研究线判定失败")
+        return []
+
+
+def research_board() -> dict:
+    from app.services.quant import agent_research as research
+    return _with_cur(research.board)
+
+
+def research_create(uid, body: dict) -> dict:
+    from app.services.quant import agent_research as research
+    return _with_cur(lambda cur: research.create_idea(cur, uid, body), commit=True)
+
+
+def research_archive(key: str, archived: bool, uid) -> dict:
+    from app.services.quant import agent_research as research
+    return _with_cur(lambda cur: research.set_archived(cur, key, archived, uid), commit=True)
 
 
 def backfill(start: date, end: date | None = None) -> dict:
@@ -1110,7 +1200,8 @@ def reset() -> None:
 def _main(argv=None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
     p = argparse.ArgumentParser(prog="agent_run")
-    p.add_argument("cmd", choices=["daily", "backfill", "reset", "dashboard"])
+    p.add_argument("cmd", choices=["daily", "backfill", "reset", "dashboard", "research-backfill", "research"])
+    p.add_argument("--line", default=None)
     p.add_argument("--from", dest="start", default=None)
     p.add_argument("--to", dest="end", default=None)
     p.add_argument("--yes", action="store_true")
@@ -1122,6 +1213,20 @@ def _main(argv=None) -> int:
             print("要 --from YYYY-MM-DD")
             return 2
         print(backfill(date.fromisoformat(a.start), date.fromisoformat(a.end) if a.end else None))
+    elif a.cmd == "research-backfill":
+        # 给一条研究线的方向补跑全年:run_date 只跑这天还没跑过的方向,VCP 那几个不会被碰
+        from app.services.quant import agent_research as research
+        lines = {x["key"]: x for x in _with_cur(research.all_lines)}
+        if a.line not in lines or not lines[a.line]["branches"]:
+            print(f"要 --line,且那条线得有方向:{[k for k, v in lines.items() if v['branches']]}")
+            return 2
+        start = date.fromisoformat(a.start) if a.start else date.fromisoformat(_with_cur(lambda c: _meta_get(c, "started")))
+        print(backfill(start, date.fromisoformat(a.end) if a.end else None))
+        print(research_evaluate())
+    elif a.cmd == "research":
+        b = research_board()
+        for ln in b["lines"]:
+            print(ln["key"], ln["status"], json.dumps(ln["metrics"], ensure_ascii=False, default=str), (ln.get("verdict") or {}).get("text"))
     elif a.cmd == "reset":
         if not a.yes:
             print("会清空小鹿的全部交易记录,确认加 --yes")

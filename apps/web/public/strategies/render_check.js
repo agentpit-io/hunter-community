@@ -646,7 +646,8 @@ try {
   `, ctx, { filename: 'assert-branch-switch' })
   const seen = ctx.SEEN
   checks.push(
-    ['首次加载没有 hash 时不带 branch 参数', seen[0] === '/api/quant/agent/dashboard'],
+    // 2026-09-13 研究台:没有 hash 时首页是研究台(用户批准的方案),#branch= 的老链接照样打开看板
+    ['首次加载没有 hash 时打开研究台', seen[0] === '/api/quant/agent/research'],
     ['点卡片后 hash 写成 #branch=sell', ctx.HASH === '#branch=sell'],
     ['点卡片后重拉带 ?branch=sell', seen[1] === '/api/quant/agent/dashboard?branch=sell'],
     ['刷新按钮传 Event 进来时按 hash 恢复', seen[2] === '/api/quant/agent/dashboard?branch=sell'],
@@ -658,6 +659,134 @@ try {
 } catch (e) {
   failed++
   console.log('FAIL 迭代方向定向断言 ·', e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e)
+}
+
+// ─── 小鹿智能体 · 研究台(2026-09-13 · docs/agent-research-plan.md)──────────────
+// 要钉住的:
+//   ① 四列阶段按真实先后顺序(立项 → 全年回测 → 纸上跑 → 封存),卡片进对的列,淘汰的单独一块;
+//   ② 封存卡有「打开看板」「解除封存」;还没引擎的立项卡写明「还没有引擎」,不画数字格;
+//   ③ 对照表只列跑出数据的线,被引用为对照组的那条带「对照组」;净值图每条有净值的线一条 path + 基准一条;
+//   ④ 全 null / 后端 404 骨架:四列照画、数据位 —,不出现 NaN / undefined / null 字面量;
+//   ⑤ 看板视图顶上有分页 + 面包屑,封存的线常驻提示条带「解除封存」(新功能入口不许藏 hover);
+//   ⑥ 新建表单:淘汰线在表单里写出来并声明「提交后锁定」。
+try {
+  const ctx = vm.createContext(makeContext('agent.html'))
+  vm.runInContext(appJs, ctx, { filename: 'app.js' })
+  const ag = inlineScripts(fs.readFileSync(path.join(DIR, 'agent.html'), 'utf8'))
+  ag.forEach((src, i) => vm.runInContext(src, ctx, { filename: `agent#${i + 1}` }))
+  vm.runInContext(`
+    var NAV3 = [0, 1.2, 5.13]
+    var RB = {
+      common:{ start:'2026-01-02', end:'2026-09-11', days:3, bench_label:'标普500', bench_pct:11.64 },
+      kill_text:'纸上跑满 30 笔完整交易后:每笔平均净损益 < 0,或同一段日期收益不如对照组 → 淘汰',
+      dates:['2026-01-02','2026-05-01','2026-09-11'], bench_nav:[0, 4.2, 11.64],
+      lines:[
+        { key:'vcp', label:'VCP 波段线', status:'archived', status_text:'封存', archived_at:'2026-09-13',
+          archive_tag:'vcp-archive-v3', archive_reason:'最好的方向 C 全年仍落后标普 500', hypothesis:'收缩后的放量突破会延续',
+          branches:[{key:'base',label:'基准 v1',version:'v1'},{key:'c',label:'方向 C · 三段式',version:'v3'}],
+          best_branch:'c', best_label:'方向 C · 三段式',
+          metrics:{ pnl_pct:5.13, excess_pt:-6.51, max_dd_pct:-5.51, sells:14, win_rate:50, profit_factor:2.37,
+                    sharpe:0.88, cycles:14, expectancy_net:364.15 }, nav:NAV3 },
+        { key:'donchian', label:'唐奇安突破线', status:'backtest', status_text:'全年回测',
+          hypothesis:'趋势一旦形成会延续', rules_draft:'进:收盘第一次突破前 55 日最高',
+          compare_text:'VCP 波段线 · 方向 C · 三段式', kill_text:'…淘汰',
+          verdict:{ decision:'wait', text:'全年回测进行中:已跑到 2026-05-01' },
+          branches:[{key:'donchian',label:'唐奇安 · 基准',version:'v1'}], best_branch:'donchian', best_label:'唐奇安 · 基准',
+          metrics:null, nav:null },
+        { key:'idea-1', label:'均线回踩线', status:'idea', status_text:'立项', custom:true,
+          hypothesis:'回踩 EMA20 缩量企稳会延续', compare_text:'VCP 波段线 · 方向 C · 三段式', kill_text:'…淘汰',
+          branches:[], best_branch:null, metrics:null, nav:null },
+        { key:'old', label:'被淘汰的线', status:'killed', status_text:'淘汰',
+          verdict:{ decision:'kill', text:'满 30 笔:每笔平均净损益 -12 美元 < 0 —— 淘汰' },
+          branches:[{key:'old',label:'旧',version:'v1'}], best_branch:'old', best_label:'旧',
+          metrics:{ pnl_pct:-2.1, excess_pt:-13.7, max_dd_pct:-6, sells:31, win_rate:40, profit_factor:0.8,
+                    sharpe:-0.3, cycles:30, expectancy_net:-12 }, nav:[0, -1, -2.1] },
+      ] }
+    var H_RS = renderResearch(RB)
+    var H_RSNULL = renderResearch({ common:{}, dates:[], lines:[
+      { key:null, label:null, status:'backtest', status_text:null, branches:[{key:null,label:null}], best_branch:null,
+        metrics:{ pnl_pct:null, excess_pt:null, max_dd_pct:null, cycles:null, win_rate:null, expectancy_net:null,
+                  profit_factor:null, sharpe:null }, nav:[null, null], verdict:null } ] })
+    var H_RSSKEL = renderResearch(null, { kind:'dev', icon:'hi-puzzle', html:'后端还没有' })
+    RS.form = true
+    var H_RSFORM = renderResearch(RB)
+    RS.form = false
+    var H_DASH = render({ state:'running', strategy:{ name:'x' }, branch:'c',
+      branches:[{ key:'c', label:'方向 C · 三段式', active:true }],
+      line:{ key:'vcp', label:'VCP 波段线', status:'archived', status_text:'封存', archived_at:'2026-09-13', archive_tag:'vcp-archive-v3' } })
+    var H_DASHSKEL = render({}, NOTICE.dev)
+  `, ctx, { filename: 'assert-research' })
+
+  const H = ctx.H_RS
+  const col = (k) => {
+    const i = H.indexOf('data-stage="' + k + '"')
+    const j = H.indexOf('data-stage=', i + 10)
+    return i < 0 ? '' : H.slice(i, j < 0 ? H.indexOf('同口径对照') : j)
+  }
+  const at = (t) => H.indexOf(t)
+  const banned = [/NaN/, /undefined/, />null</]
+  const clean = (x) => banned.every((re) => !re.test(x))
+  const checks = [
+    ['四列按先后顺序:立项 → 全年回测 → 纸上跑 → 封存',
+      at('data-stage="idea"') >= 0 && at('data-stage="idea"') < at('data-stage="backtest"') &&
+      at('data-stage="backtest"') < at('data-stage="paper"') && at('data-stage="paper"') < at('data-stage="archived"')],
+    ['封存的 VCP 进「封存」列', col('archived').indexOf('VCP 波段线') >= 0],
+    ['唐奇安进「全年回测」列、写着进度', col('backtest').indexOf('唐奇安突破线') >= 0 && col('backtest').indexOf('已跑到 2026-05-01') >= 0],
+    ['自建立项进「立项」列并写明还没有引擎', col('idea').indexOf('均线回踩线') >= 0 && col('idea').indexOf('还没有引擎') >= 0],
+    ['立项卡不画数字格(没有方向就没有数字)', col('idea').indexOf('rs-kv') < 0],
+    ['空列写「暂时没有」', col('paper').indexOf('暂时没有') >= 0],
+    ['淘汰的线不在看板四列里,在「淘汰记录」',
+      ['idea', 'backtest', 'paper', 'archived'].every((k) => col(k).indexOf('被淘汰的线') < 0) &&
+      H.slice(at('淘汰记录')).indexOf('<div class="rs-card killed">') >= 0],
+    ['封存卡有「打开看板」和「解除封存」', /data-open="c"/.test(col('archived')) && /data-arch="0"/.test(col('archived'))],
+    ['回测中的卡有「封存」按钮', /data-arch="1"[^>]*data-line="donchian"/.test(col('backtest'))],
+    ['最好的方向带星标', /class="best">方向 C · 三段式 ★/.test(H)],
+    ['没算出来的数字位是 —', /完整交易<b><span class="ag-na">—<\/span><\/b>/.test(col('backtest'))],
+    ['对照表只列有数据的线(VCP + 淘汰的那条)', (H.match(/<tr( class="ref")?><td>/g) || []).length === 2],
+    ['被引用为对照组的 VCP 那行带「对照组」', /<tr class="ref"><td>VCP 波段线 · 方向 C · 三段式<span class="rs-chip cool">对照组/.test(H)],
+    ['净值图:两条有净值的线 + 基准一条 = 3 条 path', (H.match(/<path d="M/g) || []).length === 3],
+    ['基准是虚线', /stroke-dasharray="4 3"/.test(H)],
+    ['新建入口常驻可见(按钮在研究台面板里)', /id="rs-new"/.test(H)],
+    ['研究台视图顶上是分页,研究台高亮', /data-go="research" class="on"/.test(H)],
+    ['正常数据不出现 NaN / undefined / null', clean(H)],
+    ['全 null 的线不出现 NaN / undefined / null', clean(ctx.H_RSNULL)],
+    ['全 null 的线数字位全是 —', (ctx.H_RSNULL.match(/<b><span class="ag-na">—<\/span><\/b>/g) || []).length >= 6],
+    ['全 null 净值不画线,写明还没有净值', ctx.H_RSNULL.indexOf('还没有净值数据') >= 0 && !/<path d="M/.test(ctx.H_RSNULL)],
+    ['后端 404 骨架:四列照画', ['idea', 'backtest', 'paper', 'archived'].every((k) => ctx.H_RSSKEL.indexOf('data-stage="' + k + '"') >= 0)],
+    ['后端 404 骨架:顶上说明为什么是 —', /ag-banner dev/.test(ctx.H_RSSKEL) && clean(ctx.H_RSSKEL)],
+    ['新建表单写出淘汰线并声明提交后锁定', ctx.H_RSFORM.indexOf('id="rs-f-submit"') >= 0 && ctx.H_RSFORM.indexOf('提交后这一栏锁定') >= 0
+      && ctx.H_RSFORM.indexOf('每笔平均净损益 &lt; 0') >= 0],
+    ['看板视图:分页里「运行看板」高亮', /data-go="dash" class="on"/.test(ctx.H_DASH)],
+    ['看板视图:面包屑 研究台 › VCP 波段线 › 方向 C', /data-go="research">研究台<\/a><i>›<\/i><b>VCP 波段线<\/b><i>›<\/i>方向 C · 三段式/.test(ctx.H_DASH)],
+    ['看板视图:封存提示条常驻,带「解除封存」', /rs-lb cool/.test(ctx.H_DASH) && /id="ag-unarchive" data-line="vcp"/.test(ctx.H_DASH)],
+    ['看板视图:分页在状态条之前', ctx.H_DASH.indexOf('rs-seg') >= 0 && ctx.H_DASH.indexOf('rs-seg') < ctx.H_DASH.indexOf('ag-status')],
+    ['看板 404 骨架:有分页、没有凭空的面包屑状态', ctx.H_DASHSKEL.indexOf('rs-seg') >= 0 && ctx.H_DASHSKEL.indexOf('rs-lb') < 0 && clean(ctx.H_DASHSKEL)],
+  ]
+  vm.runInContext(`
+    var SEEN2 = []
+    fetch = function (url) { SEEN2.push(String(url)); return Promise.reject(new Error('render_check: 不联网')) }
+    location.hash = ''
+    boot()
+    location.hash = '#view=research'
+    boot({ type: 'click' })
+    switchBranch('donchian')
+    goView('research')
+    var HASH2 = location.hash
+  `, ctx, { filename: 'assert-research-route' })
+  const s2 = ctx.SEEN2
+  checks.push(
+    ['路由:没有 hash → 研究台接口', s2[0] === '/api/quant/agent/research'],
+    ['路由:#view=research 时刷新按钮留在研究台', s2[1] === '/api/quant/agent/research'],
+    ['路由:打开一条线 → 那个方向的看板', s2[2] === '/api/quant/agent/dashboard?branch=donchian'],
+    ['路由:点「研究台」分页 → 写 #view=research 并拉研究台', s2[3] === '/api/quant/agent/research' && ctx.HASH2 === '#view=research'],
+  )
+  for (const [name, ok] of checks) {
+    if (ok) console.log('PASS 研究台 ·', name)
+    else { failed++; console.log('FAIL 研究台 ·', name) }
+  }
+} catch (e) {
+  failed++
+  console.log('FAIL 研究台定向断言 ·', e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e)
 }
 
 // ─── 悬停日K:dispose 必须在清容器之前(app.js)────────────────────────

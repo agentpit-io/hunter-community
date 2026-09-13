@@ -1383,7 +1383,7 @@ from app.services.quant import agent_run as _agent
 
 @router.get("/agent/dashboard")
 async def agent_dashboard(branch: str = "base"):
-    # branch = base | buy | sell(三个迭代方向,agent_opt.BRANCHES);不认识的落回 base
+    # branch = agent_opt.BRANCHES 的键(base / buy / sell / c / donchian …);不认识的落回 base
     return await asyncio.to_thread(_agent.dashboard, branch)
 
 
@@ -1406,3 +1406,41 @@ async def agent_pause(request: Request):
 async def agent_resume(request: Request):
     _need_uid(request)
     return {"state": await asyncio.to_thread(_agent.set_state, "running")}
+
+
+# 研究台(2026-09-13):研究线看板免登录;立项 / 封存 / 解除封存要登录。
+# 淘汰线在立项时写定,**没有**修改接口 —— 防的是看过回测结果再回头改标准。
+@router.get("/agent/research")
+async def agent_research_board():
+    return await asyncio.to_thread(_agent.research_board)
+
+
+@router.post("/agent/research")
+async def agent_research_create(request: Request):
+    uid = _need_uid(request)
+    try:
+        body = await request.json()
+    except Exception:                                         # noqa: BLE001
+        raise HTTPException(400, "请求体不是合法 JSON")
+    try:
+        return await asyncio.to_thread(_agent.research_create, uid, body if isinstance(body, dict) else {})
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/agent/research/{key}/archive")
+async def agent_research_archive(key: str, request: Request):
+    uid = _need_uid(request)
+    try:
+        return await asyncio.to_thread(_agent.research_archive, key, True, uid)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/agent/research/{key}/unarchive")
+async def agent_research_unarchive(key: str, request: Request):
+    uid = _need_uid(request)
+    try:
+        return await asyncio.to_thread(_agent.research_archive, key, False, uid)
+    except ValueError as e:
+        raise HTTPException(400, str(e))

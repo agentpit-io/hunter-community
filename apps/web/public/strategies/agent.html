@@ -282,6 +282,80 @@
     .ag-chart-empty{height:250px;display:grid;place-items:center;color:var(--soft);
       font-size:22px;font-family:var(--serif);
       background:repeating-linear-gradient(180deg,transparent,transparent 47px,#f2f0ea 47px,#f2f0ea 48px)}
+
+    /* ══ 研究台(2026-09-13 · docs/agent-research-plan.md)══════════════════════
+       分页常驻在页面最上面 —— 新功能入口不许藏在 hover 或二级面板里(仓内铁律)。
+       四个阶段是真实先后顺序(立项 → 全年回测 → 纸上跑 → 封存),所以做成从左到右的看板;
+       淘汰的线单独一块放在下面,数据全部保留。 */
+    .rs-top{display:flex;align-items:center;gap:10px 14px;flex-wrap:wrap}
+    .rs-seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;padding:3px;background:var(--panel)}
+    .rs-seg button{border:0;background:transparent;border-radius:7px;padding:5px 16px;font:inherit;font-size:13px;color:var(--muted);cursor:pointer}
+    .rs-seg button.on{background:#fff;color:var(--brand-dark);font-weight:650;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+    .rs-seg button:focus-visible,.rs-card .btn:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
+    .rs-crumb{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--muted);flex-wrap:wrap}
+    .rs-crumb a{color:var(--muted);text-decoration:none;border-bottom:1px dotted var(--line-strong)}
+    .rs-crumb a:hover{color:var(--brand-dark)}
+    .rs-crumb b{color:var(--text)} .rs-crumb i{font-style:normal;color:var(--soft)}
+    .rs-chip{display:inline-block;font-size:11px;border-radius:5px;padding:0 7px;line-height:19px;white-space:nowrap;font-weight:500}
+    .rs-chip.cool{background:var(--tag-cool-bg);color:var(--tag-cool-fg)}
+    .rs-chip.ok{background:var(--tag-ok-bg);color:var(--tag-ok-fg)}
+    .rs-chip.warn{background:var(--tag-warn-bg);color:var(--tag-warn-fg)}
+    .rs-chip.bad{background:#fbeceb;color:var(--danger)}
+    .rs-chip.idea{background:var(--panel);color:var(--muted);border:1px dashed var(--line-strong);line-height:17px}
+    .rs-lb{display:flex;align-items:center;gap:8px 10px;flex-wrap:wrap;border:1px solid var(--line);background:var(--panel);
+      border-radius:10px;padding:9px 12px;font-size:12.5px;line-height:1.6;color:var(--text)}
+    .rs-lb.cool{background:var(--tag-cool-bg);border-color:#d5dcea;color:var(--tag-cool-fg)}
+    .rs-lb.bad{background:#fdf6f5;border-color:#efd5d1;color:#7d3a33}
+    .rs-lb .btn{margin-left:auto}
+    .rs-lb code{font-size:11.5px}
+    .rs-strip{display:flex;align-items:center;gap:6px 16px;flex-wrap:wrap;color:var(--muted);font-size:12px;margin-bottom:12px}
+    .rs-strip b{color:var(--text);font-weight:600}
+    .rs-strip .pos{color:var(--up)} .rs-strip .neg{color:var(--dn)}
+    .rs-acts{margin-left:auto;display:flex;gap:8px}
+    .rs-board{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+    @media(max-width:1000px){.rs-board{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    @media(max-width:640px){.rs-board{grid-template-columns:1fr}}
+    .rs-col{background:var(--panel);border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:10px}
+    .rs-colhd{display:flex;align-items:baseline;gap:6px;font-size:12px;color:var(--muted);padding:0 2px}
+    .rs-colhd b{color:var(--text);font-size:13px}
+    .rs-colhd .gate{margin-left:auto;font-size:10.5px;color:var(--soft);text-align:right}
+    .rs-card{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 11px;display:flex;flex-direction:column;gap:7px}
+    .rs-card.archived{border-color:#c9d2e4}
+    .rs-card .t{display:flex;align-items:baseline;gap:6px;font-weight:650;font-size:13.5px}
+    .rs-card .t .rs-chip{margin-left:auto}
+    .rs-card .hyp{color:var(--text);font-size:12px;line-height:1.6}
+    .rs-card .draft{color:var(--muted);font-size:11.5px;line-height:1.6}
+    .rs-card .rs-v{font-size:11.5px;line-height:1.6;color:var(--muted);border-left:2px solid var(--line-strong);padding-left:7px}
+    .rs-card .rs-v.kill{border-left-color:var(--danger);color:#7d3a33}
+    .rs-card .rs-v.pass{border-left-color:var(--success);color:var(--text)}
+    .rs-dirs{display:flex;gap:4px;flex-wrap:wrap}
+    .rs-dirs span{font-size:10.5px;background:var(--panel);border-radius:4px;padding:0 5px;color:var(--muted)}
+    .rs-dirs span.best{background:var(--brand-pale);color:var(--brand-dark);font-weight:600}
+    .rs-kv{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px 8px;border-top:1px solid var(--panel-2);padding-top:7px}
+    .rs-kv span{display:flex;flex-direction:column;font-size:10.5px;color:var(--soft)}
+    .rs-kv b{font-family:ui-monospace,menlo,monospace;font-size:12.5px;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums;white-space:nowrap}
+    .rs-kv b.pos{color:var(--up)} .rs-kv b.neg{color:var(--dn)}
+    .rs-foot{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:11px;color:var(--soft)}
+    .rs-foot .btns{margin-left:auto;display:flex;gap:6px}
+    .rs-empty{border:1px dashed var(--line-strong);border-radius:10px;padding:14px 10px;text-align:center;color:var(--soft);font-size:12px;line-height:1.6}
+    .rs-two{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:14px;align-items:start}
+    @media(max-width:1000px){.rs-two{grid-template-columns:1fr}}
+    .rs-tb .rs-chip{margin-left:5px}
+    .rs-tb tr.ref td{background:#fbfaf6}
+    .rs-legend{display:flex;gap:4px 14px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin-top:6px}
+    .rs-legend i{display:inline-block;width:14px;height:0;border-top:2px solid;vertical-align:middle;margin-right:5px}
+    .rs-legend i.dash{border-top-style:dashed}
+    .rs-form{display:grid;gap:10px}
+    .rs-f{display:grid;grid-template-columns:90px minmax(0,1fr);gap:10px;align-items:start;font-size:12.5px}
+    .rs-f label{color:var(--muted);padding-top:6px}
+    .rs-f input,.rs-f textarea{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:7px;padding:6px 9px;
+      font:inherit;font-size:13px;background:#fff;color:var(--text);resize:vertical}
+    .rs-f input:focus,.rs-f textarea:focus{outline:2px solid var(--brand-pale);border-color:var(--brand)}
+    .rs-ro{padding:6px 0;color:var(--text)}
+    .rs-kill{background:#fdf6f5;border:1px solid #efd5d1;border-radius:8px;padding:8px 10px;font-size:12px;color:#7d3a33;line-height:1.65}
+    .rs-fact{display:flex;gap:8px;justify-content:flex-end;align-items:center}
+    .rs-fact .rs-msg{margin-right:auto;color:var(--danger);font-size:12px}
+    .rs-killed{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px}
   </style>
 </head>
 <body>
@@ -406,9 +480,377 @@ function vBranches(d) {
       '<span class="st">' + stats + '</span></button>'
   }).join('')
   return '<div class="ag-br"><div class="hd"><span class="lb">迭代方向</span>' +
-    '<span>' + esc(bs.length + ' 个方向并行') + ' · 点一张卡切换下面整页的数据 · ' +
+    '<span>' + esc((d.line && d.line.label ? d.line.label + ' · ' : '') + bs.length + ' 个方向并行') + ' · 点一张卡切换下面整页的数据 · ' +
     '「立即跑一次 / 暂停」对所有方向一起生效</span></div>' +
     '<div class="ag-br-row">' + cards + '</div></div>'
+}
+
+// ═══ ⓪ 研究台(2026-09-13 · 用户批准 docs/agent-research-plan.md)══════════════
+// 页面顶上常驻两个分页:研究台(所有研究线的看板 + 同口径对照)/ 运行看板(下面原来的整页)。
+// 路由写在 hash 里:#view=research → 研究台;#branch=<方向> → 那个方向的运行看板;什么都没有 → 研究台。
+// 以前收藏的 #branch=c 链接照样打开看板。数字一律 Number.isFinite 判断,算不出显示 —。
+const RESEARCH_API = '/api/quant/agent/research'
+const RS_STAGES = [
+  ['idea', '立项', '写清假设与淘汰线'],
+  ['backtest', '全年回测', '跑同一段交易日 · 过关才进下一步'],
+  ['paper', '纸上跑', '满 30 笔才下结论'],
+  ['archived', '封存', '冻结优化 · 仍在跑,当对照组'],
+]
+const RS_CHIP = { idea: 'idea', backtest: 'warn', paper: 'ok', archived: 'cool', killed: 'bad' }
+const RS_COLORS = ['#b56b2d', '#6a4c93', '#2a7f8f', '#8a6d3b', '#777970']
+const RS_LAST_KEY = 'hunter_agent_last_branch'
+const RS = { form: false, busy: false, data: null }
+
+function vTopNav(view, d) {
+  let crumb = ''
+  if (view === 'dash') {
+    const ln = d && d.line
+    const bl = (Array.isArray(d && d.branches) ? d.branches : []).filter(function (b) { return b && b.active })[0]
+    crumb = '<span class="rs-crumb"><a href="#view=research" data-go="research">研究台</a><i>›</i>' +
+      '<b>' + txt(ln && ln.label) + '</b>' + (bl ? '<i>›</i>' + txt(bl.label) : '') +
+      (ln && ln.status ? '<span class="rs-chip ' + (RS_CHIP[ln.status] || '') + '">' + txt(ln.status_text) + '</span>' : '') +
+      '</span>'
+  }
+  return '<div class="rs-top"><div class="rs-seg" role="tablist" aria-label="小鹿智能体视图">' +
+    '<button type="button" role="tab" data-go="research" class="' + (view === 'research' ? 'on' : '') + '" aria-selected="' + (view === 'research') + '">研究台</button>' +
+    '<button type="button" role="tab" data-go="dash" class="' + (view === 'dash' ? 'on' : '') + '" aria-selected="' + (view === 'dash') + '">运行看板</button>' +
+    '</div>' + crumb + '</div>'
+}
+
+// 看板顶上的研究线状态条:封存的线常驻一条提示(不是灰掉整页 —— 封存的线仍是活的对照组)
+function vLineBanner(d) {
+  const ln = d && d.line
+  if (!ln || !ln.status) return ''
+  const v = ln.verdict
+  if (ln.status === 'archived') {
+    return '<div class="rs-lb cool"><span class="rs-chip cool">封存</span><span>' +
+      (ln.archived_at ? esc(ln.archived_at) + ' ' : '') + '封存:优化器冻结,不再换版;每天收盘后照常纸上跑,当新研究线的对照组。' +
+      (ln.archive_tag ? '代码标签 <code>' + esc(ln.archive_tag) + '</code>。' : '') + '</span>' +
+      '<button type="button" class="btn small" id="ag-unarchive" data-line="' + esc(ln.key || '') + '">解除封存</button></div>'
+  }
+  if (ln.status === 'killed') {
+    return '<div class="rs-lb bad"><span class="rs-chip bad">淘汰</span><span>' + txt(v && v.text, '已淘汰') + '</span></div>'
+  }
+  return '<div class="rs-lb"><span class="rs-chip ' + (RS_CHIP[ln.status] || '') + '">' + txt(ln.status_text) + '</span><span>' +
+    (v && v.text ? esc(v.text) : '研究线规则固定,满 30 笔完整交易前不开优化器') + '</span></div>'
+}
+
+function rsKv(label, val, cls) {
+  return '<span>' + label + '<b' + (cls ? ' class="' + cls + '"' : '') + '>' + val + '</b></span>'
+}
+
+function rsCard(ln) {
+  ln = ln || {}
+  const m = ln.metrics
+  const brs = Array.isArray(ln.branches) ? ln.branches : []
+  const has = brs.length > 0
+  const st = ln.status || ''
+  const dirs = brs.length > 1 ? '<div class="rs-dirs">' + brs.map(function (b) {
+    const best = b && b.key === ln.best_branch
+    return '<span' + (best ? ' class="best"' : '') + '>' + txt(b && b.label) + (best ? ' ★' : '') + '</span>'
+  }).join('') + '</div>' : ''
+  const kv = has ? '<div class="rs-kv">' +
+    rsKv('总收益', pct(m && m.pnl_pct, 2, true), dir(m && m.pnl_pct)) +
+    rsKv('超额', m && Number.isFinite(m.excess_pt) ? (m.excess_pt > 0 ? '+' : '') + fixed(m.excess_pt, 2) + ' pt' : NA, dir(m && m.excess_pt)) +
+    rsKv('最大回撤', pct(m && m.max_dd_pct, 2), m && Number.isFinite(m.max_dd_pct) && m.max_dd_pct < 0 ? 'neg' : '') +
+    rsKv('完整交易', m && Number.isFinite(m.cycles) ? int(m.cycles) + ' 笔' : NA, '') +
+    rsKv('胜率', pct(m && m.win_rate, 1), '') +
+    rsKv('每笔净损益', m && Number.isFinite(m.expectancy_net) ? money(m.expectancy_net, true) : NA, dir(m && m.expectancy_net)) +
+    '</div>' : ''
+  const v = ln.verdict
+  const vtxt = st === 'archived' ? (ln.archive_reason || '') : (v && v.text) || ''
+  const vcls = v && v.decision === 'kill' ? ' kill' : (v && v.decision === 'pass' ? ' pass' : '')
+  const verdict = vtxt ? '<div class="rs-v' + (st === 'archived' ? '' : vcls) + '">' + esc(vtxt) + '</div>' : ''
+  const note = has ? '' : '<div class="rs-v">还没有引擎 —— 按规则草案写好引擎、登记方向之后才能跑回测(这一步需要开发)</div>'
+  let btns = ''
+  if (has && ln.best_branch) btns += '<a class="btn small" href="#branch=' + esc(ln.best_branch) + '" data-open="' + esc(ln.best_branch) + '">打开看板</a>'
+  if (has && st === 'archived') btns += '<button type="button" class="btn small" data-arch="0" data-line="' + esc(ln.key || '') + '">解除封存</button>'
+  else if (has && (st === 'backtest' || st === 'paper')) btns += '<button type="button" class="btn small" data-arch="1" data-line="' + esc(ln.key || '') + '">封存</button>'
+  const foot = (ln.compare_text ? '对照组 ' + esc(ln.compare_text) : (st === 'archived' ? '封存于 ' + txt(ln.archived_at) : '')) +
+    (ln.kill_text && st !== 'archived' ? ' · <span title="' + esc(ln.kill_text) + '">淘汰线已锁定</span>' : '')
+  return '<div class="rs-card ' + esc(st) + '">' +
+    '<div class="t">' + txt(ln.label) + '<span class="rs-chip ' + (RS_CHIP[st] || '') + '">' + txt(ln.status_text) +
+      (st === 'archived' && ln.archive_tag ? ' · ' + esc(ln.archive_tag.replace(/^vcp-archive-/, '')) : '') + '</span></div>' +
+    (ln.hypothesis ? '<div class="hyp">' + esc(ln.hypothesis) + '</div>' : '') +
+    (ln.rules_draft ? '<div class="draft">' + esc(ln.rules_draft) + '</div>' : '') +
+    dirs + kv + verdict + note +
+    '<div class="rs-foot"><span>' + foot + '</span>' + (btns ? '<span class="btns">' + btns + '</span>' : '') + '</div></div>'
+}
+
+function rsTable(r) {
+  const all = Array.isArray(r && r.lines) ? r.lines : []
+  const ls = all.filter(function (ln) { return ln && ln.metrics })
+  if (!ls.length) return missing('还没有跑出数据的研究线', '回测跑完后,每条线取它最好的那个方向进这张表')
+  const refs = all.map(function (l) { return l && l.compare_text ? String(l.compare_text).split(' · ')[0] : '' })
+  const rows = ls.map(function (ln) {
+    const m = ln.metrics
+    const ref = refs.indexOf(ln.label) >= 0
+    const multi = Array.isArray(ln.branches) && ln.branches.length > 1
+    return '<tr' + (ref ? ' class="ref"' : '') + '><td>' + txt(ln.label) + (multi && ln.best_label ? ' · ' + txt(ln.best_label) : '') +
+      (ref ? '<span class="rs-chip cool">对照组</span>' : '') + '</td>' +
+      '<td><span class="rs-chip ' + (RS_CHIP[ln.status] || '') + '">' + txt(ln.status_text) + '</span></td>' +
+      '<td class="n ' + dir(m.pnl_pct) + '">' + pct(m.pnl_pct, 2, true) + '</td>' +
+      '<td class="n ' + dir(m.excess_pt) + '">' + (Number.isFinite(m.excess_pt) ? (m.excess_pt > 0 ? '+' : '') + fixed(m.excess_pt, 2) : NA) + '</td>' +
+      '<td class="n ' + (Number.isFinite(m.max_dd_pct) && m.max_dd_pct < 0 ? 'neg' : '') + '">' + pct(m.max_dd_pct, 2) + '</td>' +
+      '<td class="n">' + (Number.isFinite(m.cycles) ? int(m.cycles) : NA) + '</td>' +
+      '<td class="n">' + pct(m.win_rate, 1) + '</td>' +
+      '<td class="n">' + num(m.profit_factor, 2) + '</td>' +
+      '<td class="n">' + num(m.sharpe, 2) + '</td>' +
+      '<td class="n ' + dir(m.expectancy_net) + '">' + (Number.isFinite(m.expectancy_net) ? money(m.expectancy_net, true) : NA) + '</td></tr>'
+  }).join('')
+  return '<div class="ag-scroll"><table class="ag-tb rs-tb"><thead><tr><th>研究线</th><th>阶段</th>' +
+    '<th style="text-align:right">总收益</th><th style="text-align:right">超额 pt</th><th style="text-align:right">最大回撤</th>' +
+    '<th style="text-align:right">完整交易</th><th style="text-align:right">胜率</th><th style="text-align:right">盈亏比</th>' +
+    '<th style="text-align:right">夏普</th><th style="text-align:right">每笔净损益</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+    '<div class="ag-note" style="margin-top:8px">超额 = 总收益 − 同期标普 500(百分点)。胜率按每次卖出计(和方向卡同口径);' +
+    '完整交易与每笔净损益按持仓周期、<b>已扣手续费</b>。<b>完整交易少于 30 笔的线,这些数只供参考,不当结论。</b></div>'
+}
+
+// 净值叠加:同一个坐标、同一段日期。纵轴刻度按数据现算,一个刻度函数同时放线、刻度和标签
+function rsChart(r) {
+  r = r || {}
+  const dates = Array.isArray(r.dates) ? r.dates : []
+  const ser = []
+  ;(Array.isArray(r.lines) ? r.lines : []).forEach(function (ln, i) {
+    if (ln && Array.isArray(ln.nav) && ln.nav.some(function (v) { return Number.isFinite(v) })) {
+      const multi = Array.isArray(ln.branches) && ln.branches.length > 1
+      ser.push({ label: String(ln.label || '') + (multi && ln.best_label ? ' · ' + ln.best_label : ''), nav: ln.nav, color: RS_COLORS[i % RS_COLORS.length], dash: false })
+    }
+  })
+  if (Array.isArray(r.bench_nav) && r.bench_nav.some(function (v) { return Number.isFinite(v) })) {
+    ser.push({ label: String((r.common && r.common.bench_label) || '基准'), nav: r.bench_nav, color: '#3b558a', dash: true })
+  }
+  if (dates.length < 2 || !ser.length) return missing('还没有净值数据', '研究线跑出净值后,曲线叠加在这里,和对照组画在同一个坐标里')
+  let lo = 0, hi = 0
+  ser.forEach(function (sr) { sr.nav.forEach(function (v) { if (Number.isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v) } }) })
+  const raw = (hi - lo || 1) / 4
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)))
+  const step = [1, 2, 5, 10].map(function (k) { return k * mag }).filter(function (x) { return x >= raw })[0]
+  const y0 = Math.floor(lo / step) * step, y1 = Math.ceil(hi / step) * step
+  const W = 460, H = 220, L = 40, R = 64, T = 10, B = 24
+  const n = dates.length
+  const x = function (i) { return L + (W - L - R) * i / (n - 1) }
+  const y = function (v) { return T + (H - T - B) * (y1 - v) / ((y1 - y0) || 1) }
+  let g = ''
+  for (let k = 0; y0 + k * step <= y1 + step * 1e-6; k++) {
+    const vv = y0 + k * step
+    const yy = y(vv).toFixed(1)
+    g += '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + yy + '" y2="' + yy + '" stroke="' + (Math.abs(vv) < step * 1e-6 ? '#cfcbbf' : '#efeee8') + '" stroke-width="1"/>' +
+      '<text x="' + (L - 6) + '" y="' + (y(vv) + 3.5).toFixed(1) + '" text-anchor="end" font-size="10" fill="#a2a49d">' +
+      (vv > 0 ? '+' : '') + fixed(vv, step < 1 ? 1 : 0) + '</text>'
+  }
+  let lastM = ''
+  dates.forEach(function (d, i) {
+    const mo = String(d).slice(5, 7)
+    if (mo && mo !== lastM) {
+      lastM = mo
+      g += '<text x="' + x(i).toFixed(1) + '" y="' + (H - 7) + '" text-anchor="middle" font-size="10" fill="#a2a49d">' + int(+mo) + '月</text>'
+    }
+  })
+  const ends = []
+  ser.forEach(function (sr) {
+    let path = '', pen = false, lastI = -1
+    sr.nav.forEach(function (v, i) {
+      if (!Number.isFinite(v)) { pen = false; return }
+      path += (pen ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1)
+      pen = true
+      lastI = i
+    })
+    g += '<path d="' + path + '" fill="none" stroke="' + sr.color + '" stroke-width="' + (sr.dash ? 1.4 : 1.9) + '"' +
+      (sr.dash ? ' stroke-dasharray="4 3"' : '') + ' stroke-linejoin="round"/>'
+    if (lastI >= 0) {
+      const v = sr.nav[lastI]
+      g += '<circle cx="' + x(lastI).toFixed(1) + '" cy="' + y(v).toFixed(1) + '" r="2.6" fill="' + sr.color + '"/>'
+      ends.push({ v: v, yy: y(v), c: sr.color })
+    }
+  })
+  ends.sort(function (a, b) { return a.yy - b.yy })
+  let prev = -Infinity
+  ends.forEach(function (e) {
+    let ly = e.yy + 3.5
+    if (ly - prev < 12) ly = prev + 12
+    prev = ly
+    g += '<text x="' + (W - R + 6) + '" y="' + ly.toFixed(1) + '" font-size="10" font-weight="600" fill="' + e.c + '">' + pct(e.v, 2, true) + '</text>'
+  })
+  const legend = ser.map(function (sr) {
+    return '<span><i class="' + (sr.dash ? 'dash' : '') + '" style="border-color:' + sr.color + '"></i>' + esc(sr.label) + '</span>'
+  }).join('')
+  return '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="各研究线累计收益与基准" style="width:100%;height:auto;display:block">' +
+    g + '</svg><div class="rs-legend">' + legend + '</div>'
+}
+
+function vRsForm(r) {
+  if (!RS.form) return ''
+  const f = function (label, ctl) { return '<div class="rs-f"><label>' + label + '</label><div>' + ctl + '</div></div>' }
+  return panel('新建研究线', '立项后才能跑回测 · 淘汰线提交即锁定',
+    '<div class="rs-form">' +
+      f('名称', '<input id="rs-f-label" maxlength="30" placeholder="例如:均线回踩线">') +
+      f('一句话假设', '<textarea id="rs-f-hyp" maxlength="400" rows="3" placeholder="要验证的是什么?说不清在验证什么,回测结果怎么读都对"></textarea>') +
+      f('规则草案', '<textarea id="rs-f-rules" maxlength="600" rows="3" placeholder="进场 / 出场 / 止损 / 仓位"></textarea>') +
+      f('股票池', '<input id="rs-f-pool" maxlength="200" placeholder="筛选器预设或保存的扫描策略名">') +
+      f('对照组', '<div class="rs-ro">VCP 波段线 · 方向 C · 三段式(封存版)</div>') +
+      f('淘汰线', '<div class="rs-kill">' + txt(r && r.kill_text) + '<br><b>提交后这一栏锁定,不能看过结果再改。</b></div>') +
+      '<div class="rs-fact"><span class="rs-msg" id="rs-f-msg"></span>' +
+        '<button type="button" class="btn small" id="rs-f-cancel">取消</button>' +
+        '<button type="button" class="btn small primary" id="rs-f-submit">立项</button></div>' +
+    '</div>')
+}
+
+function renderResearch(r, notice) {
+  const has = !!(r && Array.isArray(r.lines))
+  r = r || {}
+  const lines = has ? r.lines : []
+  const cm = r.common || {}
+  const byStage = {}
+  lines.forEach(function (ln) {
+    const k = (ln && ln.status) || ''
+    ;(byStage[k] = byStage[k] || []).push(ln)
+  })
+  const strip = '<div class="rs-strip">' +
+    '<span>共同口径:<b>' + txt(cm.start) + ' → ' + txt(cm.end) + '</b> · ' + (Number.isFinite(cm.days) ? int(cm.days) : NA) + ' 个交易日</span>' +
+    '<span>基准 <b>' + txt(cm.bench_label, '标普500') + ' <span class="' + dir(cm.bench_pct) + '">' + pct(cm.bench_pct, 2, true) + '</span></b></span>' +
+    '<span>手续费 <b>阶梯式</b>(与历史交易记录同口径)</span>' +
+    '<span class="rs-acts"><button type="button" class="btn small primary" id="rs-new">' + (RS.form ? '收起新建' : '＋ 新建研究线') + '</button></span></div>'
+  const cols = RS_STAGES.map(function (sg) {
+    const items = byStage[sg[0]] || []
+    return '<div class="rs-col" data-stage="' + sg[0] + '"><div class="rs-colhd"><b>' + sg[1] + '</b> ' +
+      (has ? int(items.length) : NA) + '<span class="gate">' + sg[2] + '</span></div>' +
+      (items.length ? items.map(rsCard).join('') : '<div class="rs-empty">' + (has ? '暂时没有' : NA) + '</div>') + '</div>'
+  }).join('')
+  const killed = byStage.killed || []
+  const html = '<div class="ag-wrap">' + vBanner(notice) + vTopNav('research') +
+    panel('研究台', (has ? esc(lines.length + ' 条研究线') : NA) + ' · 从左到右是一条线必经的先后阶段',
+      strip + '<div class="rs-board">' + cols + '</div>') +
+    vRsForm(r) +
+    '<div class="rs-two">' +
+      panel('同口径对照', '每条线取它最好的那个方向 · 算不出的一律 —', rsTable(r)) +
+      panel('净值 vs 基准', '累计收益 %', rsChart(r)) +
+    '</div>' +
+    panel('淘汰记录', (has ? esc(killed.length + ' 条') : NA) + ' · 数据全部保留',
+      killed.length ? '<div class="rs-killed">' + killed.map(rsCard).join('') + '</div>'
+        : missing('还没有淘汰的研究线', r.kill_text || '')) +
+    '<div class="ag-note" style="text-align:center;padding:6px 0 0">封存的线照常每天纸上跑,新研究线和它在同一段行情、同一个基准、同一套手续费下比。' +
+      '回测关与 30 笔判定由后端每天收盘后自动判,晋级主线是你的决定。</div>' +
+    '</div>'
+  container.innerHTML = html
+  bindResearch()
+  return html
+}
+
+function goView(v) {
+  if (v === 'research') {
+    try { location.hash = '#view=research' } catch (e) { /* 假 DOM 没有 location */ }
+    boot('')
+    return
+  }
+  let b = ''
+  try { b = localStorage.getItem(RS_LAST_KEY) || '' } catch (e) { /* 读不到就用默认 */ }
+  switchBranch(b || 'c')
+}
+
+function bindTopNav() {
+  Array.prototype.forEach.call(container.querySelectorAll('[data-go]'), function (el) {
+    el.addEventListener('click', function (e) {
+      if (e && e.preventDefault) e.preventDefault()
+      goView(el.getAttribute('data-go'))
+    })
+  })
+  Array.prototype.forEach.call(container.querySelectorAll('[data-arch]'), function (el) {
+    el.addEventListener('click', function () { rsArchive(el.getAttribute('data-line'), el.getAttribute('data-arch') === '1') })
+  })
+  const un = document.getElementById('ag-unarchive')
+  if (un) un.addEventListener('click', function () { rsArchive(un.getAttribute('data-line'), false) })
+}
+
+function bindResearch() {
+  bindTopNav()
+  const retry = document.getElementById('ag-retry')
+  if (retry) retry.addEventListener('click', function () { boot('') })
+  const nb = document.getElementById('rs-new')
+  if (nb) nb.addEventListener('click', function () { RS.form = !RS.form; renderResearch(RS.data) })
+  const cancel = document.getElementById('rs-f-cancel')
+  if (cancel) cancel.addEventListener('click', function () { RS.form = false; renderResearch(RS.data) })
+  const sub = document.getElementById('rs-f-submit')
+  if (sub) sub.addEventListener('click', rsSubmit)
+  Array.prototype.forEach.call(container.querySelectorAll('[data-open]'), function (el) {
+    el.addEventListener('click', function (e) {
+      if (e && e.preventDefault) e.preventDefault()
+      switchBranch(el.getAttribute('data-open'))
+    })
+  })
+}
+
+async function rsPost(url, body) {
+  let r, d = null
+  try {
+    r = await fetch(url, { method: 'POST', headers: apiHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(body || {}) })
+    try { d = await r.json() } catch (e) { /* 非 JSON */ }
+  } catch (e) {
+    return { ok: false, msg: '请求没发出去' }
+  }
+  if (r.status === 401) return { ok: false, msg: '登录已失效,请在新窗口重新登录后再试' }
+  if (!r.ok) return { ok: false, msg: (d && d.detail) || ('HTTP ' + r.status) }
+  return { ok: true, data: d }
+}
+
+// 立项与封存都是不可撤销的写操作:发请求之前先闸门去重(仓内铁律)
+async function rsSubmit() {
+  if (RS.busy) return
+  const val = function (id) { const el = document.getElementById(id); return el ? String(el.value || '').trim() : '' }
+  const body = { label: val('rs-f-label'), hypothesis: val('rs-f-hyp'), rules_draft: val('rs-f-rules'), pool: val('rs-f-pool') }
+  const msg = document.getElementById('rs-f-msg')
+  if (!body.label || !body.hypothesis) { if (msg) msg.textContent = '名称和一句话假设必须写'; return }
+  RS.busy = true
+  const res = await rsPost(RESEARCH_API, body)
+  RS.busy = false
+  if (!res.ok) { if (msg) msg.textContent = '立项没成:' + res.msg; return }
+  RS.form = false
+  toast((res.data && res.data.note) || '已立项', 'success')
+  boot('')
+}
+
+async function rsArchive(key, on) {
+  if (RS.busy || !key) return
+  const q = on
+    ? '封存这条研究线?\n\n优化器会冻结、不再换版;每天照常纸上跑。之后可以解除封存。'
+    : '解除封存?\n\n这条线回到「纸上跑」,优化器恢复工作 —— 它就不再是固定不动的对照组了。'
+  if (!confirm(q)) return
+  RS.busy = true
+  const res = await rsPost(RESEARCH_API + '/' + encodeURIComponent(key) + (on ? '/archive' : '/unarchive'), {})
+  RS.busy = false
+  if (!res.ok) { toast((on ? '封存' : '解除封存') + '没成:' + res.msg, 'warn'); return }
+  toast(on ? '已封存' : '已解除封存', 'success')
+  boot(hashView() === 'dash' ? hashBranch() : '')
+}
+
+function hashView() {
+  const h = String((typeof location !== 'undefined' && location.hash) || '')
+  if (/(?:^#|&)view=research/.test(h)) return 'research'
+  if (hashBranch()) return 'dash'
+  return 'research'
+}
+
+async function bootResearch() {
+  container.innerHTML = '<div class="ag-wrap"><div class="panel">' +
+    '<div class="cnt" style="padding:24px;text-align:center">加载中…</div></div></div>'
+  let r
+  try {
+    r = await fetch(RESEARCH_API, { headers: apiHeaders(), cache: 'no-store' })
+  } catch (e) {
+    RS.data = null
+    renderResearch(null, errNotice('请求没发出去 · ' + (e && e.message ? e.message : e))); return
+  }
+  if (r.status === 404) {
+    RS.data = null
+    renderResearch(null, { kind: 'dev', icon: 'hi-puzzle',
+      html: '后端还没有 <code>' + RESEARCH_API + '</code> —— 下面是研究台骨架,数据位显示 —。' })
+    return
+  }
+  if (!r.ok) { RS.data = null; renderResearch(null, errNotice('接口返回 HTTP ' + r.status)); return }
+  let d
+  try { d = await r.json() } catch (e) { RS.data = null; renderResearch(null, errNotice('返回的不是合法 JSON')); return }
+  RS.data = d && typeof d === 'object' ? d : null
+  renderResearch(RS.data, RS.data ? null : errNotice('返回体为空'))
 }
 
 // ═══ ② 当前策略 ═══════════════════════════════════════════════════
@@ -1109,8 +1551,9 @@ function vBanner(n) {
 let LAST_D = null       // 导出 CSV 要用最近一次拿到的整份数据(策略 / 护栏 / 规则手册都在里面)
 function render(d, notice) {
   LAST_D = d || {}
+  if (d && d.branch) { try { localStorage.setItem(RS_LAST_KEY, String(d.branch)) } catch (e) { /* 存不了就算了 */ } }
   // 返回 html 而不只是写进 container:render_check.js 靠这个返回值断言区块顺序
-  const html = '<div class="ag-wrap">' + vBanner(notice) +
+  const html = '<div class="ag-wrap">' + vBanner(notice) + vTopNav('dash', d) + vLineBanner(d) +
     vStatus(d) + vBranches(d) + vStrategy(d) + vGuard(d) + vPipeline(d) + vKpi(d) + vNav(d) +
     vScreener() + vRules(d) +
     '<div class="ag-two"><div class="ag-col" id="ag-col">' + vHoldings(d) + vHistory(d) + '</div>' + vWatch(d) + '</div>' +
@@ -1212,6 +1655,7 @@ function fitBoth() {
 }
 let watchFitBound = false
 function bindOps() {
+  bindTopNav()
   fitBoth()
   bindKChart()          // 悬停日K(app.js)· 内部自带「只绑一次」的闸门
   // resize 监听只挂一次:bindOps 每次重渲染都跑,重复挂会越积越多
@@ -1290,7 +1734,9 @@ async function agCall(url, btn, what) {
 // boot(branch):branch 是方向 key(字符串)。刷新 / 重试按钮把它当 click 回调用,
 // 传进来的是 Event —— 非字符串一律按 hash 恢复,所以跑完一次 / 暂停后重拉也停在当前方向。
 async function boot(branch) {
-  if (typeof branch !== 'string') branch = hashBranch()
+  // 显式给了方向 key → 运行看板;传空串 / Event(刷新按钮)→ 按 hash 决定视图
+  if (!(typeof branch === 'string' && branch) && hashView() === 'research') return bootResearch()
+  if (typeof branch !== 'string' || !branch) branch = hashBranch()
   const url = branch ? API + '?branch=' + encodeURIComponent(branch) : API
   container.innerHTML = '<div class="ag-wrap"><div class="panel">' +
     '<div class="cnt" style="padding:24px;text-align:center">加载中…</div></div></div>'
