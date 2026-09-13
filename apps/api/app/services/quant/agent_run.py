@@ -968,7 +968,7 @@ def _strategy_block(universe_size, st: dict, branch: str = "base") -> dict:
             "market_label": "美股", "market_note": getattr(eng, "EXEC_NOTE", "纸上交易 · 日线收盘价成交"),
             "universe": (f"{getattr(eng, 'POOL_LABEL')} · 近 10 天并集" if getattr(eng, "POOL", None)
                          else "筛选器「VCP 波段收缩」近 10 天结果并集"), "universe_size": universe_size,
-            "rebalance": "每个交易日收盘后跑一次 · 信号当天收盘价成交" + (";止损按盘中触及价" if getattr(eng, "EXEC_NOTE", None) else ""),
+            "rebalance": "每个交易日收盘后跑一次 · 信号当天收盘价成交" + getattr(eng, "REBALANCE_SUFFIX", ""),
             "data_source": "自家全市场日线(每晚落库,拆股已核对)+ 标普500 基准 · 不含盘中"}
 
 

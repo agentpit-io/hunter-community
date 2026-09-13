@@ -62,8 +62,8 @@ check("⭐候选 · 冻结期过了也不许改回历史旧值(5 天不再出现
 nb = ao.neighbors("sell", BASE, "time1_days", 7)
 check("邻域 · 7 天的邻档是 5(当前,跳过)和无 → 空;3 天的邻档是 5(当前)→ 空", nb == [] and ao.neighbors("sell", BASE, "time1_days", 3) == [])
 nb2 = ao.neighbors("buy", P4, "vol_boost", 1.5)
-check("邻域 · 方向 A(vcp4)vol_boost 1.5 的邻档是 1.2;1.2 的邻档去掉当前 1.0 只剩 1.5",
-      [x["vol_boost"] for x in nb2] == [1.2] and [x["vol_boost"] for x in ao.neighbors("buy", P4, "vol_boost", 1.2)] == [1.5], str(nb2))
+check("邻域 · 方向 A(vcp4)vol_boost 当前 1.2:1.5 的邻档 1.2 是当前 → 空;1.2 的邻档是 1.0 和 1.5",
+      nb2 == [] and [x["vol_boost"] for x in ao.neighbors("buy", P4, "vol_boost", 1.2)] == [1.0, 1.5], str(nb2))
 nb3 = ao.neighbors("c", c3_base := dict(ao.engine_of("c").PARAMS), "time_days", 20)
 check("邻域 · C 方向 time_days 20 的邻档是 15(当前)→ 空;10 的邻档 15(当前)→ 空", nb3 == [] and ao.neighbors("c", c3_base, "time_days", 10) == [])
 csc = ao.candidates("c", c3_base)
