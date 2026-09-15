@@ -309,7 +309,8 @@ class Handler(BaseHTTPRequestHandler):
                         # 否则 OpenAI 兼容 SDK 读到 [DONE] 就收工,补发被无视。
                         done_line = None
                         while True:
-                            chunk = r.read(4096)
+                            # read() 会等满缓冲区或 EOF，read1() 及时返回可用数据。
+                            chunk = r.read1(4096)
                             if not chunk:
                                 break
                             if not STRIP_THINK:
