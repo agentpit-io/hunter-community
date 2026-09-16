@@ -12,5 +12,16 @@
   "commitConvention": "angular",
   "contributorsPerLine": 7,
   "linkToUsage": false,
-  "contributors": []
+  "contributors": [
+    {
+      "login": "forever-ivy",
+      "name": "Ziggy xuan",
+      "avatar_url": "https://avatars.githubusercontent.com/u/187021713?v=4",
+      "profile": "https://github.com/forever-ivy",
+      "contributions": [
+        "code"
+      ]
+    }
+  ],
+  "commitType": "docs"
 }
