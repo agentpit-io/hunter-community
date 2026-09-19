@@ -1,0 +1,8 @@
+# 本地开发与 CI 用:运行时依赖 + 测试工具
+#   cd apps/api && pip install -r requirements-dev.txt && python -m pytest
+# 镜像(Dockerfile)只装 requirements.txt,不受这里影响
+-r requirements.txt
+
+pytest==9.1.1
+# pytest.ini 设了 asyncio_mode = auto,tests/agent 里有 async 用例
+pytest-asyncio==1.4.0

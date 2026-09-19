@@ -101,6 +101,11 @@ def app(monkeypatch):
     # setup.py 是在函数体里 `from app.services import hunter_key` 的,
     # 所以要把模块本身换掉,不能只 setattr 到 S 上。
     monkeypatch.setitem(sys.modules, "app.services.hunter_key", hk)
+    # 光换 sys.modules 不够:同一进程里别的用例先 import 过真的 hunter_key 时(全量 pytest 里
+    # tests/agent/test_mcp_tools.py 等),包 app.services 上已挂着这个属性,
+    # `from app.services import hunter_key` 先取包属性、不查 sys.modules —— 拿到的是真模块。
+    import app.services as _services
+    monkeypatch.setattr(_services, "hunter_key", hk, raising=False)
 
     def _fetch(url, api_key):
         state["quota_calls"].append((url, api_key))

@@ -35,12 +35,12 @@ jobs:
         with:
           python-version: '3.11'
           cache: pip
-          cache-dependency-path: apps/api/requirements.txt
+          cache-dependency-path: apps/api/requirements*.txt
       - name: LLM shim SSE regression tests
         run: python -m unittest discover -s scripts/llm-shim -p 'test_*.py' -v
       - name: Install deps
         working-directory: apps/api
-        run: pip install -r requirements.txt
+        run: pip install -r requirements-dev.txt
       - name: Compile check (syntax)
         working-directory: apps/api
         run: python -m compileall -q app main.py
@@ -51,19 +51,19 @@ jobs:
           JWT_SECRET: ci-test-secret
           DATABASE_URL: postgresql://placeholder@localhost/placeholder
         run: python -c "import main; print('import ok')"
-      # ── 首启向导的单元测试(M2)· 不连库、不联网 ──────────────────────
-      # 只点名这三个文件:仓库里另外 30+ 个测试文件的通过状态未知,
-      # 给整个 tests/ 加 pytest 会把 CI 搞红,那不是这个 job 该管的事
-      # (同 migrations job 里的 test_migrate.py)。
-      - name: pytest · 首启向导(门禁 / 三项检测 / 路由 / 内置额度)
+      # 全部后端用例,含首启向导与内置额度的 test_setup_guard / test_llm_probe / test_setup_router /
+      # test_runtime_config / test_setup_builtin(原来单独一步点名跑这几份,现已并进这里)。
+      # 脚本式用例由 conftest 放进子进程跑;test_migrate.py 的真库用例在这里没有 TEST_DATABASE_URL
+      # 会跳过,由下面的 migrations job 跑。
+      - name: Backend tests (pytest · apps/api/tests)
         working-directory: apps/api
         env:
-          JWT_SECRET: ci-test-secret-for-setup-wizard-0123456789
-        run: |
-          pip install pytest
-          python -m pytest tests/test_setup_guard.py tests/test_llm_probe.py \
-                           tests/test_setup_router.py tests/test_runtime_config.py \
-                           tests/test_setup_builtin.py -p no:cacheprovider -q
+          HUNTER_MINIMAL_BOOT: '1'
+          JWT_SECRET: ci-test-secret
+          DATABASE_URL: postgresql://placeholder@localhost/placeholder
+        run: python -m pytest
+      - name: SKILL tool references (offline)
+        run: python scripts/check_skill_tools.py --offline
 
       # llm-shim 与 api 共用同一份 schema_clean.py —— 别让人在 api 里另存副本。
       # 副本漂了的表现是「向导说能用、实际对话一发就 400」,最难查的那一类。
@@ -317,12 +317,15 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Typecheck
         working-directory: apps/web
-        run: npx tsc --noEmit || true   # non-blocking until we clean up types
+        run: npx tsc --noEmit
       # 「模型调用失败时用户看到什么」的唯一出口。坏掉的表现是界面一片空白或者
       # 一句看不懂的英文,而 tsc 与 next build 全绿 —— 所以单独跑一遍真断言。
       - name: 错误卡回归(真实抓到的报错对象)
         working-directory: apps/web
         run: node scripts/model-error-check.mjs
+      - name: Strategy pages self-check (render_check.js)
+        working-directory: apps/web/public/strategies
+        run: node render_check.js
       - name: Build
         working-directory: apps/web
         env:

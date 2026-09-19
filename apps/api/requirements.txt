@@ -23,7 +23,9 @@ PyYAML==6.0.3
 ta==0.11.0
 # uvicorn[standard] 的可选高性能依赖，hermes-agent-core 默认 import 探测，缺了会报 warning（不致命，但跟现网一致更稳）
 httptools==0.7.1
-uvloop==0.22.1
+# uvloop 不支持 Windows(pip 直接报错),所以只在非 Windows 上装。本仓代码没有直接 import 它,
+# 它是 uvicorn 在 Linux 上自动启用的加速;Linux 容器照装,行为不变
+uvloop==0.22.1; sys_platform != "win32"
 watchfiles==1.1.1
 websockets==16.0
 
