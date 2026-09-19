@@ -12,13 +12,25 @@ SaaS keys per-account via the `/settings` page.
 
 ## Data source
 
-`DATA_SOURCE_PROVIDER` = `akshare` (default) · `yfinance` · `saas`
+`DATA_SOURCE_PROVIDER` = `hunter` (default) · `akshare` · `yfinance` · `saas`
+
+The default is `hunter` even when no platform key is configured. Without a key
+it raises `HunterKeyRequired`, so the user is told to apply for a key instead of
+being silently switched to `akshare` (often unreachable from inside a
+container). For no-key data, set `akshare` or `yfinance` explicitly.
+
+The setting is only consulted for live quotes (`finance_data_client.get_quote`)
+when no data key is configured: A-share quotes go straight to it, while HK / US
+quotes try the built-in free Tencent channel
+(`apps/api/app/services/market_source.py`) first. With a key configured, it is
+not used.
 
 | impl | Coverage | Free? | Notes |
 |---|---|---|---|
+| `hunter` | Hunter platform data pipeline | free key | Default · key resolved on every call (`HUNTER_API_KEY`, or the key pasted under "解锁全部工具" in the UI) · no key → `HunterKeyRequired` · [get a key](https://hunter.agentpit.io/dev/api-keys) |
 | `akshare` | A-shares | ✅ | Wraps `akshare` pip package · sync API bridged to async |
 | `yfinance` | US · HK · rough A-share | ✅ | Needs internet reach to Yahoo Finance |
-| `saas` | Everything hunter aggregates | free tier | Requires `HUNTER_SAAS_DATA_URL` + `HUNTER_SAAS_DATA_KEY` · [get a key](https://hunter.agentpit.io/dev/api-keys) |
+| `saas` | Everything hunter aggregates | free tier | Requires a key: `HUNTER_API_KEY` is enough (`HUNTER_SAAS_DATA_KEY` only for a separate data key) · URL defaults to the Hunter data gateway, override with `HUNTER_SAAS_DATA_URL` · resolution in `apps/api/app/services/finance_data_auth.py` · [get a key](https://hunter.agentpit.io/dev/api-keys) |
 
 All impls return the same shape:
 

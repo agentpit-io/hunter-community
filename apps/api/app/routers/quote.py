@@ -92,8 +92,9 @@ async def get_quote(code: str):
     stock_map = {s["code"]: s for s in stocks}
     if code not in stock_map:
         raise HTTPException(404, f"股票 {code} 不存在")
-    # Cache-miss path · try live fetch (finance_data_client hits SaaS or
-    # falls back to providers.data_source · either yfinance/akshare).
+    # Cache-miss path · try live fetch (finance_data_client hits SaaS or, with
+    # no key, falls back to providers.data_source · `hunter` by default, which
+    # raises HunterKeyRequired; akshare/yfinance only if DATA_SOURCE_PROVIDER says so).
     fresh = await asyncio.to_thread(fd_get_quote, code)
     if fresh:
         _redis.set(f"quote:{code}", json.dumps(fresh))

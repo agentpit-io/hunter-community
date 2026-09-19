@@ -1,8 +1,15 @@
 """Data source provider factory · env-driven singleton.
 
 Set DATA_SOURCE_PROVIDER to one of: hunter · saas · akshare · yfinance
-Leave it unset and we pick for you: "hunter" when a platform key is configured
-(see app.services.hunter_key), else "akshare" (A-shares out-of-box, no key).
+Leave it unset and you get "hunter", whether or not a platform key is
+configured (see app.services.hunter_key). Without a key its calls raise
+HunterKeyRequired ("go apply for a key") instead of falling back to akshare;
+the comment in get_data_source() explains why. For no-key data, set
+DATA_SOURCE_PROVIDER=akshare (A-shares) or yfinance (US/HK).
+
+Only caller today: app.services.finance_data_client.get_quote() (via
+_provider_get_quote_sync), and only when no data key is configured
+(HK/US try the free market_source channel first).
 """
 import os
 from loguru import logger
