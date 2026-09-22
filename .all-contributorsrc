@@ -21,6 +21,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "ZGRX",
+      "name": "Ricey",
+      "avatar_url": "https://avatars.githubusercontent.com/u/146192810?v=4",
+      "profile": "https://github.com/ZGRX",
+      "contributions": [
+        "maintenance"
+      ]
     }
   ],
   "commitType": "docs"
