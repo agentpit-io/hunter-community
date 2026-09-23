@@ -41,10 +41,8 @@ def get_data_source() -> IDataSource:
         from .hunter_tools import HunterToolsDataSource
         _INSTANCE = HunterToolsDataSource()
     elif provider == "saas":
-        # URL/KEY 三级 fallback · 与 finance_data_client / unified_fetcher 一致。
-        # 只填 HUNTER_API_KEY 就自动通往官方 finance-data.agentpit.io。
-        _DEFAULT_SAAS_URL = "https://finance-data.agentpit.io"
-        # 与 finance_data_client / sentinel 同一个入口 · 含数据库里网页填的 key
+        # URL/KEY 的解析顺序见 finance_data_auth；与 finance_data_client /
+        # sentinel 共用入口，包含默认网关和数据库里网页填写的 key。
         from app.services import finance_data_auth as _auth
         from app.services import hunter_key
         from .hunter_tools import HunterKeyRequired
