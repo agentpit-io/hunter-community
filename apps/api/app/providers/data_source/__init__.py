@@ -46,13 +46,19 @@ def get_data_source() -> IDataSource:
         _DEFAULT_SAAS_URL = "https://finance-data.agentpit.io"
         # 与 finance_data_client / sentinel 同一个入口 · 含数据库里网页填的 key
         from app.services import finance_data_auth as _auth
+        from app.services import hunter_key
+        from .hunter_tools import HunterKeyRequired
         url = _auth.data_url()
         key = _auth.data_token()
         if not key:
-            raise RuntimeError(
+            # HunterKeyRequired, not a bare RuntimeError: _provider_get_quote_sync
+            # re-raises only this type so the FastAPI handler can turn it into the
+            # structured hunter_key_required response instead of a silent None.
+            raise HunterKeyRequired(
                 "DATA_SOURCE_PROVIDER=saas requires a key. "
                 "Set HUNTER_API_KEY (统一 key) or HUNTER_SAAS_DATA_KEY (独立数据 key). "
-                "Free-tier: https://hunter.agentpit.io/dev/api-keys"
+                "Free-tier: https://hunter.agentpit.io/dev/api-keys",
+                hunter_key.APPLY_URL,
             )
         from .saas import SaasDataSource
         _INSTANCE = SaasDataSource(url, key)
