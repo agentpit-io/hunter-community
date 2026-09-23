@@ -51,6 +51,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "AmirF194",
+      "name": "Amir Fathi",
+      "avatar_url": "https://avatars.githubusercontent.com/u/26088029?v=4",
+      "profile": "https://fastinfer.org/",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "commitType": "docs"
