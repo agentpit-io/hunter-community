@@ -42,6 +42,15 @@
       "contributions": [
         "maintenance"
       ]
+    },
+    {
+      "login": "fatihcvs",
+      "name": "fatihcvs",
+      "avatar_url": "https://avatars.githubusercontent.com/u/105765934?v=4",
+      "profile": "https://github.com/fatihcvs",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "commitType": "docs"
