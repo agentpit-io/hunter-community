@@ -80,6 +80,67 @@ platform's environment-variable panel.
 
 ---
 
+## 🖥 Desktop launcher (recommended if you'd rather not touch a terminal)
+
+**Download → paste one key → wait a few minutes, and the whole HunterCode stack installs itself. No commands to type.**
+
+Open it and follow the wizard: welcome → key → one-time consent → pick a model → automatic install.
+Detecting Docker, choosing a download mirror, picking free ports, writing the config, pulling images
+and starting containers all run back to back; when it's done it opens your browser for you.
+Launcher repo: [agentpit-io/HunterLauncher](https://github.com/agentpit-io/HunterLauncher) ·
+Walkthrough with screenshots: [www.agentpit.io/en/hunter-community](https://www.agentpit.io/en/hunter-community)
+
+**Current version 0.1.13** (released 2026-09-23 · prerelease)
+
+| Platform | Installer | GitHub | Mirror (reachable from mainland China) |
+|---|---|---|---|
+| **macOS** 12+ · universal (Intel / Apple silicon) | `hunter-launcher_0.1.13_universal.dmg` · 8.09 MiB | [Download](https://github.com/agentpit-io/HunterLauncher/releases/download/launcher-v0.1.13/hunter-launcher_0.1.13_universal.dmg) | [Download](https://www.agentpit.io/media/hunter-launcher/latest/hunter-launcher_0.1.13_universal.dmg) |
+| **Windows** 10 / 11 · x64 | `hunter-launcher_0.1.13_x64-setup.exe` · 3.20 MiB · **recommended** | [Download](https://github.com/agentpit-io/HunterLauncher/releases/download/launcher-v0.1.13/hunter-launcher_0.1.13_x64-setup.exe) | [Download](https://www.agentpit.io/media/hunter-launcher/latest/hunter-launcher_0.1.13_x64-setup.exe) |
+| **Windows** · for group-policy deployment | `hunter-launcher_0.1.13_x64_en-US.msi` · 4.23 MiB | [Download](https://github.com/agentpit-io/HunterLauncher/releases/download/launcher-v0.1.13/hunter-launcher_0.1.13_x64_en-US.msi) | [Download](https://www.agentpit.io/media/hunter-launcher/latest/hunter-launcher_0.1.13_x64_en-US.msi) |
+| **Linux** x64 | `hunter-launcher_0.1.13_amd64.deb` · 4.65 MiB / `_amd64.AppImage` · 79.35 MiB | [Releases](https://github.com/agentpit-io/HunterLauncher/releases/tag/launcher-v0.1.13) | [deb](https://hunter-dl-hk-1253756459.cos.ap-hongkong.myqcloud.com/launcher/0.1.13/hunter-launcher_0.1.13_amd64.deb) / [AppImage](https://hunter-dl-hk-1253756459.cos.ap-hongkong.myqcloud.com/launcher/0.1.13/hunter-launcher_0.1.13_amd64.AppImage) (Tencent Cloud HK) |
+
+> sha256 checksums: [checksums.txt](https://www.agentpit.io/media/hunter-launcher/latest/checksums.txt) ·
+> `latest/` always points at the newest build; a version-pinned copy is kept alongside it
+> (swap `latest` for `0.1.13` in any URL above — the bytes are identical).
+
+**System requirements**
+
+* **macOS 12+** (Intel / Apple silicon, one universal build) — **you do not need to install Docker first.**
+  If this machine has no Docker, the launcher prepares a runtime for you (a bundled Colima + Lima,
+  entirely under `~/.hunter/runtime`). It never touches your existing `~/.colima`, `~/.lima`,
+  or anyone else's containers and volumes. If OrbStack / Docker Desktop / Colima is already here,
+  it downloads nothing at all.
+* **Windows 10 / 11 · x64** — **you must install
+  [Docker Desktop](https://www.docker.com/products/docker-desktop/) and WSL2 yourself first.**
+  Installing Docker Desktop on Windows needs WSL and administrator rights, and the launcher
+  does not do that path in this version. Once Docker Desktop is up, come back and hit "re-detect".
+
+**The installers are not code-signed, so the first launch needs one extra click**
+
+* **Windows**: SmartScreen will stop you — click "**More info**" → "**Run anyway**".
+* **macOS**: **don't double-click.** Right-click the icon → **Open**, then confirm "**Open**" in the dialog.
+
+**Where this actually stands**
+
+* This is **0.1.13, a prerelease**. Every build is marked prerelease for exactly the reason above:
+  the packages are not code-signed.
+* **macOS has been verified on real hardware end to end**: on 2026-09-23, on Intel · macOS 14.8.5,
+  we ran through automatic runtime preparation (the VM layer ran on a real VM for the first time),
+  boot-state self-check, the daily scheduled backup (a force-triggered LaunchAgent produced a real
+  backup), app removal, and the full **backup → remove → reinstall → restore** loop
+  (reinstall in 57 s, 6/6 services healthy, existing data reused as-is).
+  · Known issue: **self-update does not work on macOS in this version** (it downloads the Linux
+  package). To upgrade, download the new installer manually and install over the old one.
+* **Windows has not been verified on real hardware**: it compiles and packages in CI, but
+  **it has never been run on an actual Windows machine**. If you're the first, please tell us
+  at [Issues](https://github.com/agentpit-io/HunterLauncher/issues).
+* Linux has been exercised on a real test machine: clean install, upgrade, rollback and offline import.
+
+> Prefer the command line, or installing onto a remote server? Keep reading "Deploy in 5 minutes" —
+> both routes install exactly the same thing.
+
+---
+
 ## 🚀 Deploy in 5 minutes
 
 **You need**: Docker Desktop (Windows / macOS) or Docker Engine + Compose v2 (Linux) · 10 GB disk · 4 GB RAM (measured peak ~1.3 GB) · access to `ghcr.io`
