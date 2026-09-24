@@ -89,7 +89,7 @@ HunterCode 是腾讯 WorkBuddy 金融版的开源本地替代方案 · 面向私
 | **macOS** 12+ · Intel / Apple 芯片通用 | [hunter-launcher-latest-universal.dmg](https://www.agentpit.io/media/hunter-launcher/latest/hunter-launcher-latest-universal.dmg) | [GitHub Releases](https://github.com/agentpit-io/HunterLauncher/releases) |
 | **Windows** 10 / 11 · x64 · **推荐** | [hunter-launcher-latest-x64-setup.exe](https://www.agentpit.io/media/hunter-launcher/latest/hunter-launcher-latest-x64-setup.exe) | [GitHub Releases](https://github.com/agentpit-io/HunterLauncher/releases) |
 | **Windows** · 组策略分发 | [hunter-launcher-latest-x64.msi](https://www.agentpit.io/media/hunter-launcher/latest/hunter-launcher-latest-x64.msi) | [GitHub Releases](https://github.com/agentpit-io/HunterLauncher/releases) |
-| **Linux** x64 | deb / AppImage 见 [Releases](https://github.com/agentpit-io/HunterLauncher/releases) | 腾讯云香港镜像同步中 |
+| **Linux** x64 | [hunter-launcher-latest-amd64.deb](https://www.agentpit.io/media/hunter-launcher/latest/hunter-launcher-latest-amd64.deb) / [.AppImage](https://www.agentpit.io/media/hunter-launcher/latest/hunter-launcher-latest-amd64.AppImage) | [GitHub Releases](https://github.com/agentpit-io/HunterLauncher/releases) |
 
 > 这几个链接是**固定的**:每次发版都会把最新安装包覆盖到同一个地址,
 > 所以收藏它、贴进文章、做成二维码都不会失效。

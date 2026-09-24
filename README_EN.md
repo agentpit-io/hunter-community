@@ -97,7 +97,7 @@ Walkthrough with screenshots: [www.agentpit.io/en/hunter-community](https://www.
 | **macOS** 12+ · universal (Intel / Apple silicon) | [hunter-launcher-latest-universal.dmg](https://www.agentpit.io/media/hunter-launcher/latest/hunter-launcher-latest-universal.dmg) | [GitHub Releases](https://github.com/agentpit-io/HunterLauncher/releases) |
 | **Windows** 10 / 11 · x64 · **recommended** | [hunter-launcher-latest-x64-setup.exe](https://www.agentpit.io/media/hunter-launcher/latest/hunter-launcher-latest-x64-setup.exe) | [GitHub Releases](https://github.com/agentpit-io/HunterLauncher/releases) |
 | **Windows** · group-policy deployment | [hunter-launcher-latest-x64.msi](https://www.agentpit.io/media/hunter-launcher/latest/hunter-launcher-latest-x64.msi) | [GitHub Releases](https://github.com/agentpit-io/HunterLauncher/releases) |
-| **Linux** x64 | deb / AppImage on [Releases](https://github.com/agentpit-io/HunterLauncher/releases) | Tencent Cloud HK mirror |
+| **Linux** x64 | [hunter-launcher-latest-amd64.deb](https://www.agentpit.io/media/hunter-launcher/latest/hunter-launcher-latest-amd64.deb) / [.AppImage](https://www.agentpit.io/media/hunter-launcher/latest/hunter-launcher-latest-amd64.AppImage) | [GitHub Releases](https://github.com/agentpit-io/HunterLauncher/releases) |
 
 > These URLs are **stable**: every release overwrites the same paths, so you can bookmark them,
 > put them in a blog post or turn them into a QR code without them going stale.
