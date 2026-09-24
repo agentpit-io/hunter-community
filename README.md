@@ -557,6 +557,7 @@ python scripts/check_skill_sync.py       # 比对磁盘与 opencode 实际加载
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/ZGRX"><img src="https://avatars.githubusercontent.com/u/146192810?v=4?s=72" width="72px;" alt="Ricey"/><br /><sub><b>Ricey</b></sub></a><br /><a href="#maintenance-ZGRX" title="Maintenance">🚧</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/fatihcvs"><img src="https://avatars.githubusercontent.com/u/105765934?v=4?s=72" width="72px;" alt="fatihcvs"/><br /><sub><b>fatihcvs</b></sub></a><br /><a href="https://github.com/agentpit-io/hunter-community/commits?author=fatihcvs" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://fastinfer.org/"><img src="https://avatars.githubusercontent.com/u/26088029?v=4?s=72" width="72px;" alt="Amir Fathi"/><br /><sub><b>Amir Fathi</b></sub></a><br /><a href="https://github.com/agentpit-io/hunter-community/commits?author=AmirF194" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/hangeaiagent"><img src="https://avatars.githubusercontent.com/u/203139500?v=4?s=72" width="72px;" alt="hangeaiagent"/><br /><sub><b>hangeaiagent</b></sub></a><br /><a href="https://github.com/agentpit-io/hunter-community/commits?author=hangeaiagent" title="Code">💻</a></td>
     </tr>
   </tbody>
 </table>
