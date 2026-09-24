@@ -82,18 +82,22 @@ HunterCode 是腾讯 WorkBuddy 金融版的开源本地替代方案 · 面向私
 启动器仓库:[agentpit-io/HunterLauncher](https://github.com/agentpit-io/HunterLauncher) ·
 图文说明与截图:[www.agentpit.io/hunter-community](https://www.agentpit.io/hunter-community)
 
-**当前版本 0.1.13**(2026-09-23 发布 · 预发布)
+![最新版本](https://img.shields.io/github/v/release/agentpit-io/HunterLauncher?include_prereleases&label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC&color=1F6FEB) —— 徽章上就是当前最新版,下面的链接永远指向它,不用找版本号。
 
-| 平台 | 安装包 | GitHub | 国内直链(不用翻墙) |
-|---|---|---|---|
-| **macOS** 12+ · Intel / Apple 芯片通用 | `hunter-launcher_0.1.13_universal.dmg` · 8.09 MiB | [下载](https://github.com/agentpit-io/HunterLauncher/releases/download/launcher-v0.1.13/hunter-launcher_0.1.13_universal.dmg) | [下载](https://www.agentpit.io/media/hunter-launcher/latest/hunter-launcher_0.1.13_universal.dmg) |
-| **Windows** 10 / 11 · x64 | `hunter-launcher_0.1.13_x64-setup.exe` · 3.20 MiB · **推荐** | [下载](https://github.com/agentpit-io/HunterLauncher/releases/download/launcher-v0.1.13/hunter-launcher_0.1.13_x64-setup.exe) | [下载](https://www.agentpit.io/media/hunter-launcher/latest/hunter-launcher_0.1.13_x64-setup.exe) |
-| **Windows** · 组策略分发 | `hunter-launcher_0.1.13_x64_en-US.msi` · 4.23 MiB | [下载](https://github.com/agentpit-io/HunterLauncher/releases/download/launcher-v0.1.13/hunter-launcher_0.1.13_x64_en-US.msi) | [下载](https://www.agentpit.io/media/hunter-launcher/latest/hunter-launcher_0.1.13_x64_en-US.msi) |
-| **Linux** x64 | `hunter-launcher_0.1.13_amd64.deb` · 4.65 MiB / `_amd64.AppImage` · 79.35 MiB | [Releases](https://github.com/agentpit-io/HunterLauncher/releases/tag/launcher-v0.1.13) | [deb](https://hunter-dl-hk-1253756459.cos.ap-hongkong.myqcloud.com/launcher/0.1.13/hunter-launcher_0.1.13_amd64.deb) / [AppImage](https://hunter-dl-hk-1253756459.cos.ap-hongkong.myqcloud.com/launcher/0.1.13/hunter-launcher_0.1.13_amd64.AppImage)(腾讯云香港) |
+| 平台 | 直接下载(国内可达) | 其他来源 |
+|---|---|---|
+| **macOS** 12+ · Intel / Apple 芯片通用 | [hunter-launcher-latest-universal.dmg](https://www.agentpit.io/media/hunter-launcher/latest/hunter-launcher-latest-universal.dmg) | [GitHub Releases](https://github.com/agentpit-io/HunterLauncher/releases) |
+| **Windows** 10 / 11 · x64 · **推荐** | [hunter-launcher-latest-x64-setup.exe](https://www.agentpit.io/media/hunter-launcher/latest/hunter-launcher-latest-x64-setup.exe) | [GitHub Releases](https://github.com/agentpit-io/HunterLauncher/releases) |
+| **Windows** · 组策略分发 | [hunter-launcher-latest-x64.msi](https://www.agentpit.io/media/hunter-launcher/latest/hunter-launcher-latest-x64.msi) | [GitHub Releases](https://github.com/agentpit-io/HunterLauncher/releases) |
+| **Linux** x64 | deb / AppImage 见 [Releases](https://github.com/agentpit-io/HunterLauncher/releases) | 腾讯云香港镜像同步中 |
 
-> sha256 校验和:[checksums.txt](https://www.agentpit.io/media/hunter-launcher/latest/checksums.txt) ·
-> `latest/` 永远指向最新版,同时保留一份按版本号归档的副本
-> (把上面链接里的 `latest` 换成 `0.1.13` 即可,内容逐字节相同)。
+> 这几个链接是**固定的**:每次发版都会把最新安装包覆盖到同一个地址,
+> 所以收藏它、贴进文章、做成二维码都不会失效。
+>
+> 想要带版本号的包、逐个文件的 sha256、或是历史版本,看
+> [checksums.txt](https://www.agentpit.io/media/hunter-launcher/latest/checksums.txt)、[manifest.json](https://www.agentpit.io/media/hunter-launcher/latest/manifest.json)
+> 与 [Releases](https://github.com/agentpit-io/HunterLauncher/releases)。`manifest.json` 里有当前版本号、发布日期与三个包的
+> 体积和完整 sha256 —— [下载页](https://www.agentpit.io/hunter-launcher) 显示的就是它。
 
 **系统要求**
 
@@ -113,12 +117,12 @@ HunterCode 是腾讯 WorkBuddy 金融版的开源本地替代方案 · 面向私
 
 **现状(如实说明)**
 
-* 当前是 **0.1.13 预发布(prerelease)**。每一版都标 prerelease,原因就是上面那条:包没有代码签名。
+* 目前**每一版都标预发布(prerelease)**,原因就是上面那条:包没有代码签名。
 * **macOS 已在真机验证过全流程**:2026-09-23 在 Intel · macOS 14.8.5 上跑通了自动准备运行环境
   (虚拟机层第一次在真虚拟机上跑通)、开机自检、每日定时备份(LaunchAgent 强制触发后真跑出备份)、
   删除应用,以及「**备份 → 删除 → 重装 → 恢复**」闭环(重装 57 秒、6/6 服务健康、数据原样沿用)。
-  · 已知问题:**macOS 上的「自动更新」这一版不可用**(会下错成 Linux 的包),
-  升级请手动下载新版安装包覆盖安装。
+  · 已知问题:**0.1.13 及更早版本在 macOS 上的「自动更新」不可用**(会下错成 Linux 的包),
+  这几版升级请手动下载新安装包覆盖安装。
 * **Windows 尚未真机验证**:只在 CI 里编译与打包通过,**没有在任何一台真 Windows 上跑过**。
   你是第一个跑的话,欢迎来 [Issues](https://github.com/agentpit-io/HunterLauncher/issues) 说结果。
 * Linux 在测试机上真机跑通过从零安装、升级、回滚与离线导入。
