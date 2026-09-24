@@ -60,6 +60,15 @@
       "contributions": [
         "code"
       ]
+    },
+    {
+      "login": "hangeaiagent",
+      "name": "hangeaiagent",
+      "avatar_url": "https://avatars.githubusercontent.com/u/203139500?v=4",
+      "profile": "https://github.com/hangeaiagent",
+      "contributions": [
+        "code"
+      ]
     }
   ],
   "commitType": "docs"
