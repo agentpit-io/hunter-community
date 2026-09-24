@@ -90,18 +90,23 @@ and starting containers all run back to back; when it's done it opens your brows
 Launcher repo: [agentpit-io/HunterLauncher](https://github.com/agentpit-io/HunterLauncher) ·
 Walkthrough with screenshots: [www.agentpit.io/en/hunter-community](https://www.agentpit.io/en/hunter-community)
 
-**Current version 0.1.13** (released 2026-09-23 · prerelease)
+![Latest release](https://img.shields.io/github/v/release/agentpit-io/HunterLauncher?include_prereleases&label=latest&color=1F6FEB) — the badge shows the current release; the links below always point at it, so you never need to look up a version number.
 
-| Platform | Installer | GitHub | Mirror (reachable from mainland China) |
-|---|---|---|---|
-| **macOS** 12+ · universal (Intel / Apple silicon) | `hunter-launcher_0.1.13_universal.dmg` · 8.09 MiB | [Download](https://github.com/agentpit-io/HunterLauncher/releases/download/launcher-v0.1.13/hunter-launcher_0.1.13_universal.dmg) | [Download](https://www.agentpit.io/media/hunter-launcher/latest/hunter-launcher_0.1.13_universal.dmg) |
-| **Windows** 10 / 11 · x64 | `hunter-launcher_0.1.13_x64-setup.exe` · 3.20 MiB · **recommended** | [Download](https://github.com/agentpit-io/HunterLauncher/releases/download/launcher-v0.1.13/hunter-launcher_0.1.13_x64-setup.exe) | [Download](https://www.agentpit.io/media/hunter-launcher/latest/hunter-launcher_0.1.13_x64-setup.exe) |
-| **Windows** · for group-policy deployment | `hunter-launcher_0.1.13_x64_en-US.msi` · 4.23 MiB | [Download](https://github.com/agentpit-io/HunterLauncher/releases/download/launcher-v0.1.13/hunter-launcher_0.1.13_x64_en-US.msi) | [Download](https://www.agentpit.io/media/hunter-launcher/latest/hunter-launcher_0.1.13_x64_en-US.msi) |
-| **Linux** x64 | `hunter-launcher_0.1.13_amd64.deb` · 4.65 MiB / `_amd64.AppImage` · 79.35 MiB | [Releases](https://github.com/agentpit-io/HunterLauncher/releases/tag/launcher-v0.1.13) | [deb](https://hunter-dl-hk-1253756459.cos.ap-hongkong.myqcloud.com/launcher/0.1.13/hunter-launcher_0.1.13_amd64.deb) / [AppImage](https://hunter-dl-hk-1253756459.cos.ap-hongkong.myqcloud.com/launcher/0.1.13/hunter-launcher_0.1.13_amd64.AppImage) (Tencent Cloud HK) |
+| Platform | Direct download (reachable from mainland China) | Other sources |
+|---|---|---|
+| **macOS** 12+ · universal (Intel / Apple silicon) | [hunter-launcher-latest-universal.dmg](https://www.agentpit.io/media/hunter-launcher/latest/hunter-launcher-latest-universal.dmg) | [GitHub Releases](https://github.com/agentpit-io/HunterLauncher/releases) |
+| **Windows** 10 / 11 · x64 · **recommended** | [hunter-launcher-latest-x64-setup.exe](https://www.agentpit.io/media/hunter-launcher/latest/hunter-launcher-latest-x64-setup.exe) | [GitHub Releases](https://github.com/agentpit-io/HunterLauncher/releases) |
+| **Windows** · group-policy deployment | [hunter-launcher-latest-x64.msi](https://www.agentpit.io/media/hunter-launcher/latest/hunter-launcher-latest-x64.msi) | [GitHub Releases](https://github.com/agentpit-io/HunterLauncher/releases) |
+| **Linux** x64 | [hunter-launcher-latest-amd64.deb](https://www.agentpit.io/media/hunter-launcher/latest/hunter-launcher-latest-amd64.deb) / [.AppImage](https://www.agentpit.io/media/hunter-launcher/latest/hunter-launcher-latest-amd64.AppImage) | [GitHub Releases](https://github.com/agentpit-io/HunterLauncher/releases) |
 
-> sha256 checksums: [checksums.txt](https://www.agentpit.io/media/hunter-launcher/latest/checksums.txt) ·
-> `latest/` always points at the newest build; a version-pinned copy is kept alongside it
-> (swap `latest` for `0.1.13` in any URL above — the bytes are identical).
+> These URLs are **stable**: every release overwrites the same paths, so you can bookmark them,
+> put them in a blog post or turn them into a QR code without them going stale.
+>
+> For version-pinned packages, per-file sha256 or older builds, see
+> [checksums.txt](https://www.agentpit.io/media/hunter-launcher/latest/checksums.txt), [manifest.json](https://www.agentpit.io/media/hunter-launcher/latest/manifest.json)
+> and [Releases](https://github.com/agentpit-io/HunterLauncher/releases). `manifest.json` carries the current version, release date,
+> size and full sha256 of each package — it's what the
+> [download page](https://www.agentpit.io/en/hunter-launcher) renders.
 
 **System requirements**
 
@@ -122,15 +127,16 @@ Walkthrough with screenshots: [www.agentpit.io/en/hunter-community](https://www.
 
 **Where this actually stands**
 
-* This is **0.1.13, a prerelease**. Every build is marked prerelease for exactly the reason above:
+* **Every build is marked prerelease** for exactly the reason above:
   the packages are not code-signed.
 * **macOS has been verified on real hardware end to end**: on 2026-09-23, on Intel · macOS 14.8.5,
   we ran through automatic runtime preparation (the VM layer ran on a real VM for the first time),
   boot-state self-check, the daily scheduled backup (a force-triggered LaunchAgent produced a real
   backup), app removal, and the full **backup → remove → reinstall → restore** loop
   (reinstall in 57 s, 6/6 services healthy, existing data reused as-is).
-  · Known issue: **self-update does not work on macOS in this version** (it downloads the Linux
-  package). To upgrade, download the new installer manually and install over the old one.
+  · Known issue: **self-update does not work on macOS in 0.1.13 and earlier** (it downloads the
+  Linux package). On those builds, upgrade by downloading the new installer and installing over
+  the old one.
 * **Windows has not been verified on real hardware**: it compiles and packages in CI, but
   **it has never been run on an actual Windows machine**. If you're the first, please tell us
   at [Issues](https://github.com/agentpit-io/HunterLauncher/issues).
