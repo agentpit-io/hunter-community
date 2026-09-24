@@ -60,7 +60,7 @@ services:
   api:
     # HUNTER_VERSION / HUNTER_REGISTRY 见 .env.example。**钉具体版本,别用 latest** ——
     # 浮动标签意味着某次 pull 会无声换掉运行的代码,排查时连「什么时候变的」都查不出来。
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-api:${HUNTER_VERSION:-1.2.1}
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-api:${HUNTER_VERSION:-1.2.2}
     <<: *restart
     depends_on:
       postgres:
@@ -223,7 +223,7 @@ services:
       - "${API_HOST_PORT:-8100}:8000"
 
   web:
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-web:${HUNTER_VERSION:-1.2.1}
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-web:${HUNTER_VERSION:-1.2.2}
     <<: *restart
     depends_on:
       - api
@@ -267,7 +267,7 @@ services:
     # 原来是裸 python:3.12-alpine + 挂 ./scripts/llm-shim。现在源码打进镜像
     # (deploy/llm-shim.Dockerfile),command 与 healthcheck 也在镜像里,
     # 这样不写 compose 的平台(K8s / 云平台表单)拿到的是同一套行为。
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-llm-shim:${HUNTER_VERSION:-1.2.1}
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-llm-shim:${HUNTER_VERSION:-1.2.2}
     <<: *restart
     environment:
       # 监听地址。默认 0.0.0.0;Railway 的老环境私有网络是 IPv6-only,那里设 `::`。
@@ -289,7 +289,7 @@ services:
     # 所以这个服务不再需要任何 bind mount。
     #
     # 换源(自建 registry / 国内镜像)改 HUNTER_REGISTRY,见 .env.example。
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-opencode:${HUNTER_VERSION:-1.2.1}
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-opencode:${HUNTER_VERSION:-1.2.2}
     <<: *restart
     depends_on:
       api:

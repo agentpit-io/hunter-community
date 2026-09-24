@@ -3,6 +3,40 @@
 All notable changes to HunterCode · Community Edition follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] - 2026-09-25
+
+> 补丁版本,无数据库变更、无新环境变量。
+> 升级:`.env` 里的 `HUNTER_VERSION` 改成 `1.2.2`(没写的不用改),然后
+> `docker compose pull && docker compose up -d`。桌面启动器用户点「升级」即可。
+
+**上线前实测**:opencode 新镜像在断网状态下启动,`/path` 0.18 秒返回、日志里没有任何依赖安装
+(1.2.1 镜像同样条件下 60 秒仍超时);登录中间件新增用例 9 项全过;CI 与 docker compose 端到端通过。
+
+
+### 🐛 修复 · Fixed
+
+- **新装 / 升级后模型选择器是空的,点了没反应**(2026-09-25 本机重装实测)。opencode 启动时
+  给三个配置目录现场 `npm install @opencode-ai/plugin`,插件初始化要等它装完;这三个目录不在
+  数据卷里,每次新装或升级都要重装。国内直连 npm 官方源碰上卡死的连接没有总超时,opencode
+  的所有接口(连 `/path` 都算)一直挂着,浏览器里看不到任何报错。现在依赖在构建镜像时装好,
+  启动时检查到已安装就跳过,不再联网。
+- **重装后界面卡在旧登录状态**。数据卷清空而 `JWT_SECRET` 被沿用时,浏览器里的旧 token
+  仍能验签,但用户已不在库里,各接口回 404「用户不存在」;前端只认 401 才会重新登录,
+  于是合规弹层、偏好引导都不出现,多处功能静默失败。现在登录中间件验签后再确认用户存在,
+  不存在回 401,单用户模式下前端会自动换一把新 token,用户无感。
+- **选股器**:追加模式下点「VCP 波段收缩」报不认识 `sma50`;点官方示例改为按「追加 / 替换」
+  开关合并,不再一律替换。
+- **平台数据源缺 key 时静默返回空行情**,现在正确提示去申请 Hunter key(外部贡献 #44)。
+- **安全**:去掉 api 里误带的 SaaS 数据库连接串默认值,改为与 compose 一致的本地默认值。
+  各部署方式都显式设置 `DATABASE_URL`,不受影响。
+
+### 🔧 其他 · Changed
+
+- Windows 上 `pip install -r requirements.txt` 不再因 uvloop 失败;新增 `requirements-dev.txt`。
+- 后端用例、SKILL 检查与策略页自检接入 CI,前端类型检查改为阻塞。
+- README:新增桌面启动器下载一节;数据源默认值与港美股来源说明更正。
+
+
 ## [1.2.1] - 2026-09-22
 
 > 补丁版本,只修内置额度的两个接入问题,无数据库变更、无新环境变量。
