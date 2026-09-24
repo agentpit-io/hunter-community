@@ -73,6 +73,60 @@ HunterCode 是腾讯 WorkBuddy 金融版的开源本地替代方案 · 面向私
 
 ---
 
+## 🖥 桌面启动器(推荐给不熟悉命令行的用户)
+
+**下载 → 填一把 key → 等几分钟,整套 HunterCode 自动装好,全程不用敲一条命令。**
+
+装完打开按向导走:欢迎 → 填 key → 一次授权 → 选模型 → 自动安装。检测 Docker、挑下载源、
+算端口、写配置、拉镜像、起容器由它连着跑完,装好自动打开浏览器。
+启动器仓库:[agentpit-io/HunterLauncher](https://github.com/agentpit-io/HunterLauncher) ·
+图文说明与截图:[www.agentpit.io/hunter-community](https://www.agentpit.io/hunter-community)
+
+**当前版本 0.1.13**(2026-09-23 发布 · 预发布)
+
+| 平台 | 安装包 | GitHub | 国内直链(不用翻墙) |
+|---|---|---|---|
+| **macOS** 12+ · Intel / Apple 芯片通用 | `hunter-launcher_0.1.13_universal.dmg` · 8.09 MiB | [下载](https://github.com/agentpit-io/HunterLauncher/releases/download/launcher-v0.1.13/hunter-launcher_0.1.13_universal.dmg) | [下载](https://www.agentpit.io/media/hunter-launcher/latest/hunter-launcher_0.1.13_universal.dmg) |
+| **Windows** 10 / 11 · x64 | `hunter-launcher_0.1.13_x64-setup.exe` · 3.20 MiB · **推荐** | [下载](https://github.com/agentpit-io/HunterLauncher/releases/download/launcher-v0.1.13/hunter-launcher_0.1.13_x64-setup.exe) | [下载](https://www.agentpit.io/media/hunter-launcher/latest/hunter-launcher_0.1.13_x64-setup.exe) |
+| **Windows** · 组策略分发 | `hunter-launcher_0.1.13_x64_en-US.msi` · 4.23 MiB | [下载](https://github.com/agentpit-io/HunterLauncher/releases/download/launcher-v0.1.13/hunter-launcher_0.1.13_x64_en-US.msi) | [下载](https://www.agentpit.io/media/hunter-launcher/latest/hunter-launcher_0.1.13_x64_en-US.msi) |
+| **Linux** x64 | `hunter-launcher_0.1.13_amd64.deb` · 4.65 MiB / `_amd64.AppImage` · 79.35 MiB | [Releases](https://github.com/agentpit-io/HunterLauncher/releases/tag/launcher-v0.1.13) | [deb](https://hunter-dl-hk-1253756459.cos.ap-hongkong.myqcloud.com/launcher/0.1.13/hunter-launcher_0.1.13_amd64.deb) / [AppImage](https://hunter-dl-hk-1253756459.cos.ap-hongkong.myqcloud.com/launcher/0.1.13/hunter-launcher_0.1.13_amd64.AppImage)(腾讯云香港) |
+
+> sha256 校验和:[checksums.txt](https://www.agentpit.io/media/hunter-launcher/latest/checksums.txt) ·
+> `latest/` 永远指向最新版,同时保留一份按版本号归档的副本
+> (把上面链接里的 `latest` 换成 `0.1.13` 即可,内容逐字节相同)。
+
+**系统要求**
+
+* **macOS 12+**(Intel / Apple 芯片通用)—— **不需要你先装 Docker**。本机没有 Docker 时,
+  启动器会自己准备一套运行环境(内置 Colima + Lima,全装在 `~/.hunter/runtime`),
+  不碰你已有的 `~/.colima`、`~/.lima`、别人的容器与数据卷。本机已有 OrbStack /
+  Docker Desktop / Colima 的话它一个字节都不下。
+* **Windows 10 / 11 · x64** —— **需要你先装好
+  [Docker Desktop](https://www.docker.com/products/docker-desktop/) 与 WSL2**。
+  Windows 上装 Docker Desktop 要 WSL 与管理员权限,启动器这一版还没有做这条链路;
+  装好 Docker Desktop 之后回来点一次「重新检测」就能继续。
+
+**安装包没有做代码签名,第一次打开要放行一下**
+
+* **Windows**:SmartScreen 会拦一下 —— 点「**更多信息**」→「**仍要运行**」。
+* **macOS**:**不要双击**,在图标上**右键 → 打开**,在弹出的对话框里再点一次「**打开**」。
+
+**现状(如实说明)**
+
+* 当前是 **0.1.13 预发布(prerelease)**。每一版都标 prerelease,原因就是上面那条:包没有代码签名。
+* **macOS 已在真机验证过全流程**:2026-09-23 在 Intel · macOS 14.8.5 上跑通了自动准备运行环境
+  (虚拟机层第一次在真虚拟机上跑通)、开机自检、每日定时备份(LaunchAgent 强制触发后真跑出备份)、
+  删除应用,以及「**备份 → 删除 → 重装 → 恢复**」闭环(重装 57 秒、6/6 服务健康、数据原样沿用)。
+  · 已知问题:**macOS 上的「自动更新」这一版不可用**(会下错成 Linux 的包),
+  升级请手动下载新版安装包覆盖安装。
+* **Windows 尚未真机验证**:只在 CI 里编译与打包通过,**没有在任何一台真 Windows 上跑过**。
+  你是第一个跑的话,欢迎来 [Issues](https://github.com/agentpit-io/HunterLauncher/issues) 说结果。
+* Linux 在测试机上真机跑通过从零安装、升级、回滚与离线导入。
+
+> 想自己敲命令,或者要装到远程服务器上,往下看「5 分钟跑起来」—— 两条路装出来的是同一套东西。
+
+---
+
 ## 🚀 5 分钟跑起来
 
 **准备**:Docker Desktop(Windows / macOS)或 Docker Engine + Compose v2(Linux) · 磁盘 10 GB · 内存 4 GB(实测峰值约 1.3 GB) · 能访问 `ghcr.io`
