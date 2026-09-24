@@ -111,6 +111,55 @@ async function hermes(
   }
 }
 
+// ─── 模型身份 · 让模型如实说出自己是谁 ─────────────────────────────
+//
+// 2026-09-22 用户实报:选择器显示「Gemini 3.8 Flash」,问「什么版本」模型却答
+// 「Gemini 1.5 Flash」。上游确实是 3.8(网关渠道映射 hunter-chat → gemini-3.8-flash,
+// 每次回复都带思考签名与思考 token,1.5 两样都没有)—— 是模型**不知道自己的版本**,
+// 只能拿训练数据里的旧名字猜。直接调网关时它答对,是因为没有人设提示词干扰。
+//
+// 所以把「当前在用哪个模型」写进 system。名字取自 opencode 的 provider 清单,
+// 与前端模型选择器**同一个来源**(内置额度下是网关给的展示名,自带 key 下就是模型名),
+// 换模型时自动跟着变,不在这里写死任何一个名字。取不到就**不注入** —— 宁可不说,不猜。
+let _modelNames: { at: number; names: Map<string, string>; current: string } | null = null
+const MODEL_NAMES_TTL_MS = 30_000
+
+async function opencodeGet(path: string): Promise<any> {
+  const res = await fetch(`${OPENCODE_URL.replace(/\/$/, '')}${path}`, {
+    headers: { Authorization: BASIC_AUTH }, cache: 'no-store',
+  })
+  if (!res.ok) throw new Error(`opencode ${path} HTTP ${res.status}`)
+  return res.json()
+}
+
+async function modelIdentity(model: any): Promise<string> {
+  try {
+    if (!_modelNames || Date.now() - _modelNames.at > MODEL_NAMES_TTL_MS) {
+      const [cfg, prov] = await Promise.all([opencodeGet('/config'), opencodeGet('/config/providers')])
+      const names = new Map<string, string>()
+      for (const p of prov?.providers || []) {
+        for (const [mid, m] of Object.entries<any>(p?.models || {})) {
+          names.set(`${p.id}/${mid}`, String(m?.name || mid))
+        }
+      }
+      _modelNames = { at: Date.now(), names, current: typeof cfg?.model === 'string' ? cfg.model : '' }
+    }
+    // 请求里显式带了模型就用它(用户在选择器里挑的),否则是 opencode 当前选定的那个
+    const key = model?.providerID && model?.modelID
+      ? `${model.providerID}/${model.modelID}` : _modelNames.current
+    const name = key ? _modelNames.names.get(key) : ''
+    if (!name || name === 'hunter-unconfigured') return ''
+    const mid = key.split('/').slice(1).join('/')
+    return `【模型身份】
+- 你当前运行在「${name}」上${mid && mid !== name ? `(本部署里的模型 ID 是 ${mid})` : ''}。
+- 用户问「你是什么模型 / 哪个版本」时,**如实回答「${name}」**。不要凭记忆报版本号 ——
+  你训练数据里的旧版本名(例如某个更早的版本)不代表你现在运行的版本。`
+  } catch (e) {
+    console.warn('[bff] 取模型展示名失败(不注入模型身份):', e)
+    return ''
+  }
+}
+
 /** 我拥有的 session id 集合 */
 async function ownedIds(token: string): Promise<Set<string> | 'unauthorized' | null> {
   const r = await hermes('GET', '/api/chat/sessions', token)
@@ -744,6 +793,8 @@ async function handle(req: Request, segs: string[]): Promise<Response> {
 ❌ 错误: 调 \`truesource_get_quote\` / \`akshare_ak_spot_a\` / \`kronos_kronos_forecast\` —— 这些工具在本部署里**不存在**,调用必失败`
 
           body.system = userProfile ? `${baseSystem}\n\n【用户偏好】\n${userProfile}` : baseSystem
+          const identity = await modelIdentity(body.model)
+          if (identity) body.system = `${body.system}\n\n${identity}`
         }
 
         // ── 用户在能力库点选的 SKILL ────────────────────────────
