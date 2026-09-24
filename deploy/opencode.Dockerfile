@@ -15,7 +15,35 @@
 #
 # 构建上下文是**仓库根**(要 COPY skills/ 和 scripts/,它们不在同一子目录下):
 #   docker build -f deploy/opencode.Dockerfile -t hunter-community-opencode .
+
+# ── 插件依赖 · 构建时装好,启动时不再联网 ─────────────────────────
+#
+# opencode 启动时会给三个配置目录各装一次 `@opencode-ai/plugin`
+# (~/.config/opencode、/opt/opencode-workspace、/opt/opencode-workspace/.opencode),
+# **只要目录里没有 node_modules 就现场 npm install**;而我们的两个插件要等这一步装完
+# 才初始化(opencode 源码 plugin/index.ts 里的 waitForDependencies)。
+#
+# 这三个目录都不在数据卷里,所以每次新装 / 升级重建容器都要重装一遍。npm 下载没有
+# 总超时,国内直连 registry.npmjs.org 一旦碰上卡死的连接,opencode 所有接口(连 /path
+# 都算)就一直挂着 —— 2026-09-25 本机重装实测:装完 10 分钟模型选择器还是空的,
+# 浏览器里看不到任何报错,重启容器(依赖已在)8 秒就好。
+#
+# 在这里预先装好,并带上 package.json 与 package-lock.json:opencode 看到 node_modules
+# 存在、锁文件里也有 @opencode-ai/plugin,就整个跳过安装(core/src/npm.ts 的 install)。
+# ⚠️ 版本必须与基础镜像的 opencode 版本一致(它装的是 @opencode-ai/plugin@<自身版本>),
+#    升级基础镜像时这里一起改;对不上的话锁文件检查照样通过,但插件接口可能不匹配。
+FROM node:22-slim AS plugin-deps
+ARG OPENCODE_PLUGIN_VERSION=1.18.12
+WORKDIR /deps
+RUN printf '{\n  "dependencies": {\n    "@opencode-ai/plugin": "%s"\n  }\n}\n' "$OPENCODE_PLUGIN_VERSION" > package.json \
+ && npm install --ignore-scripts --no-audit --no-fund --omit=dev \
+ && test -d node_modules/@opencode-ai/plugin
+
 FROM ghcr.io/agentpit-io/hunter-opencode:1.18.12-slim.1
+
+COPY --from=plugin-deps --chown=1001:1001 /deps/ /home/hunter/.config/opencode/
+COPY --from=plugin-deps --chown=1001:1001 /deps/ /opt/opencode-workspace/
+COPY --from=plugin-deps --chown=1001:1001 /deps/ /opt/opencode-workspace/.opencode/
 
 # ── 启动脚本 · gen-config.py · HUNTER-AGENT.md ────────────────
 # 原挂载:./scripts/opencode:/opt/hunter-boot:ro
