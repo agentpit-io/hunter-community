@@ -10,7 +10,9 @@
     if (!r.ok) throw new Error(r.status === 401 ? '请登录后编辑个人规则' : (d.detail || '请求失败'));
     return d;
   }
-  window.openAgentRules = async function (branch) {
+  window.openAgentRules = branch => openPanel(branch, false);
+  window.openAgentBacktest = branch => openPanel(branch, true);
+  async function openPanel(branch, backtest) {
     if (!['limitup','limitup_yin'].includes(branch)) return;
     const token = ++generation;
     clearTimeout(timer);
@@ -19,7 +21,7 @@
     dialog = document.createElement('dialog');
     dialog.id = 'manual-rules-dialog';
     dialog.style.cssText = 'width:min(880px,94vw);max-height:90vh;overflow:auto;border:1px solid #ddd;border-radius:14px;padding:24px;background:#fff;color:#243746';
-    dialog.innerHTML = '<button type="button" style="float:right" id="mr-close">关闭</button><h2>编辑规则与手动回测</h2><div id="mr-content">加载中…</div>';
+    dialog.innerHTML = '<button class="btn small" type="button" style="float:right" id="mr-close">关闭</button><h2>' + (backtest ? '手动回测' : '编辑规则') + '</h2><div id="mr-content">加载中…</div>';
     document.body.appendChild(dialog);
     dialog.showModal();
     dialog.querySelector('#mr-close').onclick = () => dialog.close();
@@ -73,7 +75,7 @@
       const start = new Date(end); start.setFullYear(start.getFullYear() - 1);
       if (cfg.data_first && start < new Date(cfg.data_first)) start.setTime(new Date(cfg.data_first + 'T12:00:00Z').getTime());
       const iso = d => d.toISOString().slice(0, 10);
-      root.innerHTML = '<p>修改保存为你的个人版本，公共看板规则和历史记录保留。下方回测只使用对应的已保存版本。</p>' +
+      const editor = '<p>修改保存为你的个人版本。保存成功后，可关闭此窗口，在规则区点击“手动回测”。</p>' +
         '<form id="mr-form">' + number('amount','每个信号买入金额（元）',100,100000,100) +
         number('hold_days','持有交易日数',1,60,1) +
         (yin ? '<p>交易板块：沪深主板；信号：涨停后连续三根阴线。</p>' :
@@ -82,14 +84,24 @@
           number('amp_max','三天整理幅度上限（%，留空表示不限）',0.1,100,0.1) +
           check('no_all_shrink','排除三天成交量都低于涨停日')) +
         '<p>涨停判定、三天整理信号、成交与手续费口径沿用引擎；参数改动会实际参与回测。</p>' +
-        '<button type="submit">保存规则</button> <span id="mr-version">当前个人版本 v' + cfg.version + '</span></form>' +
-        '<hr><label>开始日期 <input id="mr-start" type="date" value="' + iso(start) + '"></label> ' +
+        '<div style="position:sticky;bottom:-24px;background:#fff;border-top:1px solid #ddd;padding:16px 0;margin-top:16px;display:flex;gap:16px;align-items:center"><button class="btn primary" id="mr-save" type="submit">保存规则</button> <span id="mr-version">当前个人版本 v' + cfg.version + '</span></div></form>';
+      const runner = '<p>使用已保存的个人版本 v' + cfg.version + ' 回测。修改条件请先关闭此窗口，点击规则区的“编辑规则”。</p>' +
+        '<label>开始日期 <input id="mr-start" type="date" value="' + iso(start) + '"></label> ' +
         '<label>结束日期 <input id="mr-end" type="date" value="' + iso(end) + '"></label> ' +
-        '<button type="button" id="mr-run">手动回测</button><p>最多一年；结束日期须不晚于已入库的最近交易日。</p>' +
-        '<p id="mr-msg" role="status"></p><div id="mr-results"></div>';
+        '<button class="btn primary" type="button" id="mr-run">开始回测</button><p>最多一年；结束日期须不晚于已入库的最近交易日。</p>' +
+        (!cfg.version ? '<p>请先在“编辑规则”中保存一个个人版本。</p>' : '');
+      root.innerHTML = (backtest ? runner : editor) + '<p id="mr-msg" role="status" aria-live="polite"></p>' + (backtest ? '<div id="mr-results"></div>' : '');
       const form = root.querySelector('#mr-form'), runButton = root.querySelector('#mr-run');
-      if (!yin) form.elements.board.value = p.main_only ? 'main' : p.growth_only ? 'growth' : 'all';
-      function buttons() { form.querySelectorAll('input,select').forEach(el => { el.disabled = busy; }); runButton.disabled = busy || dirty || !cfg.version; form.querySelector('button').disabled = busy; }
+      if (form && !yin) form.elements.board.value = p.main_only ? 'main' : p.growth_only ? 'growth' : 'all';
+      function buttons() {
+        if (form) {
+          form.querySelectorAll('input,select').forEach(el => { el.disabled = busy; });
+          form.querySelector('button').disabled = busy;
+          form.querySelector('button').textContent = busy ? '保存中…' : '保存规则';
+        }
+        if (runButton) runButton.disabled = busy || !cfg.version;
+      }
+      if (form) {
       form.addEventListener('input', () => {dirty = true; buttons(); message('有未保存修改，请先保存再回测。');});
       form.onsubmit = async e => {
         e.preventDefault(); if (busy) return;
@@ -102,11 +114,12 @@
           const saved = await request(url, {version:cfg.version, params});
           cfg.version = saved.version; cfg.editable = params; dirty = false;
           if (current()) root.querySelector('#mr-version').textContent = '当前个人版本 v' + cfg.version;
-          message('规则保存成功，可以手动回测。');
+          message('规则保存成功。关闭此窗口后，在规则区点击“手动回测”。');
         } catch (err) { message(err.message); }
         finally { busy = false; if (current()) buttons(); }
       };
-      runButton.onclick = async () => {
+      }
+      if (runButton) runButton.onclick = async () => {
         if (busy || dirty || !cfg.version) return;
         busy = true; buttons();
         try {
@@ -116,8 +129,11 @@
         } catch (err) { message(err.message); }
         finally { busy = false; if (current()) buttons(); }
       };
-      buttons(); drawResults(cfg);
-      if ((cfg.runs || []).some(x => ['queued','running'].includes(x.status))) timer = setTimeout(poll, 1000);
+      buttons();
+      if (backtest) {
+        drawResults(cfg);
+        if ((cfg.runs || []).some(x => ['queued','running'].includes(x.status))) timer = setTimeout(poll, 1000);
+      }
     } catch (e) { if (current()) root.textContent = e.message; }
   };
 })();

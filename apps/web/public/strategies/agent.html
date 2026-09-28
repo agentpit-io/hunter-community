@@ -1101,7 +1101,7 @@ function vRules(d) {
       (stats ? '<div class="ft">' + stats + '</div>' : '') + '</div>'
   }).join('')
   return panel('当前生效的规则', (has ? esc(rs.length + ' 条') : NA) + ' · 交易记录里的 R-xx 都指向这里',
-    (['limitup', 'limitup_yin'].includes(hashBranch()) ? '<button class="btn small" id="ag-edit-rules">编辑规则 / 手动回测</button>' : '') + '<div class="ag-rules" id="ag-rules">' + cards + '</div>' +
+    (['limitup', 'limitup_yin'].includes(hashBranch()) ? '<div style="display:flex;gap:10px;margin-bottom:16px"><button class="btn small" id="ag-edit-rules">编辑规则</button><button class="btn small primary" id="ag-manual-backtest">手动回测</button></div>' : '') + '<div class="ag-rules" id="ag-rules">' + cards + '</div>' +
     '<div class="ag-note" style="margin-top:12px">每条规则都带<b>触发次数与触发后胜率</b> —— ' +
     '没有这两个数,就分不清一条规则是「有效」还是「只是没怎么触发」。</div>')
 }
@@ -1656,6 +1656,8 @@ let watchFitBound = false
 function bindOps() {
   const edit = document.getElementById("ag-edit-rules");
   if (edit) edit.onclick = () => window.openAgentRules(hashBranch());
+  const backtest = document.getElementById("ag-manual-backtest");
+  if (backtest) backtest.onclick = () => window.openAgentBacktest(hashBranch());
   bindTopNav()
   fitBoth()
   bindKChart()          // 悬停日K(app.js)· 内部自带「只绑一次」的闸门
