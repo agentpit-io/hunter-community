@@ -40,6 +40,7 @@
           escape(run.version) + ' · ' + escape(run.start) + '～' + escape(run.end) + '</b><p>' +
           ({queued:'等待回测',running:'回测中 ' + escape(run.progress) + '%',done:'回测完成',failed:'回测失败'}[run.status] || '状态未知') +
           (run.error ? '：' + escape(run.error) : '') + '</p>' +
+          (run.status === 'done' && window.agentOverfitCard ? window.agentOverfitCard(run.overfit) : '') +
           (r ? '<p>净收益 ¥' + fmt(r.net_pnl) + ' · 收益率 ' + fmt(r.return_pct) + '% · 最大回撤 ' + fmt(r.max_drawdown_pct) +
             '%</p><p>已平仓 ' + escape(r.closed) + ' 笔 · 未平仓 ' + escape(r.open) + ' 笔 · 扣费后胜率 ' + fmt(r.win_rate) +
             (r.win_rate == null ? '' : '%') + '</p><p>' + escape(r.note) + '</p><button type="button" data-download="' + escape(run.id) + '">下载回测明细</button>' : '') +
@@ -88,6 +89,9 @@
       const runner = '<p>使用已保存的个人版本 v' + cfg.version + ' 回测。修改条件请先关闭此窗口，点击规则区的“编辑规则”。</p>' +
         '<label>开始日期 <input id="mr-start" type="date" value="' + iso(start) + '"></label> ' +
         '<label>结束日期 <input id="mr-end" type="date" value="' + iso(end) + '"></label> ' +
+        '<p><label>本次假设（为什么有效）<br><textarea id="mr-hypothesis" maxlength="2000" style="width:100%"></textarea></label></p>' +
+        '<p><label>什么结果出现就放弃这个方向<br><textarea id="mr-failure" maxlength="2000" style="width:100%"></textarea></label></p>' +
+        '<p>可留空，但缺失证据不计分。每个方向累计 20 次后提示暂停复核，不自动清零；失败试跑也会留档。</p>' +
         '<button class="btn primary" type="button" id="mr-run">开始回测</button><p>最多一年；结束日期须不晚于已入库的最近交易日。</p>' +
         (!cfg.version ? '<p>请先在“编辑规则”中保存一个个人版本。</p>' : '');
       root.innerHTML = (backtest ? runner : editor) + '<p id="mr-msg" role="status" aria-live="polite"></p>' + (backtest ? '<div id="mr-results"></div>' : '');
@@ -123,7 +127,7 @@
         if (busy || dirty || !cfg.version) return;
         busy = true; buttons();
         try {
-          await request(url + '/backtest', {version:cfg.version, start:root.querySelector('#mr-start').value, end:root.querySelector('#mr-end').value});
+          await request(url + '/backtest', {version:cfg.version, start:root.querySelector('#mr-start').value, end:root.querySelector('#mr-end').value, hypothesis:root.querySelector('#mr-hypothesis')?.value || '', failure_rule:root.querySelector('#mr-failure')?.value || ''});
           message('回测已启动；关闭窗口后仍可回来查看结果。');
           clearTimeout(timer); await poll();
         } catch (err) { message(err.message); }

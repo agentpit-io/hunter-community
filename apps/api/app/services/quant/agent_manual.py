@@ -7,6 +7,7 @@ import uuid
 from bisect import bisect_right
 from datetime import date
 from app.services.quant import agent_run as ar, agent_limitup as engine
+from app.services.quant import agent_overfit as overfit
 
 BRANCHES = {"limitup", "limitup_yin"}
 LOCK = 719280061
@@ -78,9 +79,11 @@ def read(uid, branch):
             cur.execute("SELECT pg_try_advisory_xact_lock(%s)", (LOCK,))
             if cur.fetchone()[0]:
                 runs[0] = dict(runs[0], status="failed", error="回测进程已中断，请重新运行")
+                overfit.record_result(cur, key, runs[0])
                 cfg["runs"] = runs
                 ar._meta_set(cur, key, cfg)
-        out["runs"] = runs
+        out["runs"] = [dict(r, overfit=r.get("overfit") or overfit.manual_report(r))
+                       if r.get("status") == "done" else r for r in runs]
         return out
     return transaction(get)
 
@@ -124,6 +127,7 @@ def submit(uid, branch, body):
             run = {"id": uuid.uuid4().hex, "version": cfg["version"], "params": dict(cfg["params"]),
                    "start": str(start), "end": str(end), "status": "queued", "progress": 0,
                    "created_at": time.time(), "rules": engine.rules_for(cfg["params"])}
+            overfit.record_submit(cur, key, cfg, run, body)
             cfg["runs"] = [run] + cfg.get("runs", [])[:9]
             ar._meta_set(cur, key, cfg)
         conn.commit()
@@ -137,6 +141,7 @@ def persist(conn, key, run):
     with conn.cursor() as cur:
         cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (key,))
         cfg = ar._meta_get(cur, key)
+        overfit.record_result(cur, key, run)
         cfg["runs"] = [dict(run) if x["id"] == run["id"] else x for x in cfg["runs"]]
         ar._meta_set(cur, key, cfg)
     conn.commit()

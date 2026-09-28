@@ -920,7 +920,9 @@ def dashboard(branch: str = "base") -> dict:
     started = days[0][0]
     date_index = {str(r[0]): i for i, r in enumerate(days)}
     versions, marks = _versions_block(st, started, days, branch)
+    from app.services.quant import agent_overfit
     return {
+        "overfit": agent_overfit.public_report(history, [r[0] for r in days], line, branch),
         "enabled": True, "state": state, "paper": True, "version": f"v{st['version']}",
         "branch": branch, "branches": branches, "line": line_block,
         "day_count": len(days), "iteration_count": st["version"] - 1,

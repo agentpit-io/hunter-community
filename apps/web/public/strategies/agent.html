@@ -364,6 +364,7 @@
 </head>
 <body>
 <script src="app.js"></script>
+<script src="agent-overfit.js"></script>
 <script>
 // ═══════════════════════════════════════════════════════════════════
 // 小鹿智能体 · 自迭代量化原型
@@ -592,6 +593,7 @@ function rsCard(ln) {
     (ln.hypothesis ? '<div class="hyp">' + esc(ln.hypothesis) + '</div>' : '') +
     (ln.rules_draft ? '<div class="draft">' + esc(ln.rules_draft) + '</div>' : '') +
     dirs + (kv ? '<div class="rs-sub">全段(含回测)</div>' + kv : '') + oos + verdict + note +
+    (window.agentOverfitCard ? window.agentOverfitCard(ln.overfit) : '') +
     '<div class="rs-foot"><span>' + foot + '</span>' + (btns ? '<span class="btns">' + btns + '</span>' : '') + '</div></div>'
 }
 
@@ -1554,6 +1556,7 @@ function render(d, notice) {
   // 返回 html 而不只是写进 container:render_check.js 靠这个返回值断言区块顺序
   const html = '<div class="ag-wrap">' + vBanner(notice) + vTopNav('dash') + vLineBanner(d) +
     vStatus(d) + vBranches(d) + vStrategy(d) + vGuard(d) + vPipeline(d) + vKpi(d) + vNav(d) +
+    (window.agentOverfitCard ? window.agentOverfitCard(d.overfit) : '') +
     vRules(d) +
     '<div class="ag-two"><div class="ag-col" id="ag-col">' + vHoldings(d) + vHistory(d) + '</div>' + vWatch(d) + '</div>' +
     vVersions(d) + vLessons(d) +
