@@ -1620,3 +1620,41 @@ async def agent_research_unarchive(key: str, request: Request):
         return await asyncio.to_thread(_agent.research_archive, key, False, uid)
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+# 个人规则按登录账号隔离，回测不覆盖公共研究账本。
+from app.services.quant import agent_manual as _manual
+
+
+@router.get("/agent/rules/{branch}")
+async def agent_rules_get(branch: str, request: Request):
+    uid = _need_uid(request)
+    try:
+        return await asyncio.to_thread(_manual.read, uid, branch)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/agent/rules/{branch}")
+async def agent_rules_save(branch: str, request: Request):
+    uid = _need_uid(request)
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise ValueError("请求体必须为对象")
+        return await asyncio.to_thread(_manual.save, uid, branch, body)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/agent/rules/{branch}/backtest")
+async def agent_rules_backtest(branch: str, request: Request, bg: BackgroundTasks):
+    uid = _need_uid(request)
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise ValueError("请求体必须为对象")
+        conn, key, run = await asyncio.to_thread(_manual.submit, uid, branch, body)
+        bg.add_task(_manual.run_job, conn, key, run)
+        return {"id": run["id"], "status": run["status"]}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
