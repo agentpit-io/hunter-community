@@ -42,6 +42,10 @@ def main() -> None:
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="HunterCode Community 产品说明书、日常投研工作流与量化扩展方案">
   <title>帮助中心 · HunterCode Community</title>
+  <!-- 静态页不走 Next 的 app/icon.png,不写这两行浏览器就是空白图标。
+       与策略中心那 7 个静态页同一份 /icon.png。 -->
+  <link rel="icon" href="/icon.png" type="image/png" />
+  <link rel="apple-touch-icon" href="/icon.png" />
   <style>
     :root {{ color-scheme: light; --ink:#211c18; --muted:#766b60; --line:#ded2bf; --paper:#fffdfa; --bg:#f7f3ec; --copper:#ad6832; }}
     * {{ box-sizing:border-box; }}
