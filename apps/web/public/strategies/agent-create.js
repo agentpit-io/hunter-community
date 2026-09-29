@@ -14,7 +14,7 @@
     const root = document.getElementById('rs-f-rules')
     if (!root || document.getElementById('ac-editor')) return
     const box = document.createElement('div'); box.id = 'ac-editor'
-    box.innerHTML = '<style>#ac-editor{margin-top:12px}#ac-editor .ac-row{border:1px solid var(--line);border-radius:9px;padding:12px;margin:10px 0;background:var(--bg,#fafaf8)}#ac-editor .ac-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0}#ac-editor label{display:inline-block;margin-right:14px}#ac-editor input[type=checkbox]{width:auto}#ac-editor input[type=number],#ac-editor input[type=date]{width:150px}#ac-editor .ac-state{color:var(--brand);font-weight:bold}#ac-result{white-space:pre-wrap;max-height:400px;overflow:auto}#ac-msg{color:var(--brand);white-space:pre-wrap}#ac-editor select{max-width:100%}</style>' +
+    box.innerHTML = '<style>#ac-editor{margin-top:12px;min-width:0;overflow-wrap:anywhere}#ac-editor .ac-row{border:1px solid var(--line);border-radius:9px;padding:12px;margin:10px 0;background:var(--bg,#fafaf8)}#ac-editor .ac-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0}#ac-editor label{display:inline-block;margin-right:14px}#ac-editor input[type=checkbox]{width:auto}#ac-editor input[type=number],#ac-editor input[type=date]{width:150px}#ac-editor .ac-state{color:var(--brand);font-weight:bold}#ac-result{white-space:pre-wrap;max-height:400px;overflow:auto}#ac-msg{color:var(--brand);white-space:pre-wrap}#ac-editor select{max-width:100%}@media(max-width:640px){.rs-f{grid-template-columns:1fr}#ac-editor label{max-width:100%;margin-right:0}}</style>' +
       '<div class="ac-actions"><button type="button" class="btn primary small" id="ac-ai">AI 整理为规则</button><button type="button" class="btn small" id="ac-add">手动添加一条</button></div>' +
       '<div class="ag-note">AI 只整理受支持规则；没有写清的参数保持待确认。买入条件全部满足，卖出条件任一满足。修改后必须重新确认。</div>' +
       '<div class="ac-actions"><select id="ac-saved" aria-label="我的个人策略"><option value="">加载已保存的个人策略…</option></select><button type="button" class="btn small" id="ac-load">加载</button><button type="button" class="btn small" id="ac-new">另建策略</button></div>' +
@@ -111,7 +111,9 @@
     el('ac-test').onclick=()=>action(async()=>{
       if(!el('ac-confirm').checked)throw Error('请核对原文并确认成交口径')
       if(!state.rows.length||state.rows.some(r=>!r.confirmed||r.type==='pending'))throw Error('请先补齐并逐条确认所有规则')
+      const before=JSON.stringify(state.rows), selected=JSON.stringify(poolRef())
       const cfg=await save()
+      if(!active()||before!==JSON.stringify(state.rows)||selected!==JSON.stringify(poolRef())||!el('ac-confirm').checked)throw Error('保存期间规则或设置发生变化，请重新确认后回测')
       const run=await request('/'+cfg.id+'/backtest',{version:cfg.version,start:el('ac-start').value,end:el('ac-end').value,initial:Number(el('ac-initial').value),slippage_bps:Number(el('ac-slip').value),execution_confirmed:true})
       result({runs:[run]});msg('回测已提交，使用刚保存的确认版本')
     })
