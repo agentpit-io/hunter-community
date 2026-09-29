@@ -47,6 +47,9 @@ tsconfig.tsbuildinfo
 *.bak
 *.bak.*
 .env.bak.*
+# 改 .env 前的手工备份(如 .env.backup-2026-08-18-16h-before-aihubmix)——
+# 里面是真实密钥(POSTGRES_PASSWORD / JWT_SECRET / LLM_API_KEY),一条 `git add -A` 就会推上去。
+.env.backup*
 
 # 用户在界面上装的第三方 SKILL 落在这里(bind mount 进容器)——
 # 是运行时数据,不是代码。误提交过一次,044462d 撤回的就是这个。
