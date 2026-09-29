@@ -831,7 +831,7 @@ try {
     ['后端 404 骨架:顶上说明为什么是 —', /ag-banner dev/.test(ctx.H_RSSKEL) && clean(ctx.H_RSSKEL)],
     ['新建表单写出淘汰线并声明提交后锁定', ctx.H_RSFORM.indexOf('id="rs-f-submit"') >= 0 && ctx.H_RSFORM.indexOf('提交后这一栏锁定') >= 0
       && ctx.H_RSFORM.indexOf('每笔平均净损益 &lt; 0') >= 0],
-    ['新建表单(暂时保留)写明提交后进「运行中」标「待写引擎」', ctx.H_RSFORM.indexOf('提交后放在「运行中」、标「待写引擎」') >= 0 && />提交<\/button>/.test(ctx.H_RSFORM)],
+    ['创建入口合并且保存真实草案', H.includes('＋ 创建策略') && !H.includes('新建研究线') && ctx.H_RSFORM.includes('接入执行逻辑后才能回测') && />保存策略草案<\/button>/.test(ctx.H_RSFORM)],
     ['看板视图:分页里「运行看板」高亮', /data-go="dash" class="on"/.test(ctx.H_DASH)],
     // 用户 2026-09-14 要求去掉面包屑(和分页、方向卡、提示条重复)
     ['看板视图:分页右边没有面包屑', ctx.H_DASH.indexOf('rs-crumb') < 0 && !/<a href="#view=research"/.test(ctx.H_DASH)],

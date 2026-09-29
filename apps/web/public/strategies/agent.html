@@ -702,17 +702,17 @@ function rsChart(r) {
 function vRsForm(r) {
   if (!RS.form) return ''
   const f = function (label, ctl) { return '<div class="rs-f"><label>' + label + '</label><div>' + ctl + '</div></div>' }
-  return panel('新建研究线', '提交后放在「运行中」、标「待写引擎」· 写好引擎才开始跑 · 淘汰线提交即锁定',
+  return panel('创建策略', '保存后在研究台管理 · 当前保存策略草案，接入执行逻辑后才能回测和每日运行',
     '<div class="rs-form">' +
-      f('名称', '<input id="rs-f-label" maxlength="30" placeholder="例如:均线回踩线">') +
-      f('一句话假设', '<textarea id="rs-f-hyp" maxlength="400" rows="3" placeholder="要验证的是什么?说不清在验证什么,回测结果怎么读都对"></textarea>') +
+      f('策略名称', '<input id="rs-f-label" maxlength="30" placeholder="例如：我的 VCP 波段策略">') +
+      f('策略思路', '<textarea id="rs-f-hyp" maxlength="400" rows="3" placeholder="描述你想捕捉的交易机会，以及为什么认为它有效"></textarea>') +
       f('规则草案', '<textarea id="rs-f-rules" maxlength="600" rows="3" placeholder="进场 / 出场 / 止损 / 仓位"></textarea>') +
       f('股票池', '<input id="rs-f-pool" maxlength="200" placeholder="筛选器预设或保存的扫描策略名">') +
       f('对照组', '<div class="rs-ro">VCP 波段线 · 方向 C · 三段式(封存版)</div>') +
       f('淘汰线', '<div class="rs-kill">' + txt(r && r.kill_text) + '<br><b>提交后这一栏锁定,不能看过结果再改。</b></div>') +
       '<div class="rs-fact"><span class="rs-msg" id="rs-f-msg"></span>' +
         '<button type="button" class="btn small" id="rs-f-cancel">取消</button>' +
-        '<button type="button" class="btn small primary" id="rs-f-submit">提交</button></div>' +
+        '<button type="button" class="btn small primary" id="rs-f-submit">保存策略草案</button></div>' +
     '</div>')
 }
 
@@ -730,7 +730,7 @@ function renderResearch(r, notice) {
     '<span>共同口径:<b>' + txt(cm.start) + ' → ' + txt(cm.end) + '</b> · ' + (Number.isFinite(cm.days) ? int(cm.days) : NA) + ' 个交易日</span>' +
     '<span>基准 <b>' + txt(cm.bench_label, '标普500') + ' <span class="' + dir(cm.bench_pct) + '">' + pct(cm.bench_pct, 2, true) + '</span></b></span>' +
     '<span>手续费 <b>阶梯式</b>(与历史交易记录同口径)</span>' +
-    '<span class="rs-acts"><button type="button" class="btn small primary" id="rs-new">' + (RS.form ? '收起新建' : '＋ 新建研究线') + '</button></span></div>'
+    '<span class="rs-acts"><button type="button" class="btn small primary" id="rs-new">' + (RS.form ? '收起创建' : '＋ 创建策略') + '</button></span></div>'
   const cols = RS_STAGES.map(function (sg) {
     const items = byStage[sg[0]] || []
     return '<div class="rs-col" data-stage="' + sg[0] + '"><div class="rs-colhd"><b>' + sg[1] + '</b> ' +
@@ -742,8 +742,7 @@ function renderResearch(r, notice) {
   // 魔法筛选器已经是顶栏一级页面,这里再放一张是重复入口。运行看板那张同日也去掉了。
   const html = '<div class="ag-wrap">' + vBanner(notice) + vTopNav('research') +
     panel('研究台', (has ? esc(lines.length + ' 条研究线') : NA) + ' · 运行中 / 封存 · 淘汰的线收在下面',
-      strip + '<div class="rs-board">' + cols + '</div>') +
-    vRsForm(r) +
+      strip + vRsForm(r) + '<div class="rs-board">' + cols + '</div>') +
     '<div class="rs-two">' +
       panel('同口径对照', '每条线取它最好的那个方向 · 算不出的一律 —', rsTable(r)) +
       panel('净值 vs 基准', '累计收益 %', rsChart(r)) +
@@ -789,7 +788,11 @@ function bindResearch() {
   const retry = document.getElementById('ag-retry')
   if (retry) retry.addEventListener('click', function () { boot('') })
   const nb = document.getElementById('rs-new')
-  if (nb) nb.addEventListener('click', function () { RS.form = !RS.form; renderResearch(RS.data) })
+  if (nb) nb.addEventListener('click', function () {
+    RS.form = !RS.form
+    renderResearch(RS.data)
+    if (RS.form) document.getElementById('rs-f-label').focus()
+  })
   const cancel = document.getElementById('rs-f-cancel')
   if (cancel) cancel.addEventListener('click', function () { RS.form = false; renderResearch(RS.data) })
   const sub = document.getElementById('rs-f-submit')
@@ -821,7 +824,7 @@ async function rsSubmit() {
   const val = function (id) { const el = document.getElementById(id); return el ? String(el.value || '').trim() : '' }
   const body = { label: val('rs-f-label'), hypothesis: val('rs-f-hyp'), rules_draft: val('rs-f-rules'), pool: val('rs-f-pool') }
   const msg = document.getElementById('rs-f-msg')
-  if (!body.label || !body.hypothesis) { if (msg) msg.textContent = '名称和一句话假设必须写'; return }
+  if (!body.label || !body.hypothesis) { if (msg) msg.textContent = '请填写策略名称和策略思路'; return }
   RS.busy = true
   const res = await rsPost(RESEARCH_API, body)
   RS.busy = false
@@ -872,6 +875,8 @@ async function bootResearch() {
   let d
   try { d = await r.json() } catch (e) { RS.data = null; renderResearch(null, errNotice('返回的不是合法 JSON')); return }
   RS.data = d && typeof d === 'object' ? d : null
+  // 旧预览链接统一进入真实草案表单，避免用户误把预览当作另一套创建功能。
+  if (/(?:^#|&)create=1(?:&|$)/.test(String(location.hash || ''))) RS.form = true
   renderResearch(RS.data, RS.data ? null : errNotice('返回体为空'))
 }
 
