@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="HunterCode Community 产品说明书、日常投研工作流与量化扩展方案">
+  <title>帮助中心 · HunterCode Community</title>
+  <style>
+    :root { color-scheme: light; --ink:#211c18; --muted:#766b60; --line:#ded2bf; --paper:#fffdfa; --bg:#f7f3ec; --copper:#ad6832; }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; }
+    body { margin:0; color:var(--ink); background:var(--bg); font:15px/1.8 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif; }
+    a { color:#96551f; text-decoration:none; } a:hover { text-decoration:underline; }
+    .top { position:sticky; top:0; z-index:10; display:flex; gap:24px; align-items:center; padding:10px max(24px,calc((100vw - 1340px)/2)); background:rgba(255,253,250,.94); border-bottom:1px solid var(--line); backdrop-filter:blur(12px); }
+    .brand { display:flex; align-items:center; gap:9px; margin-right:auto; color:var(--ink); font-weight:700; white-space:nowrap; }
+    .brand img { width:24px; height:24px; border-radius:50%; } .top nav { display:flex; gap:22px; }
+    .wrap { display:grid; grid-template-columns:230px minmax(0,1fr); gap:36px; max-width:1340px; margin:auto; padding:36px 24px 90px; }
+    aside { align-self:start; position:sticky; top:80px; max-height:calc(100vh - 100px); overflow:auto; padding:18px 15px; background:var(--paper); border:1px solid var(--line); border-radius:14px; }
+    aside strong { display:block; margin:0 8px 10px; } aside a { display:block; padding:6px 8px; border-radius:7px; color:var(--muted); line-height:1.4; } aside a:hover { background:#f3e9dc; text-decoration:none; color:var(--ink); }
+    main { min-width:0; padding:32px clamp(20px,5vw,76px) 70px; background:var(--paper); border:1px solid var(--line); border-radius:18px; box-shadow:0 8px 30px rgba(59,35,15,.04); }
+    h1,h2,h3 { line-height:1.35; letter-spacing:-.02em; scroll-margin-top:72px; } h1 { font-size:clamp(28px,3vw,40px); margin:0 0 12px; } h2 { font-size:24px; margin:46px 0 16px; padding-top:9px; border-top:1px solid var(--line); } h3 { font-size:18px; margin:28px 0 8px; }
+    p,li { max-width:85ch; } blockquote { margin:18px 0; padding:12px 18px; border-left:3px solid var(--copper); background:#f5ede3; color:#704c31; border-radius:0 8px 8px 0; } blockquote p { margin:0; }
+    table { width:100%; border-collapse:collapse; margin:16px 0 24px; font-size:14px; } th,td { border-bottom:1px solid var(--line); padding:10px 12px; text-align:left; vertical-align:top; } th { background:#f3ebe0; }
+    code { padding:2px 4px; background:#f3eee7; border-radius:4px; font:13px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace; } pre { overflow:auto; padding:18px; border-radius:10px; background:#2a2521; color:#f7f1e8; } pre code { padding:0; background:none; color:inherit; }
+    .meta { color:var(--muted); font-size:13px; }
+    @media(max-width:900px) { .wrap { display:block; padding:14px 12px 60px; } aside { position:static; max-height:none; margin-bottom:14px; } main { padding:24px 20px 40px; } .top { padding:10px 16px; } .top nav { gap:12px; font-size:13px; } table { display:block; overflow-x:auto; } }
+    @media print { .top,aside { display:none; } .wrap { display:block; padding:0; } main { border:0; box-shadow:none; } }
+  </style>
+</head>
+<body>
+  <header class="top"><a class="brand" href="/chat"><img src="/logo-hunter.png" alt="">猎鹿人 · Hunter</a><nav><a href="/chat">返回对话</a><a href="/strategies/index.html">策略中心</a><a href="https://github.com/agentpit-io/hunter-community/blob/main/doc/%E4%BA%A7%E5%93%81%E8%AF%B4%E6%98%8E%E4%B9%A6.md">Markdown 原文</a></nav></header>
+  <div class="wrap"><aside aria-label="本页目录"><strong>帮助中心</strong><a href="#1">1. 从哪里开始</a>
+<a href="#2">2. 一天的工作流程</a>
+<a href="#3">3. 两类应用方案</a>
+<a href="#4">4. 量化选股、监控与回测</a>
+<a href="#5-skill">5. 用 SKILL 扩展研究方法</a>
+<a href="#6">6. 扩展实施路线</a>
+<a href="#7">7. 验收清单与使用边界</a></aside><main><h1 id="huntercode-community">HunterCode Community 产品说明书与应用方案</h1>
+<blockquote>
+<p>版本：2026-09-29 · 适用对象：私募投研团队、专业个人投资者、小型量化团队
+产品定位：把搜索、整理、研究、监控与提醒交给智能体；投资决策、指令复核与交易执行由人负责。</p>
+</blockquote>
+<h2 id="1">1. 从哪里开始</h2>
+<p>HunterCode 是可自部署的 AI 投研工作台，覆盖 A 股、港股、美股。用户配置大模型与数据源后，可以在对话中查询行情、新闻和公司信息，运行深度分析，管理自选股与持仓，并在策略中心做因子筛选和回测。对话、持仓和投资论点保存在本地数据库。它不连接券商自动下单，也不保证预测准确。</p>
+<p>安装与首次配置见 <a href="https://github.com/agentpit-io/hunter-community/blob/main/docs/01-getting-started.md">快速开始</a>。部署后打开 <code>/chat</code>，顶部“帮助中心”可随时返回本手册。实际功能受数据源、密钥、市场覆盖和部署配置影响；结果页面应以数据时间与来源为准。</p>
+<h3 id="_1">核心入口</h3>
+<table>
+<thead>
+<tr>
+<th>工作</th>
+<th>入口</th>
+<th>你能做什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>对话投研</td>
+<td><code>/chat</code></td>
+<td>提问、调用工具与 SKILL、生成带来源的分析材料</td>
+</tr>
+<tr>
+<td>自选股</td>
+<td>对话页侧栏“自选股”；<code>/watchlist</code></td>
+<td>维护观察池和投资论点</td>
+</tr>
+<tr>
+<td>持仓</td>
+<td>头像菜单“我的持仓”；<code>/portfolio</code></td>
+<td>记录持仓、成本与相关研究假设</td>
+</tr>
+<tr>
+<td>策略中心</td>
+<td>顶部“策略中心”；<code>/strategies/index.html</code></td>
+<td>官方策略、因子广场、工作台、回测</td>
+</tr>
+<tr>
+<td>信号</td>
+<td><code>/signals</code></td>
+<td>查看现有信号与配置；可用性依赖后台任务和数据源</td>
+</tr>
+<tr>
+<td>SKILL / 工具 / 数据源</td>
+<td>对话页侧栏能力区</td>
+<td>安装方法论、连接 MCP、配置数据供给</td>
+</tr>
+</tbody>
+</table>
+<h2 id="2">2. 一天的工作流程</h2>
+<h3 id="_2">盘前：收集与形成观察清单</h3>
+<ol>
+<li>请智能体汇总隔夜宏观、公告、行业新闻与自选股事件，要求逐条列来源、发布时间及可能影响。</li>
+<li>对重要公司运行深度分析，核查财务变化、估值、竞争格局和风险，记录“事实 / 推断 / 待验证问题”。</li>
+<li>用策略中心的因子与筛选器形成候选池，再结合流动性、行业集中度及禁止交易名单人工复核。</li>
+<li>产出盘前卡片：关注标的、触发条件、反证条件、数据更新时间、负责人。</li>
+</ol>
+<p>可直接提问：</p>
+<blockquote>
+<p>汇总我的自选股过去 24 小时公告和新闻。只列有来源和时间的事实；逐只说明原投资论点是否受影响，并给出今天需要人工核实的三件事。</p>
+</blockquote>
+<h3 id="_3">盘中：观察、核实、提醒</h3>
+<p>把价格、成交量、资金流、公告或组合暴露设为观察条件。收到信号后先检查数据是否延迟、是否停牌或复权、同一事件是否重复，再让智能体解释与原投资论点的关系。信号是研究线索，不是交易指令。实时性取决于数据源与后台调度；浏览器页面打开不等于全天候稳定监控。</p>
+<h3 id="_4">盘后：复盘与更新研究记录</h3>
+<p>记录当天新事实、原假设状态、组合暴露变化、未完成的问题与次日观察条件。将候选策略的回测结果、参数和数据区间保存到团队研究记录；由人决定是否进入模拟或真实交易流程。</p>
+<h2 id="3">3. 两类应用方案</h2>
+<h3 id="_5">专业个人投资者</h3>
+<p>建议从一个自选池、一个持仓账本和一份固定日报开始。先验证数据源稳定性，再使用量化因子缩小候选范围。对每只持仓记录买入理由、失效条件、持有期限与最大可接受损失。智能体每天做信息检索、论点复核和异常摘要；用户负责判断与操作。</p>
+<h3 id="_6">私募机构或研究团队</h3>
+<p>建议把研究拆为“数据采集 → 分析草稿 → 研究员复核 → 投委会/负责人决策 → 交易员执行 → 盘后归档”。按策略、组合、标的和日期组织研究材料；研究结论保存原始出处、数据截面、模型与 SKILL 版本、审阅人。需机构级权限、审批、审计、留痕或合规报告时，应按第 6 节建设扩展能力，并在正式使用前做安全和合规验收。开源社区版当前功能不能替代机构 OMS、PMS 或合规系统。</p>
+<h2 id="4">4. 量化选股、监控与回测</h2>
+<h3 id="_7">现有工作流</h3>
+<ol>
+<li>在策略中心选择市场与股票池，使用官方策略或到因子广场挑选因子。</li>
+<li>在工作台设置因子权重、筛选规则、调仓频率、成本和基准；明确缺失值与行业约束。</li>
+<li>运行回测，查看收益、回撤、换手、成本、分档验证、逐笔交易与数据质量提示。没有实算结果时，不应把策略配置当成业绩。</li>
+<li>比较训练期与样本外、不同市场阶段和交易成本敏感性，再决定是否加入观察池。</li>
+<li>将策略输出视为候选名单，用基本面、流动性、事件风险和组合约束做人工复核。</li>
+</ol>
+<h3 id="_8">因子建议与验证口径</h3>
+<p>现有因子覆盖估值、质量、成长、动量、技术、资金、波动、流动性与规模，实际可用清单以 <code>/strategies/factors.html</code> 和 <code>/api/quant/factors</code> 为准。建议按目标增加下列因子，新增前先定义数据来源与生效时间：</p>
+<table>
+<thead>
+<tr>
+<th>因子方向</th>
+<th>示例</th>
+<th>验证重点</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>质量与现金流</td>
+<td>经营现金流 / 净利润、应收增长与收入增长差</td>
+<td>财报披露时点、行业可比性</td>
+</tr>
+<tr>
+<td>成长持续性</td>
+<td>连续季度营收增速、盈利预期修正</td>
+<td>预期数据授权、修正滞后</td>
+</tr>
+<tr>
+<td>估值与质量组合</td>
+<td>行业内估值分位 × ROE 稳定性</td>
+<td>行业中性化、极值处理</td>
+</tr>
+<tr>
+<td>价格与量能</td>
+<td>跳空后回补、放量突破、成交额变化</td>
+<td>停牌、涨跌停、滑点</td>
+</tr>
+<tr>
+<td>风险暴露</td>
+<td>波动率、贝塔、尾部损失、拥挤度</td>
+<td>组合相关性、压力情景</td>
+</tr>
+<tr>
+<td>事件</td>
+<td>公告事件、业绩预告、解禁窗口</td>
+<td>事件时间戳、禁止未来信息</td>
+</tr>
+</tbody>
+</table>
+<p>每个因子至少记录定义、方向、计算窗口、数据延迟、覆盖率、缺失处理、行业和市值中性化方式。检验 IC/Rank IC、分位组合、稳定性、换手和成本，并做样本外与滚动窗口验证。使用当时可获得的成分股和财报数据，控制幸存者偏差与前视偏差。回测收益属于历史模拟结果，不代表未来表现。</p>
+<h3 id="_9">量化监控仓库：建议扩展</h3>
+<p>建设统一的“策略与组合监控仓库”，把<strong>策略定义、版本、因子快照、每日候选、持仓快照、信号命中、告警确认、回测任务、数据质量</strong>关联起来。建议的最小记录包括：<code>strategy_id</code>、<code>version</code>、<code>market</code>、<code>as_of</code>、<code>data_source</code>、<code>universe_hash</code>、<code>factor_values</code>、<code>portfolio_id</code>、<code>rule_id</code>、<code>severity</code>、<code>status</code>、<code>owner</code>、<code>evidence_uri</code>。保留原始数据时间与处理时间，支持重跑和审计。</p>
+<p>监控任务按交易所日历运行，检查数据新鲜度、缺口、异常值、接口错误和调度失败；同一告警去重、分级并记录确认人。可先从盘后批处理与站内信号开始，再接短信、飞书或邮件。通知通道、服务等级、机构级多租户权限和统一告警工作台属于扩展建设内容，不能仅靠安装 SKILL 获得。</p>
+<h2 id="5-skill">5. 用 SKILL 扩展研究方法</h2>
+<p>SKILL 是 Markdown 方法论，告诉智能体何时使用、先查什么、如何交叉验证和怎样输出。仓库内置 <code>deep_analysis</code>、<code>investor_panel</code>、<code>risk_profile</code>、<code>trap_detector</code>、<code>lhb_analyzer</code>、<code>uzi</code> 等；实际可用能力以当前安装和工具授权为准。用户可在侧栏安装 GitHub SKILL，也可把自定义 <code>SKILL.md</code> 放在 <code>user-skills/&lt;名称&gt;/</code>。详见 <a href="https://github.com/agentpit-io/hunter-community/blob/main/user-skills/README.md">用户 SKILL 说明</a>。</p>
+<p>建议优先补充这些工作流型 SKILL：</p>
+<table>
+<thead>
+<tr>
+<th>SKILL</th>
+<th>输入</th>
+<th>输出与边界</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>盘前研究简报</td>
+<td>自选池、持仓、时间窗</td>
+<td>带来源的事实、影响、待核实问题</td>
+</tr>
+<tr>
+<td>公告影响核查</td>
+<td>公告原文、标的与投资论点</td>
+<td>关键条款、影响路径、反证条件</td>
+</tr>
+<tr>
+<td>投资论点跟踪</td>
+<td>原论点、最新数据</td>
+<td>假设状态与证据，不给自动买卖指令</td>
+</tr>
+<tr>
+<td>异常波动解释</td>
+<td>报价、成交、公告、行业行情</td>
+<td>多假设解释与数据缺口</td>
+</tr>
+<tr>
+<td>组合风险巡检</td>
+<td>持仓、基准、风险阈值</td>
+<td>集中度、相关性、暴露和阈值命中</td>
+</tr>
+<tr>
+<td>因子研究审查</td>
+<td>因子定义、回测报告</td>
+<td>偏差、稳定性与复现检查清单</td>
+</tr>
+</tbody>
+</table>
+<p>一个最小的自定义 SKILL：</p>
+<pre><code class="language-markdown">---
+name: thesis_review
+description: 当用户要求复核持仓投资论点时使用
+---
+
+# 投资论点复核
+1. 读取用户提供的原始论点、有效期和失效条件。
+2. 检索最新公告、财报和行情；每项事实标注来源与时间。
+3. 将结果分为“支持 / 削弱 / 无法判断”，列出缺失数据。
+4. 输出需人工核实的问题，不生成交易指令。
+</code></pre>
+<p>SKILL 只定义方法，不会自动新增行情数据、后台任务或交易权限。需要新数据时接入合法授权的数据源或 MCP；需要持续监控时还要实现调度器、状态存储与通知渠道。第三方 SKILL 安装前应审阅代码、来源与许可证。</p>
+<h2 id="6">6. 扩展实施路线</h2>
+<table>
+<thead>
+<tr>
+<th>阶段</th>
+<th>目标</th>
+<th>可验收结果</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1. 数据与研究规范</td>
+<td>确定市场、授权数据源、时区、复权及来源格式</td>
+<td>任一结论能追溯到时间和原始出处</td>
+</tr>
+<tr>
+<td>2. 每日工作台</td>
+<td>盘前摘要、盘中异常、盘后复盘的 SKILL 模板</td>
+<td>人工可复核的日报与观察清单</td>
+</tr>
+<tr>
+<td>3. 量化研究</td>
+<td>因子版本、策略参数、回测与样本外校验</td>
+<td>可重复运行，结果包含成本与质量说明</td>
+</tr>
+<tr>
+<td>4. 持续监控</td>
+<td>仓库、调度、告警去重、通知、失败补跑</td>
+<td>告警有证据、状态、负责人和闭环时间</td>
+</tr>
+<tr>
+<td>5. 机构治理</td>
+<td>权限、双人复核、审计留痕、备份与恢复</td>
+<td>满足机构内部制度和适用监管要求</td>
+</tr>
+</tbody>
+</table>
+<p>扩展接口优先复用现有数据源、MCP、SKILL 和量化 API。新增服务应与交易系统隔离；若未来生成下单文件或建议单，必须有人工确认、风控校验和操作留痕。部署到公网时配置登录、初始化口令、TLS、密钥管理和备份；对行情及公告数据遵守服务商授权与使用条款。</p>
+<h2 id="7">7. 验收清单与使用边界</h2>
+<ul>
+<li>研究输出可看到来源、时间、市场、币种及数据缺口；无法核实的信息明确标注。</li>
+<li>自选股与持仓论点能复盘，策略与因子参数可复现。</li>
+<li>回测明确股票池、时间区间、基准、成本、调仓规则与样本外结果。</li>
+<li>监控发生数据中断时发出系统故障提醒，不把“无数据”解释为“无风险”。</li>
+<li>人负责投资判断、交易执行、权限与合规；智能体承担资料搜索、整理、初步分析与提醒。</li>
+</ul>
+<p>更多操作细节：<a href="https://github.com/agentpit-io/hunter-community/blob/main/docs/01-getting-started.md">快速开始</a> · <a href="https://github.com/agentpit-io/hunter-community/blob/main/README.md">README</a> · <a href="https://github.com/agentpit-io/hunter-community/blob/main/user-skills/README.md">用户 SKILL</a> · <a href="https://hunter-community.agentpit.io/legal/disclaimer">免责声明</a>。本说明书仅供产品使用与研究参考，不构成投资建议。</p></main></div>
+</body></html>

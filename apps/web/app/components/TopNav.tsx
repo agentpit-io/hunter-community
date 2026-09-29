@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Target, Bell, LogOut, Settings, Gift } from 'lucide-react'
+import { Target, CircleHelp, LogOut, Settings } from 'lucide-react'
 import { HUNTER, HUNTER_LOGO } from '../lib/hunter-theme'
 
 
@@ -123,6 +123,7 @@ export default function TopNav({ active }: NavProps) {
        *        2026-08-30_导航重构方案-对话与自选股双栏.md
        */}
       <NavLink href="/strategies/index.html" icon={<Target size={14} />} label="策略中心" active={active === 'strategies'} />
+      <NavLink href="/help/" icon={<CircleHelp size={14} />} label="帮助中心" active={active === 'help'} />
 
       {/* 弹簧 */}
       <div style={{ flex: 1 }} />
