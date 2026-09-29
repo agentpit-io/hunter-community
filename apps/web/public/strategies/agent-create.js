@@ -97,7 +97,9 @@
     async function refresh(){if(!state.id||!active())return;result(await request('/'+state.id))}
     el('ac-ai').onclick=()=>action(async()=>{
       if(state.rows.length&&!confirm('重新整理全部规则会替换当前规则和确认状态，继续吗？'))return
-      const text=el('rs-f-hyp').value+'\n'+root.value, before=JSON.stringify(state.rows);msg('AI 正在整理，缺参数的内容会保留为待确认…')
+      const text=el('rs-f-hyp').value+'\n'+root.value, before=JSON.stringify(state.rows)
+      if(text.length>6000)throw Error('策略思路与规则草案合计最多六千字，请精简后重试')
+      msg('AI 正在整理，缺参数的内容会保留为待确认…')
       const data=await request('/recognize',{text})
       if(!active())return
       if(text!==el('rs-f-hyp').value+'\n'+root.value||before!==JSON.stringify(state.rows)){msg('识别期间内容已被修改，返回结果未覆盖你的编辑');return}

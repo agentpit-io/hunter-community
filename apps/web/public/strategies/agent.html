@@ -705,8 +705,8 @@ function vRsForm(r) {
   return panel('创建策略', 'AI 整理或手动添加 · 逐条确认后回测 · 在「已保存的个人策略」中管理',
     '<div class="rs-form">' +
       f('策略名称', '<input id="rs-f-label" maxlength="30" placeholder="例如：我的 VCP 波段策略">') +
-      f('策略思路', '<textarea id="rs-f-hyp" maxlength="400" rows="3" placeholder="描述你想捕捉的交易机会，以及为什么认为它有效"></textarea>') +
-      f('规则草案', '<textarea id="rs-f-rules" maxlength="600" rows="3" placeholder="进场 / 出场 / 止损 / 仓位"></textarea>') +
+      f('策略思路', '<textarea id="rs-f-hyp" maxlength="6000" rows="3" placeholder="描述你想捕捉的交易机会，以及为什么认为它有效"></textarea>') +
+      f('规则草案', '<textarea id="rs-f-rules" maxlength="6000" rows="3" placeholder="进场 / 出场 / 止损 / 仓位；与策略思路合计最多六千字"></textarea>') +
       f('股票池', '<select id="rs-f-pool" aria-label="选择筛选策略"><option value="">正在加载筛选策略…</option></select><div class="ag-note" id="rs-pool-note" role="status"></div><button type="button" class="btn small" id="rs-pool-reload">刷新列表</button>') +
       f('运行方式', '<div class="rs-ro">个人策略独立保存；确认后执行历史回测，不会自动启动每日交易或影响公共研究线。</div>') +
       '<div class="rs-fact"><span class="rs-msg" id="rs-f-msg"></span>' +
