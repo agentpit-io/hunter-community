@@ -4,8 +4,8 @@
   const API = '/api/quant/agent/builder'
   const escape = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))
   let current = null
-  async function request(path, data) {
-    const r = await fetch(API + path, {method:data === undefined ? 'GET':'POST', headers:apiHeaders({'Content-Type':'application/json'}), ...(data === undefined ? {} : {body:JSON.stringify(data)})})
+  async function request(path, data, method) {
+    const r = await fetch(API + path, {method:method || (data === undefined ? 'GET':'POST'), headers:apiHeaders({'Content-Type':'application/json'}), ...(data === undefined ? {} : {body:JSON.stringify(data)})})
     let d; try { d = await r.json() } catch (_) { throw Error('服务返回异常，请稍后重试') }
     if (!r.ok) throw Error(r.status === 401 ? '请重新登录后再试' : d.detail || '请求失败，请稍后重试')
     return d
@@ -18,7 +18,7 @@
       '<div class="ac-actions"><button type="button" class="btn primary small" id="ac-ai">AI 整理为规则</button><button type="button" class="btn small" id="ac-add">手动添加一条</button></div>' +
       '<div class="ag-note">AI 只整理受支持规则；没有写清的参数保持待确认。买入条件全部满足，卖出条件任一满足。修改后必须重新确认。</div>' +
       '<div class="ac-actions"><select id="ac-saved" aria-label="我的个人策略"><option value="">加载已保存的个人策略…</option></select><button type="button" class="btn small" id="ac-load">加载</button><button type="button" class="btn small" id="ac-new">另建策略</button></div>' +
-      '<div id="ac-msg" role="status"></div><div id="ac-rows"></div>' +
+      '<div id="ac-personal-list"></div><div id="ac-msg" role="status"></div><div id="ac-rows"></div>' +
       '<div class="ac-actions"><label>回测开始 <input type="date" id="ac-start"></label><label>回测结束 <input type="date" id="ac-end"></label><label>初始资金（美元） <input type="number" id="ac-initial" value="100000" min="1000" max="10000000"></label><label>单边滑点（基点） <input type="number" id="ac-slip" value="5" min="0" max="100"></label></div>' +
       '<div class="ag-note" id="ac-execution"></div><label><input type="checkbox" id="ac-confirm"> 我已核对原始描述没有遗漏，并确认成交口径、费用与滑点设置</label>' +
       '<div class="ac-actions"><button type="button" class="btn primary small" id="ac-test">保存确认版本并回测</button><button type="button" class="btn small" id="ac-refresh">刷新回测状态</button></div><div id="ac-result"></div>'
@@ -29,6 +29,19 @@
     const el = id => document.getElementById(id)
     const active = () => document.getElementById('ac-editor') === box
     const msg = s => { if(active()) el('ac-msg').textContent = s }
+    function personalList() {
+      el('ac-personal-list').innerHTML=state.items.map(x=>'<div class="ac-row"><b>'+escape(x.name)+'</b> · v'+x.version+'<div class="ac-actions"><button type="button" class="btn small" data-personal-load="'+escape(x.id)+'">加载策略</button><button type="button" class="btn small" data-personal-delete="'+escape(x.id)+'">删除</button></div></div>').join('')
+      el('ac-personal-list').querySelectorAll('[data-personal-load]').forEach(b=>b.onclick=()=>{el('ac-saved').value=b.dataset.personalLoad;el('ac-load').click()})
+      el('ac-personal-list').querySelectorAll('[data-personal-delete]').forEach(b=>b.onclick=()=>action(async()=>{
+        const id=b.dataset.personalDelete, item=state.items.find(x=>x.id===id)
+        if(!confirm('删除个人策略「'+item.name+'」？\n删除后不再出现在列表，历史回测快照保留。'))return
+        await request('/'+id,undefined,'DELETE')
+        state.items=state.items.filter(x=>x.id!==id)
+        Array.from(el('ac-saved').options).filter(o=>o.value===id).forEach(o=>o.remove())
+        if(state.id===id){state.id=null;state.version=null;state.rows=[];el('rs-f-label').value='';el('rs-f-hyp').value='';root.value='';invalidate();renderRows();el('ac-result').textContent=''}
+        personalList();msg('策略已删除')
+      }))
+    }
     function invalidate() { if(active()) el('ac-confirm').checked = false }
     async function action(fn) {
       if(state.busy) return
@@ -81,6 +94,7 @@
       let option=Array.from(el('ac-saved').options).find(o=>o.value===cfg.id)
       if(!option){option=document.createElement('option');option.value=cfg.id;el('ac-saved').appendChild(option)}
       option.textContent=cfg.name+' · v'+cfg.version;el('ac-saved').value=cfg.id
+      state.items=state.items.filter(x=>x.id!==cfg.id).concat([{id:cfg.id,name:cfg.name,version:cfg.version}]);personalList()
       msg('已保存个人策略版本 '+cfg.version+'；公共研究线未改变')
       return cfg
     }
@@ -135,6 +149,7 @@
     request('').then(data=>{
       if(!active())return
       state.schema=data.schema;state.items=data.items
+      personalList()
       el('ac-saved').innerHTML='<option value="">选择已保存的个人策略</option>'+data.items.map(x=>'<option value="'+escape(x.id)+'">'+escape(x.name)+' · v'+x.version+'</option>').join('')
       el('ac-execution').textContent=data.execution+' 首版回测仅支持美股，日期请使用已入库历史范围；不支持的规则不能带入执行。'
       if(data.data_range && data.data_range.last){

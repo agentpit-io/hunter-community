@@ -63,6 +63,16 @@ async def get(ident: str, request: Request):
     return await call(builder.read, uid(request), ident)
 
 
+@router.delete("/research/{line}")
+async def delete_research(line: str, request: Request):
+    return await call(builder.delete_research, uid(request), line)
+
+
+@router.delete("/{ident}")
+async def delete(ident: str, request: Request):
+    return await call(builder.delete, uid(request), ident)
+
+
 @router.post("/{ident}/backtest")
 async def backtest(ident: str, request: Request, bg: BackgroundTasks):
     conn, key, run = await call(builder.submit, uid(request), ident, await body(request))

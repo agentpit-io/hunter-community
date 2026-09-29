@@ -137,14 +137,14 @@ def read(uid, ident):
             if changed: ar._meta_set(c, k, cfg)
         return cfg
     result = transaction(get)
-    if not result: raise ValueError("策略不存在或不属于当前账号")
+    if not result or result.get("deleted"): raise ValueError("策略不存在、已删除或不属于当前账号")
     return result
 
 
 def list_for(uid):
     def get(c, ar):
         c.execute("SELECT value FROM agent_meta WHERE key LIKE %s ORDER BY key", (f"builder:{uid}:%",))
-        return [dict(id=v["id"], name=v["name"], version=v["version"]) for (v,) in c.fetchall()]
+        return [dict(id=v["id"], name=v["name"], version=v["version"]) for (v,) in c.fetchall() if not v.get("deleted")]
     return transaction(get)
 
 
@@ -184,7 +184,7 @@ def save(uid, body):
         k = key(uid, ident)
         c.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (k,))
         old = ar._meta_get(c, k)
-        if body.get("id") and not old: raise ValueError("策略不存在或无权修改")
+        if body.get("id") and (not old or old.get("deleted")): raise ValueError("策略不存在或无权修改")
         if old and body.get("version") != old["version"]: raise ValueError("策略已在其他页面修改，请重新加载")
         history = (old or {}).get("history", [])
         if old: history = history + [{k: old.get(k) for k in ("version", "name", "rules", "pool", "source_text")}]
@@ -223,7 +223,7 @@ def submit(uid, ident, body):
             k = key(uid, ident)
             c.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (k,))
             current = ar._meta_get(c, k)
-            if current["version"] != cfg["version"]: raise ValueError("规则版本已变化，请重新提交")
+            if current.get("deleted") or current["version"] != cfg["version"]: raise ValueError("策略已删除或规则版本已变化，请重新提交")
             current["runs"] = current.get("runs", []) + [run]
             ar._meta_set(c, k, current)
         conn.commit()
@@ -231,6 +231,41 @@ def submit(uid, ident, body):
     except Exception:
         conn.close()
         raise
+
+
+def delete(uid, ident):
+    read(uid, ident)  # 顺便识别已中断的回测，避免永久不能删除。
+    def remove(c, ar):
+        k = key(uid, ident)
+        c.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (k,))
+        cfg = ar._meta_get(c, k)
+        if not cfg or cfg.get("deleted"): raise ValueError("策略不存在或已删除")
+        if any(r["status"] in ("queued", "running") for r in cfg.get("runs", [])):
+            raise ValueError("此策略正在回测，请等待完成后再删除")
+        cfg["deleted"] = True
+        ar._meta_set(c, k, cfg)
+        return {"deleted": True}
+    return transaction(remove)
+
+
+def filter_research(uid, board):
+    if not uid: return board
+    hidden = transaction(lambda c, ar: ar._meta_get(c, f"research-hidden:{uid}", []))
+    return dict(board, lines=[ln for ln in board.get("lines", []) if ln["key"] not in hidden])
+
+
+def delete_research(uid, line):
+    from app.services.quant import agent_research
+    def remove(c, ar):
+        if not any(ln["key"] == line for ln in agent_research.all_lines(c)):
+            raise ValueError("研究策略不存在")
+        k = f"research-hidden:{uid}"
+        c.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (k,))
+        hidden = ar._meta_get(c, k, [])
+        if line not in hidden: hidden.append(line)
+        ar._meta_set(c, k, hidden)
+        return {"deleted": True}
+    return transaction(remove)
 
 
 def run_job(conn, k, run):

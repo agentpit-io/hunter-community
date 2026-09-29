@@ -27,6 +27,8 @@ AI 只返回受限 JSON，不能写代码。每条必须引用用户原文，所
 - POST /api/quant/agent/builder：保存新策略或版本。
 - GET /api/quant/agent/builder/{id}：个人策略、旧版本和回测结果。
 - POST /api/quant/agent/builder/{id}/backtest：提交确认版本的后台回测。
+- DELETE /api/quant/agent/builder/{id}：删除自己的个人策略，保留旧快照，运行中不能删除；已删除策略不能读取、覆盖或继续回测。
+- DELETE /api/quant/agent/builder/research/{key}：从当前账号研究台移除该卡片（含旧版待写引擎草案），历史公共账本不删除，其他账号不受影响。为什么：默认研究线是共享回测来源，直接删除会破坏其他研究线的对照组。页面确认明确说明此口径；不提供恢复入口。
 
 身份必需；AI 复用筛选器 AI 次数，模型未配置或调用失败退次。回测与既有个人回测共享数据库资源锁；进程中断后读取会将失去运行锁的任务标失败，不永远显示运行中。结果保存在个人策略中，可刷新或下载完整快照、净值与每笔交易。
 

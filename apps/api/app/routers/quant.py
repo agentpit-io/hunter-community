@@ -1587,8 +1587,10 @@ async def agent_resume(request: Request):
 # 研究台(2026-09-13):研究线看板免登录;立项 / 封存 / 解除封存要登录。
 # 淘汰线在立项时写定,**没有**修改接口 —— 防的是看过回测结果再回头改标准。
 @router.get("/agent/research")
-async def agent_research_board():
-    return await asyncio.to_thread(_agent.research_board)
+async def agent_research_board(request: Request):
+    from app.services.quant.agent_builder import filter_research
+    board = await asyncio.to_thread(_agent.research_board)
+    return await asyncio.to_thread(filter_research, getattr(request.state, "user_id", None), board)
 
 
 @router.post("/agent/research")

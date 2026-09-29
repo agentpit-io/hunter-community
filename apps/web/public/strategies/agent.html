@@ -581,6 +581,7 @@ function rsCard(ln) {
       + '</div>'
     : ''
   let btns = ''
+  btns += '<button type="button" class="btn small" data-delete-line="' + esc(ln.key || '') + '">删除</button>'
   if (has && ln.best_branch) btns += '<a class="btn small" href="#branch=' + esc(ln.best_branch) + '" data-open="' + esc(ln.best_branch) + '">打开看板</a>'
   if (has && st === 'archived') btns += '<button type="button" class="btn small" data-arch="0" data-line="' + esc(ln.key || '') + '">解除封存</button>'
   else if (has && rsColumn(ln) === 'running') btns += '<button type="button" class="btn small" data-arch="1" data-line="' + esc(ln.key || '') + '">封存</button>'
@@ -784,6 +785,19 @@ function bindTopNav() {
 
 function bindResearch() {
   bindTopNav()
+  container.querySelectorAll('[data-delete-line]').forEach(function (button) {
+    button.addEventListener('click', async function () {
+      if (RS.busy || !confirm('从你的研究台删除这条策略？\n历史回测记录保留，其他账号不受影响。')) return
+      RS.busy = true; button.disabled = true
+      try {
+        const r = await fetch('/api/quant/agent/builder/research/' + encodeURIComponent(button.dataset.deleteLine), {method:'DELETE',headers:apiHeaders()})
+        const d = await r.json()
+        if (!r.ok) throw new Error(r.status === 401 ? '请登录后再删除' : d.detail || '删除失败')
+        await bootResearch()
+      } catch (e) { toast(e.message || '删除失败，请重试', 'warn'); button.disabled = false }
+      finally { RS.busy = false }
+    })
+  })
   const retry = document.getElementById('ag-retry')
   if (retry) retry.addEventListener('click', function () { boot('') })
   const nb = document.getElementById('rs-new')
