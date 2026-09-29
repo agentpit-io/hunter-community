@@ -352,7 +352,7 @@
     .rs-form{display:grid;gap:10px}
     .rs-f{display:grid;grid-template-columns:90px minmax(0,1fr);gap:10px;align-items:start;font-size:12.5px}
     .rs-f label{color:var(--muted);padding-top:6px}
-    .rs-f input,.rs-f textarea{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:7px;padding:6px 9px;
+    .rs-f input,.rs-f textarea,.rs-f select{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:7px;padding:6px 9px;
       font:inherit;font-size:13px;background:#fff;color:var(--text);resize:vertical}
     .rs-f input:focus,.rs-f textarea:focus{outline:2px solid var(--brand-pale);border-color:var(--brand)}
     .rs-ro{padding:6px 0;color:var(--text)}
@@ -707,7 +707,7 @@ function vRsForm(r) {
       f('策略名称', '<input id="rs-f-label" maxlength="30" placeholder="例如：我的 VCP 波段策略">') +
       f('策略思路', '<textarea id="rs-f-hyp" maxlength="400" rows="3" placeholder="描述你想捕捉的交易机会，以及为什么认为它有效"></textarea>') +
       f('规则草案', '<textarea id="rs-f-rules" maxlength="600" rows="3" placeholder="进场 / 出场 / 止损 / 仓位"></textarea>') +
-      f('股票池', '<input id="rs-f-pool" maxlength="200" placeholder="筛选器预设或保存的扫描策略名">') +
+      f('股票池', '<select id="rs-f-pool" aria-label="选择筛选策略"><option value="">正在加载筛选策略…</option></select><div class="ag-note" id="rs-pool-note" role="status"></div><button type="button" class="btn small" id="rs-pool-reload">刷新列表</button>') +
       f('对照组', '<div class="rs-ro">VCP 波段线 · 方向 C · 三段式(封存版)</div>') +
       f('淘汰线', '<div class="rs-kill">' + txt(r && r.kill_text) + '<br><b>提交后这一栏锁定,不能看过结果再改。</b></div>') +
       '<div class="rs-fact"><span class="rs-msg" id="rs-f-msg"></span>' +
@@ -797,12 +797,55 @@ function bindResearch() {
   if (cancel) cancel.addEventListener('click', function () { RS.form = false; renderResearch(RS.data) })
   const sub = document.getElementById('rs-f-submit')
   if (sub) sub.addEventListener('click', rsSubmit)
+  const poolReload = document.getElementById('rs-pool-reload')
+  if (poolReload) { poolReload.addEventListener('click', loadRsPools); loadRsPools() }
   Array.prototype.forEach.call(container.querySelectorAll('[data-open]'), function (el) {
     el.addEventListener('click', function (e) {
       if (e && e.preventDefault) e.preventDefault()
       switchBranch(el.getAttribute('data-open'))
     })
   })
+}
+
+// 与魔法筛选器共用预设与账号保存接口，不在研究台维护另一份策略列表。
+async function loadRsPools() {
+  const select = document.getElementById('rs-f-pool')
+  const note = document.getElementById('rs-pool-note')
+  if (!select || select.dataset.loading === '1') return
+  select.dataset.loading = '1'
+  const previous = select.value
+  if (note) note.textContent = '正在加载…'
+  const urls = ['/api/quant/screener/meta', '/api/quant/screener/saved']
+  const results = await Promise.all(urls.map(async function (url) {
+    try {
+      const r = await fetch(url, { headers: apiHeaders(), cache: 'no-store' })
+      if (!r.ok) throw new Error(r.status === 401 ? '请重新登录后刷新列表' : '请求失败（HTTP ' + r.status + '）')
+      return { data: await r.json() }
+    } catch (e) { return { error: e.message || '网络请求失败' } }
+  }))
+  if (document.getElementById('rs-f-pool') !== select) return
+  let hidden = []
+  try { const h = JSON.parse(localStorage.getItem('hunter_screener_hidden_presets') || '[]'); if (Array.isArray(h)) hidden = h } catch (e) { /* 无有效隐藏记录时显示全部预设 */ }
+  const meta = results[0].data || {}
+  const markets = {}
+  ;(meta.markets || []).forEach(function (m) { markets[m.key] = m.label })
+  const groups = [
+    ['系统预设', (meta.presets || []).filter(function (p) { return hidden.indexOf(p.key) < 0 })],
+    ['我保存的扫描策略', (results[1].data || {}).items || []]
+  ]
+  let count = 0
+  select.innerHTML = '<option value="">请选择筛选策略</option>' + groups.map(function (g) {
+    const options = g[1].map(function (p) {
+      count++
+      const label = p.name + '（' + (markets[p.market] || {us:'美股',hk:'港股',a:'A股'}[p.market] || p.market) + '）'
+      return '<option value="' + esc(label) + '">' + esc(label) + '</option>'
+    }).join('')
+    return options ? '<optgroup label="' + g[0] + '">' + options + '</optgroup>' : ''
+  }).join('')
+  select.value = previous
+  select.dataset.loading = '0'
+  const errors = results.map(function (r, i) { return r.error ? groups[i][0] + '：' + r.error : '' }).filter(Boolean)
+  if (note) note.textContent = errors.length ? errors.join('；') : count ? '来自魔法筛选器；选中后随策略草案保存。' : '暂无可选策略，请先在魔法筛选器保存扫描策略。'
 }
 
 async function rsPost(url, body) {
