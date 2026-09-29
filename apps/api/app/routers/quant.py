@@ -1623,6 +1623,8 @@ async def agent_research_unarchive(key: str, request: Request):
 
 # 个人规则按登录账号隔离，回测不覆盖公共研究账本。
 from app.services.quant import agent_manual as _manual
+from app.routers.agent_builder import router as _builder_router
+router.include_router(_builder_router)
 
 
 @router.get("/agent/rules/{branch}")

@@ -829,9 +829,8 @@ try {
     ['全 null 净值不画线,写明还没有净值', ctx.H_RSNULL.indexOf('还没有净值数据') >= 0 && !/<path d="M/.test(ctx.H_RSNULL)],
     ['后端 404 骨架:两列照画', ['running', 'archived'].every((k) => ctx.H_RSSKEL.indexOf('data-stage="' + k + '"') >= 0)],
     ['后端 404 骨架:顶上说明为什么是 —', /ag-banner dev/.test(ctx.H_RSSKEL) && clean(ctx.H_RSSKEL)],
-    ['新建表单写出淘汰线并声明提交后锁定', ctx.H_RSFORM.indexOf('id="rs-f-submit"') >= 0 && ctx.H_RSFORM.indexOf('提交后这一栏锁定') >= 0
-      && ctx.H_RSFORM.indexOf('每笔平均净损益 &lt; 0') >= 0],
-    ['创建入口合并且保存真实草案', H.includes('＋ 创建策略') && !H.includes('新建研究线') && ctx.H_RSFORM.includes('接入执行逻辑后才能回测') && />保存策略草案<\/button>/.test(ctx.H_RSFORM)],
+    ['个人策略不承诺未实现的公共淘汰规则', ctx.H_RSFORM.includes('id="rs-f-submit"') && ctx.H_RSFORM.includes('个人策略独立保存') && !ctx.H_RSFORM.includes('提交后这一栏锁定')],
+    ['创建入口合并且逐条确认后回测', H.includes('＋ 创建策略') && !H.includes('新建研究线') && ctx.H_RSFORM.includes('逐条确认后回测') && />保存策略草案<\/button>/.test(ctx.H_RSFORM)],
     ['看板视图:分页里「运行看板」高亮', /data-go="dash" class="on"/.test(ctx.H_DASH)],
     // 用户 2026-09-14 要求去掉面包屑(和分页、方向卡、提示条重复)
     ['看板视图:分页右边没有面包屑', ctx.H_DASH.indexOf('rs-crumb') < 0 && !/<a href="#view=research"/.test(ctx.H_DASH)],

@@ -702,14 +702,13 @@ function rsChart(r) {
 function vRsForm(r) {
   if (!RS.form) return ''
   const f = function (label, ctl) { return '<div class="rs-f"><label>' + label + '</label><div>' + ctl + '</div></div>' }
-  return panel('创建策略', '保存后在研究台管理 · 当前保存策略草案，接入执行逻辑后才能回测和每日运行',
+  return panel('创建策略', 'AI 整理或手动添加 · 逐条确认后回测 · 在「已保存的个人策略」中管理',
     '<div class="rs-form">' +
       f('策略名称', '<input id="rs-f-label" maxlength="30" placeholder="例如：我的 VCP 波段策略">') +
       f('策略思路', '<textarea id="rs-f-hyp" maxlength="400" rows="3" placeholder="描述你想捕捉的交易机会，以及为什么认为它有效"></textarea>') +
       f('规则草案', '<textarea id="rs-f-rules" maxlength="600" rows="3" placeholder="进场 / 出场 / 止损 / 仓位"></textarea>') +
       f('股票池', '<select id="rs-f-pool" aria-label="选择筛选策略"><option value="">正在加载筛选策略…</option></select><div class="ag-note" id="rs-pool-note" role="status"></div><button type="button" class="btn small" id="rs-pool-reload">刷新列表</button>') +
-      f('对照组', '<div class="rs-ro">VCP 波段线 · 方向 C · 三段式(封存版)</div>') +
-      f('淘汰线', '<div class="rs-kill">' + txt(r && r.kill_text) + '<br><b>提交后这一栏锁定,不能看过结果再改。</b></div>') +
+      f('运行方式', '<div class="rs-ro">个人策略独立保存；确认后执行历史回测，不会自动启动每日交易或影响公共研究线。</div>') +
       '<div class="rs-fact"><span class="rs-msg" id="rs-f-msg"></span>' +
         '<button type="button" class="btn small" id="rs-f-cancel">取消</button>' +
         '<button type="button" class="btn small primary" id="rs-f-submit">保存策略草案</button></div>' +
@@ -838,7 +837,7 @@ async function loadRsPools() {
     const options = g[1].map(function (p) {
       count++
       const label = p.name + '（' + (markets[p.market] || {us:'美股',hk:'港股',a:'A股'}[p.market] || p.market) + '）'
-      return '<option value="' + esc(label) + '">' + esc(label) + '</option>'
+      return '<option value="' + esc(label) + '" data-kind="' + (g[0] === '系统预设' ? 'preset' : 'saved') + '" data-id="' + esc(String(p.key || p.id)) + '" data-script="' + esc(p.script || '') + '">' + esc(label) + '</option>'
     }).join('')
     return options ? '<optgroup label="' + g[0] + '">' + options + '</optgroup>' : ''
   }).join('')
@@ -1820,5 +1819,6 @@ if (reload) reload.addEventListener('click', boot)
 boot()
 </script>
 <script src="agent-rules.js"></script>
+<script src="agent-create.js"></script>
 </body>
 </html>
