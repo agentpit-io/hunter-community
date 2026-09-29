@@ -123,7 +123,10 @@ export default function TopNav({ active }: NavProps) {
        *        2026-08-30_导航重构方案-对话与自选股双栏.md
        */}
       <NavLink href="/strategies/index.html" icon={<Target size={14} />} label="策略中心" active={active === 'strategies'} />
-      <NavLink href="/help/" icon={<CircleHelp size={14} />} label="帮助中心" active={active === 'help'} />
+      {/* 静态页要写全 index.html —— Next 不给 public 下的目录做 index 解析。
+       * 线上实测:public/strategies/index.html 存在,而 /strategies/ 308 → /strategies → 404。
+       * 写成 /help/ 帮助中心就点不进去了。 */}
+      <NavLink href="/help/index.html" icon={<CircleHelp size={14} />} label="帮助中心" active={active === 'help'} />
 
       {/* 弹簧 */}
       <div style={{ flex: 1 }} />
