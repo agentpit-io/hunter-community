@@ -27,7 +27,7 @@
     root.rows=14;root.spellcheck=false;root.placeholder='输入交易规则，或粘贴 Python / JavaScript / ThinkScript / Pine 等策略代码…'
     const box = document.createElement('div'); box.id = 'ac-editor'
     box.innerHTML = '<style>#ac-editor{margin-top:12px;min-width:0;overflow-wrap:anywhere}#ac-editor .ac-row{border:1px solid var(--line);border-radius:9px;padding:12px;margin:10px 0;background:var(--bg,#fafaf8)}#ac-editor .ac-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0}#ac-editor label{display:inline-block;margin-right:14px}#ac-editor input[type=checkbox]{width:auto}#ac-editor input[type=number],#ac-editor input[type=date]{width:150px}#ac-editor .ac-state{color:var(--brand);font-weight:bold}#ac-result{white-space:pre-wrap;max-height:400px;overflow:auto}#ac-msg{color:var(--brand);white-space:pre-wrap}#ac-editor select{max-width:100%}@media(max-width:640px){.rs-f{grid-template-columns:1fr}#ac-editor label{max-width:100%;margin-right:0}}</style>' +
-      '<style>#ac-workspace{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(270px,1fr);border:1px solid var(--line);border-radius:12px;overflow:hidden;min-width:0}.ac-code,.ac-assistant{min-width:0}.ac-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:12px 14px;border-bottom:1px solid var(--line);background:var(--bg)}.ac-toolbar label{display:flex;align-items:center;gap:8px;font-size:13px}.ac-toolbar select{width:auto;max-width:100%}#rs-f-rules{font-family:Consolas,monospace;line-height:1.7;border:0;border-radius:0;min-height:330px;resize:vertical;tab-size:2}.ac-code-note{padding:10px 14px}.ac-assistant{padding:0 14px 14px;background:var(--bg);border-left:1px solid var(--line)}.ac-assistant .ac-toolbar{margin:0 -14px 12px}.ac-assistant label{display:block;margin:16px 0 8px}.ac-presets{display:flex;gap:8px;flex-wrap:wrap}#ac-prompt{min-height:130px;resize:vertical}#ac-stop[hidden]{display:none}#ac-ai{margin-top:12px}#ac-ai-status{margin-top:10px;color:var(--brand);font-size:13px;line-height:1.6;overflow-wrap:anywhere}#ac-ai-status[data-loading=true]:before{content:"";display:inline-block;width:12px;height:12px;margin-right:8px;border:2px solid var(--line);border-top-color:var(--brand);border-radius:50%;vertical-align:middle;animation:ac-spin .8s linear infinite}@keyframes ac-spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){#ac-ai-status[data-loading=true]:before{animation:none}}.ac-count{text-align:right;font-size:12px;color:var(--muted);margin-top:4px}@media(max-width:850px){#ac-workspace{grid-template-columns:1fr}.ac-assistant{border-left:0;border-top:1px solid var(--line)}}@media(max-width:640px){.ac-toolbar label{display:block}.ac-toolbar select{width:100%}}</style>'+
+      '<style>#ac-rule-results[hidden],#ac-code-body[hidden],.ac-rule-detail[hidden]{display:none} .ac-rule-tabs{display:flex;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line)}.ac-rule-tabs [aria-pressed=true]{color:var(--brand);border-color:var(--brand);background:var(--bg)}#ac-rule-results{padding:12px;min-height:330px}#ac-rule-results>.ac-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}#ac-rows{max-height:520px;overflow:auto;margin-top:10px}#ac-rows .ac-row{border:1px solid var(--line);border-radius:8px;margin:7px 0;padding:10px;background:white}#ac-rows .ac-row-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}#ac-rows .ac-rule-summary{flex:1;min-width:120px;overflow:hidden}#ac-rows .ac-rule-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px}#ac-rows .ac-rule-params{font-size:12px;color:var(--muted);overflow-wrap:anywhere}#ac-rows .ac-state{color:var(--brand);font-size:12px}#ac-rows .ac-row-tools{display:flex;align-items:center;gap:5px;flex-wrap:wrap}#ac-rows .ac-row-tools label{font-size:12px;white-space:nowrap}#ac-rows input[type=checkbox]{width:auto}#ac-rows .ac-rule-detail{border-top:1px solid var(--line);margin-top:10px;padding-top:10px}#ac-rows .ac-rule-detail label{display:block;font-size:12px;margin:8px 0}#ac-rows .ac-rule-detail input{width:120px}#ac-rows .ac-row-msg{color:var(--brand);font-size:12px;overflow-wrap:anywhere}#ac-workspace{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(270px,1fr);border:1px solid var(--line);border-radius:12px;overflow:hidden;min-width:0}.ac-code,.ac-assistant{min-width:0}.ac-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:12px 14px;border-bottom:1px solid var(--line);background:var(--bg)}.ac-toolbar label{display:flex;align-items:center;gap:8px;font-size:13px}.ac-toolbar select{width:auto;max-width:100%}#rs-f-rules{font-family:Consolas,monospace;line-height:1.7;border:0;border-radius:0;min-height:330px;resize:vertical;tab-size:2}.ac-code-note{padding:10px 14px}.ac-assistant{padding:0 14px 14px;background:var(--bg);border-left:1px solid var(--line)}.ac-assistant .ac-toolbar{margin:0 -14px 12px}.ac-assistant label{display:block;margin:16px 0 8px}.ac-presets{display:flex;gap:8px;flex-wrap:wrap}#ac-prompt{min-height:130px;resize:vertical}#ac-stop[hidden]{display:none}#ac-ai{margin-top:12px}#ac-ai-status{margin-top:10px;color:var(--brand);font-size:13px;line-height:1.6;overflow-wrap:anywhere}#ac-ai-status[data-loading=true]:before{content:"";display:inline-block;width:12px;height:12px;margin-right:8px;border:2px solid var(--line);border-top-color:var(--brand);border-radius:50%;vertical-align:middle;animation:ac-spin .8s linear infinite}@keyframes ac-spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){#ac-ai-status[data-loading=true]:before{animation:none}}.ac-count{text-align:right;font-size:12px;color:var(--muted);margin-top:4px}@media(max-width:850px){#ac-workspace{grid-template-columns:1fr}.ac-assistant{border-left:0;border-top:1px solid var(--line)}}@media(max-width:640px){.ac-toolbar label{display:block}.ac-toolbar select{width:100%}}</style>'+
       '<div class="ac-actions"><b>逐条核对规则</b><button type="button" class="btn small" id="ac-add">手动添加一条</button></div>' +
       '<div class="ag-note">AI 只整理受支持规则；没有写清的参数保持待确认。买入条件全部满足，卖出条件任一满足。修改后必须重新确认。</div>' +
       '<div class="ac-actions"><select id="ac-saved" aria-label="我的个人策略"><option value="">加载已保存的个人策略…</option></select><button type="button" class="btn small" id="ac-load">加载</button><button type="button" class="btn small" id="ac-new">另建策略</button></div>' +
@@ -36,10 +36,22 @@
       '<div class="ag-note" id="ac-execution"></div><label><input type="checkbox" id="ac-confirm"> 我已核对原始描述没有遗漏，并确认成交口径、费用与滑点设置</label>' +
       '<div class="ac-actions"><button type="button" class="btn primary small" id="ac-test">保存确认版本并回测</button><button type="button" class="btn small" id="ac-refresh">刷新回测状态</button></div><div id="ac-result"></div>'
     workspace.after(box)
-    const state = {rows:[], schema:[], id:null, version:null, busy:false, timer:null, items:[]}
+    const state = {rows:[], schema:[], id:null, version:null, busy:false, timer:null, items:[], editing:null}
     if (current && current.timer) clearTimeout(current.timer)
     current = state
     const el = id => document.getElementById(id)
+    const codeBody=el('ac-code-body'), tabs=document.createElement('div')
+    tabs.className='ac-rule-tabs'
+    tabs.innerHTML='<button type="button" class="btn small" id="ac-tab-source" aria-pressed="true">规则原文 / 代码</button><button type="button" class="btn small" id="ac-tab-rows" aria-pressed="false">识别结果 <span id="ac-rule-count">0</span></button>'
+    codeBody.before(tabs)
+    const results=document.createElement('div');results.id='ac-rule-results';results.hidden=true
+    results.appendChild(el('ac-add').parentElement)
+    results.appendChild(box.querySelector('.ag-note'))
+    results.appendChild(el('ac-rows'))
+    codeBody.after(results)
+    function showRules(show=true){codeBody.hidden=show;results.hidden=!show;el('ac-tab-source').setAttribute('aria-pressed',String(!show));el('ac-tab-rows').setAttribute('aria-pressed',String(show))}
+    el('ac-tab-source').onclick=()=>showRules(false)
+    el('ac-tab-rows').onclick=()=>showRules(true)
     const active = () => document.getElementById('ac-editor') === box
     const msg = s => { if(active()) el('ac-msg').textContent = s }
     const description=el('rs-f-hyp'), counter=document.createElement('div');counter.className='ac-count';counter.id='ac-description-count';description.after(counter)
@@ -77,15 +89,18 @@
       if (!active()) return
       el('ac-rows').innerHTML = state.rows.map((r,i)=>{
         const spec=state.schema.find(x=>x.type===r.type)
-        return '<div class="ac-row" data-row="'+i+'"><div class="ac-state">规则 '+(i+1)+' · '+(r.confirmed?'已确认':'待确认')+'</div>' +
-          '<label>原始描述（可修改后单条重新识别）</label><textarea data-source rows="2">'+escape(r.source)+'</textarea>' +
-          '<label>规则类型</label><select data-type>'+state.schema.map(x=>'<option value="'+x.type+'"'+(x.type===r.type?' selected':'')+'>'+escape(x.label)+'</option>').join('')+'</select>' +
-          (spec?spec.fields.map(f=>'<label>'+escape(f.label)+' <input data-param="'+f.key+'" type="number" min="'+f.min+'" max="'+f.max+'" step="'+(f.integer?'1':'any')+'" value="'+escape(r.params[f.key])+'"></label>').join(''):'') +
-          '<div class="ac-actions"><button type="button" class="btn small" data-retry>仅重新识别这一条</button><button type="button" class="btn small" data-remove>删除此条</button><label><input data-confirm type="checkbox"'+(r.confirmed?' checked':'')+(r.type==='pending'?' disabled':'')+'>确认此条规则</label></div></div>'
+        const params=spec&&r.type!=='pending'?spec.label+' · '+spec.fields.map(f=>f.label+' '+(r.params[f.key]??'—')).join(' / '):'待补充或暂不支持，不能直接回测'
+        return '<div class="ac-row" data-row="'+i+'"><div class="ac-row-head"><span class="ac-state">'+(i+1)+' · '+(r.confirmed?'已确认':'待确认')+'</span><div class="ac-rule-summary"><div class="ac-rule-title" title="'+escape(r.source)+'">'+escape(r.source||'请编辑此条规则')+'</div><div class="ac-rule-params">'+escape(params)+'</div></div><div class="ac-row-tools"><button type="button" class="btn small" data-edit aria-expanded="'+(state.editing===r)+'">'+(state.editing===r?'收起':'编辑')+'</button><button type="button" class="btn small" data-retry>AI 重新识别</button><button type="button" class="btn small" data-remove>删除</button><label><input data-confirm type="checkbox"'+(r.confirmed?' checked':'')+(r.type==='pending'?' disabled':'')+'>确认</label></div></div><div class="ac-row-msg" role="status"></div><div class="ac-rule-detail"'+(state.editing===r?'':' hidden')+'>'+
+          '<label>原始描述（修改后可单条重新识别）</label><textarea data-source rows="3">'+escape(r.source)+'</textarea>'+
+          '<label>规则类型</label><select data-type>'+state.schema.map(x=>'<option value="'+x.type+'"'+(x.type===r.type?' selected':'')+'>'+escape(x.label)+'</option>').join('')+'</select>'+
+          (spec?spec.fields.map(f=>'<label>'+escape(f.label)+' <input data-param="'+f.key+'" type="number" min="'+f.min+'" max="'+f.max+'" step="'+(f.integer?'1':'any')+'" value="'+escape(r.params[f.key])+'"></label>').join(''):'')+'</div></div>'
       }).join('')
+      el('ac-rule-count').textContent=state.rows.length
+      if(!state.rows.length)el('ac-rows').innerHTML='<div class="ag-note">尚无规则，可在右侧识别或手动添加。</div>'
       el('ac-rows').querySelectorAll('[data-row]').forEach(card=>{
         const i=+card.dataset.row, r=state.rows[i]
-        function change() {r.confirmed=false;card.querySelector('[data-confirm]').checked=false;card.querySelector('.ac-state').textContent='规则 '+(i+1)+' · 待确认';invalidate()}
+        card.querySelector('[data-edit]').onclick=()=>{state.editing=state.editing===r?null:r;renderRows()}
+        function change() {r.confirmed=false;card.querySelector('[data-confirm]').checked=false;card.querySelector('.ac-state').textContent=(i+1)+' · 待确认';card.querySelector('.ac-rule-title').textContent=r.source||'请编辑此条规则';card.querySelector('.ac-rule-title').title=r.source;const spec=state.schema.find(x=>x.type===r.type);card.querySelector('.ac-rule-params').textContent=spec&&r.type!=='pending'?spec.label+' · '+spec.fields.map(f=>f.label+' '+(r.params[f.key]??'—')).join(' / '):'待补充或暂不支持，不能直接回测';invalidate()}
         card.querySelector('[data-source]').oninput=e=>{r.source=e.target.value;change()}
         card.querySelector('[data-type]').onchange=e=>{r.type=e.target.value;r.params={};change();renderRows()}
         card.querySelectorAll('[data-param]').forEach(inp=>{inp.oninput=()=>{r.params[inp.dataset.param]=inp.value===''?null:Number(inp.value);change()}})
@@ -97,11 +112,11 @@
         }
         card.querySelector('[data-remove]').onclick=()=>{state.rows.splice(i,1);invalidate();renderRows()}
         card.querySelector('[data-retry]').onclick=()=>action(async()=>{
-          const original=r.source, before=JSON.stringify(r); msg('正在重新识别这一条，其他规则保持不变…')
+          const original=r.source, before=JSON.stringify(r); card.querySelector('.ac-row-msg').textContent='正在重新识别这一条…';msg('正在重新识别这一条，其他规则保持不变…')
           const data=await request('/recognize',{text:original,single:true})
           if(!active()||state.rows[i]!==r||JSON.stringify(r)!==before) {msg('识别期间此条已被修改，返回结果未覆盖你的编辑');return}
           state.rows[i]=data.rules[0];invalidate();renderRows();msg('此条已重新识别，请重新确认')
-        })
+        },text=>{if(card.isConnected)card.querySelector('.ac-row-msg').textContent=text;msg(text)})
       })
     }
     function poolRef() {
@@ -167,7 +182,7 @@
         const data=await request('/recognize',{text,language:el('ac-language').value})
         if(!active())return
         if(fingerprint!==inputFingerprint()||before!==JSON.stringify(state.rows)){aiStatus('识别期间内容已被修改，返回结果未覆盖你的编辑');return}
-        state.rows=data.rules;invalidate();renderRows();aiStatus('识别完成，请在下方逐条核对并确认。暂不支持的内容不能带入回测。')
+        state.rows=data.rules;state.editing=null;invalidate();renderRows();showRules();aiStatus('识别完成，请在左侧逐条核对并确认。暂不支持的内容不能带入回测。')
       } finally {
         if(active()){
           el('ac-stop').hidden=true
@@ -177,7 +192,7 @@
         }
       }
     },text=>{aiStatus(text);syncRecognition().catch(()=>{})})
-    el('ac-add').onclick=()=>{if(state.rows.length>=30){msg('最多三十条规则');return}state.rows.push({type:'pending',params:{},source:'',confirmed:false});invalidate();renderRows()}
+    el('ac-add').onclick=()=>{if(state.rows.length>=30){msg('最多三十条规则');return}const row={type:'pending',params:{},source:'',confirmed:false};state.rows.push(row);state.editing=row;invalidate();renderRows();showRules()}
     root.addEventListener('input',()=>{state.rows.forEach(r=>r.confirmed=false);invalidate();renderRows()})
     ;['rs-f-pool','ac-start','ac-end','ac-initial','ac-slip'].forEach(id=>el(id).addEventListener('change',invalidate))
     el('rs-f-submit').addEventListener('click',e=>{e.stopImmediatePropagation();e.preventDefault();action(save)},true)
@@ -201,7 +216,7 @@
       const p=el('rs-f-pool'), opt=Array.from(p.options).find(o=>o.dataset.kind===cfg.pool.ref.kind&&o.dataset.id===String(cfg.pool.ref.id))
       if(opt)p.selectedIndex=opt.index;else p.value=''
       description.value=cfg.description||'';countDescription();root.value=cfg.source_text??cfg.rules.map(r=>r.source).join('\n');el('ac-language').value=cfg.source_language||'text';el('ac-prompt').value=cfg.assistant_prompt||''
-      invalidate();renderRows();result(cfg);msg('已加载版本 '+cfg.version+'，股票池快照：'+cfg.pool.name+'。再次保存时会读取所选筛选器的当前脚本。')
+      state.editing=null;invalidate();renderRows();showRules();result(cfg);msg('已加载版本 '+cfg.version+'，股票池快照：'+cfg.pool.name+'。再次保存时会读取所选筛选器的当前脚本。')
     })
     request('').then(data=>{
       if(!active())return
