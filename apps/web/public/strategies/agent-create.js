@@ -4,6 +4,20 @@
   const API = '/api/quant/agent/builder'
   const escape = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))
   let current = null
+  function draftOwner() {
+    try { const t=localStorage.getItem('hunter_token')||'', part=t.split('.')[1]; return String(JSON.parse(atob(part.replace(/-/g,'+').replace(/_/g,'/'))).sub||'') } catch(_){return ''}
+  }
+  document.addEventListener('input',()=>current?.persist?.())
+  document.addEventListener('change',()=>current?.persist?.())
+  document.addEventListener('click',e=>{
+    current?.persist?.()
+    if(e.target.closest('#rs-new,#rs-f-cancel')&&document.getElementById('ac-editor')){
+      const h=new URLSearchParams(location.hash.slice(1));h.delete('create');history.replaceState(null,'',location.pathname+location.search+'#'+h)
+    }
+  },true)
+  window.addEventListener('pagehide',()=>current?.persist?.())
+  window.addEventListener('beforeunload',e=>{current?.persist?.();if(current?.draftError){e.preventDefault();e.returnValue=''}})
+
   async function request(path, data, method) {
     const r = await fetch(API + path, {method:method || (data === undefined ? 'GET':'POST'), headers:apiHeaders({'Content-Type':'application/json'}), ...(data === undefined ? {} : {body:JSON.stringify(data)})})
     let d; try { d = await r.json() } catch (_) { throw Error('服务返回异常，请稍后重试') }
@@ -31,11 +45,14 @@
       '<div class="ac-actions"><b>逐条核对规则</b><button type="button" class="btn small" id="ac-add">手动添加一条</button></div>' +
       '<div class="ag-note">AI 只整理受支持规则；没有写清的参数保持待确认。买入条件全部满足；卖出按优先级执行，硬止损最先。修改后必须重新确认。</div>' +
       '<div class="ac-actions"><select id="ac-saved" aria-label="我的个人策略"><option value="">加载已保存的个人策略…</option></select><button type="button" class="btn small" id="ac-load">加载</button><button type="button" class="btn small" id="ac-new">另建策略</button></div>' +
-      '<div id="ac-personal-list"></div><div id="ac-msg" role="status"></div><div id="ac-rows"></div>' +
+      '<div class="ac-actions"><span id="ac-draft-status" role="status">正在准备草稿保护…</span><button type="button" class="btn small" id="ac-discard">清空本机草稿</button></div><div id="ac-personal-list"></div><div id="ac-msg" role="status"></div><div id="ac-rows"></div>' +
       '<div class="ac-actions"><label>回测开始 <input type="date" id="ac-start"></label><label>回测结束 <input type="date" id="ac-end"></label><label>初始资金（美元） <input type="number" id="ac-initial" value="100000" min="1000" max="10000000"></label><label>单边滑点（基点） <input type="number" id="ac-slip" value="5" min="0" max="100"></label></div>' +
       '<div class="ag-note" id="ac-execution"></div><label><input type="checkbox" id="ac-confirm"> 我已核对原始描述没有遗漏，并确认成交口径、费用与滑点设置</label>' +
       '<div class="ac-actions"><button type="button" class="btn primary small" id="ac-test">保存确认版本并回测</button><button type="button" class="btn small" id="ac-refresh">刷新回测状态</button></div><div id="ac-result"></div>'
     workspace.after(box)
+    const draftBar=box.querySelector('#ac-draft-status').parentElement
+    draftBar.style.cssText='display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:8px 0;font-size:12px;color:var(--muted)'
+    workspace.before(draftBar)
     const state = {rows:[], schema:[], id:null, version:null, busy:false, timer:null, items:[], editing:null}
     if (current && current.timer) clearTimeout(current.timer)
     current = state
@@ -49,7 +66,7 @@
     results.appendChild(box.querySelector('.ag-note'))
     results.appendChild(el('ac-rows'))
     codeBody.after(results)
-    function showRules(show=true){codeBody.hidden=show;results.hidden=!show;el('ac-tab-source').setAttribute('aria-pressed',String(!show));el('ac-tab-rows').setAttribute('aria-pressed',String(show))}
+    function showRules(show=true){codeBody.hidden=show;results.hidden=!show;el('ac-tab-source').setAttribute('aria-pressed',String(!show));el('ac-tab-rows').setAttribute('aria-pressed',String(show));state.persist?.()}
     el('ac-tab-source').onclick=()=>showRules(false)
     el('ac-tab-rows').onclick=()=>showRules(true)
     const active = () => document.getElementById('ac-editor') === box
@@ -83,7 +100,7 @@
       state.busy = true
       ;[box,workspace].forEach(n=>n.querySelectorAll('button:not(#ac-stop)').forEach(b=>b.disabled=true))
       try { await fn() } catch(e) { report(e.message || '请求失败') }
-      finally { state.busy=false; if(active()) [box,workspace].forEach(n=>n.querySelectorAll('button:not(#ac-stop)').forEach(b=>b.disabled=false)) }
+      finally { state.busy=false;state.persist?.(); if(active()) [box,workspace].forEach(n=>n.querySelectorAll('button:not(#ac-stop)').forEach(b=>b.disabled=false)) }
     }
     function ruleText(r) {
       const spec=state.schema.find(x=>x.type===r.type)
@@ -135,6 +152,7 @@
           state.rows[i]=data.rules[0];invalidate();renderRows();msg('此条已重新识别，请重新确认')
         },text=>{if(card.isConnected)card.querySelector('.ac-row-msg').textContent=text;msg(text)})
       })
+      state.persist?.()
     }
     function poolRef() {
       const p=el('rs-f-pool'), o=p.options[p.selectedIndex]
@@ -223,7 +241,7 @@
       result({runs:[run]});msg('回测已提交，使用刚保存的确认版本')
     })
     el('ac-refresh').onclick=()=>action(refresh)
-    el('ac-new').onclick=()=>{state.id=null;state.version=null;invalidate();msg('下次保存将创建另一条个人策略，现有规则保留供修改')}
+    el('ac-new').onclick=()=>{state.id=null;state.version=null;invalidate();msg('下次保存将创建另一条个人策略，现有规则保留供修改');state.persist?.()}
     el('ac-load').onclick=()=>action(async()=>{
       const id=el('ac-saved').value;if(!id)return
       if(state.rows.length&&!confirm('加载将替换当前未保存的规则，继续吗？'))return
@@ -235,6 +253,59 @@
       description.value=cfg.description||'';countDescription();root.value=cfg.source_text??cfg.rules.map(r=>r.source).join('\n');el('ac-language').value=cfg.source_language||'text';el('ac-prompt').value=cfg.assistant_prompt||''
       state.editing=null;invalidate();renderRows();showRules();result(cfg);msg('已加载版本 '+cfg.version+'，股票池快照：'+cfg.pool.name+'。再次保存时会读取所选筛选器的当前脚本。')
     })
+    const draftFields=['rs-f-label','rs-f-hyp','rs-f-rules','ac-prompt','ac-language','ac-start','ac-end','ac-initial','ac-slip']
+    let ready=false, restoring=false, owner=draftOwner(), wantedPool=null
+    const draftKey=()=>owner?'hunter_agent_builder_draft:v1:'+encodeURIComponent(owner):null
+    const draftStatus=text=>{if(active())el('ac-draft-status').textContent=text}
+    state.persist=()=>{
+      if(!active()||restoring)return
+      if(!ready){state.draftError=true;draftStatus('草稿保护尚未就绪，离开前请复制输入');return}
+      if(!owner)owner=draftOwner()
+      if(!owner||draftOwner()!==owner){state.draftError=true;draftStatus('暂未保存：请登录后继续，离开前请复制输入');return}
+      const values=Object.fromEntries(draftFields.map(id=>[id,el(id).value]))
+      const p=el('rs-f-pool'),o=p.options[p.selectedIndex]
+      const pool=o?.dataset.id?{kind:o.dataset.kind,id:o.dataset.id}:wantedPool
+      const data={v:1,values,rows:state.rows,id:state.id,version:state.version,editing:state.rows.indexOf(state.editing),showRules:!results.hidden,pool}
+      const meaningful=state.rows.length||state.id||['rs-f-label','rs-f-hyp','rs-f-rules','ac-prompt'].some(id=>values[id].trim())
+      try {
+        if(meaningful)localStorage.setItem(draftKey(),JSON.stringify(data));else localStorage.removeItem(draftKey())
+        state.draftError=false;draftStatus(meaningful?'草稿已自动保存到本机 · 刷新可恢复':'自动保存草稿 · 仅当前浏览器、当前账号')
+      }catch(_){state.draftError=true;draftStatus('本机草稿保存失败，请勿刷新；先复制输入或保存策略')}
+    }
+    function restoreDraft(){
+      if(!active()||ready)return
+      owner=draftOwner();restoring=true
+      try{
+        const raw=owner&&localStorage.getItem(draftKey()),d=raw&&JSON.parse(raw)
+        if(d){
+          if(d.v!==1||!d.values||!Array.isArray(d.rows)||d.rows.length>30||d.rows.some(r=>!r||typeof r.type!=='string'||typeof r.source!=='string'||!r.params))throw Error('invalid')
+          draftFields.forEach(id=>{if(typeof d.values[id]==='string')el(id).value=d.values[id]})
+          state.rows=d.rows;state.id=d.id||null;state.version=d.version??null;state.editing=state.rows[d.editing]||null
+          wantedPool=d.pool||null;restorePool();countDescription();showRules(!!d.showRules);el('ac-confirm').checked=false
+          draftStatus('已恢复本机草稿 · 回测前请重新确认成交口径')
+        }else draftStatus('自动保存草稿 · 仅当前浏览器、当前账号')
+      }catch(_){draftStatus('草稿暂时无法恢复；原草稿未删除，请先保留当前输入');state.draftError=true;restoring=false;return}
+      restoring=false;ready=true
+    }
+    function restorePool(){
+      if(!wantedPool||!active())return
+      const p=el('rs-f-pool'),opt=Array.from(p.options).find(o=>o.dataset.kind===wantedPool.kind&&o.dataset.id===String(wantedPool.id))
+      if(opt){p.value=opt.value;wantedPool=null}
+    }
+    const poolObserver=new MutationObserver(()=>{if(!active()){poolObserver.disconnect();return}restorePool()})
+    poolObserver.observe(el('rs-f-pool'),{childList:true})
+    el('rs-f-pool').addEventListener('change',()=>{wantedPool=null})
+    el('ac-discard').onclick=()=>{
+      if(!confirm('清空本机草稿和当前编辑内容？已保存的策略及回测不会删除。'))return
+      try{if(draftKey())localStorage.removeItem(draftKey())}catch(_){draftStatus('清空失败，本机存储不可用');return}
+      ready=true;restoring=true;state.rows=[];state.id=null;state.version=null;state.editing=null;wantedPool=null
+      ;['rs-f-label','rs-f-hyp','rs-f-rules','ac-prompt','ac-start'].forEach(id=>el(id).value='')
+      el('ac-language').value='text';el('rs-f-pool').value='';el('ac-initial').value='100000';el('ac-slip').value='5'
+      invalidate();countDescription();renderRows();showRules(false);restoring=false;state.persist()
+    }
+    const hash=new URLSearchParams(location.hash.slice(1));hash.set('view','research');hash.set('create','1');hash.delete('branch')
+    history.replaceState(null,'',location.pathname+location.search+'#'+hash)
+    if(owner){restoreDraft();renderRows()}
     request('').then(data=>{
       if(!active())return
       state.schema=data.schema;state.items=data.items
@@ -245,10 +316,10 @@
         el('ac-execution').textContent+=' 已入库基准范围：'+data.data_range.first+' 至 '+data.data_range.last+'；个股覆盖可能更短。'
         el('ac-start').min=el('ac-end').min=data.data_range.first
         el('ac-start').max=el('ac-end').max=data.data_range.last
-        el('ac-end').value=data.data_range.last
+        if(!el('ac-end').value)el('ac-end').value=data.data_range.last
       }
-      renderRows()
-    }).catch(e=>msg(e.message))
+      restoreDraft();renderRows()
+    }).catch(e=>{msg(e.message);restoreDraft()})
   }
   new MutationObserver(mount).observe(document.body,{childList:true,subtree:true})
   mount()
