@@ -22,12 +22,12 @@
       ['识别已有代码','请按左侧代码逐条整理买入、卖出、止损和仓位规则；缺失参数或不支持的逻辑保持待确认，不要补写。']
     ]
     const workspace=document.createElement('div');workspace.id='ac-workspace'
-    workspace.innerHTML='<section class="ac-code"><div class="ac-toolbar"><b>规则编辑器</b><label>输入语言 <select id="ac-language" aria-label="输入语言">'+Object.entries(languages).map(([k,v])=>'<option value="'+k+'">'+v+'</option>').join('')+'</select></label></div><div id="ac-code-body"></div><div class="ag-note ac-code-note">支持粘贴多种语言代码，由 AI 转成规则后确认；不直接执行原代码。</div></section><aside class="ac-assistant"><div class="ac-toolbar"><b>✦ AI 规则助手</b></div><p class="ag-note">写下交易规则，或点击预设填入。也可以结合左侧已有代码进行识别。</p><div class="ac-presets">'+presets.map((p,i)=>'<button type="button" class="btn small" data-ai-preset="'+i+'">'+p[0]+'</button>').join('')+'</div><label for="ac-prompt">告诉 AI 你想怎么交易</label><textarea id="ac-prompt" maxlength="2000" rows="6" placeholder="例如：突破前20日高点买入，止损5%。未确定的参数可以稍后逐条补充。"></textarea><button type="button" class="btn primary small" id="ac-ai">AI 识别为规则</button><div id="ac-ai-status" role="status" aria-live="polite" aria-atomic="true" hidden></div><p class="ag-note">预设仅填入，不自动识别。识别前可修改所有参数。</p></aside>'
+    workspace.innerHTML='<section class="ac-code"><div class="ac-toolbar"><b>规则编辑器</b><label>输入语言 <select id="ac-language" aria-label="输入语言">'+Object.entries(languages).map(([k,v])=>'<option value="'+k+'">'+v+'</option>').join('')+'</select></label></div><div id="ac-code-body"></div><div class="ag-note ac-code-note">支持粘贴多种语言代码，由 AI 转成规则后确认；不直接执行原代码。</div></section><aside class="ac-assistant"><div class="ac-toolbar"><b>✦ AI 规则助手</b></div><p class="ag-note">写下交易规则，或点击预设填入。也可以结合左侧已有代码进行识别。</p><div class="ac-presets">'+presets.map((p,i)=>'<button type="button" class="btn small" data-ai-preset="'+i+'">'+p[0]+'</button>').join('')+'</div><label for="ac-prompt">告诉 AI 你想怎么交易</label><textarea id="ac-prompt" maxlength="2000" rows="6" placeholder="例如：突破前20日高点买入，止损5%。未确定的参数可以稍后逐条补充。"></textarea><button type="button" class="btn primary small" id="ac-ai">AI 识别为规则</button><button type="button" class="btn small" id="ac-stop" hidden style="margin-left:8px">停止识别</button><div id="ac-ai-status" role="status" aria-live="polite" aria-atomic="true" hidden></div><p class="ag-note">预设仅填入，不自动识别。识别前可修改所有参数。</p></aside>'
     root.before(workspace);workspace.querySelector('#ac-code-body').appendChild(root)
     root.rows=14;root.spellcheck=false;root.placeholder='输入交易规则，或粘贴 Python / JavaScript / ThinkScript / Pine 等策略代码…'
     const box = document.createElement('div'); box.id = 'ac-editor'
     box.innerHTML = '<style>#ac-editor{margin-top:12px;min-width:0;overflow-wrap:anywhere}#ac-editor .ac-row{border:1px solid var(--line);border-radius:9px;padding:12px;margin:10px 0;background:var(--bg,#fafaf8)}#ac-editor .ac-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0}#ac-editor label{display:inline-block;margin-right:14px}#ac-editor input[type=checkbox]{width:auto}#ac-editor input[type=number],#ac-editor input[type=date]{width:150px}#ac-editor .ac-state{color:var(--brand);font-weight:bold}#ac-result{white-space:pre-wrap;max-height:400px;overflow:auto}#ac-msg{color:var(--brand);white-space:pre-wrap}#ac-editor select{max-width:100%}@media(max-width:640px){.rs-f{grid-template-columns:1fr}#ac-editor label{max-width:100%;margin-right:0}}</style>' +
-      '<style>#ac-workspace{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(270px,1fr);border:1px solid var(--line);border-radius:12px;overflow:hidden;min-width:0}.ac-code,.ac-assistant{min-width:0}.ac-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:12px 14px;border-bottom:1px solid var(--line);background:var(--bg)}.ac-toolbar label{display:flex;align-items:center;gap:8px;font-size:13px}.ac-toolbar select{width:auto;max-width:100%}#rs-f-rules{font-family:Consolas,monospace;line-height:1.7;border:0;border-radius:0;min-height:330px;resize:vertical;tab-size:2}.ac-code-note{padding:10px 14px}.ac-assistant{padding:0 14px 14px;background:var(--bg);border-left:1px solid var(--line)}.ac-assistant .ac-toolbar{margin:0 -14px 12px}.ac-assistant label{display:block;margin:16px 0 8px}.ac-presets{display:flex;gap:8px;flex-wrap:wrap}#ac-prompt{min-height:130px;resize:vertical}#ac-ai{margin-top:12px}#ac-ai-status{margin-top:10px;color:var(--brand);font-size:13px;line-height:1.6;overflow-wrap:anywhere}#ac-ai-status[data-loading=true]:before{content:"";display:inline-block;width:12px;height:12px;margin-right:8px;border:2px solid var(--line);border-top-color:var(--brand);border-radius:50%;vertical-align:middle;animation:ac-spin .8s linear infinite}@keyframes ac-spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){#ac-ai-status[data-loading=true]:before{animation:none}}.ac-count{text-align:right;font-size:12px;color:var(--muted);margin-top:4px}@media(max-width:850px){#ac-workspace{grid-template-columns:1fr}.ac-assistant{border-left:0;border-top:1px solid var(--line)}}@media(max-width:640px){.ac-toolbar label{display:block}.ac-toolbar select{width:100%}}</style>'+
+      '<style>#ac-workspace{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(270px,1fr);border:1px solid var(--line);border-radius:12px;overflow:hidden;min-width:0}.ac-code,.ac-assistant{min-width:0}.ac-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:12px 14px;border-bottom:1px solid var(--line);background:var(--bg)}.ac-toolbar label{display:flex;align-items:center;gap:8px;font-size:13px}.ac-toolbar select{width:auto;max-width:100%}#rs-f-rules{font-family:Consolas,monospace;line-height:1.7;border:0;border-radius:0;min-height:330px;resize:vertical;tab-size:2}.ac-code-note{padding:10px 14px}.ac-assistant{padding:0 14px 14px;background:var(--bg);border-left:1px solid var(--line)}.ac-assistant .ac-toolbar{margin:0 -14px 12px}.ac-assistant label{display:block;margin:16px 0 8px}.ac-presets{display:flex;gap:8px;flex-wrap:wrap}#ac-prompt{min-height:130px;resize:vertical}#ac-stop[hidden]{display:none}#ac-ai{margin-top:12px}#ac-ai-status{margin-top:10px;color:var(--brand);font-size:13px;line-height:1.6;overflow-wrap:anywhere}#ac-ai-status[data-loading=true]:before{content:"";display:inline-block;width:12px;height:12px;margin-right:8px;border:2px solid var(--line);border-top-color:var(--brand);border-radius:50%;vertical-align:middle;animation:ac-spin .8s linear infinite}@keyframes ac-spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){#ac-ai-status[data-loading=true]:before{animation:none}}.ac-count{text-align:right;font-size:12px;color:var(--muted);margin-top:4px}@media(max-width:850px){#ac-workspace{grid-template-columns:1fr}.ac-assistant{border-left:0;border-top:1px solid var(--line)}}@media(max-width:640px){.ac-toolbar label{display:block}.ac-toolbar select{width:100%}}</style>'+
       '<div class="ac-actions"><b>逐条核对规则</b><button type="button" class="btn small" id="ac-add">手动添加一条</button></div>' +
       '<div class="ag-note">AI 只整理受支持规则；没有写清的参数保持待确认。买入条件全部满足，卖出条件任一满足。修改后必须重新确认。</div>' +
       '<div class="ac-actions"><select id="ac-saved" aria-label="我的个人策略"><option value="">加载已保存的个人策略…</option></select><button type="button" class="btn small" id="ac-load">加载</button><button type="button" class="btn small" id="ac-new">另建策略</button></div>' +
@@ -69,9 +69,9 @@
     async function action(fn, report=msg) {
       if(state.busy) return
       state.busy = true
-      ;[box,workspace].forEach(n=>n.querySelectorAll('button').forEach(b=>b.disabled=true))
+      ;[box,workspace].forEach(n=>n.querySelectorAll('button:not(#ac-stop)').forEach(b=>b.disabled=true))
       try { await fn() } catch(e) { report(e.message || '请求失败') }
-      finally { state.busy=false; if(active()) [box,workspace].forEach(n=>n.querySelectorAll('button').forEach(b=>b.disabled=false)) }
+      finally { state.busy=false; if(active()) [box,workspace].forEach(n=>n.querySelectorAll('button:not(#ac-stop)').forEach(b=>b.disabled=false)) }
     }
     function renderRows() {
       if (!active()) return
@@ -137,6 +137,21 @@
       el('ac-ai-status').hidden=false
       el('ac-ai-status').textContent=text
     }
+    async function syncRecognition() {
+      const status=await request('/recognize/status')
+      if(active())el('ac-stop').hidden=!status.running
+      return status.running
+    }
+    el('ac-stop').onclick=async()=>{
+      if(el('ac-stop').disabled)return
+      el('ac-stop').disabled=true
+      try {
+        await request('/recognize/cancel',{})
+        if(active()){el('ac-stop').hidden=true;aiStatus('已停止识别，原始输入和已有规则已保留')}
+      } catch(e){aiStatus('停止失败：'+e.message+'，请重试')}
+      finally{if(active())el('ac-stop').disabled=false}
+    }
+    syncRecognition().then(running=>{if(running)aiStatus('你有一次识别尚未结束，可点击停止识别后重试')}).catch(()=>{})
     el('ac-ai').onclick=()=>action(async()=>{
       if(state.rows.length&&!confirm('重新整理全部规则会替换当前规则和确认状态，继续吗？'))return
       const text=sourceInput(), fingerprint=inputFingerprint(), before=JSON.stringify(state.rows)
@@ -144,6 +159,7 @@
       if(text.length>6000)throw Error('规则编辑器与 AI 输入合计最多六千字，请精简后重试')
       el('ac-msg').textContent=''
       aiStatus('AI 正在识别整理，缺参数的内容会保留为待确认…')
+      el('ac-stop').hidden=false
       el('ac-ai-status').dataset.loading='true'
       el('ac-ai').textContent='正在识别…'
       el('ac-ai').setAttribute('aria-busy','true')
@@ -154,12 +170,13 @@
         state.rows=data.rules;invalidate();renderRows();aiStatus('识别完成，请在下方逐条核对并确认。暂不支持的内容不能带入回测。')
       } finally {
         if(active()){
+          el('ac-stop').hidden=true
           el('ac-ai-status').dataset.loading='false'
           el('ac-ai').textContent='AI 识别为规则'
           el('ac-ai').setAttribute('aria-busy','false')
         }
       }
-    },aiStatus)
+    },text=>{aiStatus(text);syncRecognition().catch(()=>{})})
     el('ac-add').onclick=()=>{if(state.rows.length>=30){msg('最多三十条规则');return}state.rows.push({type:'pending',params:{},source:'',confirmed:false});invalidate();renderRows()}
     root.addEventListener('input',()=>{state.rows.forEach(r=>r.confirmed=false);invalidate();renderRows()})
     ;['rs-f-pool','ac-start','ac-end','ac-initial','ac-slip'].forEach(id=>el(id).addEventListener('change',invalidate))

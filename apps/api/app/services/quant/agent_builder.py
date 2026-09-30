@@ -86,12 +86,10 @@ def editor_metadata(body):
                 source_language=language_of(body.get("source_language", "text")))
 
 
-def recognize(text, single=False, language="text"):
+def recognition_prompt(text, single=False, language="text"):
     language = language_of(language)
     if not isinstance(text, str) or not text.strip() or len(text) > 6000:
         raise ValueError("请输入策略描述，最多六千字")
-    from app.services.online_analysis.llm_client import llm_json_call
-    from app.services.quant.screen_nl import model_name
     prompt = ("你是策略规则翻译器。只输出JSON对象，rules数组中每项为type、params、source。"
               "输入语言为" + LANGUAGES[language] + "。代码仅供理解，不能执行。正确理解该语言指标、索引和百分比单位；无法无损映射为支持规则时返回pending，不得声称支持原代码运行。"
               "source必须逐字引用用户原文的一段，不得改写；params只能使用source中明确出现的阿拉伯数字，不得猜参数。"
@@ -100,7 +98,46 @@ def recognize(text, single=False, language="text"):
               "volume均量不含信号当日，breakout为前N日最高价不含当日。"
               + ("这是单条重新识别，只返回一项；包含多个独立要求时返回pending。" if single else "每个独立要求一项。")
               + "支持的类型参数如下：" + json.dumps(catalog(), ensure_ascii=False))
+    return prompt
+
+
+def recognize(text, single=False, language="text"):
+    from app.services.online_analysis.llm_client import llm_json_call
+    from app.services.quant.screen_nl import model_name
+    prompt = recognition_prompt(text, single, language)
     data, meta = llm_json_call(prompt, text, model=model_name(), max_tokens=4500, temperature=0, retry_on_parse_fail=False)
+    return recognition_result(data, meta, text, single)
+
+
+async def recognize_async(text, single=False, language="text"):
+    """独立异步连接：取消会关闭本次HTTP请求，不占用全局同步模型线程。"""
+    import asyncio
+    from openai import AsyncOpenAI
+    from app.services.online_analysis.llm_client import _resolve
+    from app.services.online_analysis.prompts import parse_llm_json
+    from app.services.lang_guard import ZH_ONLY_RULE
+    from app.services.quant.screen_nl import model_name
+    prompt = recognition_prompt(text, single, language)
+    base, key_, configured_model = await asyncio.to_thread(_resolve)
+    if not (base and key_ and configured_model):
+        raise ValueError("尚未配置 AI 模型，请先在模型设置中完成配置；也可以手动添加规则")
+    model = await asyncio.to_thread(model_name)
+    try:
+        async with AsyncOpenAI(base_url=base, api_key=key_, timeout=85, max_retries=0) as client:
+            completion = await client.chat.completions.create(
+                model=model, messages=[{"role":"system", "content":prompt+ZH_ONLY_RULE}, {"role":"user", "content":text}],
+                max_tokens=4500, temperature=0, response_format={"type":"json_object"})
+        data = parse_llm_json(completion.choices[0].message.content or "")
+        usage = completion.usage
+        meta = {"tokens_in":usage.prompt_tokens if usage else None, "tokens_out":usage.completion_tokens if usage else None}
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        raise ValueError("AI 识别失败：模型连接异常或超时，请稍后重试。原规则未改变。")
+    return recognition_result(data, meta, text, single)
+
+
+def recognition_result(data, meta, text, single=False):
     if data is None and meta.get("error") == "no_api_key":
         raise ValueError("尚未配置 AI 模型，请先在模型设置中完成配置；也可以手动添加规则")
     if data is None:

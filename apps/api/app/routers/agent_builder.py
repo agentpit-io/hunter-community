@@ -4,7 +4,8 @@ from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
 from app.services.quant import agent_builder as builder
 
 router = APIRouter(prefix="/agent/builder")
-_ai_lock = asyncio.Lock()
+_ai_jobs = {}  # 当前进程按账号登记可取消任务；本地部署为单API进程。
+_AI_TIMEOUT = 90
 
 
 def uid(request):
@@ -31,27 +32,59 @@ async def listing(request: Request):
     return {"items": items, "schema": builder.catalog(), "execution": builder.EXECUTION, "data_range": await call(builder.data_range)}
 
 
+@router.get("/recognize/status")
+async def recognition_status(request: Request):
+    task = _ai_jobs.get(uid(request))
+    return {"running": bool(task and not task.done())}
+
+
+@router.post("/recognize/cancel")
+async def cancel_recognition(request: Request):
+    user = uid(request)
+    task = _ai_jobs.get(user)
+    if task and not task.done():
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    if _ai_jobs.get(user) is task: _ai_jobs.pop(user, None)
+    return {"stopped": True}
+
+
 @router.post("/recognize")
 async def recognize(request: Request):
     user = uid(request)
     b = await body(request)
-    language = await call(builder.language_of, b.get("language", "text"))
+    try: language = builder.language_of(b.get("language", "text"))
+    except ValueError as e: raise HTTPException(400, str(e))
     if not isinstance(b.get("text"), str) or not b["text"].strip() or len(b["text"]) > 6000:
         raise HTTPException(400, "请输入策略描述，最多六千字")
-    if _ai_lock.locked(): raise HTTPException(429, "AI 正在识别其他规则，请稍后重试")
-    async with _ai_lock:
+    existing = _ai_jobs.get(user)
+    if existing and not existing.done():
+        raise HTTPException(429, "你有一次识别尚未结束，可点击停止识别后重试")
+    if sum(not t.done() for t in _ai_jobs.values()) >= 4:
+        raise HTTPException(429, "当前识别请求较多，请稍后重试")
+
+    async def perform():
         from app.services.quant import screen_quota
         role = getattr(request.state, "user_role", None)
+        try: await asyncio.to_thread(screen_quota.reserve, user, role, "ai")
+        except screen_quota.QuotaExceeded: raise HTTPException(429, "今日 AI 识别额度已用完，请稍后再试")
         try:
-            await asyncio.to_thread(screen_quota.reserve, user, role, "ai")
-        except screen_quota.QuotaExceeded:
-            raise HTTPException(429, "今日 AI 识别额度已用完，请稍后再试")
-        try:
-            return await call(builder.recognize, b.get("text"), b.get("single") is True, language)
-        except HTTPException as e:
-            if str(e.detail).startswith(("尚未配置", "AI 识别失败")):
+            return await builder.recognize_async(b["text"], b.get("single") is True, language)
+        except ValueError as e:
+            if str(e).startswith(("尚未配置", "AI 识别失败")):
                 await asyncio.to_thread(screen_quota.refund, user, role, "ai")
-            raise
+            raise HTTPException(400, str(e))
+
+    task = asyncio.create_task(perform())
+    _ai_jobs[user] = task
+    try:
+        return await asyncio.wait_for(task, timeout=_AI_TIMEOUT)
+    except asyncio.TimeoutError:
+        raise HTTPException(504, "AI 识别超时，已停止本次等待，请精简内容后重试。原规则未改变。")
+    except asyncio.CancelledError:
+        raise HTTPException(409, "已停止识别，原始输入和已有规则已保留")
+    finally:
+        if _ai_jobs.get(user) is task: _ai_jobs.pop(user, None)
 
 
 @router.post("")
