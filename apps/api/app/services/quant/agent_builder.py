@@ -112,7 +112,8 @@ def recognize(text, single=False, language="text"):
 async def recognize_async(text, single=False, language="text"):
     """独立异步连接：取消会关闭本次HTTP请求，不占用全局同步模型线程。"""
     import asyncio
-    from openai import AsyncOpenAI
+    from openai import AsyncOpenAI, APIConnectionError, APITimeoutError, APIStatusError
+    from loguru import logger
     from app.services.online_analysis.llm_client import _resolve
     from app.services.online_analysis.prompts import parse_llm_json
     from app.services.lang_guard import ZH_ONLY_RULE
@@ -122,18 +123,59 @@ async def recognize_async(text, single=False, language="text"):
     if not (base and key_ and configured_model):
         raise ValueError("尚未配置 AI 模型，请先在模型设置中完成配置；也可以手动添加规则")
     model = await asyncio.to_thread(model_name)
-    try:
-        async with AsyncOpenAI(base_url=base, api_key=key_, timeout=85, max_retries=0) as client:
-            completion = await client.chat.completions.create(
-                model=model, messages=[{"role":"system", "content":prompt+ZH_ONLY_RULE}, {"role":"user", "content":text}],
-                max_tokens=4500, temperature=0, response_format={"type":"json_object"})
-        data = parse_llm_json(completion.choices[0].message.content or "")
-        usage = completion.usage
-        meta = {"tokens_in":usage.prompt_tokens if usage else None, "tokens_out":usage.completion_tokens if usage else None}
-    except asyncio.CancelledError:
-        raise
-    except Exception:
-        raise ValueError("AI 识别失败：模型连接异常或超时，请稍后重试。原规则未改变。")
+    async with AsyncOpenAI(base_url=base, api_key=key_, timeout=85, max_retries=0) as client:
+        arguments = dict(model=model, messages=[{"role":"system", "content":prompt+ZH_ONLY_RULE}, {"role":"user", "content":text}],
+                         max_tokens=4500, temperature=0, response_format={"type":"json_object"})
+        # 只对短暂连接/服务异常重试一次；仍由路由总超时和取消控制。
+        retry_left = 1
+        while True:
+            try:
+                completion = await client.chat.completions.create(**arguments)
+                break
+            except asyncio.CancelledError:
+                raise
+            except APITimeoutError:
+                logger.warning("[builder-ai] upstream timeout")
+                raise ValueError("AI 识别失败：模型已配置，但本次响应超时，请稍后重试或分段识别。原规则未改变。")
+            except APIConnectionError:
+                logger.warning("[builder-ai] upstream connection failed; retry={}", retry_left)
+                if retry_left:
+                    retry_left -= 1
+                    await asyncio.sleep(.5)
+                    continue
+                raise ValueError("AI 识别失败：模型已配置，但暂时无法连接模型服务，请检查虚机联网或代理后重试。原规则未改变。")
+            except APIStatusError as e:
+                code = e.status_code
+                logger.warning("[builder-ai] upstream HTTP {}", code)
+                # 某些兼容网关不支持JSON模式，仅在明确拒绝该参数时降级。
+                body_ = e.body if isinstance(e.body, dict) else {}
+                error_ = body_.get("error", body_)
+                message_ = str(error_.get("message", "")).lower() if isinstance(error_, dict) else ""
+                if code in (400,422) and "response_format" in arguments and any(x in message_ for x in ("response_format", "json_object", "json mode")):
+                    arguments.pop("response_format")
+                    continue
+                if code >= 500 and retry_left:
+                    retry_left -= 1
+                    await asyncio.sleep(.5)
+                    continue
+                reason = {401:"模型服务拒绝凭据，请检查已绑定服务的授权状态",403:"当前授权无权使用此模型，请检查模型权限",402:"模型服务额度不足，请检查服务余额",404:"模型服务地址或模型名称不可用，请检查模型设置",429:"模型服务限流或额度已用完，请稍后重试并检查额度"}.get(code)
+                if not reason: reason = "模型服务暂时不可用，请稍后重试" if code >= 500 else "模型服务拒绝本次请求，请检查模型兼容性"
+                raise ValueError("AI 识别失败：" + reason + "。原规则未改变。")
+            except Exception as e:
+                logger.warning("[builder-ai] unexpected response type={}", type(e).__name__)
+                raise ValueError("AI 识别失败：模型返回异常，未能读取结果。原规则未改变。")
+    choices = getattr(completion, "choices", None)
+    if not choices:
+        raise ValueError("AI 返回内容格式无效：模型没有返回识别内容，请重试。原规则未改变。")
+    first = choices[0]
+    if getattr(first, "finish_reason", None) == "length":
+        raise ValueError("AI 返回内容被截断，请减少单次规则数量或分段识别。原规则未改变。")
+    content = getattr(getattr(first, "message", None), "content", None)
+    data = parse_llm_json(content) if isinstance(content, str) else None
+    if not isinstance(data, dict):
+        raise ValueError("AI 返回内容格式无效：未生成可读取的规则，请重试或分段识别。原规则未改变。")
+    usage = getattr(completion, "usage", None)
+    meta = {"tokens_in":usage.prompt_tokens if usage else None, "tokens_out":usage.completion_tokens if usage else None}
     return recognition_result(data, meta, text, single)
 
 
@@ -142,6 +184,8 @@ def recognition_result(data, meta, text, single=False):
         raise ValueError("尚未配置 AI 模型，请先在模型设置中完成配置；也可以手动添加规则")
     if data is None:
         raise ValueError("AI 识别失败：请在设置中检查模型配置与连接，或稍后重试。原规则未改变。")
+    if not isinstance(data, dict):
+        raise ValueError("AI 返回内容格式无效，请重新识别。原规则未改变。")
     rows = data.get("rules")
     if not isinstance(rows, list) or not rows or len(rows) > 30 or (single and len(rows) != 1):
         raise ValueError("AI 没有返回有效规则，请补充描述后重试")
