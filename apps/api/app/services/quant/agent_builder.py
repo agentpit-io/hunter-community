@@ -107,6 +107,20 @@ def catalog():
             for k, (label, fields) in SCHEMA.items()]
 
 
+def catalog_for_prompt():
+    """给模型的最小规则目录，不携带回测展示模板。"""
+    return [{
+        "type": row["type"],
+        "label": row["label"],
+        "category": row["category"],
+        "fields": [
+            {"key": field["key"], "label": field["label"], "min": field["min"],
+             "max": field["max"], "integer": field["integer"]}
+            for field in row["fields"]
+        ],
+    } for row in catalog()]
+
+
 def clean_rule(raw):
     if not isinstance(raw, dict) or raw.get("type") not in SCHEMA:
         raise ValueError("规则类型暂不支持，请重新识别或选择支持的类型")
@@ -194,7 +208,7 @@ def recognition_prompt(text, single=False, language="text"):
               "市场趋势规则仅支持标普500双SMA及价格，必须说明指数与两周期；泛称大盘上升时返回pending建议market_trend且参数为空。"
               "volume均量不含信号当日，breakout为前N日最高价不含当日。"
               + ("这是单条重新识别，只返回一项；包含多个独立要求时返回pending。" if single else "每个独立要求一项。")
-              + "支持的类型参数如下：" + json.dumps(catalog(), ensure_ascii=False))
+              + "支持的类型和参数如下：" + json.dumps(catalog_for_prompt(), ensure_ascii=False, separators=(",", ":")))
     return prompt
 
 
@@ -242,6 +256,7 @@ async def recognize_async(text, single=False, language="text"):
                      max_tokens=4500, temperature=0, response_format={"type":"json_object"})
     # 三次尝试共用路由90秒总时限；每次关闭旧连接，取消立即向上传播。
     retry_left = 2
+    plain_mode_retry = False
     while True:
         try:
             async with AsyncOpenAI(base_url=base, api_key=key_, timeout=httpx.Timeout(75,connect=8,write=15,pool=8), max_retries=0) as client:
@@ -260,6 +275,15 @@ async def recognize_async(text, single=False, language="text"):
         except APIConnectionError as e:
             label, cause = connection_cause(e)
             logger.warning("[builder-ai] connection cause={} remaining={}", cause, retry_left)
+            # 个别兼容网关在较长 JSON 模式请求上会直接关闭连接，不会返回 400。
+            # 已经确认是这种协议级断连时，下一次去掉 response_format，仍要求模型只回 JSON，
+            # 避免把同一个会失败的请求重复发送三次。
+            if "response_format" in arguments and not plain_mode_retry and "RemoteProtocolError" in cause:
+                arguments.pop("response_format")
+                plain_mode_retry = True
+                if retry_left:
+                    retry_left -= 1
+                continue
             if retry_left:
                 retry_left -= 1
                 await asyncio.sleep(1 if retry_left else 3)

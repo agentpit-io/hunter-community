@@ -52,6 +52,12 @@ async def main():
     proxy.__cause__=httpx.ProxyError('sensitive-proxy-password',request=req)
     label,chain=b.connection_cause(proxy)
     assert label=='代理连接异常' and 'sensitive' not in chain
+    remote=APIConnectionError(request=req)
+    remote.__cause__=httpx.RemoteProtocolError('sensitive-remote-body',request=req)
+    calls=await run([remote,good])
+    assert 'response_format' in calls[0] and 'response_format' not in calls[1]
     assert len(await run([APIConnectionError(request=req),APIConnectionError(request=req),good]))==3
-    print('MODEL_ERRORS ALL OK：状态分类、连接有限重试、超时不重试、JSON兼容、空内容、截断、正文不泄漏')
+    assert 'template' not in b.recognition_prompt('止损5%')
+    assert 'fields' in b.recognition_prompt('止损5%')
+    print('MODEL_ERRORS ALL OK：状态分类、连接有限重试、断连兼容模式、超时不重试、JSON兼容、空内容、截断、正文不泄漏')
 asyncio.run(main())
