@@ -206,6 +206,23 @@ def recognize(text, single=False, language="text"):
     return recognition_result(data, meta, text, single)
 
 
+def connection_cause(exc):
+    """只记录异常类名，不记录可能包含凭据、策略或代理地址的异常正文。"""
+    import socket
+    import ssl
+    import httpx
+    chain=[];seen=set();label='网络连接异常'
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc));chain.append(type(exc).__name__)
+        if isinstance(exc,socket.gaierror): label='域名解析失败'
+        elif isinstance(exc,ssl.SSLCertVerificationError): label='安全证书校验失败'
+        elif isinstance(exc,httpx.ProxyError): label='代理连接异常'
+        elif isinstance(exc,httpx.RemoteProtocolError): label='连接被服务端或中间网络关闭'
+        elif isinstance(exc,httpx.ConnectTimeout): label='建立连接超时'
+        exc=exc.__cause__
+    return label, '/'.join(chain[:8])
+
+
 async def recognize_async(text, single=False, language="text"):
     """独立异步连接：取消会关闭本次HTTP请求，不占用全局同步模型线程。"""
     import asyncio
@@ -220,47 +237,54 @@ async def recognize_async(text, single=False, language="text"):
     if not (base and key_ and configured_model):
         raise ValueError("尚未配置 AI 模型，请先在模型设置中完成配置；也可以手动添加规则")
     model = await asyncio.to_thread(model_name)
-    async with AsyncOpenAI(base_url=base, api_key=key_, timeout=85, max_retries=0) as client:
-        arguments = dict(model=model, messages=[{"role":"system", "content":prompt+ZH_ONLY_RULE}, {"role":"user", "content":text}],
-                         max_tokens=4500, temperature=0, response_format={"type":"json_object"})
-        # 只对短暂连接/服务异常重试一次；仍由路由总超时和取消控制。
-        retry_left = 1
-        while True:
-            try:
+    import httpx
+    arguments = dict(model=model, messages=[{"role":"system", "content":prompt+ZH_ONLY_RULE}, {"role":"user", "content":text}],
+                     max_tokens=4500, temperature=0, response_format={"type":"json_object"})
+    # 三次尝试共用路由90秒总时限；每次关闭旧连接，取消立即向上传播。
+    retry_left = 2
+    while True:
+        try:
+            async with AsyncOpenAI(base_url=base, api_key=key_, timeout=httpx.Timeout(75,connect=8,write=15,pool=8), max_retries=0) as client:
                 completion = await client.chat.completions.create(**arguments)
-                break
-            except asyncio.CancelledError:
-                raise
-            except APITimeoutError:
-                logger.warning("[builder-ai] upstream timeout")
-                raise ValueError("AI 识别失败：模型已配置，但本次响应超时，请稍后重试或分段识别。原规则未改变。")
-            except APIConnectionError:
-                logger.warning("[builder-ai] upstream connection failed; retry={}", retry_left)
-                if retry_left:
-                    retry_left -= 1
-                    await asyncio.sleep(.5)
-                    continue
-                raise ValueError("AI 识别失败：模型已配置，但暂时无法连接模型服务，请检查虚机联网或代理后重试。原规则未改变。")
-            except APIStatusError as e:
-                code = e.status_code
-                logger.warning("[builder-ai] upstream HTTP {}", code)
-                # 某些兼容网关不支持JSON模式，仅在明确拒绝该参数时降级。
-                body_ = e.body if isinstance(e.body, dict) else {}
-                error_ = body_.get("error", body_)
-                message_ = str(error_.get("message", "")).lower() if isinstance(error_, dict) else ""
-                if code in (400,422) and "response_format" in arguments and any(x in message_ for x in ("response_format", "json_object", "json mode")):
-                    arguments.pop("response_format")
-                    continue
-                if code >= 500 and retry_left:
-                    retry_left -= 1
-                    await asyncio.sleep(.5)
-                    continue
-                reason = {401:"模型服务拒绝凭据，请检查已绑定服务的授权状态",403:"当前授权无权使用此模型，请检查模型权限",402:"模型服务额度不足，请检查服务余额",404:"模型服务地址或模型名称不可用，请检查模型设置",429:"模型服务限流或额度已用完，请稍后重试并检查额度"}.get(code)
-                if not reason: reason = "模型服务暂时不可用，请稍后重试" if code >= 500 else "模型服务拒绝本次请求，请检查模型兼容性"
-                raise ValueError("AI 识别失败：" + reason + "。原规则未改变。")
-            except Exception as e:
-                logger.warning("[builder-ai] unexpected response type={}", type(e).__name__)
-                raise ValueError("AI 识别失败：模型返回异常，未能读取结果。原规则未改变。")
+            break
+        except asyncio.CancelledError:
+            raise
+        except APITimeoutError as e:
+            label, cause = connection_cause(e)
+            logger.warning("[builder-ai] timeout cause={} remaining={}", cause, retry_left)
+            if 'ConnectTimeout' in cause and retry_left:
+                retry_left -= 1
+                await asyncio.sleep(1 if retry_left else 3)
+                continue
+            raise ValueError("AI 识别失败：模型已配置，但本次响应超时，请稍后重试或分段识别。原规则未改变。")
+        except APIConnectionError as e:
+            label, cause = connection_cause(e)
+            logger.warning("[builder-ai] connection cause={} remaining={}", cause, retry_left)
+            if retry_left:
+                retry_left -= 1
+                await asyncio.sleep(1 if retry_left else 3)
+                continue
+            raise ValueError("AI 识别失败：暂时无法连接模型服务（"+label+"），已自动重连两次。原文和已有规则已保留，请稍后重试；持续失败请检查服务状态。")
+        except APIStatusError as e:
+            code = e.status_code
+            logger.warning("[builder-ai] upstream HTTP {}", code)
+            # 某些兼容网关不支持JSON模式，仅在明确拒绝该参数时降级。
+            body_ = e.body if isinstance(e.body, dict) else {}
+            error_ = body_.get("error", body_)
+            message_ = str(error_.get("message", "")).lower() if isinstance(error_, dict) else ""
+            if code in (400,422) and "response_format" in arguments and any(x in message_ for x in ("response_format", "json_object", "json mode")):
+                arguments.pop("response_format")
+                continue
+            if code >= 500 and retry_left:
+                retry_left -= 1
+                await asyncio.sleep(1 if retry_left else 3)
+                continue
+            reason = {401:"模型服务拒绝凭据，请检查已绑定服务的授权状态",403:"当前授权无权使用此模型，请检查模型权限",402:"模型服务额度不足，请检查服务余额",404:"模型服务地址或模型名称不可用，请检查模型设置",429:"模型服务限流或额度已用完，请稍后重试并检查额度"}.get(code)
+            if not reason: reason = "模型服务暂时不可用，请稍后重试" if code >= 500 else "模型服务拒绝本次请求，请检查模型兼容性"
+            raise ValueError("AI 识别失败：" + reason + "。原规则未改变。")
+        except Exception as e:
+            logger.warning("[builder-ai] unexpected response type={}", type(e).__name__)
+            raise ValueError("AI 识别失败：模型返回异常，未能读取结果。原规则未改变。")
     choices = getattr(completion, "choices", None)
     if not choices:
         raise ValueError("AI 返回内容格式无效：模型没有返回识别内容，请重试。原规则未改变。")
