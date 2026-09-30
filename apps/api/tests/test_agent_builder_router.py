@@ -34,3 +34,8 @@ with patch('app.services.quant.screen_quota.reserve'),patch.object(b,'recognize_
     assert c.post('/agent/builder/recognize',headers=h,json={'text':'stop_pct = 5','language':'python'}).status_code==200
     recognize.assert_called_once_with('stop_pct = 5',False,'python')
 print('ROUTER ALL OK：鉴权、对象校验、目录、空输入不扣次、模型未配置退次')
+
+assert c.post('/agent/builder/preview',json={}).status_code==401
+assert c.post('/agent/builder/preview',headers=h,json={}).status_code==400
+r=c.post('/agent/builder/preview',headers=h,json=dict(type='breakeven',params={'trigger_pct':5},source='盈利5%回本出'))
+assert r.status_code==200 and r.json()['steps'][-1]['remaining']==0

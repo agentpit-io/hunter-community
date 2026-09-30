@@ -87,6 +87,12 @@ async def recognize(request: Request):
         if _ai_jobs.get(user) is task: _ai_jobs.pop(user, None)
 
 
+@router.post("/preview")
+async def preview_rule(request: Request):
+    uid(request)
+    return await call(builder.preview, await body(request))
+
+
 @router.post("")
 async def save(request: Request):
     return await call(builder.save, uid(request), await body(request))

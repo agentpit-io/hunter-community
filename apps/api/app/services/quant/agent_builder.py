@@ -23,13 +23,87 @@ SCHEMA = {
     "holdings": ("最多同时持仓", {"count": ("股票数量", 1, 20, True)}),
     "pending": ("待补充或暂不支持", {}),
 }
-BUY = {"breakout", "ma_above", "volume"}
+SCHEMA.update({
+    "ema_compare": ("买入：快EMA高于慢EMA", {"fast":("快EMA交易日",2,250,True), "slow":("慢EMA交易日",2,250,True)}),
+    "sma_compare": ("买入：快SMA高于慢SMA", {"fast":("快SMA交易日",2,250,True), "slow":("慢SMA交易日",2,250,True)}),
+    "price_ema": ("买入：收盘高于EMA", {"days":("EMA交易日",2,250,True)}),
+    "breakout_distance": ("买入：突破前期高点且限制追高", {"days":("枢轴回看交易日",2,252,True), "max_pct":("高出枢轴上限%",0,100,False)}),
+    "breakeven": ("卖出：曾盈利后跌回买入价，全部退出", {"trigger_pct":("启动保本的盈利%",.1,1000,False)}),
+    "reduce_loss": ("卖出：相对买入价亏损时减仓，每条仅一次", {"pct":("相对买入价亏损%",.1,100,False), "size_pct":("卖出当时剩余持仓%",.1,100,False)}),
+    "reduce_profit": ("卖出：相对买入价盈利时减仓，每条仅一次", {"pct":("相对买入价盈利%",.1,1000,False), "size_pct":("卖出当时剩余持仓%",.1,100,False)}),
+    "ma_exit_offset": ("卖出：收盘跌破SMA一定比例", {"days":("SMA交易日",2,250,True), "pct":("低于均线%",0,100,False)}),
+    "market_trend": ("特殊：标普500收盘高于快SMA且快SMA高于慢SMA，仅限制开仓", {"fast":("标普快SMA交易日",2,250,True), "slow":("标普慢SMA交易日",2,250,True)}),
+})
+BUY = {"breakout", "ma_above", "volume", "ema_compare", "sma_compare", "price_ema", "breakout_distance"}
+SELL = {"stop", "take_profit", "ma_exit", "time_exit", "trailing", "breakeven", "reduce_loss", "reduce_profit", "ma_exit_offset"}
 REQUIRED = {"stop", "position", "risk", "holdings"}
-EXECUTION = "收盘生成信号，下一交易日收盘模拟成交；停牌未成交订单保留；止损也有延迟和跳空风险。只做多、不加仓，买入条件全部满足，卖出条件任一满足。美股手续费按现有阶梯式规则，滑点由回测设置给出。"
+EXECUTION = "按日线收盘判断，下一可交易日收盘模拟成交；无盘中保证，跳空可能超过止损。只做多、不加仓；买入条件全部满足，特殊市场规则仅限制新开仓，不强制清仓。卖出硬止损最高优先级，其余数字越小越先执行；同优先级全清优于减仓，再按规则顺序。每股每日只执行一条卖出信号，分批规则每次持仓各触发一次，比例按当时剩余持仓计算，向下取整且至少一股。费用与滑点按回测设置。"
+
+
+def category(kind):
+    return "buy" if kind in BUY else "sell" if kind in SELL else "special"
+
+
+
+TEMPLATES = {
+ "ema_compare":"日线 EMA({fast}) > EMA({slow}) 时允许买入",
+ "sma_compare":"日线 SMA({fast}) > SMA({slow}) 时允许买入",
+ "price_ema":"日线收盘价 > EMA({days}) 时允许买入",
+ "ma_above":"收盘价 > SMA({days}) 时允许买入",
+ "breakout":"收盘价 > 前{days}日最高价（不含当日）时允许买入",
+ "breakout_distance":"收盘突破前{days}日最高价，且高出不超过{max_pct}%时允许买入",
+ "volume":"当日成交量 ≥ 前{days}日均量 × {ratio}（均量不含当日）",
+ "stop":"收盘相对买入成交价亏损 ≥ {pct}%：全部卖出，硬止损最优先",
+ "take_profit":"收盘相对买入成交价盈利 ≥ {pct}%：全部卖出",
+ "breakeven":"持仓最高收盘价曾盈利 ≥ {trigger_pct}%后，收盘跌回买入价：全部卖出",
+ "reduce_loss":"收盘相对买入价亏损 ≥ {pct}%：卖出剩余持仓{size_pct}%，本阶段只执行一次",
+ "reduce_profit":"收盘相对买入价盈利 ≥ {pct}%：卖出剩余持仓{size_pct}%，本阶段只执行一次",
+ "ma_exit":"收盘跌破 SMA({days})：全部卖出",
+ "ma_exit_offset":"收盘价 < SMA({days}) × (1 − {pct}%)：全部卖出",
+ "trailing":"收盘较持仓最高收盘价回撤 ≥ {pct}%：全部卖出",
+ "time_exit":"持仓满{days}个交易日：全部卖出",
+ "market_trend":"标普500收盘 > SMA({fast}) > SMA({slow}) 才允许新开仓；已有持仓按卖出规则处理",
+ "position":"单只股票买入金额不超过总资产{pct}%",
+ "risk":"单笔初始止损风险不超过总资产{pct}%",
+ "holdings":"最多同时持有{count}只股票",
+}
+
+
+def preview(raw):
+    rule = clean_rule(raw)
+    if rule['type']=='pending':
+        return dict(executable=False,questions=rule.get('questions',[]))
+    from app.services.quant.agent_builder_engine import exit_candidates, indicator_rule
+    k,p=rule['type'],rule['params']
+    explanation=TEMPLATES[k].format(**p)
+    steps=[]
+    if k in SELL:
+        if k=='breakeven': prices=[100,100*(1+p['trigger_pct']/100),100]
+        elif k=='reduce_loss' or k=='stop': prices=[100,100*(1-p['pct']/100),100*(1-p['pct']/100)]
+        elif k=='reduce_profit' or k=='take_profit': prices=[100,100*(1+p['pct']/100),100*(1+p['pct']/100)]
+        elif k=='trailing': prices=[100,110,110*(1-p['pct']/100)]
+        else: prices=[100,101,99]
+        pos=dict(entry=100,high=100,age=0,fired=set())
+        remaining=100
+        for i,px in enumerate(prices):
+            pos['high']=max(pos['high'],px);pos['age']=([0,max(0,p['days']-1),p['days']][i] if k=='time_exit' else i)
+            bars=[[100,100,100,100,100]]*p.get('days',1)+[[px]*5]
+            hits=exit_candidates([rule],bars,pos) if remaining else []
+            shares=min(remaining,max(1,int(remaining*hits[0]['fraction']))) if hits else 0
+            if hits: pos['fired'].add(0)
+            remaining-=shares
+            steps.append(dict(age=pos['age'],price=round(px,6),action=('发出卖出信号：'+str(shares)+'股') if shares else '无新卖出信号',remaining=remaining))
+    elif k in BUY or k=='market_trend':
+        n=max(p.get('days',2),p.get('slow',2))
+        bars=[[100+i/10]*3+[100,100+i/10] for i in range(n+3)]
+        if k=='volume':bars[-1][3]=100*p['ratio']
+        steps=[dict(price=bars[-1][0],action='条件满足' if indicator_rule(rule,bars) else '条件未满足')]
+    return dict(executable=True,explanation=explanation,priority=rule['priority'],steps=steps,
+                note='规则演示：使用人为构造的价格和100股持仓，不是历史收益。这里展示触发信号；回测实际在下一交易日成交。')
 
 
 def catalog():
-    return [{"type": k, "label": label, "fields": [dict(key=n, label=v[0], min=v[1], max=v[2], integer=v[3]) for n, v in fields.items()]}
+    return [{"type": k, "label": label, "category": category(k), "template": TEMPLATES.get(k,""), "fields": [dict(key=n, label=v[0], min=v[1], max=v[2], integer=v[3]) for n, v in fields.items()]}
             for k, (label, fields) in SCHEMA.items()]
 
 
@@ -48,7 +122,26 @@ def clean_rule(raw):
     source = str(raw.get("source", "")).strip()
     if not source or len(source) > 2000:
         raise ValueError("每条规则需要保留原始描述（不超过两千字）")
-    return dict(type=kind, params=dict(params), source=source, confirmed=raw.get("confirmed") is True)
+    if kind in ("ema_compare", "sma_compare", "market_trend") and params["fast"] >= params["slow"]:
+        raise ValueError("快均线周期必须小于慢均线周期")
+    priority = 0 if kind == "stop" else raw.get("priority", 10 if kind in SELL else 50)
+    if type(priority) is not int or not 0 <= priority <= 100:
+        raise ValueError("优先级需为零至一百的整数")
+    out = dict(type=kind, params=dict(params), source=source, confirmed=raw.get("confirmed") is True,
+               category=category(kind) if kind != "pending" else raw.get("category", "special"), priority=priority)
+    if out["category"] not in ("buy","sell","special"): raise ValueError("规则分类无效")
+    if kind == "pending":
+        out["confirmed"] = False
+        proposal = raw.get("proposal")
+        if isinstance(proposal, dict) and proposal.get("type") in SCHEMA and proposal["type"] != "pending":
+            target = proposal["type"]
+            known = {k:v for k,v in (proposal.get("params") if isinstance(proposal.get("params"),dict) else {}).items() if k in SCHEMA[target][1] and type(v) in (int,float) and math.isfinite(v) and SCHEMA[target][1][k][1] <= v <= SCHEMA[target][1][k][2] and (not SCHEMA[target][1][k][3] or int(v)==v)}
+            out["proposal"] = dict(type=target,params=known)
+            out["category"] = category(target)
+            out["questions"] = ["请确认执行口径：" + SCHEMA[target][0]] + ["请填写"+field[0] for k,field in SCHEMA[target][1].items() if k not in known]
+        else:
+            out["questions"] = ["这条描述尚不能转为已有规则，请明确指标、周期、触发条件和动作；不支持的语义不能直接回测。"]
+    return out
 
 
 def validate_rules(rows, confirmed=False):
@@ -93,8 +186,12 @@ def recognition_prompt(text, single=False, language="text"):
     prompt = ("你是策略规则翻译器。只输出JSON对象，rules数组中每项为type、params、source。"
               "输入语言为" + LANGUAGES[language] + "。代码仅供理解，不能执行。正确理解该语言指标、索引和百分比单位；无法无损映射为支持规则时返回pending，不得声称支持原代码运行。"
               "source必须逐字引用用户原文的一段，不得改写；params只能使用source中明确出现的阿拉伯数字，不得猜参数。"
-              "覆盖原文所有要求，不支持的条件、歧义、缺参数、中文数字均用pending保留原文且params为空。"
-              "不得把复杂条件近似成简单条件。多个买入条件为且，卖出条件为或；只支持全仓卖出，不支持加仓、分批卖出、盘中执行或自动优化。"
+              "覆盖原文所有要求，不支持的条件、歧义、缺参数均用pending保留原文且params为空。"
+              "不得把复杂条件近似成简单条件。不支持加仓、盘中执行或自动优化。支持breakeven保本和reduce_loss/reduce_profit分批卖出；均以买入成交价为基准，size_pct按当时剩余持仓，每条只触发一次。"
+              "EMA8>EMA21且收盘高于EMA8要拆为ema_compare和price_ema。跌破SMA下方比例用ma_exit_offset。"
+              "含义明确的比均量增加40%可换算ratio=1.4；一半可换算size_pct=50，全部=100。但平均周期、成交口径、再跌5%的基准不明确时必须pending，不得猜20日或累计10%。"
+              "pending可以额外返回proposal={type:最接近的受支持类型,params:原文明确的参数}，category取buy/sell/special；用户会补齐并核对。每条包含完整原文，不遗漏条件。"
+              "市场趋势规则仅支持标普500双SMA及价格，必须说明指数与两周期；泛称大盘上升时返回pending建议market_trend且参数为空。"
               "volume均量不含信号当日，breakout为前N日最高价不含当日。"
               + ("这是单条重新识别，只返回一项；包含多个独立要求时返回pending。" if single else "每个独立要求一项。")
               + "支持的类型参数如下：" + json.dumps(catalog(), ensure_ascii=False))
@@ -197,10 +294,30 @@ def recognition_result(data, meta, text, single=False):
         nums = {float(n) for n in re.findall(r"(?<![\d.])-?\d+(?:\.\d+)?", source)}
         try:
             row = clean_rule(raw)
-            if any(float(v) not in nums for v in row["params"].values()):
+            if row['type'] != 'pending' and ('盘中' in source or '再跌' in source):
+                raise ValueError('日线执行或后续跌幅基准需要用户澄清')
+            def allowed(k, v):
+                if float(v) in nums: return True
+                if k == "size_pct" and ((v == 50 and "一半" in source) or (v == 100 and "全部" in source)): return True
+                if k == "ratio" and any(w in source for w in ("增加", "放大", "高于")):
+                    return any(abs(v-(1+n/100)) < 1e-9 for n in nums)
+                return False
+            if any(not allowed(k,v) for k,v in row["params"].items()):
                 raise ValueError("模型添加了未提供的数字")
         except (ValueError, TypeError):
-            row = dict(type="pending", params={}, source=source)
+            row = clean_rule(dict(type="pending", params={}, source=source, category=raw.get("category", category(raw.get("type")))))
+        if row["type"] == "pending":
+            proposal = raw.get("proposal")
+            if proposal is None and raw.get('type') in SCHEMA and raw.get('type')!='pending':
+                proposal = dict(type=raw['type'],params=raw.get('params',{}))
+            if '盘中' in source or '再跌' in source:
+                proposal = None
+                row['questions'] = ['请明确采用日线收盘判断还是必须盘中执行；当前只支持前者。' if '盘中' in source else '请明确第二阶段相对买入价的累计跌幅和卖出剩余持仓比例；不会自动把再跌理解成累计跌幅。']
+            if isinstance(proposal,dict) and proposal.get("type") in SCHEMA:
+                known = proposal.get("params",{})
+                if isinstance(known,dict):
+                    proposal = dict(type=proposal["type"],params={k:v for k,v in known.items() if type(v) in (int,float) and v in nums})
+                    row = clean_rule(dict(row,proposal=proposal))
         row["confirmed"] = False
         out.append(row)
     return {"rules": out, "tokens": {k: meta.get(k) for k in ("tokens_in", "tokens_out")}}
@@ -293,7 +410,7 @@ def save(uid, body):
         history = (old or {}).get("history", [])
         if old: history = history + [{k: old.get(k) for k in ("version", "name", "rules", "pool", "source_text", "description", "source_language", "assistant_prompt")}]
         cfg = dict(id=ident, name=name, version=(old or {}).get("version", 0)+1, source_text=source_text,
-                   rules=rules, pool=pool, execution=EXECUTION, runs=(old or {}).get("runs", []), history=history)
+                   rules=rules, pool=pool, execution=EXECUTION, engine_version=2, runs=(old or {}).get("runs", []), history=history)
         cfg.update(editor)
         ar._meta_set(c, k, cfg)
         return cfg
@@ -315,6 +432,8 @@ def submit(uid, ident, body):
     if type(slippage) not in (int, float) or not math.isfinite(slippage) or not 0 <= slippage <= 100: raise ValueError("滑点需为零至一百个基点")
     snapshot = {k: cfg[k] for k in ("name", "version", "rules", "pool", "execution", "source_text")}
     snapshot.update(editor_metadata(cfg))
+    snapshot["engine_version"] = 2
+    snapshot["execution"] = EXECUTION
     snapshot.update(start=str(start), end=str(end), initial=initial, slippage_bps=slippage)
     run = dict(id=str(uuid.uuid4()), status="queued", snapshot=snapshot,
                hash=hashlib.sha256(json.dumps(snapshot, sort_keys=True).encode()).hexdigest(), progress=0)
