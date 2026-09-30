@@ -13,22 +13,45 @@
   function mount() {
     const root = document.getElementById('rs-f-rules')
     if (!root || document.getElementById('ac-editor')) return
+    const languages = {text:'自然语言 · 中文 / English',python:'Python',javascript:'JavaScript',thinkscript:'ThinkScript',pine:'Pine Script',cpp:'C++',rust:'Rust',my:'My语言'}
+    const presets = [
+      ['均线趋势','收盘价高于20日均线时买入，跌破20日均线时卖出。止损5%，单票仓位上限20%，单笔风险上限1%，最多持仓5只。'],
+      ['放量突破','收盘突破前20日最高价，且成交量达到前20日均量的1.5倍时买入。止损5%，止盈15%，单票仓位上限20%，单笔风险上限1%，最多持仓5只。'],
+      ['移动止损','从持仓最高收盘价回撤5%时卖出。'],
+      ['时间退出','持有达到15个交易日时卖出。'],
+      ['识别已有代码','请按左侧代码逐条整理买入、卖出、止损和仓位规则；缺失参数或不支持的逻辑保持待确认，不要补写。']
+    ]
+    const workspace=document.createElement('div');workspace.id='ac-workspace'
+    workspace.innerHTML='<section class="ac-code"><div class="ac-toolbar"><b>规则编辑器</b><label>输入语言 <select id="ac-language" aria-label="输入语言">'+Object.entries(languages).map(([k,v])=>'<option value="'+k+'">'+v+'</option>').join('')+'</select></label></div><div id="ac-code-body"></div><div class="ag-note ac-code-note">支持粘贴多种语言代码，由 AI 转成规则后确认；不直接执行原代码。</div></section><aside class="ac-assistant"><div class="ac-toolbar"><b>✦ AI 规则助手</b></div><p class="ag-note">写下交易规则，或点击预设填入。也可以结合左侧已有代码进行识别。</p><div class="ac-presets">'+presets.map((p,i)=>'<button type="button" class="btn small" data-ai-preset="'+i+'">'+p[0]+'</button>').join('')+'</div><label for="ac-prompt">告诉 AI 你想怎么交易</label><textarea id="ac-prompt" maxlength="2000" rows="6" placeholder="例如：突破前20日高点买入，止损5%。未确定的参数可以稍后逐条补充。"></textarea><button type="button" class="btn primary small" id="ac-ai">AI 识别为规则</button><p class="ag-note">预设仅填入，不自动识别。识别前可修改所有参数。</p></aside>'
+    root.before(workspace);workspace.querySelector('#ac-code-body').appendChild(root)
+    root.rows=14;root.spellcheck=false;root.placeholder='输入交易规则，或粘贴 Python / JavaScript / ThinkScript / Pine 等策略代码…'
     const box = document.createElement('div'); box.id = 'ac-editor'
     box.innerHTML = '<style>#ac-editor{margin-top:12px;min-width:0;overflow-wrap:anywhere}#ac-editor .ac-row{border:1px solid var(--line);border-radius:9px;padding:12px;margin:10px 0;background:var(--bg,#fafaf8)}#ac-editor .ac-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0}#ac-editor label{display:inline-block;margin-right:14px}#ac-editor input[type=checkbox]{width:auto}#ac-editor input[type=number],#ac-editor input[type=date]{width:150px}#ac-editor .ac-state{color:var(--brand);font-weight:bold}#ac-result{white-space:pre-wrap;max-height:400px;overflow:auto}#ac-msg{color:var(--brand);white-space:pre-wrap}#ac-editor select{max-width:100%}@media(max-width:640px){.rs-f{grid-template-columns:1fr}#ac-editor label{max-width:100%;margin-right:0}}</style>' +
-      '<div class="ac-actions"><button type="button" class="btn primary small" id="ac-ai">AI 整理为规则</button><button type="button" class="btn small" id="ac-add">手动添加一条</button></div>' +
+      '<style>#ac-workspace{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(270px,1fr);border:1px solid var(--line);border-radius:12px;overflow:hidden;min-width:0}.ac-code,.ac-assistant{min-width:0}.ac-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:12px 14px;border-bottom:1px solid var(--line);background:var(--bg)}.ac-toolbar label{display:flex;align-items:center;gap:8px;font-size:13px}.ac-toolbar select{width:auto;max-width:100%}#rs-f-rules{font-family:Consolas,monospace;line-height:1.7;border:0;border-radius:0;min-height:330px;resize:vertical;tab-size:2}.ac-code-note{padding:10px 14px}.ac-assistant{padding:0 14px 14px;background:var(--bg);border-left:1px solid var(--line)}.ac-assistant .ac-toolbar{margin:0 -14px 12px}.ac-assistant label{display:block;margin:16px 0 8px}.ac-presets{display:flex;gap:8px;flex-wrap:wrap}#ac-prompt{min-height:130px;resize:vertical}#ac-ai{margin-top:12px}.ac-count{text-align:right;font-size:12px;color:var(--muted);margin-top:4px}@media(max-width:850px){#ac-workspace{grid-template-columns:1fr}.ac-assistant{border-left:0;border-top:1px solid var(--line)}}@media(max-width:640px){.ac-toolbar label{display:block}.ac-toolbar select{width:100%}}</style>'+
+      '<div class="ac-actions"><b>逐条核对规则</b><button type="button" class="btn small" id="ac-add">手动添加一条</button></div>' +
       '<div class="ag-note">AI 只整理受支持规则；没有写清的参数保持待确认。买入条件全部满足，卖出条件任一满足。修改后必须重新确认。</div>' +
       '<div class="ac-actions"><select id="ac-saved" aria-label="我的个人策略"><option value="">加载已保存的个人策略…</option></select><button type="button" class="btn small" id="ac-load">加载</button><button type="button" class="btn small" id="ac-new">另建策略</button></div>' +
       '<div id="ac-personal-list"></div><div id="ac-msg" role="status"></div><div id="ac-rows"></div>' +
       '<div class="ac-actions"><label>回测开始 <input type="date" id="ac-start"></label><label>回测结束 <input type="date" id="ac-end"></label><label>初始资金（美元） <input type="number" id="ac-initial" value="100000" min="1000" max="10000000"></label><label>单边滑点（基点） <input type="number" id="ac-slip" value="5" min="0" max="100"></label></div>' +
       '<div class="ag-note" id="ac-execution"></div><label><input type="checkbox" id="ac-confirm"> 我已核对原始描述没有遗漏，并确认成交口径、费用与滑点设置</label>' +
       '<div class="ac-actions"><button type="button" class="btn primary small" id="ac-test">保存确认版本并回测</button><button type="button" class="btn small" id="ac-refresh">刷新回测状态</button></div><div id="ac-result"></div>'
-    root.parentElement.appendChild(box)
+    workspace.after(box)
     const state = {rows:[], schema:[], id:null, version:null, busy:false, timer:null, items:[]}
     if (current && current.timer) clearTimeout(current.timer)
     current = state
     const el = id => document.getElementById(id)
     const active = () => document.getElementById('ac-editor') === box
     const msg = s => { if(active()) el('ac-msg').textContent = s }
+    const description=el('rs-f-hyp'), counter=document.createElement('div');counter.className='ac-count';counter.id='ac-description-count';description.after(counter)
+    const countDescription=()=>{const chars=Array.from(description.value);if(chars.length>100)description.value=chars.slice(0,100).join('');counter.textContent=Array.from(description.value).length+' / 100 · 选填'}
+    description.addEventListener('input',countDescription);countDescription()
+    const sourceInput=()=>[root.value,el('ac-prompt').value].filter(x=>x.trim()).join('\n\n')
+    const inputFingerprint=()=>JSON.stringify([root.value,el('ac-prompt').value,el('ac-language').value])
+    const revoke=()=>{state.rows.forEach(r=>r.confirmed=false);invalidate();renderRows()}
+    workspace.querySelectorAll('[data-ai-preset]').forEach(b=>b.onclick=()=>{if(el('ac-prompt').value.trim()&&!confirm('用此预设替换右侧输入？左侧内容会保留。'))return;el('ac-prompt').value=presets[+b.dataset.aiPreset][1];revoke();el('ac-prompt').focus()})
+    el('ac-prompt').addEventListener('input',revoke)
+    el('ac-language').addEventListener('change',revoke)
+    root.addEventListener('keydown',e=>{if(e.key==='Tab'){e.preventDefault();root.setRangeText('  ',root.selectionStart,root.selectionEnd,'end');root.dispatchEvent(new Event('input',{bubbles:true}))}})
     function personalList() {
       el('ac-personal-list').innerHTML=state.items.map(x=>'<div class="ac-row"><b>'+escape(x.name)+'</b> · v'+x.version+'<div class="ac-actions"><button type="button" class="btn small" data-personal-load="'+escape(x.id)+'">加载策略</button><button type="button" class="btn small" data-personal-delete="'+escape(x.id)+'">删除</button></div></div>').join('')
       el('ac-personal-list').querySelectorAll('[data-personal-load]').forEach(b=>b.onclick=()=>{el('ac-saved').value=b.dataset.personalLoad;el('ac-load').click()})
@@ -38,7 +61,7 @@
         await request('/'+id,undefined,'DELETE')
         state.items=state.items.filter(x=>x.id!==id)
         Array.from(el('ac-saved').options).filter(o=>o.value===id).forEach(o=>o.remove())
-        if(state.id===id){state.id=null;state.version=null;state.rows=[];el('rs-f-label').value='';el('rs-f-hyp').value='';root.value='';invalidate();renderRows();el('ac-result').textContent=''}
+        if(state.id===id){state.id=null;state.version=null;state.rows=[];el('rs-f-label').value='';description.value='';countDescription();root.value='';el('ac-prompt').value='';el('ac-language').value='text';invalidate();renderRows();el('ac-result').textContent=''}
         personalList();msg('策略已删除')
       }))
     }
@@ -46,9 +69,9 @@
     async function action(fn) {
       if(state.busy) return
       state.busy = true
-      box.querySelectorAll('button').forEach(b=>b.disabled=true)
+      ;[box,workspace].forEach(n=>n.querySelectorAll('button').forEach(b=>b.disabled=true))
       try { await fn() } catch(e) { msg(e.message || '请求失败') }
-      finally { state.busy=false; if(active()) box.querySelectorAll('button').forEach(b=>b.disabled=false) }
+      finally { state.busy=false; if(active()) [box,workspace].forEach(n=>n.querySelectorAll('button').forEach(b=>b.disabled=false)) }
     }
     function renderRows() {
       if (!active()) return
@@ -87,7 +110,7 @@
       return {kind:o.dataset.kind,id:o.dataset.id,script:o.dataset.script}
     }
     async function save() {
-      const body={id:state.id,version:state.version,name:el('rs-f-label').value,rules:state.rows,pool:poolRef(),source_text:el('rs-f-hyp').value+'\n'+root.value}
+      const body={id:state.id,version:state.version,name:el('rs-f-label').value,rules:state.rows,pool:poolRef(),source_text:root.value,description:description.value,source_language:el('ac-language').value,assistant_prompt:el('ac-prompt').value}
       const cfg=await request('',body)
       if(!active())return cfg
       state.id=cfg.id;state.version=cfg.version
@@ -111,16 +134,16 @@
     async function refresh(){if(!state.id||!active())return;result(await request('/'+state.id))}
     el('ac-ai').onclick=()=>action(async()=>{
       if(state.rows.length&&!confirm('重新整理全部规则会替换当前规则和确认状态，继续吗？'))return
-      const text=el('rs-f-hyp').value+'\n'+root.value, before=JSON.stringify(state.rows)
-      if(text.length>6000)throw Error('策略思路与规则草案合计最多六千字，请精简后重试')
+      const text=sourceInput(), fingerprint=inputFingerprint(), before=JSON.stringify(state.rows)
+      if(!text.trim())throw Error('请在左侧填写规则或代码，或在右侧输入交易要求')
+      if(text.length>6000)throw Error('规则编辑器与 AI 输入合计最多六千字，请精简后重试')
       msg('AI 正在整理，缺参数的内容会保留为待确认…')
-      const data=await request('/recognize',{text})
+      const data=await request('/recognize',{text,language:el('ac-language').value})
       if(!active())return
-      if(text!==el('rs-f-hyp').value+'\n'+root.value||before!==JSON.stringify(state.rows)){msg('识别期间内容已被修改，返回结果未覆盖你的编辑');return}
+      if(fingerprint!==inputFingerprint()||before!==JSON.stringify(state.rows)){msg('识别期间内容已被修改，返回结果未覆盖你的编辑');return}
       state.rows=data.rules;invalidate();renderRows();msg('请逐条核对。暂不支持的内容可保留草案，不能带入回测。')
     })
     el('ac-add').onclick=()=>{if(state.rows.length>=30){msg('最多三十条规则');return}state.rows.push({type:'pending',params:{},source:'',confirmed:false});invalidate();renderRows()}
-    el('rs-f-hyp').addEventListener('input',()=>{state.rows.forEach(r=>r.confirmed=false);invalidate();renderRows()})
     root.addEventListener('input',()=>{state.rows.forEach(r=>r.confirmed=false);invalidate();renderRows()})
     ;['rs-f-pool','ac-start','ac-end','ac-initial','ac-slip'].forEach(id=>el(id).addEventListener('change',invalidate))
     el('rs-f-submit').addEventListener('click',e=>{e.stopImmediatePropagation();e.preventDefault();action(save)},true)
@@ -143,7 +166,7 @@
       el('rs-f-label').value=cfg.name
       const p=el('rs-f-pool'), opt=Array.from(p.options).find(o=>o.dataset.kind===cfg.pool.ref.kind&&o.dataset.id===String(cfg.pool.ref.id))
       if(opt)p.selectedIndex=opt.index;else p.value=''
-      el('rs-f-hyp').value=cfg.source_text||cfg.rules.map(r=>r.source).join('\n');root.value=''
+      description.value=cfg.description||'';countDescription();root.value=cfg.source_text??cfg.rules.map(r=>r.source).join('\n');el('ac-language').value=cfg.source_language||'text';el('ac-prompt').value=cfg.assistant_prompt||''
       invalidate();renderRows();result(cfg);msg('已加载版本 '+cfg.version+'，股票池快照：'+cfg.pool.name+'。再次保存时会读取所选筛选器的当前脚本。')
     })
     request('').then(data=>{

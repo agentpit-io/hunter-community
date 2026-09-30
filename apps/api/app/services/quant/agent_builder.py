@@ -66,12 +66,34 @@ def validate_rules(rows, confirmed=False):
     return rows
 
 
-def recognize(text, single=False):
+LANGUAGES = {"text": "自然语言（中文或英文）", "python": "Python", "javascript": "JavaScript", "thinkscript": "ThinkScript", "pine": "Pine Script", "cpp": "C++", "rust": "Rust", "my": "My语言"}
+
+
+def language_of(value="text"):
+    if not isinstance(value, str) or value not in LANGUAGES:
+        raise ValueError("请选择支持的输入语言")
+    return value
+
+
+def editor_metadata(body):
+    description = body.get("description", "")
+    assistant_prompt = body.get("assistant_prompt", "")
+    if not isinstance(description, str) or len(description) > 100:
+        raise ValueError("策略描述最多一百字，也可以留空")
+    if not isinstance(assistant_prompt, str) or len(assistant_prompt) > 2000:
+        raise ValueError("AI 输入最多两千字")
+    return dict(description=description, assistant_prompt=assistant_prompt,
+                source_language=language_of(body.get("source_language", "text")))
+
+
+def recognize(text, single=False, language="text"):
+    language = language_of(language)
     if not isinstance(text, str) or not text.strip() or len(text) > 6000:
         raise ValueError("请输入策略描述，最多六千字")
     from app.services.online_analysis.llm_client import llm_json_call
     from app.services.quant.screen_nl import model_name
     prompt = ("你是策略规则翻译器。只输出JSON对象，rules数组中每项为type、params、source。"
+              "输入语言为" + LANGUAGES[language] + "。代码仅供理解，不能执行。正确理解该语言指标、索引和百分比单位；无法无损映射为支持规则时返回pending，不得声称支持原代码运行。"
               "source必须逐字引用用户原文的一段，不得改写；params只能使用source中明确出现的阿拉伯数字，不得猜参数。"
               "覆盖原文所有要求，不支持的条件、歧义、缺参数、中文数字均用pending保留原文且params为空。"
               "不得把复杂条件近似成简单条件。多个买入条件为且，卖出条件为或；只支持全仓卖出，不支持加仓、分批卖出、盘中执行或自动优化。"
@@ -173,6 +195,7 @@ def resolve_pool(uid, ref):
 
 
 def save(uid, body):
+    editor = editor_metadata(body)
     name = str(body.get("name", "")).strip()
     if not name or len(name) > 30: raise ValueError("策略名称需为一至三十字")
     rules = validate_rules(body.get("rules"))
@@ -187,9 +210,10 @@ def save(uid, body):
         if body.get("id") and (not old or old.get("deleted")): raise ValueError("策略不存在或无权修改")
         if old and body.get("version") != old["version"]: raise ValueError("策略已在其他页面修改，请重新加载")
         history = (old or {}).get("history", [])
-        if old: history = history + [{k: old.get(k) for k in ("version", "name", "rules", "pool", "source_text")}]
+        if old: history = history + [{k: old.get(k) for k in ("version", "name", "rules", "pool", "source_text", "description", "source_language", "assistant_prompt")}]
         cfg = dict(id=ident, name=name, version=(old or {}).get("version", 0)+1, source_text=source_text,
                    rules=rules, pool=pool, execution=EXECUTION, runs=(old or {}).get("runs", []), history=history)
+        cfg.update(editor)
         ar._meta_set(c, k, cfg)
         return cfg
     return transaction(put)
@@ -209,6 +233,7 @@ def submit(uid, ident, body):
     if type(initial) not in (int, float) or not math.isfinite(initial) or not 1000 <= initial <= 10000000: raise ValueError("初始资金应在一千至一千万之间")
     if type(slippage) not in (int, float) or not math.isfinite(slippage) or not 0 <= slippage <= 100: raise ValueError("滑点需为零至一百个基点")
     snapshot = {k: cfg[k] for k in ("name", "version", "rules", "pool", "execution", "source_text")}
+    snapshot.update(editor_metadata(cfg))
     snapshot.update(start=str(start), end=str(end), initial=initial, slippage_bps=slippage)
     run = dict(id=str(uuid.uuid4()), status="queued", snapshot=snapshot,
                hash=hashlib.sha256(json.dumps(snapshot, sort_keys=True).encode()).hexdigest(), progress=0)

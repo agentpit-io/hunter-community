@@ -35,6 +35,7 @@ async def listing(request: Request):
 async def recognize(request: Request):
     user = uid(request)
     b = await body(request)
+    language = await call(builder.language_of, b.get("language", "text"))
     if not isinstance(b.get("text"), str) or not b["text"].strip() or len(b["text"]) > 6000:
         raise HTTPException(400, "请输入策略描述，最多六千字")
     if _ai_lock.locked(): raise HTTPException(429, "AI 正在识别其他规则，请稍后重试")
@@ -46,7 +47,7 @@ async def recognize(request: Request):
         except screen_quota.QuotaExceeded:
             raise HTTPException(429, "今日 AI 识别额度已用完，请稍后再试")
         try:
-            return await call(builder.recognize, b.get("text"), b.get("single") is True)
+            return await call(builder.recognize, b.get("text"), b.get("single") is True, language)
         except HTTPException as e:
             if str(e.detail).startswith(("尚未配置", "AI 识别失败")):
                 await asyncio.to_thread(screen_quota.refund, user, role, "ai")

@@ -25,7 +25,12 @@ with patch.object(b,'list_for',return_value=[]),patch.object(b,'data_range',retu
 with patch('app.services.quant.screen_quota.reserve') as reserve, patch('app.services.quant.screen_quota.refund') as refund:
     assert c.post('/agent/builder/recognize',headers=h,json={'text':''}).status_code==400
     reserve.assert_not_called()
+    assert c.post('/agent/builder/recognize',headers=h,json={'text':'止损5%','language':'shell'}).status_code==400
+    reserve.assert_not_called()
     with patch.object(b,'recognize',side_effect=ValueError('尚未配置 AI 模型')):
         assert c.post('/agent/builder/recognize',headers=h,json={'text':'止损5%'}).status_code==400
         reserve.assert_called_once();refund.assert_called_once()
+with patch('app.services.quant.screen_quota.reserve'),patch.object(b,'recognize',return_value={'rules':[]}) as recognize:
+    assert c.post('/agent/builder/recognize',headers=h,json={'text':'stop_pct = 5','language':'python'}).status_code==200
+    recognize.assert_called_once_with('stop_pct = 5',False,'python')
 print('ROUTER ALL OK：鉴权、对象校验、目录、空输入不扣次、模型未配置退次')
