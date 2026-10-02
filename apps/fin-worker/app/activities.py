@@ -29,7 +29,7 @@ from temporalio import activity
 from app import config
 from app.bridge.contracts import StrategyDecision
 from app.bridge.hunter_api import ApiError, HunterApiClient
-from app.bridge.idem import order_key, point_job_key
+from app.bridge.idem import order_key, point_job_key, report_job_key
 from app.bridge.paper import PaperClient
 from app.strategy.sample import build_decision as build_sample_decision
 
@@ -303,6 +303,67 @@ def close_day(req: dict[str, Any]) -> dict[str, Any]:
     valuation = paper.make_valuation(project_id, at_iso)
     recon = paper.run_recon(project_id, at_iso)
     return {"expired": expired, "valuation": valuation, "recon": recon}
+
+
+# ── 每日报告（M5）────────────────────────────────────────────────────────
+
+@activity.defn
+def generate_daily_report(req: dict[str, Any]) -> dict[str, Any]:
+    """收盘后为项目生成当日报告（M-17）。
+
+    三件事，全部经 HTTP，**不碰账本库**：
+
+    1. 在 `paper` 登记一条 `report` 长任务（同键幂等，重放拿到同一个 `job_id`）；
+    2. 调 api 的 `/api/internal/fin/reports/generate` —— 那边的**确定性指标代码**
+       从账本算事实、AI 只写文字、生成后跑回读校验；
+    3. 按结果收尾：校验通过 → job SUCCEEDED + 产物引用；校验不通过（数字对不上）
+       → job **FAILED** 且**不发布**；无报告日（非交易日 / 缺估值）→ job SUCCEEDED
+       并写明原因（不是失败，是「这天没有报告」）。
+
+    ⚠️ 校验不通过**不重试**：数字对不上是确定性的结论，重试只会反复烧 token。
+    要重跑由人工处置（重跑 `15:30` 时点或等下一交易日）。
+    """
+    project_id = req["project_id"]
+    trade_date = req["trade_date"]
+    paper = PaperClient()
+    key = report_job_key(project_id, trade_date)
+    job = paper.submit_job(
+        job_type="report",
+        params={"trade_date": trade_date, "point": "report"},
+        project_id=project_id,
+        idempotency_key=key,
+    )
+    job_id = job["job_id"]
+    paper.mark_job_running(job_id)
+
+    try:
+        out = HunterApiClient().generate_report(project_id, trade_date)
+    except ApiError as exc:
+        paper.fail_job(job_id)
+        logger.error("[report] 生成失败 project={} date={} · {}", project_id, trade_date, exc)
+        raise
+
+    status = out.get("status")
+    if status == "failed":
+        # 回读校验没通过：报告落库为 failed，**不发布**；job 记 FAILED。
+        paper.fail_job(job_id)
+        logger.warning("[report] 回读校验未通过，不发布 · project={} date={} · 违规 {} 处",
+                       project_id, trade_date, len((out.get("check") or {}).get("violations") or []))
+    elif status == "no_report":
+        paper.succeed_job(job_id, f"report:no_report:{trade_date}",
+                          {"status": status, "reason": out.get("reason")})
+        logger.info("[report] 无报告日 · project={} date={} · {}", project_id, trade_date,
+                    out.get("reason"))
+    else:
+        paper.succeed_job(job_id, out.get("artifact_ref") or out.get("report_id") or "report",
+                          {"status": status, "report_id": out.get("report_id"),
+                           "artifact_ref": out.get("artifact_ref"),
+                           "checked": (out.get("check") or {}).get("checked"),
+                           "used_fallback": out.get("used_fallback")})
+        logger.info("[report] 生成并校验通过 · project={} date={} · report={} · 核对 {} 个数字",
+                    project_id, trade_date, out.get("report_id"),
+                    (out.get("check") or {}).get("checked"))
+    return {"job_id": job_id, "idempotency_key": key, **out}
 
 
 # ── 数据面（「谁决定什么时候拉数据」的落点）───────────────────────────────

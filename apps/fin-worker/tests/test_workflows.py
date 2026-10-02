@@ -55,6 +55,7 @@ def test_activity_list_covers_workflow_calls():
         "begin_point_job", "write_checkpoint", "finish_point_job", "fail_point_job",
         "confirm_t1", "build_decision", "submit_decision",
         "match_open_orders", "close_day", "trigger_market_etl",
+        "generate_daily_report",
     } == names
 
 

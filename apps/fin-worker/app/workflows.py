@@ -45,6 +45,8 @@ ACT_TIMEOUT = timedelta(seconds=120)
 # 带故障注入（hold_seconds）的 decide 要睡够，否则会被超时打断 —— 给它更长的预算。
 DECIDE_TIMEOUT = timedelta(minutes=10)
 ETL_TIMEOUT = timedelta(minutes=60)
+# 报告生成要读账本 + 调模型（可能十几秒到几分钟），给足预算。
+REPORT_TIMEOUT = timedelta(minutes=5)
 # 下单 Activity 会打心跳（`activities._heartbeat`）。心跳超时是**检测 Worker 崩溃**
 # 的手段：Worker 被杀后心跳一断，Temporal 在 10 秒内就重试这个 Activity，
 # 而不用等满 start_to_close（10 分钟）。生产上这也是对的 —— 一个下单动作
@@ -161,6 +163,19 @@ async def _run_for_project(point, project: dict, trade_date: str, now_iso: str, 
         out["close"] = await _exec(activities.close_day, {
             "project_id": project_id, "now": now_iso,
         })
+        # M5 · 报告生成（M-17）接在**收盘估值之后**：报告的事实层读的正是刚写下的
+        # 那次收盘估值（`fin_valuation`）。
+        #
+        # 加在 `close` 分支的**末尾**（M4 交接的 replay 提示）：这一步只对
+        # 「部署之后新起的工作流」生效 —— 已 COMPLETED 的历史不会被重放；
+        # 部署窗口在收盘之后，在途的 15:30 工作流不存在。整体退出走
+        # `req.get("report", True)`，排障时可关。
+        if req.get("report", True):
+            out["report"] = await _exec(
+                activities.generate_daily_report,
+                {"project_id": project_id, "trade_date": trade_date, "now": now_iso},
+                timeout=REPORT_TIMEOUT,
+            )
 
     out["finish"] = await _exec(activities.finish_point_job, {
         "job_id": job_id,

@@ -32,6 +32,15 @@ def point_job_key(project_id: str, trade_date: str, point: str) -> str:
     return f"fin-job:{project_id}:{trade_date}:{point}"
 
 
+def report_job_key(project_id: str, trade_date: str) -> str:
+    """每日报告任务（`fin_job`）的幂等键。
+
+    同一项目 + 同一交易日 = 同一份报告，重放只登记一条 job。报告 id 也由
+    `(project_id, trade_date)` 推导（api 侧 `report.report_id_for`），两侧口径一致。
+    """
+    return f"fin-report:{project_id}:{trade_date}"
+
+
 def etc_job_key(market: str, trade_date: str) -> str:
     """K 线 ETL 触发任务的幂等键（`fin-worker` 侧只用于记录，不写账本）。"""
     return f"fin-etl:{market}:{trade_date}"

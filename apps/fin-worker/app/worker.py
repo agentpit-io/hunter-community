@@ -30,6 +30,7 @@ def activity_list() -> list:
         activities.submit_decision,
         activities.match_open_orders,
         activities.close_day,
+        activities.generate_daily_report,
         activities.trigger_market_etl,
     ]
 

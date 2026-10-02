@@ -70,3 +70,17 @@ class HunterApiClient:
         if resp.status_code >= 400:
             raise ApiError(resp.status_code, resp.text)
         return resp.json()
+
+    def generate_report(self, project_id: str, trade_date: str) -> dict[str, Any]:
+        """触发每日报告生成（M5）。
+
+        数字在 api 侧由**确定性指标代码**从账本算出（`fin_report_fact`），AI 只写文字，
+        生成后跑回读校验；这里只负责「触发」与把结果带回来。
+        """
+        resp = self._request(
+            "POST", "/api/internal/fin/reports/generate",
+            json={"project_id": project_id, "trade_date": trade_date},
+        )
+        if resp.status_code >= 400:
+            raise ApiError(resp.status_code, resp.text)
+        return resp.json()
