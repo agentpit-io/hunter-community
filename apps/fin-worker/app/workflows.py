@@ -62,6 +62,14 @@ async def _exec(fn, arg, *, timeout: timedelta = ACT_TIMEOUT,
     )
 
 
+def filter_projects(projects: list[dict], only: str | None) -> list[dict]:
+    """`only` 非空时只保留那一个项目。抽成纯函数是为了能单独测 —— 它决定
+    「一次手工触发会给几个账户下单」，验收环境里有一堆测试残留项目时很容易出事。"""
+    if not only:
+        return list(projects)
+    return [p for p in projects if p.get("project_id") == only]
+
+
 def _today() -> str:
     """交易日按**上海时间**切（A 股）。`workflow.now()` 是确定性的。"""
     return workflow.now().astimezone(SHANGHAI).date().isoformat()
@@ -105,6 +113,13 @@ async def _run_point(point_key: str, req: dict) -> dict:
 
     # ② 对每个进行中的项目跑这个时点
     projects = await _exec(activities.list_active_projects, {})
+    # 只跑指定项目：**补跑 / 故障注入验收**用（调度永远不带这个字段，
+    # 所以生产路径逐字节不变）。没有它，一次手工触发会给**每一个**进行中的
+    # 项目下单 —— 验收环境里有一堆测试残留项目时，证据会被冲散。
+    only = req.get("project_id")
+    if only:
+        projects = filter_projects(projects, only)
+        summary["filtered_project"] = only
     summary["projects"] = []
     for project in projects:
         summary["projects"].append(
@@ -291,4 +306,25 @@ class MarketEtlWorkflow:
         return result
 
 
-ALL_WORKFLOWS = POINT_WORKFLOWS + (MarketEtlWorkflow,)
+# ── 标的元数据同步（M7 · M-20）────────────────────────────────────────────
+@workflow.defn(name="fin.instrument_sync")
+class InstrumentSyncWorkflow:
+    """每晚把 A 股标的的涨跌停 / ST 元数据同步进 `fin_instrument`。
+
+    独立成一个工作流类型（不是塞进某个时点）：它是**参考数据**的刷新，
+    与「今天要不要交易」无关，也不该因为某个交易日不是 A 股交易日就跳过 ——
+    master 数据随时会变（新股上市、戴帽摘帽）。所以调度是「每天一次」，
+    内层自己按市场过滤。
+    """
+
+    @workflow.run
+    async def run(self, req: dict | None = None) -> dict:
+        req = req or {}
+        return await _exec(
+            activities.sync_instruments,
+            {"market": req.get("market", "cn"), "codes": req.get("codes")},
+            timeout=ACT_TIMEOUT,
+        )
+
+
+ALL_WORKFLOWS = POINT_WORKFLOWS + (MarketEtlWorkflow, InstrumentSyncWorkflow)

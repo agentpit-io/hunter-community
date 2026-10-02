@@ -431,6 +431,10 @@ app.include_router(fin_report_router.router, prefix="/api")
 from app.routers import fin_dashboard as fin_dashboard_router
 app.include_router(fin_dashboard_router.router, prefix="/api")
 
+# M7：数据面（统一行情结构 + 标的元数据），内网口令，只读
+from app.routers import fin_data as fin_data_router
+app.include_router(fin_data_router.router, prefix="/api")
+
 @app.get("/api/health")
 async def health():
     # hunter_api_key 字段让 docker healthcheck 和运维一眼看出 SaaS 功能可不可用

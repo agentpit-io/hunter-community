@@ -146,6 +146,22 @@ def list_trades(cur, project_id: str, limit: int = 200) -> list[dict]:
     return cur.fetchall()
 
 
+def lock_project(cur, project_id: str) -> None:
+    """账户级**单写者**闸门（`09 §六-4`「并发同账户」那一行的后半句）。
+
+    `fin_project.version` 是**乐观锁**：它只在调用方显式传 `expected_version`、
+    且那个版本已经过期时才拒绝。**两个 Worker 同时读同一个版本、同时提交时，
+    双方都能通过检查** —— M7 故障注入实测到了：同一 `expected_version` 的两笔并发
+    委托**双双成交**，账户版本 1 → 3，谁也没被拦下（`01方案 §11.2` 那一行「并发操作
+    同一账户 → 版本校验、事务锁或单写者机制」要的是**三选一真的生效**）。
+
+    所以并发这一半不能只靠乐观锁。进事务先拿一把**按 project 粒度的事务级
+    advisory lock**：第二个请求排在第一个**提交之后**，于是它读到的版本是新的，
+    `expected_version` 校验才拦得住它。事务提交或回滚时自动释放，不需要 unlock。
+    """
+    cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s)::bigint)", (project_id,))
+
+
 # ── 参考数据 ──────────────────────────────────────────────────────────────
 
 def get_calendar(cur, trade_date) -> Optional[dict]:
@@ -176,6 +192,63 @@ def latest_snapshot(cur, code: str) -> Optional[dict]:
         """,
         (code,),
     )
+
+
+def latest_snapshot_at(cur, code: str, at: datetime) -> Optional[dict]:
+    """**截至 `at`** 的最新一张快照。历史时点对账 / 估值用它。
+
+    用「最新那张」去回算过去某一天，等于把现在的价格泄漏给过去
+    （`01方案 §6.2`：事后补采的数据不能自动视为历史时点已知）。
+    谓词是「快照时刻 ≤ `at`」——**按数据源时刻过滤，不按入库时间**，
+    因为 `snapshot_time` 才是那个价在市场上成立的时刻。
+    """
+    return _fetchone(
+        cur,
+        """
+        SELECT snapshot_id, code, snapshot_time, source, last_price, prev_close, quality, missing_flag
+          FROM fin_snapshot WHERE code = %s AND snapshot_time <= %s
+         ORDER BY snapshot_time DESC LIMIT 1
+        """,
+        (code, at),
+    )
+
+
+def cash_state_at(cur, project_id: str, at: datetime) -> tuple[Decimal, Decimal, int]:
+    """**截至 `at`** 的 `(可用, 冻结, 最高 entry_id)`。
+
+    时间轴取「业务时刻优先」：整个项目只按挂钟过滤会漏掉业务时刻在更早、
+    却在本机稍后才落库的行（测试夹具与历史回放都是这种形状）。所以 cutoff 取两者之大：
+
+      · 挂钟：`created_at <= at`；
+      · 业务：属于某笔 `traded_at <= at` 的成交的那些流水。
+
+    `项目本金 deposit` 排在所有成交之前，会被业务 cutoff 一并带进来 —— 这是对的：
+    没有本金就没有后面的成交。
+    """
+    row = _fetchone(
+        cur,
+        """
+        SELECT COALESCE(MAX(entry_id), 0) AS cutoff
+          FROM fin_cash_ledger
+         WHERE project_id = %s
+           AND (created_at <= %s
+                OR trade_id IN (SELECT trade_id FROM fin_trade
+                                 WHERE project_id = %s AND traded_at <= %s))
+        """,
+        (project_id, at, project_id, at),
+    )
+    cutoff = int(row["cutoff"]) if row else 0
+    if cutoff <= 0:
+        return Decimal("0.0000"), Decimal("0.0000"), 0
+    last = _fetchone(
+        cur,
+        "SELECT available_after, frozen_after FROM fin_cash_ledger "
+        " WHERE project_id = %s AND entry_id <= %s ORDER BY entry_id DESC LIMIT 1",
+        (project_id, cutoff),
+    )
+    if not last:
+        return Decimal("0.0000"), Decimal("0.0000"), 0
+    return last["available_after"], last["frozen_after"], cutoff
 
 
 # ── 写：入金（幂等）───────────────────────────────────────────────────────

@@ -30,7 +30,25 @@ from typing import Optional
 
 from loguru import logger
 
+from app import data_gap
 from app.snapshot.source import CST, Quote, QuoteSource, get_source
+
+
+def _market_of(code: str) -> str:
+    """由代码形态判市场（与 `apps/api` 的 `fin_data.market_of` 同口径）。
+
+    paper 不 import `apps/api`（两个镜像），所以这里留一份最小实现 ——
+    它只用于给缺口记录打标签，不参与任何撮合或风控判断。
+    """
+    s = (code or "").strip().upper()
+    if s.endswith(".HK"):
+        return "HK"
+    if s.endswith(".US"):
+        return "US"
+    bare = s.split(".")[0]
+    if bare.isdigit():
+        return "HK" if len(bare) == 5 else "A"
+    return "US"
 
 # 快照「新鲜」的上限。超过它 = 喂价停了（断流），标 stale 并且**不许用于成交**。
 # 15 分钟对应 A 股行情链路的延迟量级（`CLAUDE.md` 记的扫描源 update_mode 也是
@@ -89,15 +107,22 @@ def capture(
     quote: Optional[Quote] = src.fetch(code)
     if quote is None:
         logger.info("[paper.snapshot] {} 拿不到行情（断流/未接通），不落快照", code)
+        # 缺口落库：断流这件事必须留痕（`01方案 §11.2`、`08 §七`），不能只有日志。
+        data_gap.record(cur, code, "no_data", market=_market_of(code), source=src.name,
+                        detail="数据源没有返回任何报价（断流 / 未接通 / 该票无行情）")
         return None
 
     if quote.quote_time is None:
         # 数据源没给时刻 —— 不许拿本机时间顶上（`09 §六-6`）。
         logger.warning("[paper.snapshot] {} 的行情没有数据源时间戳，按「不落快照」处理", code)
+        data_gap.record(cur, code, "no_timestamp", market=_market_of(code), source=quote.source,
+                        detail="行情没有数据源时刻，不落快照（不拿本机时间顶替）")
         return None
 
     if quote.last_price is None:
         logger.warning("[paper.snapshot] {} 的行情没有最新价，按「不落快照」处理", code)
+        data_gap.record(cur, code, "no_price", market=_market_of(code), source=quote.source,
+                        detail="行情没有最新价，不落快照", event_time=quote.quote_time)
         return None
 
     stamp = now or datetime.now(timezone.utc)

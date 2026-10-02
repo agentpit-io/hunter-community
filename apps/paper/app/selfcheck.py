@@ -40,6 +40,9 @@ REQUIRED_TABLES = (
     "fin_market_calendar",
     "fin_fee_model",
     "fin_execution_model",
+    # M7 新增（数据面）。DDL 随代码走，启动时补建 —— 见 `_ensure_aux_tables`。
+    "fin_data_gap",
+    "fin_alert_log",
 )
 
 # 追加式表：运行期角色**只能** INSERT / SELECT，不许 UPDATE / DELETE（`09 §一`）。
@@ -50,6 +53,7 @@ APPEND_ONLY_TABLES = (
     "fin_valuation",
     "fin_recon_log",
     "fin_param_change_log",
+    "fin_data_gap",
 )
 
 # 状态会变的表：需要 INSERT + UPDATE，但**任何表都不给 DELETE**。
@@ -57,7 +61,57 @@ STATEFUL_TABLES = (
     "fin_order",
     "fin_position",
     "fin_project",
+    # 告警投递记录：`sent_at` 要能从 NULL 改成已发（投递回执）。
+    "fin_alert_log",
 )
+
+# ── M7 新增表的 DDL（与 `app/data_gap.py` / `app/recon.py` 里的两份一致）─────
+# **随代码走**：`db/migrations/*.sql` 对已有部署不生效（仓库铁律），真正建表的是这里。
+# 启动时补一次，让「缺表的实例看着健康、一点就 500」这件事不会发生。
+_AUX_DDL = """
+CREATE TABLE IF NOT EXISTS fin_data_gap (
+  id          BIGSERIAL PRIMARY KEY,
+  code        TEXT NOT NULL,
+  market      TEXT,
+  source      TEXT,
+  kind        TEXT NOT NULL CHECK (kind IN ('no_data','no_timestamp','no_price')),
+  detail      TEXT,
+  event_time  TIMESTAMPTZ,
+  observed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS fin_data_gap_code_time ON fin_data_gap (code, observed_at DESC);
+CREATE TABLE IF NOT EXISTS fin_alert_log (
+  id         BIGSERIAL PRIMARY KEY,
+  kind       TEXT NOT NULL,
+  ref_id     BIGINT,
+  channel    TEXT NOT NULL,
+  project_id TEXT,
+  subject    TEXT,
+  body       TEXT,
+  sent_at    TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS fin_alert_log_ref ON fin_alert_log (kind, ref_id);
+CREATE INDEX IF NOT EXISTS fin_alert_log_unsent ON fin_alert_log (id) WHERE sent_at IS NULL;
+GRANT SELECT, INSERT ON fin_data_gap TO fin_paper_rw;
+GRANT USAGE ON SEQUENCE fin_data_gap_id_seq TO fin_paper_rw;
+GRANT SELECT, INSERT, UPDATE ON fin_alert_log TO fin_paper_rw;
+GRANT USAGE ON SEQUENCE fin_alert_log_id_seq TO fin_paper_rw;
+"""
+
+
+def _ensure_aux_tables(conn) -> None:
+    """建 M7 的两张表并授权。**失败不抛** —— 后面的检查会把缺失如实报出来。"""
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET lock_timeout = '5s'")
+            cur.execute(_AUX_DDL)
+        conn.commit()
+    except Exception:  # noqa: BLE001 —— 含测试里的假连接对象（没有 rollback）
+        try:
+            conn.rollback()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def check(conn) -> list[str]:
@@ -77,6 +131,7 @@ def check(conn) -> list[str]:
 
     # ③ 库
     try:
+        _ensure_aux_tables(conn)
         with conn.cursor() as cur:
             cur.execute("SELECT current_user, current_database()")
             role, dbname = cur.fetchone()

@@ -38,7 +38,9 @@ def compute(cur, project_id: str, as_of: datetime) -> dict:
     missing: list[str] = []
     stale = False
     for pos in positions:
-        snap = ledger.latest_snapshot(cur, pos["code"])
+        # **截至 as_of 的价**，不是「最新那个价」：拿最新价去估过去时点，等于把
+        # 现在的信息泄漏给过去（`01方案 §6.2`）。as_of = 现在时行为与从前逐位一致。
+        snap = ledger.latest_snapshot_at(cur, pos["code"], as_of)
         if not snap or snap["last_price"] is None or snap["missing_flag"]:
             missing.append(pos["code"])
             continue

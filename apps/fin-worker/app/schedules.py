@@ -50,8 +50,16 @@ def point_specs() -> list[ScheduleSpecDef]:
     ]
 
 
+# 标的元数据同步（M7）：每天一次，A 股开盘前（08:40）。
+# 放在 preopen（09:15）之前 —— 开盘时风控要读的涨跌停必须已经是最新的。
+INSTRUMENT_SCHEDULES: tuple[ScheduleSpecDef, ...] = (
+    ScheduleSpecDef("fin-instrument-sync", "fin.instrument_sync", "40 8 * * 1-5",
+                    {"market": "cn"}, "A 股标的元数据同步（涨跌停 / ST）"),
+)
+
+
 def all_specs() -> list[ScheduleSpecDef]:
-    return point_specs() + list(ETL_SCHEDULES)
+    return point_specs() + list(ETL_SCHEDULES) + list(INSTRUMENT_SCHEDULES)
 
 
 def build_schedule(spec: ScheduleSpecDef):

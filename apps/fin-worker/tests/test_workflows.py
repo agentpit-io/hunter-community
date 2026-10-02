@@ -37,6 +37,8 @@ def test_all_workflows_registered():
         "fin.point_0915", "fin.point_0930", "fin.point_1130",
         "fin.point_1300", "fin.point_1455", "fin.point_1530",
         "fin.market_etl",
+        # M7：标的元数据同步（涨跌停 / ST）
+        "fin.instrument_sync",
     }
 
 
@@ -56,6 +58,8 @@ def test_activity_list_covers_workflow_calls():
         "confirm_t1", "build_decision", "submit_decision",
         "match_open_orders", "close_day", "trigger_market_etl",
         "generate_daily_report",
+        # M7：标的元数据同步
+        "sync_instruments",
     } == names
 
 
@@ -72,3 +76,12 @@ def test_no_fallback_cron_or_in_process_timer():
             if token in code:
                 hits.append(f"{path.name}: {token}")
     assert not hits, "fin-worker 不许自带兜底调度：\n" + "\n".join(hits)
+
+
+def test_filter_projects_keeps_only_the_named_one():
+    """`project_id` 过滤：手工触发/故障注入只给指定账户下单（M7）。"""
+    items = [{"project_id": "a"}, {"project_id": "b"}]
+    assert workflows.filter_projects(items, None) == items
+    assert workflows.filter_projects(items, "") == items
+    assert workflows.filter_projects(items, "b") == [{"project_id": "b"}]
+    assert workflows.filter_projects(items, "zzz") == []

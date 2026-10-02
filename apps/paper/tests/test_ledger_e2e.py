@@ -40,6 +40,14 @@ if not os.getenv("PAPER_TEST_DSN"):
 from app.main import app  # noqa: E402
 
 
+# 用例用的标代码。**故意避开 600519**：`fin_snapshot` 是全库共享的，
+# M6 的演示夹具（`apps/api/scripts/seed_m6_demo.py`）给 600519 种了 2026-09 的价格，
+# 而估值 / 对账按「该代码截至 as_of 的最新一张快照」取价 —— 用同一个代码就会取到
+# 夹具的价，`market_value` 与用例无关地变成 1724.50。换一个夹具不用的代码，
+# 断言就只依赖本用例自己种下的那一张快照（与 `uniq_when` 避开撞快照编号同一思路）。
+CODE = "600000"
+
+
 def _snap_id(when: str, code: str) -> str:
     """按 `SNAP-{日期}-{时刻}-{代码}` 拼出编号（口径与 `snapshot.store` 一致）。"""
     dt = datetime.fromisoformat(when)
@@ -68,9 +76,9 @@ def ready(pg, project):
     快照编号只到秒，而 `fin_snapshot` 是全库共享、只追加的 —— 时刻不唯一的话，
     两个用例会抢同一行快照（`ON CONFLICT DO NOTHING`），第二个拿到第一个的价格。
     """
-    seed_reference(pg, code="600519", trade_date=uniq_date(project))
+    seed_reference(pg, code=CODE, trade_date=uniq_date(project))
     pg.connection.commit()
-    install_quote_source(when=uniq_when(project))
+    install_quote_source(when=uniq_when(project), code=CODE)
     assert _post(f"/api/v1/projects/{project}/funding", {})[0] == 200
     return project
 
@@ -88,7 +96,7 @@ def test_funding_is_idempotent(ready):
 def test_buy_updates_all_seven_entities(ready, pg):
     before = _get(f"/api/v1/projects/{ready}")
 
-    status, receipt = _post("/api/v1/orders", order_body(ready))
+    status, receipt = _post("/api/v1/orders", order_body(ready, code=CODE))
     assert status == 200, receipt
     assert receipt["status"] == "filled"
     assert receipt["amount"] == "1000.0000"
@@ -126,9 +134,9 @@ def test_buy_updates_all_seven_entities(ready, pg):
 def test_trade_snapshot_is_linked_and_time_comes_from_source(ready, pg):
     """成交行能反查快照，且那张快照的 `snapshot_time` **就是数据源给的时刻**。"""
     when = uniq_when(ready)
-    _, receipt = _post("/api/v1/orders", order_body(ready))
+    _, receipt = _post("/api/v1/orders", order_body(ready, code=CODE))
     snap_id = receipt["snapshot_id"]
-    assert snap_id == _snap_id(when, "600519")
+    assert snap_id == _snap_id(when, CODE)
 
     pg.execute(
         """
@@ -149,7 +157,7 @@ def test_trade_snapshot_is_linked_and_time_comes_from_source(ready, pg):
 
 
 def test_balance_equation_holds_after_buy(ready):
-    _post("/api/v1/orders", order_body(ready))
+    _post("/api/v1/orders", order_body(ready, code=CODE))
     status, val = _post(f"/api/v1/projects/{ready}/valuation",
                         {"as_of": "2026-10-02T10:05:00+08:00"})
     assert status == 200, val
@@ -172,7 +180,7 @@ def test_balance_equation_holds_after_buy(ready):
 
 
 def test_odd_lot_buy_rejected_with_reason(ready):
-    status, rec = _post("/api/v1/orders", order_body(ready, qty=150))
+    status, rec = _post("/api/v1/orders", order_body(ready, code=CODE, qty=150))
     assert status == 200
     assert rec["status"] == "rejected"
     assert "100 股的整数倍" in rec["decline_reason"]
@@ -196,21 +204,21 @@ def test_missing_instrument_rejected(ready):
 
 def test_outside_session_rejected(ready, pg):
     prime_quote(pg, ready, salt=1, when=uniq_date(ready, 1) + "T12:00:00+08:00")
-    status, rec = _post("/api/v1/orders", order_body(ready))
+    status, rec = _post("/api/v1/orders", order_body(ready, code=CODE))
     assert status == 200 and rec["status"] == "rejected"
     assert "session" in rec["failed_checks"]
 
 
 def test_insufficient_cash_rejected(ready, pg):
     prime_quote(pg, ready, salt=2, price="200.00", prev_close="200.00")
-    status, rec = _post("/api/v1/orders", order_body(ready, price="200.00"))
+    status, rec = _post("/api/v1/orders", order_body(ready, code=CODE, price="200.00"))
     assert status == 200 and rec["status"] == "rejected"
     assert "可用资金不足" in rec["decline_reason"]
 
 
 def test_t1_blocks_same_day_sell_then_allows_after_cutover(ready):
-    _post("/api/v1/orders", order_body(ready))
-    status, rec = _post("/api/v1/orders", order_body(ready, side="sell", qty=100))
+    _post("/api/v1/orders", order_body(ready, code=CODE))
+    status, rec = _post("/api/v1/orders", order_body(ready, code=CODE, side="sell", qty=100))
     assert rec["status"] == "rejected" and "t1" in rec["failed_checks"]
 
     # 日切：次日起可卖
@@ -219,7 +227,7 @@ def test_t1_blocks_same_day_sell_then_allows_after_cutover(ready):
     with db.cursor(commit=True) as cur:
         ledger.confirm_t1(cur, ready)
 
-    status, rec = _post("/api/v1/orders", order_body(ready, side="sell", qty=100))
+    status, rec = _post("/api/v1/orders", order_body(ready, code=CODE, side="sell", qty=100))
     assert rec["status"] == "filled", rec
     assert rec["fee"]["stamp_tax"] == "0.5000"        # 卖出才有印花税
     cash = _get(f"/api/v1/projects/{ready}/cash")
@@ -230,7 +238,7 @@ def test_t1_blocks_same_day_sell_then_allows_after_cutover(ready):
 
 def test_human_order_follows_same_path(ready):
     """source='human' 与 'ai' 走同一条风控与记账路径（09 §六-10）。"""
-    body = order_body(ready, source="human", actor="user-1")
+    body = order_body(ready, code=CODE, source="human", actor="user-1")
     status, rec = _post("/api/v1/orders", body)
     assert rec["status"] == "filled"
     trades = _get(f"/api/v1/projects/{ready}/trades")["items"]
@@ -239,13 +247,13 @@ def test_human_order_follows_same_path(ready):
 
 def test_order_requires_no_snapshot_from_client(ready):
     """客户端**不能**自己塞一个快照进来 —— 成交价不接受调用方指定。"""
-    body = order_body(ready)
+    body = order_body(ready, code=CODE)
     body["snapshot"] = {"snapshot_id": "SNAP-CLIENT-1", "last_price": "0.01"}
     status, rec = _post("/api/v1/orders", body)
     # 多出来的字段被 pydantic 忽略，成交价仍来自服务端取到的快照（10.00）
     assert rec["status"] == "filled"
     assert rec["price"] == "10.0000"
-    assert rec["snapshot_id"] == _snap_id(uniq_when(ready), "600519")
+    assert rec["snapshot_id"] == _snap_id(uniq_when(ready), CODE)
 
 
 def test_unusable_snapshot_parks_the_order(ready, pg):
@@ -261,7 +269,7 @@ def test_unusable_snapshot_parks_the_order(ready, pg):
     try:
         prime_quote(pg, ready, salt=9,
                     when=uniq_date(ready, 9) + "T10:00:00+08:00")
-        status, rec = _post("/api/v1/orders", order_body(ready))
+        status, rec = _post("/api/v1/orders", order_body(ready, code=CODE))
     finally:
         restore_staleness(previous)
 
@@ -285,7 +293,7 @@ def test_no_quote_at_all_rejects_the_order(ready):
     等于把风控绕过延后到成交那一刻。
     """
     install_quote_source(when=None)              # 数据源没给时间戳
-    status, rec = _post("/api/v1/orders", order_body(ready))
+    status, rec = _post("/api/v1/orders", order_body(ready, code=CODE))
     assert status == 200 and rec["status"] == "rejected", rec
     assert "没有可用快照" in rec["decline_reason"]
     assert rec["snapshot_id"] is None
@@ -296,7 +304,7 @@ def test_no_quote_at_all_rejects_the_order(ready):
 def test_limit_not_reached_parks_then_fills_on_new_snapshot(ready, pg):
     """限价单快照价劣于限价 → 挂单；换一张更好的快照，再撮一次就成交。"""
     prime_quote(pg, ready, salt=3, price="10.50", prev_close="10.50")
-    status, rec = _post("/api/v1/orders", order_body(ready, price="10.00"))
+    status, rec = _post("/api/v1/orders", order_body(ready, code=CODE, price="10.00"))
     assert status == 200 and rec["status"] == "pending", rec
     assert "劣于买入限价" in rec["pending_reason"]
     order_id = rec["order_id"]
@@ -323,7 +331,7 @@ def test_limit_not_reached_parks_then_fills_on_new_snapshot(ready, pg):
 def test_expire_open_orders_unfreezes(ready, pg):
     """收盘仍未成交 → 撤单（`expired`）并**解冻**。"""
     prime_quote(pg, ready, salt=5, price="10.50", prev_close="10.50")
-    status, rec = _post("/api/v1/orders", order_body(ready, price="10.00"))
+    status, rec = _post("/api/v1/orders", order_body(ready, code=CODE, price="10.00"))
     assert rec["status"] == "pending"
     order_id = rec["order_id"]
 
@@ -354,7 +362,7 @@ def test_expire_open_orders_unfreezes(ready, pg):
 def test_expire_only_validity_when_asked(ready, pg):
     """`reason='validity'` 只撤越期的；还没到期的挂单留着。"""
     prime_quote(pg, ready, salt=6, price="10.50", prev_close="10.50")
-    _post("/api/v1/orders", order_body(ready, price="10.00",
+    _post("/api/v1/orders", order_body(ready, code=CODE, price="10.00",
                                        valid_until="2026-10-02T14:00:00+08:00"))
     cash = _get(f"/api/v1/projects/{ready}/cash")
     assert cash["frozen"] == "1005.0100"
@@ -375,7 +383,7 @@ def test_expire_only_validity_when_asked(ready, pg):
 def test_order_past_valid_until_is_rejected(ready):
     """委托到达时已经过了有效期 → 拒绝，不补单（`01方案 §11.2` 的「信号过期」）。"""
     status, rec = _post("/api/v1/orders", order_body(
-        ready, valid_until=uniq_date(ready) + "T00:00:00+08:00"))
+        ready, code=CODE, valid_until=uniq_date(ready) + "T00:00:00+08:00"))
     assert status == 200 and rec["status"] == "rejected", rec
     assert "有效期" in rec["decline_reason"]
     assert _get(f"/api/v1/projects/{ready}/trades")["items"] == []
@@ -384,7 +392,7 @@ def test_order_past_valid_until_is_rejected(ready):
 
 def test_cancel_order_unfreezes(ready, pg):
     prime_quote(pg, ready, salt=7, price="10.50", prev_close="10.50")
-    _, rec = _post("/api/v1/orders", order_body(ready, price="10.00"))
+    _, rec = _post("/api/v1/orders", order_body(ready, code=CODE, price="10.00"))
     order_id = rec["order_id"]
 
     status, out = _post(f"/api/v1/orders/{order_id}/cancel", {"memo": "改主意了"})
@@ -399,16 +407,16 @@ def test_cancel_order_unfreezes(ready, pg):
 
 def test_sell_commitment_blocks_double_promise(ready, pg):
     """同一批股不能被两张挂单各卖一次（卖方占用由未成交卖单推导）。"""
-    _post("/api/v1/orders", order_body(ready))                    # 买 100
+    _post("/api/v1/orders", order_body(ready, code=CODE))                    # 买 100
     from app import db, ledger
 
     with db.cursor(commit=True) as cur:
         ledger.confirm_t1(cur, ready)
 
     prime_quote(pg, ready, salt=8, price="9.00", prev_close="10.00")
-    _, first = _post("/api/v1/orders", order_body(ready, side="sell", qty=100, price="10.00"))
+    _, first = _post("/api/v1/orders", order_body(ready, code=CODE, side="sell", qty=100, price="10.00"))
     assert first["status"] == "pending", first
 
-    _, second = _post("/api/v1/orders", order_body(ready, side="sell", qty=100, price="10.00"))
+    _, second = _post("/api/v1/orders", order_body(ready, code=CODE, side="sell", qty=100, price="10.00"))
     assert second["status"] == "rejected", second
     assert "t1" in second["failed_checks"]

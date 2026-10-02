@@ -1,16 +1,22 @@
 """行情来源：把「数据源」抽象成一个只回答「这只票此刻的报价是什么」的对象。
 
-**复用，不重写**（任务书 §1）：`HttpQuoteSource` 打的是 `apps/api` 的
-`GET /api/quote/{code}` —— 那条链路背后就是现仓的 `providers.data_source`
-（`hunter` / `saas` / `akshare` / `yfinance`，见 `08 §五` 的「数据源抽象」一行）。
+这是 `01方案 §6.1` 说的那条**接口边界**：`paper`（执行区）取行情**只经这一个适配层**，
+将来换 QFinZero 是**替换实现**，不是改账本 —— 账本、撮合、风控一行不动。
+
+**复用，不重写**（任务书 §1）：`HttpQuoteSource` 打的是 `apps/api` 的内部行情端点
+`GET /api/internal/fin/quote/{code}`（`app/services/fin_data.py`）—— 那条链路背后是
+现仓的 `providers.data_source` / 免费通道（`08 §五` 的「数据源抽象」一行）。
 Paper Service 是**执行区**，不自己接行情源：接源要处理限速、WAF、多源回退，
 那是 `apps/api` 已经做完的事（`CLAUDE.md` 里腾讯 WAF 那次事故就是教训）。
 两个服务各自一个镜像，paper 的构建上下文是 `apps/paper/`，import 不到 `apps/api`，
 所以这里走 HTTP 复用而不是 import 复用。
 
+兼容：老的 `/api/quote/{code}` 仍然被尝试（`PAPER_QUOTE_LEGACY=1`，默认开）。
+内部端点不可用（404 / 401）时自动退到它 —— M4 的假行情服务就是那个形状。
+
 三条不能破的：
 
-1. **`Quote.quote_time` 是数据源给的时刻**（`ts` 字段）。数据源没给 → `None`，
+1. **`Quote.quote_time` 是数据源给的时刻**（`event_time` / `ts`）。数据源没给 → `None`，
    上层不许拿本机时间补（`09 §六-6`）。
 2. **拿不到就返回 `None`**，不返回"零价"或"上一次的价"。零价和真价长得一样，
    用户看不出来（`market_source.quote` 的头注也是这条）。
@@ -96,72 +102,124 @@ class NullQuoteSource:
 
 
 def _parse_quote_time(raw: str) -> Optional[datetime]:
-    """把数据源的 `ts` 解析成带时区的 `datetime`。
+    """把数据源的时刻解析成带时区的 `datetime`。
 
-    腾讯给 A 股的是 `20260827155755`（纯数字），给港美股的是
-    `2026/08/27 16:03:00` 或 `2026-08-26 16:00:01`；`apps/api` 的
-    `finance_data_client` 已经统一过一次，这里再兜一层（口径见
-    `market_source._iso_ts`）。**解析不出来就返回 None** —— 不猜一个时刻。
+    统一结构里 `event_time` 已经是**带偏移的 ISO 8601**（`apps/api` 按市场贴的时区，
+    见 `fin_data._market_tz`）—— 直接 `fromisoformat` 就拿到正确的时区，
+    **不能再一律贴 +08:00**：美股 12:04 ET 贴成 12:04 CST 差 12 小时且不报错。
+
+    老的 `/api/quote/{code}`（兼容路径）给的是不加偏移的字符串（腾讯 A 股
+    `20260830161458`、港美股 `2026/10/02 16:08:10`），那种按 CST 兜一层
+    （口径同 `market_source._iso_ts`）。**解析不出来就返回 None** —— 不猜一个时刻。
     """
-    text = (raw or "").strip().replace("/", "-")
+    text = (raw or "").strip()
     if not text:
         return None
-    # 依次试：纯数字 → 带秒 → 到分 → 只有日期。全部失败就返回 None（不猜）。
+    # 先试带偏移的 ISO（统一结构的形状）
+    try:
+        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        return dt if dt.tzinfo is not None else dt.replace(tzinfo=CST)
+    except ValueError:
+        pass
+    # 再试数据源的裸格式（A 股纯数字 / 港美股横杠或斜杠）
+    text = text.replace("/", "-")
     for fmt in ("%Y%m%d%H%M%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
         try:
             naive = datetime.strptime(text, fmt)
         except ValueError:
             continue
-        # 数据源给的是**市场本地时间**（A 股 = 上海时间，无夏令时）。
+        # 裸格式只出现在 A 股 / 港股（都是 +08:00）；美股那条路统一结构里已带偏移。
         return naive.replace(tzinfo=CST)
     return None
 
 
-class HttpQuoteSource:
-    """打 `apps/api` 的 `GET {base}/api/quote/{code}`。
+# 内部行情端点的路径（`apps/api/app/routers/fin_data.py`）。可由 env 覆盖，
+# 便于对着别的实现（将来换 QFinZero）做灰度。
+DEFAULT_QUOTE_PATH = "/api/internal/fin/quote/{code}"
+# 兼容路径：M4 的假行情服务与老的公开端点走这个形状。
+LEGACY_QUOTE_PATH = "/api/quote/{code}"
 
-    那个路径在 `app/middleware/auth.py` 的 `_PUBLIC_PREFIXES` 里（`/api/quote/`），
-    免登录可访问 —— paper 不需要用户 token 就能取快照。
+
+class HttpQuoteSource:
+    """打 `apps/api` 的行情端点。
+
+    顺序：**内部端点**（`/api/internal/fin/quote/{code}`，带内网口令，回答任意代码）
+    → **兼容端点**（`/api/quote/{code}`，免登录，M4 的假行情服务用这个形状）。
+
+    为什么不是只用公开那条：`/api/quote/{code}` 先查用户的股票表，代码不在表里就
+    404 —— 它是给「用户看自己的自选」用的，记账服务要的是任意合法代码的报价。
     """
 
     name = "http"
 
-    def __init__(self, base_url: str, timeout: float = DEFAULT_TIMEOUT_S):
+    def __init__(self, base_url: str, timeout: float = DEFAULT_TIMEOUT_S,
+                 internal_key: Optional[str] = None, quote_path: Optional[str] = None):
         self._base = base_url.rstrip("/")
         self._timeout = timeout
+        self._key = internal_key if internal_key is not None else _internal_key()
+        self._path = (quote_path or os.getenv("PAPER_QUOTE_PATH") or DEFAULT_QUOTE_PATH).strip()
 
-    def fetch(self, code: str) -> Optional[Quote]:
-        url = f"{self._base}/api/quote/{code}"
+    def _get(self, path: str) -> Optional[dict]:
+        url = f"{self._base}{path}"
+        headers = {"Accept": "application/json"}
+        if self._key:
+            headers["X-Hunter-Internal-Key"] = self._key
         try:
-            req = urllib.request.Request(url, headers={"Accept": "application/json"})
+            req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=self._timeout) as resp:
-                payload = json.loads(resp.read().decode("utf-8"))
-        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError) as e:
-            logger.warning("[paper.snapshot] 行情请求失败 {} · {}", code, e)
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            # 404 = 这只票没有报价（正常的「没有」）；401 = 内部端点没认我们 → 走兼容路径。
+            logger.info("[paper.snapshot] 行情端点 {} 返回 HTTP {} · {}", path, e.code, code_hint(path))
+            return None
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            logger.warning("[paper.snapshot] 行情请求失败 {} · {}", path, e)
             return None
         except (ValueError, json.JSONDecodeError) as e:
-            logger.warning("[paper.snapshot] 行情响应无法解析 {} · {}", code, e)
+            logger.warning("[paper.snapshot] 行情响应无法解析 {} · {}", path, e)
             return None
 
-        if not isinstance(payload, dict):
-            return None
-        # `apps/api` 取不到时也可能回一个空体 / 只有 error 的对象。
-        if payload.get("price") is None and payload.get("last_price") is None:
-            logger.info("[paper.snapshot] 行情无价 {} · {}", code, payload.get("error"))
+    def fetch(self, code: str) -> Optional[Quote]:
+        payload = self._get(self._path.format(code=code))
+        if not _has_price(payload) and self._path != LEGACY_QUOTE_PATH:
+            payload = self._get(LEGACY_QUOTE_PATH.format(code=code))
+        if not _has_price(payload):
+            logger.info("[paper.snapshot] 行情无价 {} · {}", code,
+                        (payload or {}).get("detail") or (payload or {}).get("error"))
             return None
 
         return Quote(
             code=payload.get("code") or code,
             source=(payload.get("source") or self.name),
-            quote_time=_parse_quote_time(payload.get("ts") or payload.get("updated_at") or ""),
-            last_price=_dec(payload.get("price", payload.get("last_price"))),
+            quote_time=_parse_quote_time(
+                payload.get("event_time") or payload.get("ts") or payload.get("updated_at") or ""
+            ),
+            last_price=_dec(payload.get("last_price", payload.get("price"))),
             prev_close=_dec(payload.get("prev_close", payload.get("pre_close"))),
-            bid1_price=_dec(payload.get("bid1", payload.get("bid1_price"))),
-            bid1_volume=_int(payload.get("bid1v", payload.get("bid1_volume"))),
-            ask1_price=_dec(payload.get("ask1", payload.get("ask1_price"))),
-            ask1_volume=_int(payload.get("ask1v", payload.get("ask1_volume"))),
+            bid1_price=_dec(payload.get("bid1_price", payload.get("bid1"))),
+            bid1_volume=_int(payload.get("bid1_volume", payload.get("bid1v"))),
+            ask1_price=_dec(payload.get("ask1_price", payload.get("ask1"))),
+            ask1_volume=_int(payload.get("ask1_volume", payload.get("ask1v"))),
             raw=payload,
         )
+
+
+def _has_price(payload: Optional[dict]) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    for key in ("last_price", "price"):
+        if payload.get(key) is not None:
+            return True
+    return False
+
+
+def code_hint(path: str) -> str:
+    return path.rsplit("/", 1)[-1]
+
+
+def _internal_key() -> str:
+    """内网口令。**只读 env**，不 import `app.config`（避免把配置模块拖进纯函数测试）。"""
+    return (os.getenv("HUNTER_INTERNAL_KEY") or "").strip()
 
 
 # ── 进程级单例（env 决定；测试可以 set_source 换掉）─────────────────────

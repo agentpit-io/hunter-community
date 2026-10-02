@@ -18,6 +18,7 @@ from loguru import logger
 # 曾被我写成 `temporalio.client.WorkflowIDReusePolicy`（ImportError，只在真调端点时才炸）。
 # 顶层 import 让 `tests/test_api.py` 只要 import 本模块就能挡住这类导错路径。
 from temporalio.common import WorkflowIDReusePolicy
+from temporalio.exceptions import WorkflowAlreadyStartedError
 from temporalio.service import RPCError
 
 from app import config
@@ -97,6 +98,12 @@ async def trigger(point_key: str, request: Request, body: Optional[dict] = None)
             task_queue=config.temporal_task_queue(),
             id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY,
         )
+    except WorkflowAlreadyStartedError as exc:
+        # 「同一天同一时点已经跑过」是**预期的拒绝**，不是服务故障。
+        # 原来只 catch 了 RPCError，这个异常类型不同，直接漏成了 500
+        # （M7 故障注入验收时撞到：`fin-0930-2026-09-30` 是 M4 跑过的 id）。
+        logger.warning("[api] 触发 {} 被拒（已存在）：{}", wf_id, exc)
+        raise HTTPException(409, f"工作流 {wf_id} 已在跑或已跑过") from exc
     except RPCError as exc:
         logger.warning("[api] 触发 {} 被拒：{}", wf_id, exc)
         raise HTTPException(409, f"工作流 {wf_id} 已在跑或已跑过：{exc}") from exc
