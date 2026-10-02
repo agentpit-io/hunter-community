@@ -97,6 +97,15 @@ class PaperClient:
                   "sessions": sessions, "note": note},
         )
 
+    def upsert_instrument(self, body: dict) -> dict:
+        """把一条标的元数据写进 `fin_instrument`（幂等 upsert）。
+
+        **同步失败不写** —— 调用方拿不到 `available=true` 的元数据就别调这个，
+        让风控第 4 条去拒绝那个标的（`总控规则 §八`）。
+        """
+        code = body["code"]
+        return self._json("PUT", f"/api/v1/instruments/{code}", json=body)
+
     # ── 委托（唯一写账本的入口）───────────────────────────────────────────
     def place_order(self, body: dict[str, Any]) -> dict:
         return self._json("POST", "/api/v1/orders", json=body)

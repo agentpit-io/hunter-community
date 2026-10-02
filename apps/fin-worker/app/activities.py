@@ -414,6 +414,57 @@ def generate_daily_report(req: dict[str, Any]) -> dict[str, Any]:
     return {"job_id": job_id, "idempotency_key": key, **out}
 
 
+# ── 标的元数据同步（M7 · M-20）─────────────────────────────────────────────
+
+@activity.defn
+def sync_instruments(req: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    """把 A 股标的的**涨跌停幅度 / ST 判定**从 `company_master` / `stock_universe`
+    同步进 `fin_instrument`（`05 §3.3` M-20）。
+
+    三条不能破：
+
+    1. **由 fin-worker 定时任务做，不是迁移做**（`09 §七` 跨库一行）。日历同步已经
+       走这条路（`sync_calendar` 也是这里），标的元数据同理 —— 它是**运行期数据**，
+       不是 schema。
+    2. **同步不上就不写**。api 侧返回的每条带 `available`；`available=false`（板块
+       判不出 / master 里没有）的那条**跳过**，`fin_instrument` 里就没有这一行，
+       于是风控第 4 条会**拒绝该标的** —— 「绝不猜涨跌幅」的兑现点在这里。
+       **不许**拿代码形态硬凑一个幅度顶上（那正是要防的静默错）。
+    3. **失败要如实报**：一条都拿不到（api 挂了 / master 空）时返回 `ok=False` 与原因，
+       工作流记下来；下一轮再试。
+    """
+    req = req or {}
+    api = HunterApiClient()
+    try:
+        payload = api.fin_instruments(codes=req.get("codes"), market=req.get("market", "cn"))
+    except ApiError as exc:
+        logger.warning("[instruments] 标的元数据拉取失败：{}", exc)
+        return {"ok": False, "error": str(exc), "written": 0, "skipped": 0}
+
+    items = payload.get("items") or []
+    paper = PaperClient()
+    written = 0
+    skipped: list[dict[str, str]] = []
+    for item in items:
+        if not item.get("available"):
+            # 判不出就**不写**：这条标的在账本里保持「没有元数据」，风控会拒它。
+            skipped.append({"code": item.get("code"), "reason": item.get("reason") or "不可用"})
+            continue
+        paper.upsert_instrument({
+            "code": item["code"], "name": item["name"], "exchange": item["exchange"],
+            "board": item["board"], "is_st": item["is_st"],
+            "limit_up_pct": item["limit_up_pct"], "limit_down_pct": item["limit_down_pct"],
+            "lot_size": item["lot_size"], "listed_at": None, "is_active": True,
+            "source": item.get("source") or "company_master/stock_universe",
+        })
+        written += 1
+
+    logger.info("[instruments] 同步完成 · 写入 {} · 跳过 {} · 源 {} 条",
+                written, len(skipped), payload.get("source_count"))
+    return {"ok": True, "written": written, "skipped": len(skipped),
+            "skipped_detail": skipped[:20], "source_count": payload.get("source_count")}
+
+
 # ── 数据面（「谁决定什么时候拉数据」的落点）───────────────────────────────
 
 @activity.defn

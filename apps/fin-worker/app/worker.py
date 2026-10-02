@@ -32,6 +32,7 @@ def activity_list() -> list:
         activities.close_day,
         activities.generate_daily_report,
         activities.trigger_market_etl,
+        activities.sync_instruments,
     ]
 
 

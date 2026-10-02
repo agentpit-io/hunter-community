@@ -146,6 +146,9 @@ def _snapshot_view(snap: Optional[dict]) -> dict:
 def execute(cur, req: dict, *, now: Optional[datetime] = None) -> dict:
     """走完四步链路。**一个请求一个事务**，任何一步失败整笔回滚。"""
     project_id = req["project_id"]
+    # **单写者闸门**（`09 §六-4`）：进事务先按 project 拿锁，第二个并发请求排到第一个
+    # 提交之后 —— 否则两个 Worker 会双双读到同一个版本、双双成交（M7 实测）。
+    ledger.lock_project(cur, project_id)
     project = ledger.get_project(cur, project_id)
     if not project:
         raise LookupError(f"项目不存在：{project_id}")
@@ -421,6 +424,7 @@ def expire_open_orders(
 
     解冻按 `fin_order.frozen_amount` 原样退回，不重算 —— 受理时冻了多少就退多少。
     """
+    ledger.lock_project(cur, project_id)
     orders = ledger.list_open_orders(cur, project_id)
     expired: list[dict] = []
     for order in orders:
@@ -442,6 +446,7 @@ def expire_open_orders(
 
 def cancel_order(cur, project_id: str, order_id: str, memo: str = "人工撤单") -> dict:
     """撤一张挂单（`cancelled`）。已成交 / 已终态的单返回原样，不报错。"""
+    ledger.lock_project(cur, project_id)
     order = ledger.get_order(cur, order_id)
     if not order or order["project_id"] != project_id:
         raise LookupError(f"委托不存在：{order_id}")
@@ -465,6 +470,7 @@ def match_open_orders(cur, project_id: str, *, now: Optional[datetime] = None) -
       · 卖出的股由 `open_sell_committed` 占着，别的挂单抢不走。
     这两条让「再撮合」是安全的：它只可能把一张已经通过风控的单变成成交。
     """
+    ledger.lock_project(cur, project_id)
     orders = ledger.list_open_orders(cur, project_id)
     model = load_execution_model(cur)
     if model is None:

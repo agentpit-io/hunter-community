@@ -71,6 +71,21 @@ class HunterApiClient:
             raise ApiError(resp.status_code, resp.text)
         return resp.json()
 
+    def fin_instruments(self, codes: Optional[list[str]] = None,
+                        market: str = "cn") -> dict[str, Any]:
+        """标的元数据（涨跌停 / ST / 板块），从 `company_master` / `stock_universe` 解析。
+
+        `codes` 留空 = 全量。返回体里每条带 `available`：**判不出的那条 `available=false`
+        且带 `reason`** —— 调用方跳过它，**不许拿代码形态硬凑一个幅度**写进 `fin_instrument`。
+        """
+        params: dict[str, Any] = {"market": market}
+        if codes:
+            params["codes"] = ",".join(codes)
+        resp = self._request("GET", "/api/internal/fin/instruments", params=params)
+        if resp.status_code >= 400:
+            raise ApiError(resp.status_code, resp.text)
+        return resp.json()
+
     def generate_report(self, project_id: str, trade_date: str) -> dict[str, Any]:
         """触发每日报告生成（M5）。
 
