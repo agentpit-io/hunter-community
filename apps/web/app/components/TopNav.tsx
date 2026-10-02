@@ -1,12 +1,16 @@
 'use client'
-// TopNav · Claude 风顶部导航 · 主入口 chat + 5 一级菜单 + 更多下拉 + 头像
+// TopNav · Claude 风顶部导航 · 主入口 chat + 一级菜单(策略中心/智能炒股/帮助中心)
+//   + 头像下拉
 // 所有菜单点击新窗口打开(target=_blank) · 保 chat 上下文不被打断
 // 对应 doc/codex/主页宣传/02-Chat作为主入口-Claude风改造方案.md §6.2
 
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Target, CircleHelp, LogOut, Settings } from 'lucide-react'
+import {
+  Target, CircleHelp, LogOut, Settings, ChevronDown, Bot,
+  Activity, TrendingUp, Wallet, FileText, GraduationCap, ShieldCheck, Compass,
+} from 'lucide-react'
 import { HUNTER, HUNTER_LOGO } from '../lib/hunter-theme'
 
 
@@ -104,9 +108,9 @@ export default function TopNav({ active }: NavProps) {
         }}>· Hunter</span>
       </Link>
 
-      {/* 一级菜单 · **只剩策略中心一个**(2026-08-30 导航重构)
+      {/* 一级菜单 · 三个(2026-08-30 导航重构 · 2026-10-02 补回智能炒股)
        *
-       * 原来是「自选 / 策略中心 / MCP 组件 / 更多∨」四个,砍到一个。
+       * 2026-08-30 那次从「自选 / 策略中心 / MCP 组件 / 更多∨」砍到只剩策略中心。
        * 砍的理由不是"太多了"这种感觉,是每一项都有更好的去处:
        *
        *   自选     → 侧栏新标签「自选股」· 卡片式 · 每张卡带
@@ -121,13 +125,47 @@ export default function TopNav({ active }: NavProps) {
        *
        * 方案见 doc/开源hunter-community/04开源比赛/
        *        2026-08-30_导航重构方案-对话与自选股双栏.md
+       *
+       * 2026-10-02 加回第三个:hunter 智能体自动炒股。它不在上面"被砍"的那批里
+       * (那些是开源版跑不全的平台内部页),是这次一期 M0–M8 真正交付的新板块。
+       * 侧栏虽然已有「智能交易」入口,但顶栏才是 /chat 首屏第一眼的导航 ——
+       * 从主页进来只看得到「策略中心」,评委找不到炒股板块。
+       * 位置按需求方指定,放在「帮助中心」前面。
        */}
       <NavLink href="/strategies/index.html" icon={<Target size={14} />} label="策略中心" active={active === 'strategies'} />
+
+      {/* 主菜单 + 二级菜单 · 板块本体在 apps/web/app/finance/
+       *
+       * 二级菜单与板块内页头那 7 个页签(finance/layout.tsx 的 TABS)逐一对齐,
+       * 两边各写一份是有意的:改板块结构时这里会一起改,比让顶栏去 import
+       * 板块内部常量更能守住"顶栏不依赖板块"这条边界。
+       *
+       * 交互沿用本文件既有的「更多」下拉:点击展开,不用 hover ——
+       * 按钮和面板之间隔了 6px,走 hover 会因为穿过间隙触发 mouseleave 而误关。
+       */}
+      <NavMenu
+        icon={<Bot size={14} />}
+        label="hunter智能体自动炒股"
+        labelShort="智能炒股"
+        badge="模拟"
+        active={active === 'finance'}
+      >
+        <DropdownLink href="/finance/overview"   icon={<Activity size={13} />}      label="总览" />
+        <DropdownLink href="/finance/auto-trade" icon={<TrendingUp size={13} />}    label="自动交易" />
+        <DropdownLink href="/finance/account"    icon={<Wallet size={13} />}        label="我的账户" />
+        <DropdownLink href="/finance/report"     icon={<FileText size={13} />}      label="每日报告" />
+        <DropdownLink href="/finance/growth"     icon={<GraduationCap size={13} />} label="成长与复盘" />
+        <DropdownLink href="/finance/help"       icon={<ShieldCheck size={13} />}   label="安全与帮助" />
+        <DropdownLink href="/finance/setup"      icon={<Compass size={13} />}       label="设置向导" />
+        {/* 板块页头挂的是同名徽标(模拟盘 · 不接实盘)—— 下拉里再提一次,
+            免得有人以为这是实盘下单入口。 */}
+        <div style={panelNoteStyle}>模拟盘 · 不接实盘</div>
+      </NavMenu>
+
       {/* 静态页要写全 index.html —— Next 不给 public 下的目录做 index 解析。
        * 线上实测:public/strategies/index.html 存在,而 /strategies/ 308 → /strategies → 404。
        * 写成 /help/ 帮助中心就点不进去了。 */}
       <NavLink href="/help/index.html" icon={<CircleHelp size={14} />} label="帮助中心" active={active === 'help'} />
-
       {/* 弹簧 */}
       <div style={{ flex: 1 }} />
 
@@ -210,6 +248,72 @@ function NavLink({ href, icon, label, active }: { href: string; icon: React.Reac
 }
 
 
+/** 一级菜单 + 二级下拉 · 自己管展开态和「点外部关闭」
+ *
+ * 没跟 TopNav 的 state 合并:顶栏以后每加一个下拉都要往父组件塞一个 state + ref,
+ * 父组件会被这些纯 UI 状态淹掉。这个组件自包含,新增主菜单只加一段 JSX。
+ */
+function NavMenu({ icon, label, labelShort, badge, active, children }: {
+  icon: React.ReactNode
+  label: string
+  /** 窄屏用 · 不传则退化成 label(顶栏在手机上放不下 11 个字的标签) */
+  labelShort?: string
+  badge?: string
+  active?: boolean
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if (open && !ref.current?.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [open])
+
+  const lit = open || active
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        title={label}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 5,
+          height: 32, padding: '0 12px', marginRight: 4,
+          background: lit ? HUNTER.BRAND_PALE : 'transparent',
+          border: 'none', borderRadius: 8,
+          color: active ? HUNTER.COPPER3 : HUNTER.INK_S,
+          fontSize: 13, fontWeight: active ? 600 : 400,
+          cursor: 'pointer', transition: 'background .1s', fontFamily: 'inherit',
+        }}
+        onMouseEnter={(e) => { if (!lit) e.currentTarget.style.background = HOVER }}
+        onMouseLeave={(e) => { if (!lit) e.currentTarget.style.background = 'transparent' }}
+      >
+        {icon}
+        <span className="hidden sm:inline">{label}</span>
+        <span className="sm:hidden">{labelShort || label}</span>
+        {badge && (
+          <span className="hidden sm:inline" style={{
+            padding: '1px 6px', borderRadius: 999,
+            background: HUNTER.BRAND_PALE, color: HUNTER.COPPER3,
+            fontSize: 10, fontWeight: 600,
+          }}>{badge}</span>
+        )}
+        <ChevronDown size={11} style={{
+          opacity: .6, transform: open ? 'rotate(180deg)' : 'none',
+          transition: 'transform .12s',
+        }} />
+      </button>
+      {open && <div style={dropdownStyle} role="menu">{children}</div>}
+    </div>
+  )
+}
+
+
 function DropdownLink({ href, icon, label, badge }: { href: string; icon: React.ReactNode; label: string; badge?: string }) {
   return (
     <a
@@ -238,6 +342,16 @@ function DropdownLink({ href, icon, label, badge }: { href: string; icon: React.
   )
 }
 
+
+
+/** 下拉面板底部的一行说明 · 与最后一项用分隔线隔开 */
+const panelNoteStyle: React.CSSProperties = {
+  margin: '5px 10px 1px',
+  paddingTop: 7,
+  borderTop: `1px solid ${HUNTER.LINE}`,
+  fontSize: 11,
+  color: HUNTER.INK_F,
+}
 
 
 const dropdownStyle: React.CSSProperties = {

@@ -3,6 +3,28 @@
 All notable changes to HunterCode · Community Edition follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - 2026-10-02
+
+> **修订版 · 顶栏补上「hunter 智能体自动炒股」主菜单**。只改前端一个组件
+> (`apps/web/app/components/TopNav.tsx`) —— 无数据库迁移、无新增服务、无 env 变更。
+>
+> 升级:把 `.env` 里的 `HUNTER_VERSION` 改成 `1.3.1`,然后
+> `docker compose pull web && docker compose up -d web`。其余服务镜像不用动
+> (智能交易的四个 `fin` profile 容器与本版无关)。
+
+### ✨ 新增 · Added
+
+- **顶栏一级菜单「hunter智能体自动炒股」**(位置在「帮助中心」左侧),点击展开二级菜单,
+  与智能交易板块页头的 7 个页签逐一对齐:总览 / 自动交易 / 我的账户 / 每日报告 /
+  成长与复盘 / 安全与帮助 / 设置向导。
+  - 补的是**入口**,不是功能:`/finance/*` 自 1.3.0 起就能用,但只挂在侧栏。
+    从 `/chat` 主页进来第一眼看到的是顶栏,而顶栏原先只有「策略中心」——
+    访客找不到炒股板块。
+  - 二级项一律新窗口打开(`target="_blank"`),与顶栏既有约定一致,不打断对话页上下文;
+    点菜单外部自动收起。
+  - 一级项带「模拟」徽标,下拉底部另有一行「模拟盘 · 不接实盘」,避免被当成实盘下单入口。
+  - 窄屏(手机)标签退化成「智能炒股」,否则 11 个字的标签会把顶栏撑破。
+
 ## [1.3.0] - 2026-10-02
 
 > **次要版本 · 新增「智能交易」板块(纸上交易账本一期)**。有数据库迁移(新增
