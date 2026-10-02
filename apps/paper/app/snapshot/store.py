@@ -31,24 +31,19 @@ from typing import Optional
 from loguru import logger
 
 from app import data_gap
+from app.market_time import market_of as _canonical_market_of
 from app.snapshot.source import CST, Quote, QuoteSource, get_source
 
 
 def _market_of(code: str) -> str:
-    """由代码形态判市场（与 `apps/api` 的 `fin_data.market_of` 同口径）。
+    """由代码形态判市场，输出沿用旧口径（`A` / `HK` / `US`），供缺口标签用。
 
-    paper 不 import `apps/api`（两个镜像），所以这里留一份最小实现 ——
-    它只用于给缺口记录打标签，不参与任何撮合或风控判断。
+    判据**只有一份**：`app.market_time.market_of`（与 `apps/api` 的
+    `fin_data.market_of` 同口径）。这里只把规范三值里的 `CN_A` 折回旧标签 `A`，
+    不另写一套规则（「同一件事写在多处、只改一处 = 两套指令打架」）。
     """
-    s = (code or "").strip().upper()
-    if s.endswith(".HK"):
-        return "HK"
-    if s.endswith(".US"):
-        return "US"
-    bare = s.split(".")[0]
-    if bare.isdigit():
-        return "HK" if len(bare) == 5 else "A"
-    return "US"
+    m = _canonical_market_of(code)
+    return "A" if m == "CN_A" else m
 
 # 快照「新鲜」的上限。超过它 = 喂价停了（断流），标 stale 并且**不许用于成交**。
 # 15 分钟对应 A 股行情链路的延迟量级（`CLAUDE.md` 记的扫描源 update_mode 也是

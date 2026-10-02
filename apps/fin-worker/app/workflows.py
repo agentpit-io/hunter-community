@@ -23,7 +23,8 @@ paper 会拒（`01方案 §11.2`「信号过期 → 丢弃并重新分析，不�
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
@@ -32,7 +33,7 @@ with workflow.unsafe.imports_passed_through():
     from app import activities, gating
     from app.points import BY_KEY
 
-SHANGHAI = timezone(timedelta(hours=8))
+SHANGHAI = ZoneInfo("Asia/Shanghai")   # IANA 时区名（不是固定偏移）
 
 # Activity 重试：at-least-once。幂等由业务键保证（见模块文档）。
 RETRY = RetryPolicy(

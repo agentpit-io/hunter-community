@@ -64,27 +64,32 @@ def upsert_calendar(trade_date: str, body: CalendarIn) -> dict:
     with db.cursor(commit=True) as cur:
         cur.execute(
             """
-            INSERT INTO fin_market_calendar (trade_date, is_trading, sessions, note)
-            VALUES (%s,%s,%s,%s)
+            INSERT INTO fin_market_calendar (market, trade_date, is_trading, sessions, note)
+            VALUES (%s,%s,%s,%s,%s)
             -- 0029 起主键是 (market, trade_date)：冲突目标必须跟着换，否则本端点会报
             -- 「no unique or exclusion constraint matching the ON CONFLICT specification」。
-            -- 本路径只写 A 股日历，market 走列默认 'CN_A'。
+            -- market 缺省 'CN_A'（旧调用方行为不变）；港美股日历种子显式传市场。
             ON CONFLICT (market, trade_date) DO UPDATE SET
               is_trading = EXCLUDED.is_trading, sessions = EXCLUDED.sessions, note = EXCLUDED.note
             RETURNING *
             """,
-            (body.trade_date, body.is_trading, psycopg2.extras.Json(body.sessions), body.note),
+            (body.market, body.trade_date, body.is_trading,
+             psycopg2.extras.Json(body.sessions), body.note),
         )
         return cur.fetchone()
 
 
 @router.get("/api/v1/market-calendar/{trade_date}")
-def get_calendar(trade_date: str) -> dict:
+def get_calendar(trade_date: str, market: str = "CN_A") -> dict:
+    """按 `(market, trade_date)` 读（缺省 CN_A 保持旧调用方行为）。"""
     with db.cursor() as cur:
-        cur.execute("SELECT * FROM fin_market_calendar WHERE trade_date = %s", (trade_date,))
+        cur.execute(
+            "SELECT * FROM fin_market_calendar WHERE market = %s AND trade_date = %s",
+            (market, trade_date),
+        )
         row = cur.fetchone()
     if not row:
-        raise HTTPException(404, f"没有 {trade_date} 的交易日历")
+        raise HTTPException(404, f"没有 {market} {trade_date} 的交易日历")
     return row
 
 
@@ -96,15 +101,19 @@ def upsert_fee_model(version: str, body: FeeModelIn) -> dict:
         cur.execute(
             """
             INSERT INTO fin_fee_model
-              (version, commission_pct, commission_min, stamp_tax_pct, transfer_fee_pct)
-            VALUES (%s,%s,%s,%s,%s)
+              (version, commission_pct, commission_min, stamp_tax_pct, transfer_fee_pct,
+               market, currency, stamp_side)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
             ON CONFLICT (version) DO UPDATE SET
               commission_pct = EXCLUDED.commission_pct, commission_min = EXCLUDED.commission_min,
-              stamp_tax_pct = EXCLUDED.stamp_tax_pct, transfer_fee_pct = EXCLUDED.transfer_fee_pct
+              stamp_tax_pct = EXCLUDED.stamp_tax_pct, transfer_fee_pct = EXCLUDED.transfer_fee_pct,
+              market = EXCLUDED.market, currency = EXCLUDED.currency,
+              stamp_side = EXCLUDED.stamp_side
             RETURNING *
             """,
             (body.version, body.commission_pct, body.commission_min,
-             body.stamp_tax_pct, body.transfer_fee_pct),
+             body.stamp_tax_pct, body.transfer_fee_pct,
+             body.market, body.currency, body.stamp_side),
         )
         return cur.fetchone()
 

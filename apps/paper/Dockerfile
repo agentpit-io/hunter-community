@@ -34,8 +34,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH="/opt/venv/bin:$PATH"
 
 # curl · HEALTHCHECK（psycopg2-binary 自带 libpq，运行层不需要 libpq-dev）
+# tzdata · **必须装**：风控第 1 条按市场时区判交易时段（`app/market_time.py` 用
+#   `zoneinfo.ZoneInfo("America/New_York")`）。python:slim 不带 tzdata ——
+#   `risk/session.py` 原来硬编码 `CST=+8` 正是因为镜像没有它（N2 起改走真时区）。
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl ca-certificates \
+        curl ca-certificates tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /opt/venv /opt/venv

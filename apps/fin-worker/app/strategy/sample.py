@@ -15,7 +15,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from typing import Any, Optional
 
 from app.bridge.contracts import CONTRACT_VERSION
@@ -27,7 +28,7 @@ SAMPLE_LOTS: dict[str, int] = {"play": 100, "manage": 1000, "operate": 10000}
 # 档位不确定时的兜底 —— 是最小档，宁可买少不买多。
 _DEFAULT_LOT = 100
 
-SHANGHAI = timezone(timedelta(hours=8))
+SHANGHAI = ZoneInfo("Asia/Shanghai")   # A 股本地时区（IANA 名，非固定偏移）
 
 
 def _lot_for(tier: str) -> int:

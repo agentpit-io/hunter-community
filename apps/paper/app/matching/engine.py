@@ -40,11 +40,11 @@ from typing import Optional
 from loguru import logger
 
 from app import idempotency, ledger, snapshot
+from app.market_time import DEFAULT_MARKET, market_local_date, market_of
 from app.matching.model import load_execution_model
 from app.matching.pricing import FILLED, MatchResult, OrderSpec, match
 from app.risk import RiskInputs, evaluate
-
-CST_OFFSET_HOURS = 8
+from app.risk import t1 as t1_mod
 
 
 class NoSnapshot(Exception):
@@ -120,6 +120,10 @@ def _reject(order_id: str, reason: str, **extra) -> dict:
         "amount": None,
         "fee": None,
         "pending_reason": None,
+        "market": extra.get("market"),
+        # 价格带留痕（N2）：`None` = 这一笔还没走到第 4 条（如快照都拿不到）；
+        # `False` = 该市场 `price_limit_mode='none'`，**没做价格带校验**（如实在回执写明）。
+        "price_limit_checked": extra.get("price_limit_checked"),
         "risk": extra.get("risk"),
     }
 
@@ -127,6 +131,14 @@ def _reject(order_id: str, reason: str, **extra) -> dict:
 def _risk_view(outcome) -> dict:
     return {r.name: {"ok": r.ok, "reason": r.reason, "detail": r.detail}
             for r in outcome.results}
+
+
+def _price_limit_checked(outcome) -> Optional[bool]:
+    """第 4 条的留痕字段：`True` 做了校验 / `False` 该市场模式为 `none` 未做 / `None` 没跑到。"""
+    r = outcome.price_limit
+    if r is None:
+        return None
+    return bool(r.detail.get("price_limit_checked", r.ok))
 
 
 def _snapshot_view(snap: Optional[dict]) -> dict:
@@ -219,17 +231,34 @@ def execute(cur, req: dict, *, now: Optional[datetime] = None) -> dict:
     )
     trial = match(spec, snap, model)
 
-    # ── ② 过规则：六条风控 ───────────────────────────────────────────────
-    fee_model = ledger.get_fee_model(cur)
-    if fee_model is None:
-        raise ValueError("没有可用的费用模型（fin_fee_model 为空），拒绝撮合")
+    # ── ② 过规则：六条风控（**按标的所属市场取参数**）──────────────────────
+    instrument = ledger.get_instrument(cur, code)
+    # 市场以 `fin_instrument.market` 为准（N1 加的列）；标的缺失时按代码形态兜一层。
+    market = (instrument or {}).get("market") or market_of(code) or DEFAULT_MARKET
+    market_rule = ledger.get_market_rule(cur, market)
 
     risk_price = _risk_price(req, snap, trial)
-    instrument = ledger.get_instrument(cur, code)
-    calendar = ledger.get_calendar(cur, snap["snapshot_time"].astimezone(_cst()).date())
+    # 日历按 **(市场, 当地日期)** 读：日期必须用该市场的时区切，不能用上海时间
+    # （美股 16:00 ET 收盘时，上海已是次日 —— 用上海日期会取错日历行）。
+    local_date = market_local_date(snap["snapshot_time"], market)
+    calendar = ledger.get_calendar(cur, local_date, market=market)
+
+    # 费用模型按市场取：市场规则给了版本号就按版本取，否则取该市场最新一行。
+    fee_version = (market_rule or {}).get("fee_model_version")
+    fee_model = ledger.get_fee_model(cur, version=fee_version, market=market)
+
     available, _frozen = ledger.cash_balance(cur, project_id)
     position = ledger.get_position(cur, project_id, code) or {"qty": 0, "sellable_qty": 0}
     committed = ledger.open_sell_committed(cur, project_id, code)
+
+    # 可卖量按市场规则算：`same_day`（港/美股）用总持仓，`t_plus_n`（A 股）用日切后的可卖量；
+    # 再统一扣掉未成交卖单占用的股数（否则同一批股能被两张挂单各卖一次）。
+    position_qty = int(position["qty"])
+    sellable_rule = (market_rule or {}).get("sellable_rule") or "t_plus_n"
+    effective_sellable = t1_mod.effective_sellable(
+        sellable_rule, position_qty, int(position["sellable_qty"])
+    )
+    sellable_qty = max(0, effective_sellable - committed)
 
     inputs = RiskInputs(
         at=snap["snapshot_time"],
@@ -241,10 +270,10 @@ def execute(cur, req: dict, *, now: Optional[datetime] = None) -> dict:
         fee_model=fee_model,
         prev_close=None if snap["prev_close"] is None else Decimal(str(snap["prev_close"])),
         available=available,
-        position_qty=int(position["qty"]),
-        # 挂单占用的股数要在**可卖量**里扣掉，否则同一批股能被两张挂单各卖一次
-        sellable_qty=max(0, int(position["sellable_qty"]) - committed),
-        lot_size=int(instrument["lot_size"]) if instrument else 100,
+        position_qty=position_qty,
+        sellable_qty=sellable_qty,
+        market=market,
+        market_rule=market_rule,
     )
     outcome = evaluate(inputs)
 
@@ -258,6 +287,8 @@ def execute(cur, req: dict, *, now: Optional[datetime] = None) -> dict:
         receipt = _reject(order_id, outcome.decline_reason,
                           risk=_risk_view(outcome), **_snapshot_view(snap))
         receipt["failed_checks"] = outcome.failed_names
+        receipt["market"] = market
+        receipt["price_limit_checked"] = _price_limit_checked(outcome)
         _remember(cur, key, req_hash, project_id, receipt, order_id)
         return receipt
 
@@ -302,6 +333,8 @@ def execute(cur, req: dict, *, now: Optional[datetime] = None) -> dict:
             "decline_reason": None,
             "pending_reason": None,
             "price_basis": trial.basis,
+            "market": market,
+            "price_limit_checked": _price_limit_checked(outcome),
             "risk": _risk_view(outcome),
             **_snapshot_view(snap),
         }
@@ -319,6 +352,8 @@ def execute(cur, req: dict, *, now: Optional[datetime] = None) -> dict:
             "pending_reason": trial.pending_reason,
             "price_basis": trial.basis,
             "frozen_amount": frozen_amount,
+            "market": market,
+            "price_limit_checked": _price_limit_checked(outcome),
             "risk": _risk_view(outcome),
             **_snapshot_view(snap),
         }
@@ -355,12 +390,6 @@ def _fee_view(fee) -> dict:
         "transfer_fee": fee.transfer_fee,
         "total": fee.total,
     }
-
-
-def _cst():
-    from datetime import timedelta, timezone
-
-    return timezone(timedelta(hours=CST_OFFSET_HOURS))
 
 
 def _remember(cur, key, req_hash, project_id, receipt, response_ref) -> None:
@@ -489,7 +518,16 @@ def match_open_orders(cur, project_id: str, *, now: Optional[datetime] = None) -
         if not result.filled:
             continue
         project = ledger.get_project(cur, project_id)
-        fee_model = ledger.get_fee_model(cur)
+        # 费用模型**按该委托所属市场**取（挂单再撮合时按实际成交额重算费用）——
+        # 拿 A 股费率给港美股挂单算费就是编数字。市场以标的元数据为准，缺失时按代码形态。
+        instrument = ledger.get_instrument(cur, order["code"])
+        market = (instrument or {}).get("market") or market_of(order["code"]) or DEFAULT_MARKET
+        market_rule = ledger.get_market_rule(cur, market) or {}
+        fee_model = ledger.get_fee_model(
+            cur, version=market_rule.get("fee_model_version"), market=market
+        )
+        if fee_model is None:
+            raise ValueError(f"{market} 没有可用的费用模型（fin_fee_model 无该市场行），拒绝撮合挂单")
         qty = int(order["qty"])
         fill_amount = (Decimal(qty) * Decimal(str(result.price))).quantize(Decimal("0.0001"))
         fee = _recompute_fee(order["side"], fill_amount, fee_model)

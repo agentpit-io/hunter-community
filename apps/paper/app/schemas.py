@@ -82,6 +82,8 @@ class CalendarIn(BaseModel):
     is_trading: bool
     sessions: list[dict[str, str]] = Field(default_factory=list)
     note: Optional[str] = None
+    # 0029 起日历主键是 (market, trade_date)；缺省 CN_A 保持旧调用方行为不变。
+    market: Literal["CN_A", "HK", "US"] = "CN_A"
 
 
 class FeeModelIn(BaseModel):
@@ -90,6 +92,10 @@ class FeeModelIn(BaseModel):
     commission_min: Decimal
     stamp_tax_pct: Decimal
     transfer_fee_pct: Decimal
+    # 0029 加市场/币种；0032 加印花税方向。缺省值保持一期 A 股口径不变。
+    market: Literal["CN_A", "HK", "US"] = "CN_A"
+    currency: Literal["CNY", "HKD", "USD"] = "CNY"
+    stamp_side: Literal["buy", "sell", "both", "none"] = "sell"
 
 
 class ValuationIn(BaseModel):

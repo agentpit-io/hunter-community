@@ -38,14 +38,13 @@ M3 起有挂单，于是买入分两种走法：
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
 import psycopg2.extras
 
-# 上海时间（中国无夏令时，固定 +08:00；与 apps/api/main.py 同口径）。
-CST = timezone(timedelta(hours=8))
+# 时区一律经 `app.market_time`（按市场归一）；本模块不再持有时区常量（N2）。
 
 
 # ── 小工具 ────────────────────────────────────────────────────────────────
@@ -164,9 +163,21 @@ def lock_project(cur, project_id: str) -> None:
 
 # ── 参考数据 ──────────────────────────────────────────────────────────────
 
-def get_calendar(cur, trade_date) -> Optional[dict]:
+def get_market_rule(cur, market: str) -> Optional[dict]:
+    """`fin_market_rule` 的一行（六条风控的参数来源，按市场）。取不到 → `None`。"""
+    return _fetchone(cur, "SELECT * FROM fin_market_rule WHERE market = %s", (market,))
+
+
+def get_calendar(cur, trade_date, market: str = "CN_A") -> Optional[dict]:
+    """**按 `(market, trade_date)`** 取日历（0029 起主键就是这两列）。
+
+    `market` 缺省 `CN_A` 保持旧调用方的行为不变；港美股必须显式传市场 ——
+    同日多市场各有各的行，只按日期取会拿到任意一行（N1 报告遗留 #1）。
+    """
     return _fetchone(
-        cur, "SELECT * FROM fin_market_calendar WHERE trade_date = %s", (trade_date,)
+        cur,
+        "SELECT * FROM fin_market_calendar WHERE market = %s AND trade_date = %s",
+        (market, trade_date),
     )
 
 
@@ -174,9 +185,24 @@ def get_instrument(cur, code: str) -> Optional[dict]:
     return _fetchone(cur, "SELECT * FROM fin_instrument WHERE code = %s", (code,))
 
 
-def get_fee_model(cur, version: Optional[str] = None) -> Optional[dict]:
+def get_fee_model(
+    cur, version: Optional[str] = None, market: Optional[str] = None
+) -> Optional[dict]:
+    """费用模型行。`market` 给了就限定市场（`fin_fee_model.market`，0029 起）。
+
+    · 给了 `version` → 直接按版本取（版本号全局唯一，市场随行落库）；
+    · 只给 `market` → 取该市场 `effective_from` 最新的那一行；
+    · 都不给 → 取全表最新的那一行（旧调用方兼容；只出现在还没接市场的路径上）。
+    """
     if version:
         return _fetchone(cur, "SELECT * FROM fin_fee_model WHERE version = %s", (version,))
+    if market:
+        return _fetchone(
+            cur,
+            "SELECT * FROM fin_fee_model WHERE market = %s "
+            "ORDER BY effective_from DESC, version DESC LIMIT 1",
+            (market,),
+        )
     return _fetchone(
         cur,
         "SELECT * FROM fin_fee_model ORDER BY effective_from DESC, version DESC LIMIT 1",

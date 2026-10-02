@@ -64,35 +64,47 @@ async def trading_days(
 ):
     """区间内的交易日（升序 `YYYY-MM-DD`）。
 
-    目前只有 **A 股**有可信的前视日历（akshare `tool_trade_date_hist_sina`，
-    覆盖到当年年底）。港股 / 美股**没有**，于是直接报错 —— 拿 A 股日历冒充
-    港股/美股日历就是编数据（`总控规则 §六-1`）。补真实日历是 M7 的事。
+    A 股走 akshare 的前视日历（含节假日与未来日期）。港股 / 美股（N2 起）走
+    `services/fin/market_calendar`：**官方页结构化数据 → 人工种子兜底**，
+    来源与是否回落都在返回体里写明（`calendar_source` / `fallback_reason`）——
+    **不许拿 A 股日历顶替**（`总控规则 §六-1`），也不许静默降级。
     """
     _auth(request)
-    if market != "a":
-        raise HTTPException(
-            501,
-            f"目前只有 A 股（market=a）有前视交易日历；{market} 的日历数据源待接（M7）。"
-            "不许用 A 股日历顶替。",
-        )
     if end < start:
         raise HTTPException(400, "end 必须不早于 start")
 
-    def _fetch() -> list[str]:
-        import akshare as ak
+    if market == "a":
+        def _fetch_a() -> list[str]:
+            import akshare as ak
 
-        df = ak.tool_trade_date_hist_sina()
-        days = []
-        for value in df["trade_date"].tolist():
-            d = value if isinstance(value, date) else date.fromisoformat(str(value)[:10])
-            if start <= d <= end:
-                days.append(d.isoformat())
-        return sorted(days)
+            df = ak.tool_trade_date_hist_sina()
+            days = []
+            for value in df["trade_date"].tolist():
+                d = value if isinstance(value, date) else date.fromisoformat(str(value)[:10])
+                if start <= d <= end:
+                    days.append(d.isoformat())
+            return sorted(days)
 
-    try:
-        days = await asyncio.to_thread(_fetch)
-    except Exception as exc:  # noqa: BLE001 —— 拉不到就如实报错，不返回空日历
-        logger.error("[internal.calendar] akshare 交易日历拉取失败：{}", exc)
-        raise HTTPException(503, f"交易日历数据源不可用：{exc}") from exc
-    return {"market": market, "start": start.isoformat(), "end": end.isoformat(),
-            "trading_days": days, "count": len(days), "source": "akshare.tool_trade_date_hist_sina"}
+        try:
+            days = await asyncio.to_thread(_fetch_a)
+        except Exception as exc:  # noqa: BLE001 —— 拉不到就如实报错，不返回空日历
+            logger.error("[internal.calendar] akshare 交易日历拉取失败：{}", exc)
+            raise HTTPException(503, f"交易日历数据源不可用：{exc}") from exc
+        return {"market": market, "start": start.isoformat(), "end": end.isoformat(),
+                "trading_days": days, "count": len(days),
+                "source": "akshare.tool_trade_date_hist_sina"}
+
+    # ── 港股 / 美股：官方来源 + 人工种子兜底（N2）──────────────────────────
+    from app.services.fin import market_calendar as mcal
+
+    mkt = market.upper()
+    info = await asyncio.to_thread(mcal.market_holidays, mkt)
+    days = mcal.trading_days(start, end, info["holidays"])
+    return {
+        "market": market, "start": start.isoformat(), "end": end.isoformat(),
+        "trading_days": days, "count": len(days),
+        "source": info["source"], "calendar_source": info["source_label"],
+        "fetched_at": info["fetched_at"],
+        # 官方接口没拿到、回落人工种子时，把原因如实带出来（拍板 §3.1 第 5 条）。
+        "fallback_reason": info.get("error"),
+    }

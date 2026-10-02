@@ -23,7 +23,6 @@ from fastapi import APIRouter, HTTPException, Query
 from app import data_gap, db, recon
 
 router = APIRouter(tags=["data-ops"])
-CST = timezone(timedelta(hours=8))
 
 
 @router.get("/api/v1/data-gaps")

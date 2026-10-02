@@ -27,8 +27,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:$PATH"
 
+# tzdata · **必须装**：与 `apps/paper` 同因 —— 按市场时区归一要走
+#   `zoneinfo.ZoneInfo`（`app/market_time.py`），python:slim 不带 tzdata（N2）。
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl ca-certificates \
+        curl ca-certificates tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /opt/venv /opt/venv

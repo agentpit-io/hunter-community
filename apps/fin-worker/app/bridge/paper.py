@@ -84,17 +84,22 @@ class PaperClient:
         return data
 
     # ── 交易日历 ─────────────────────────────────────────────────────────
-    def get_calendar(self, trade_date: str) -> Optional[dict]:
-        """`None` = 这一天没有日历（404）。**不代表「非交易日」**，代表「不知道」。"""
-        return self._json("GET", f"/api/v1/market-calendar/{trade_date}", allow=(404,))
+    def get_calendar(self, trade_date: str, market: str = "CN_A") -> Optional[dict]:
+        """`None` = 这一天没有日历（404）。**不代表「非交易日」**，代表「不知道」。
+
+        日历按 `(market, trade_date)` 读（0029 起）；缺省 `CN_A` 保持旧调用方行为。
+        """
+        return self._json("GET", f"/api/v1/market-calendar/{trade_date}",
+                          params={"market": market}, allow=(404,))
 
     def upsert_calendar(self, trade_date: str, *, is_trading: bool,
-                        sessions: list[dict[str, str]], note: str) -> dict:
+                        sessions: list[dict[str, str]], note: str,
+                        market: str = "CN_A") -> dict:
         return self._json(
             "PUT",
             f"/api/v1/market-calendar/{trade_date}",
             json={"trade_date": trade_date, "is_trading": is_trading,
-                  "sessions": sessions, "note": note},
+                  "sessions": sessions, "note": note, "market": market},
         )
 
     def upsert_instrument(self, body: dict) -> dict:

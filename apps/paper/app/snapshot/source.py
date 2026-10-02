@@ -31,13 +31,17 @@ import os
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional, Protocol
+from zoneinfo import ZoneInfo
 
 from loguru import logger
 
-CST = timezone(timedelta(hours=8))
+# 裸格式（无偏移）时间戳的兜底时区 = A 股 / 港股共同的 +08:00（两地均无夏令时）。
+# **美股不走这里**：统一结构给美股的 `event_time` 已带 `-04:00` / `-05:00` 偏移。
+# 用 IANA 时区名而不是固定偏移（N2）：镜像必须装 tzdata（见 Dockerfile）。
+CST = ZoneInfo("Asia/Shanghai")
 
 # 拉一次行情的超时。论文里这是执行区里最不该久等的一步：超时 = 断流 = 不成交。
 DEFAULT_TIMEOUT_S = 3.0

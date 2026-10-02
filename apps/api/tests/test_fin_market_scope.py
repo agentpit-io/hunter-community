@@ -316,14 +316,21 @@ def test_日历主键是market_trade_date(conn):
 
 
 def test_日历A股行已回填market与source(conn):
-    rows = _q(
+    """N1 的回填：历史 A 股日历行（`calendar_source='akshare'`）必须是 `market='CN_A'`。
+
+    ⚠️ N2 起库里还有 HK / US 的日历行（`hkex_official` / `nyse_official`），
+    所以**不能再假设整张表都是 A 股**（原断言 `cn_a == total` 已不成立）——
+    改为「akshare 行都属于 CN_A」+「没有未回填 market 的行」。
+    """
+    r = _q(
         conn,
-        "SELECT count(*) AS total, "
-        "count(*) FILTER (WHERE market = 'CN_A') AS cn_a, "
-        "count(*) FILTER (WHERE calendar_source = 'akshare') AS ak FROM fin_market_calendar",
-    )
-    r = rows[0]
-    if r["total"] == 0:
+        "SELECT count(*) AS ak, count(*) FILTER (WHERE market = 'CN_A') AS ak_cn "
+        "FROM fin_market_calendar WHERE calendar_source = 'akshare'",
+    )[0]
+    if r["ak"] == 0:
         pytest.skip("库里没有 A 股日历历史行（空库）")
-    assert r["cn_a"] == r["total"], "A 股日历行未全部回填 market='CN_A'"
-    assert r["ak"] == r["total"], "A 股日历行未全部回填 calendar_source='akshare'"
+    assert r["ak_cn"] == r["ak"], "akshare 日历行未全部回填 market='CN_A'"
+    nomarket = _q(
+        conn, "SELECT count(*) AS n FROM fin_market_calendar WHERE market IS NULL"
+    )[0]["n"]
+    assert nomarket == 0, "日历行 market 有 NULL（未回填）"

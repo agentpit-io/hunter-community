@@ -114,5 +114,7 @@ async def trigger(point_key: str, request: Request, body: Optional[dict] = None)
 
 
 def _today_shanghai() -> str:
-    from datetime import datetime, timedelta, timezone
-    return datetime.now(timezone(timedelta(hours=8))).date().isoformat()
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    return datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()

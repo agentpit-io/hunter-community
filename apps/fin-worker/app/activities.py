@@ -20,7 +20,8 @@ Activity 是 Temporal 里**唯一允许产生副作用**的东西，而它的重
 from __future__ import annotations
 
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 from typing import Any, Optional
 
 from loguru import logger
@@ -33,7 +34,8 @@ from app.bridge.idem import order_key, point_job_key, report_job_key
 from app.bridge.paper import PaperClient
 from app.strategy.sample import build_decision as build_sample_decision
 
-SHANGHAI = timezone(timedelta(hours=8))
+# A 股交易日按上海时间切。用 IANA 时区名（不是固定偏移）—— 镜像装 tzdata（N2）。
+SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 # 交易日历的默认时段（A 股：上午 / 下午各一段）。这不是「编」——
 # `fin_market_calendar.sessions` 就是给撮合判时段用的，A 股的时段是公开常识，

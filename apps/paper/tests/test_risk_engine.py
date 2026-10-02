@@ -16,6 +16,13 @@ MODEL = {
     "stamp_tax_pct": Decimal("0.0005"),
     "transfer_fee_pct": Decimal("0.00001"),
 }
+# CN_A 市场规则（与 db/migrations/0030 的 CN_A 行逐项一致）—— 六条规则从它取参。
+RULE_CN_A = {
+    "market": "CN_A", "currency": "CNY", "timezone": "Asia/Shanghai",
+    "sessions": [{"open": "09:30", "close": "11:30"}, {"open": "13:00", "close": "15:00"}],
+    "sellable_rule": "t_plus_n", "sellable_days": 1,
+    "lot_rule": "fixed", "lot_fixed": 100, "price_limit_mode": "pct",
+}
 
 
 def base(**kw):
@@ -31,6 +38,8 @@ def base(**kw):
         available=Decimal("10000"),
         position_qty=0,
         sellable_qty=0,
+        market="CN_A",
+        market_rule=RULE_CN_A,
     )
     params.update(kw)
     return RiskInputs(**params)
