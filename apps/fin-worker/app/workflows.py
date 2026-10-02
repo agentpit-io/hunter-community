@@ -141,6 +141,24 @@ async def _run_for_project(point, project: dict, trade_date: str, now_iso: str, 
             "project_id": project_id, "trade_date": trade_date, "point": point.key,
             "now": now_iso, "code": req.get("code"),
         })
+        if built.get("halted"):
+            # ── M6 · 总开关关闭：**这一步就到头，不提交任何委托** ──────────
+            # 写一条「停在这」的检查点，然后正常收尾（job SUCCEEDED）。这不是失败：
+            # 用户按的就是「停」，工作流该成功结束并在历史上留下「本时点未交易」。
+            out["halted"] = True
+            out["reason"] = built.get("reason")
+            await _exec(activities.write_checkpoint, {
+                "job_id": job_id,
+                "checkpoint": {"point": point.key, "phase": "halted",
+                               "reason": built.get("reason")},
+            })
+            out["finish"] = await _exec(activities.finish_point_job, {
+                "job_id": job_id,
+                "result_ref": f"point:{point.key}:{trade_date}:{project_id}:halted",
+                "checkpoint": {"point": point.key, "trade_date": trade_date,
+                               "phase": "done", "halted": True},
+            })
+            return out
         out["decision"] = built["decision"]
         out["idempotency_key"] = built["idempotency_key"]
         # ② 提交（有副作用的 Activity）。命令是冻结的，重试逐字节相同 → 幂等重放。

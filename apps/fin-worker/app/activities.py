@@ -48,6 +48,23 @@ def _parse_iso(value: str) -> datetime:
     return dt
 
 
+def _active_strategy(param: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    """`fin_param.strategies` 里当前生效的那一条。
+
+    ⚠️ **与 `apps/api/app/services/fin/control.py::active_strategy` 是同一条规则的两份
+    实现**（两个容器、两套依赖，不能互相 import）。规则只有一句：「有一条标了
+    `active` 就用它，没有就用第一条」。改这边必须同时改那边，
+    `tests/test_strategy_switch.py` 有用例盯着「两份实现同判」。
+    """
+    items = list((param or {}).get("strategies") or [])
+    if not items:
+        return None
+    for item in items:
+        if isinstance(item, dict) and item.get("active"):
+            return item
+    return items[0] if isinstance(items[0], dict) else None
+
+
 def _heartbeat(details: dict[str, Any]) -> None:
     """打一次 Activity 心跳。**不在 Activity 上下文里时静默跳过** ——
     这样直接调用 Activity 函数的单元测试不会被心跳炸掉。"""
@@ -211,6 +228,20 @@ def confirm_t1(req: dict[str, Any]) -> dict[str, Any]:
 def build_decision(req: dict[str, Any]) -> dict[str, Any]:
     """读项目 → 产出 `StrategyDecision` → 翻译成 Paper 命令。**只读，无副作用。**
 
+    **M6 · 总开关在这里生效**：`fin_param.auto_enabled` 为 false 时**直接返回
+    `halted=True`，不产出意图、不翻译命令 → 下游不会提交任何委托**。这是
+    「总开关真的能停」那句承诺的技术兑现点：停的是「产生新委托」这件事本身，
+    而不是「下了单再拒单」（后者会在 `fin_order` 里留下一行被拒的委托，
+    用户看到的是「它还在动」）。
+
+    ⚠️ 判据放在**出意图之前**，不是「提交前再查一次」——出意图与提交是两个
+    Activity，中间可能隔着重试；如果放在提交侧，重试时读到的可能是已经恢复的开关。
+    放在这里，Temporal 会把「这一时点不交易」这个结论冻结进历史，重放逐字节一致。
+
+    **M6 · 策略切换也在这里生效**：`strategy_key` 取 `fin_param.strategies` 里
+    标了 `active` 的那一条（没有就用第一条），不再是写死的 `FIN_SAMPLE_STRATEGY_KEY`。
+    切换之后的下一次决策用的就是新策略 —— 这就是「下一次决策生效」。
+
     「策略意图 → Paper Service 命令」（M-15）那条链路的入口：
     `build_decision()` 产出 `StrategyDecision` → `to_paper_command()` 翻译。
     桥这一层**不读行情、不做分析**。
@@ -231,6 +262,23 @@ def build_decision(req: dict[str, Any]) -> dict[str, Any]:
     project = view["project"]
     param = view.get("param")
 
+    # ── M6 · 总开关：关着就不出意图 ──────────────────────────────────────
+    # 字段缺失（老库还没补列 / paper 没返回）按「开着」处理 —— 这与默认值
+    # `DEFAULT true` 一致，改开关这件事不会因为读不到而静默生效。
+    if param is not None and param.get("auto_enabled") is False:
+        logger.info("[decide] {} 自动交易总开关关闭，本时点不产生委托", project_id)
+        return {
+            "halted": True,
+            "project_id": project_id,
+            "reason": "自动交易总开关已关闭（fin_param.auto_enabled = false）",
+            "decision": None, "idempotency_key": None, "command": None,
+        }
+
+    # ── M6 · 生效策略：取 fin_param.strategies 里 active 的那一条 ────────
+    active = _active_strategy(param) or {}
+    strategy_key = active.get("key") or config.sample_strategy_key()
+    strategy_version = str(active.get("version") or config.sample_strategy_version())
+
     decision_dict = build_sample_decision(
         project=project,
         param=param,
@@ -238,8 +286,8 @@ def build_decision(req: dict[str, Any]) -> dict[str, Any]:
         point=req["point"],
         now=_parse_iso(req["now"]),
         code=req.get("code") or config.sample_code(),
-        strategy_key=config.sample_strategy_key(),
-        strategy_version=config.sample_strategy_version(),
+        strategy_key=strategy_key,
+        strategy_version=strategy_version,
         ttl_seconds=config.contract_timeout_seconds(),
     )
     decision = StrategyDecision.from_dict(decision_dict)
