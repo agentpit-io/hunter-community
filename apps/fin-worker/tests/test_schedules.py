@@ -1,14 +1,14 @@
-"""Schedule 定义（六个时点 + 三个 ETL 市场）。"""
+"""Schedule 定义（六个时点 + 三个 ETL 市场 + 三个市场的标的元数据同步）。"""
 
 from __future__ import annotations
 
 from app import schedules
 
 
-def test_six_point_schedules_plus_three_etl_plus_one_instrument():
+def test_six_point_schedules_plus_three_etl_plus_three_instrument():
     specs = schedules.all_specs()
-    # 6 个时点 + 3 个市场 ETL + 1 个标的元数据同步（M7）
-    assert len(specs) == 10
+    # 6 个时点 + 3 个市场 ETL + 3 个市场的标的元数据同步（M7 起 A 股；N3 加港美股）
+    assert len(specs) == 12
 
 
 def test_instrument_sync_schedule():
@@ -18,6 +18,16 @@ def test_instrument_sync_schedule():
     assert spec.args["market"] == "cn"
     # 必须排在 preopen（09:15）之前 —— 开盘时风控要读的涨跌停已经是最新的
     assert spec.cron.split()[1] == "8"
+
+
+def test_instrument_sync_covers_three_markets():
+    """N3：港美股各一条 —— 以前只有 `market="cn"` 一条（标的同步对非 cn 直接返回空）。"""
+    by_market = {s.args["market"]: s for s in schedules.INSTRUMENT_SCHEDULES}
+    assert set(by_market) == {"cn", "hk", "us"}
+    for spec in by_market.values():
+        assert spec.workflow == "fin.instrument_sync"
+    # 三条各自独立（一条失败不影响另一条），且都排在 A 股 preopen 前后
+    assert len({s.schedule_id for s in schedules.INSTRUMENT_SCHEDULES}) == 3
 
 
 def test_point_schedule_ids_and_workflows():

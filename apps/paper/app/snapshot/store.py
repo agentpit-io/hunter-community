@@ -31,7 +31,7 @@ from typing import Optional
 from loguru import logger
 
 from app import data_gap
-from app.market_time import market_of as _canonical_market_of
+from app.market_time import canonical_market, market_of as _canonical_market_of
 from app.snapshot.source import CST, Quote, QuoteSource, get_source
 
 
@@ -44,6 +44,31 @@ def _market_of(code: str) -> str:
     """
     m = _canonical_market_of(code)
     return "A" if m == "CN_A" else m
+
+
+def snapshot_market(quote: Quote, code: str) -> str:
+    """快照归属哪个市场，**本仓统一三值**（`fin_snapshot.market` 的 CHECK 值）。
+
+    行情返回体带了 `market` 就用它（透传，`CN_A` / `HK` / `US`）；没带（老端点）
+    才按代码形态判。**不在这一层丢市场** —— 快照带上市场是 N3 的出口标准。
+    """
+    if quote.market:
+        return canonical_market(quote.market)
+    return _canonical_market_of(code)
+
+
+def is_date_only(quote_time: Optional[datetime]) -> bool:
+    """时刻只有日期、没有盘中时间（`00:00:00.000`）。
+
+    与 `apps/api.fin_data._is_date_only` 同一判据（两条链各自留一份）。hunter 网关的
+    港美股 / A 股报价就是这种形状（`updated_at = "2026-09-30"`）。**A 股 / 港美股
+    不存在真正在零点成交的行情**，所以「零点」只有一个含义：**数据源没给盘中时刻**。
+
+    这种报价**不得用于成交**（一期 M8 的坑：快照落成当天 00:00 → 交易时段校验与新鲜度
+    双杀 → 委托永远不成交，而且不报错）。这里按「没有可用时刻」处理：**不落快照**。
+    """
+    return (quote_time is not None and quote_time.hour == 0 and quote_time.minute == 0
+            and quote_time.second == 0 and quote_time.microsecond == 0)
 
 # 快照「新鲜」的上限。超过它 = 喂价停了（断流），标 stale 并且**不许用于成交**。
 # 15 分钟对应 A 股行情链路的延迟量级（`CLAUDE.md` 记的扫描源 update_mode 也是
@@ -107,11 +132,17 @@ def capture(
                         detail="数据源没有返回任何报价（断流 / 未接通 / 该票无行情）")
         return None
 
-    if quote.quote_time is None:
-        # 数据源没给时刻 —— 不许拿本机时间顶上（`09 §六-6`）。
-        logger.warning("[paper.snapshot] {} 的行情没有数据源时间戳，按「不落快照」处理", code)
+    if quote.quote_time is None or is_date_only(quote.quote_time):
+        # 数据源没给（可用的）时刻 —— 不许拿本机时间顶上（`09 §六-6`）。
+        # 「只到日期」与「完全没有」是同一类：`snapshot_time` 是**成交**用的时刻，
+        # 只有日期就不是一个能用的时刻（M8 的坑：落成 00:00 → 永远不成交且不报错）。
+        detail = ("行情没有数据源时刻，不落快照（不拿本机时间顶替）"
+                  if quote.quote_time is None
+                  else f"数据源的行情时刻只到日期（{quote.quote_time.date()}），没有盘中时刻"
+                       "——不得用于成交，不落快照（对齐一期 M8）")
+        logger.warning("[paper.snapshot] {} 的行情没有（可用的）数据源时间戳，按「不落快照」处理", code)
         data_gap.record(cur, code, "no_timestamp", market=_market_of(code), source=quote.source,
-                        detail="行情没有数据源时刻，不落快照（不拿本机时间顶替）")
+                        detail=detail, event_time=quote.quote_time)
         return None
 
     if quote.last_price is None:
@@ -123,17 +154,20 @@ def capture(
     stamp = now or datetime.now(timezone.utc)
     quality, missing_flag = classify(quote.quote_time, stamp, stale_after_seconds())
     snapshot_id = snapshot_id_for(code, quote.quote_time)
+    market = snapshot_market(quote, code)
 
     cur.execute(
         """
         INSERT INTO fin_snapshot
-          (snapshot_id, code, snapshot_time, source, last_price, prev_close,
+          (snapshot_id, code, snapshot_time, source, market, quote_quality,
+           last_price, prev_close,
            bid1_price, bid1_volume, ask1_price, ask1_volume, quality, missing_flag)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         ON CONFLICT (snapshot_id) DO NOTHING
         """,
         (
             snapshot_id, code, quote.quote_time, quote.source,
+            market, quote.quote_quality,
             _money(quote.last_price),
             _money(quote.prev_close),
             _money(quote.bid1_price), quote.bid1_volume,
@@ -156,7 +190,8 @@ def _money(value: Optional[Decimal]) -> Optional[Decimal]:
 # ── 读 ────────────────────────────────────────────────────────────────────
 
 _SELECT = (
-    "SELECT snapshot_id, code, snapshot_time, source, last_price, prev_close, "
+    "SELECT snapshot_id, code, snapshot_time, source, market, quote_quality, "
+    "last_price, prev_close, "
     "bid1_price, bid1_volume, ask1_price, ask1_volume, quality, missing_flag, created_at "
     "FROM fin_snapshot "
 )

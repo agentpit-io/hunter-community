@@ -50,11 +50,18 @@ def point_specs() -> list[ScheduleSpecDef]:
     ]
 
 
-# 标的元数据同步（M7）：每天一次，A 股开盘前（08:40）。
-# 放在 preopen（09:15）之前 —— 开盘时风控要读的涨跌停必须已经是最新的。
+# 标的元数据同步（M7 · N3 放开市场）：每天一次，**每个市场各一条**。
+#   · A 股放在 preopen（09:15）之前 —— 开盘时风控要读的涨跌停必须已经是最新的；
+#   · 港美股没有涨跌幅限制，元数据（每手 / 交易所）是**静态**的，时点只需各市场开盘前；
+#     港股与 A 股同时区，美股在次日凌晨 —— 都排在 A 股这道之后即可（错开分钟，
+#     三条各自独立跑，一条失败不影响另一条）。
 INSTRUMENT_SCHEDULES: tuple[ScheduleSpecDef, ...] = (
     ScheduleSpecDef("fin-instrument-sync", "fin.instrument_sync", "40 8 * * 1-5",
                     {"market": "cn"}, "A 股标的元数据同步（涨跌停 / ST）"),
+    ScheduleSpecDef("fin-instrument-sync-hk", "fin.instrument_sync", "42 8 * * 1-5",
+                    {"market": "hk"}, "港股标的元数据同步（每手 / 交易所）"),
+    ScheduleSpecDef("fin-instrument-sync-us", "fin.instrument_sync", "44 8 * * 1-5",
+                    {"market": "us"}, "美股标的元数据同步（每手 = 1 / 交易所）"),
 )
 
 

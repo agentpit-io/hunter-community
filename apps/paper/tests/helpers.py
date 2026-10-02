@@ -27,12 +27,19 @@ def at(text: str) -> datetime:
 
 
 def quote(code="600519", *, price="10.00", prev_close="10.00", bid1=None, ask1=None,
-          when: Optional[str] = DEFAULT_AT, source="test") -> Quote:
-    """一张固定报价。`when=None` → 数据源**没给时间戳**（用来测「不落快照」）。"""
+          when: Optional[str] = DEFAULT_AT, source="test",
+          market=None, quote_quality=None) -> Quote:
+    """一张固定报价。`when=None` → 数据源**没给时间戳**（用来测「不落快照」）。
+
+    `market` / `quote_quality` 缺省 `None`（老端点的形状）—— `capture` 会按代码
+    形态补市场、按盘口补质量（N3）。要测透传就显式传。
+    """
     return Quote(
         code=code,
         source=source,
         quote_time=None if when is None else at(when),
+        market=market,
+        quote_quality=quote_quality,
         last_price=Decimal(price),
         prev_close=None if prev_close is None else Decimal(prev_close),
         bid1_price=None if bid1 is None else Decimal(bid1),

@@ -208,31 +208,59 @@ _HK_CSV = os.getenv("HUNTER_HK_MASTER_CSV", "/opt/hunter-data/hk_master.csv")
 _hk_csv_cache: dict[str, dict] | None = None
 
 
+def _load_hk_csv() -> None:
+    """载入整份港股主表 CSV(进程内只载一次)。失败不抛,留空缓存由调用方回落。"""
+    global _hk_csv_cache
+    if _hk_csv_cache is not None:
+        return
+    _hk_csv_cache = {}
+    try:
+        import csv as _csv
+        with open(_HK_CSV, encoding="utf-8") as f:
+            # 前三行是 # 注释(来源与生成日期)—— 过滤掉再交给 DictReader,
+            # 否则表头会被解析成第一条数据
+            rows = _csv.DictReader(
+                (ln for ln in f if not ln.startswith("#")))
+            for r in rows:
+                c = (r.get("code") or "").strip()
+                if c:
+                    _hk_csv_cache[c] = r
+        log.info("[hk_master] 载入 CSV %s · %d 条", _HK_CSV, len(_hk_csv_cache))
+    except FileNotFoundError:
+        log.info("[hk_master] 没有 CSV(%s)· 回落到库/网关", _HK_CSV)
+    except Exception as e:                                     # noqa: BLE001
+        log.warning("[hk_master] 读 CSV 失败: %s", e)
+
+
+def hk_master_all() -> list[dict]:
+    """港交所官方清单**全量**(`data/hk_master.csv`)，按代码升序。
+
+    给标的元数据同步用 —— 港股每手股数只有这份官方清单能给（N0 报告 S7）。
+    文件不在 / 读失败 → 返回 []（调用方按「没有清单」处理，不猜每手）。
+    """
+    _load_hk_csv()
+    if not _hk_csv_cache:
+        return []
+    out: list[dict] = []
+    for code in sorted(_hk_csv_cache):
+        r = _hk_csv_cache[code]
+        lot = (r.get("lot_size") or "").strip()
+        out.append({
+            "code": code,
+            "name": r.get("name_en") or "",
+            "category": r.get("category") or "",
+            "lot_size": int(lot) if lot.isdigit() else None,
+        })
+    return out
+
+
 def _hk_from_csv(code: str) -> dict | None:
     """从 CSV 查。文件不存在或读不出来返回 None(由调用方回落)。
 
     整份读进内存缓存:2800 行、88KB,一次读完比每次扫文件划算得多,
     而且这张表在进程生命周期内不会变(要更新得重跑生成脚本)。
     """
-    global _hk_csv_cache
-    if _hk_csv_cache is None:
-        _hk_csv_cache = {}
-        try:
-            import csv as _csv
-            with open(_HK_CSV, encoding="utf-8") as f:
-                # 前三行是 # 注释(来源与生成日期)—— 过滤掉再交给 DictReader,
-                # 否则表头会被解析成第一条数据
-                rows = _csv.DictReader(
-                    (ln for ln in f if not ln.startswith("#")))
-                for r in rows:
-                    c = (r.get("code") or "").strip()
-                    if c:
-                        _hk_csv_cache[c] = r
-            log.info("[hk_master] 载入 CSV %s · %d 条", _HK_CSV, len(_hk_csv_cache))
-        except FileNotFoundError:
-            log.info("[hk_master] 没有 CSV(%s)· 回落到库/网关", _HK_CSV)
-        except Exception as e:                                 # noqa: BLE001
-            log.warning("[hk_master] 读 CSV 失败: %s", e)
+    _load_hk_csv()
     r = _hk_csv_cache.get(code)
     if not r:
         return None

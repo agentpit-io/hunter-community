@@ -66,14 +66,18 @@ class OrderIn(BaseModel):
 class InstrumentIn(BaseModel):
     code: str = Field(min_length=1)
     name: str
-    exchange: Literal["SH", "SZ", "BJ"]
-    board: Literal["main", "chinext", "star", "bse"]
+    # 二期（N3）放开市场：交易所 / 板块加港美股取值（与 `0029` 的 CHECK 同一组）。
+    exchange: Literal["SH", "SZ", "BJ", "HKEX", "NASDAQ", "NYSE", "AMEX", "CBOE"]
+    board: Literal["main", "chinext", "star", "bse", "hk_main", "hk_gem", "us_main", "us_other"]
     is_st: bool = False
-    limit_up_pct: Decimal
-    limit_down_pct: Decimal
+    # 港美股**没有每日涨跌幅限制** → 存 NULL（`0029` 已放开 NOT NULL）；A 股照旧传幅度。
+    limit_up_pct: Optional[Decimal] = None
+    limit_down_pct: Optional[Decimal] = None
     lot_size: int = 100
     listed_at: Optional[date] = None
     is_active: bool = True
+    market: Literal["CN_A", "HK", "US"] = "CN_A"
+    currency: Literal["CNY", "HKD", "USD"] = "CNY"
     source: str
 
 

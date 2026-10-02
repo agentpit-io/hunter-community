@@ -124,6 +124,8 @@ def _reject(order_id: str, reason: str, **extra) -> dict:
         # 价格带留痕（N2）：`None` = 这一笔还没走到第 4 条（如快照都拿不到）；
         # `False` = 该市场 `price_limit_mode='none'`，**没做价格带校验**（如实在回执写明）。
         "price_limit_checked": extra.get("price_limit_checked"),
+        "snapshot_market": extra.get("snapshot_market"),
+        "snapshot_quote_quality": extra.get("snapshot_quote_quality"),
         "risk": extra.get("risk"),
     }
 
@@ -144,12 +146,16 @@ def _price_limit_checked(outcome) -> Optional[bool]:
 def _snapshot_view(snap: Optional[dict]) -> dict:
     if not snap:
         return {"snapshot_id": None, "snapshot_time": None,
-                "snapshot_quality": None, "snapshot_missing_flag": None}
+                "snapshot_quality": None, "snapshot_missing_flag": None,
+                "snapshot_market": None, "snapshot_quote_quality": None}
     return {
         "snapshot_id": snap["snapshot_id"],
         "snapshot_time": snap["snapshot_time"],
         "snapshot_quality": snap["quality"],
         "snapshot_missing_flag": bool(snap["missing_flag"]),
+        # N3：快照归属哪个市场、盘口质量（回执上就能核对「这笔用的报价是哪来的」）。
+        "snapshot_market": snap.get("market"),
+        "snapshot_quote_quality": snap.get("quote_quality"),
     }
 
 
@@ -236,6 +242,23 @@ def execute(cur, req: dict, *, now: Optional[datetime] = None) -> dict:
     # 市场以 `fin_instrument.market` 为准（N1 加的列）；标的缺失时按代码形态兜一层。
     market = (instrument or {}).get("market") or market_of(code) or DEFAULT_MARKET
     market_rule = ledger.get_market_rule(cur, market)
+
+    # 港美股**本期只接限价单**（设计文档 §3.4、拍板 §四）：数据源没有盘口
+    # （`quote_quality='last_only'`），市价单只能拿最新价加滑点撮合 —— 那不是盘口价。
+    # 明确拒绝并留痕，**不拿最新价冒充买一/卖一**。A 股有盘口，市价单照旧。
+    if price_type == "market" and market != "CN_A":
+        reason = (f"{market} 没有盘口数据，本期只接限价单"
+                  "（市价单按最新价撮合会失真）；请改用限价委托")
+        ledger.insert_order(
+            cur, order_id, project_id, code, side, qty, price_type, req.get("limit_price"),
+            status="rejected", filled_qty=0, source=source, actor=actor,
+            decline_reason=reason, intent_ref=req.get("intent_ref"),
+            decision_ref=req.get("decision_ref"), valid_until=req.get("valid_until"),
+        )
+        receipt = _reject(order_id, reason, market=market, **_snapshot_view(snap))
+        receipt["failed_checks"] = ["price_type"]
+        _remember(cur, key, req_hash, project_id, receipt, order_id)
+        return receipt
 
     risk_price = _risk_price(req, snap, trial)
     # 日历按 **(市场, 当地日期)** 读：日期必须用该市场的时区切，不能用上海时间

@@ -74,3 +74,69 @@ def test_api_failure_is_reported_not_swallowed(monkeypatch):
     out = activities.sync_instruments({})
     assert out["ok"] is False and out["written"] == 0
     assert "500" in out["error"]
+
+
+# ── N3：市场参数按市场跑 + 港美股条目写对 market / currency ────────────────
+
+_HK = {"code": "00700", "available": True, "name": "TENCENT", "exchange": "HKEX",
+       "board": "hk_main", "is_st": False, "limit_up_pct": None, "limit_down_pct": None,
+       "lot_size": 100, "market": "HK", "currency": "HKD",
+       "source": "hkex_listofsecurities(data/hk_master.csv)"}
+_US = {"code": "AAPL", "available": True, "name": "Apple Inc.", "exchange": "NASDAQ",
+       "board": "us_main", "is_st": False, "limit_up_pct": None, "limit_down_pct": None,
+       "lot_size": 1, "market": "US", "currency": "USD",
+       "source": "hunter_gateway(us_quote.exchange)"}
+
+
+def _capture_put(monkeypatch, payload, market):
+    """跑一次同步，返回 (结果, 请求过的 URL, 最后一条 PUT 的 body)。"""
+    import json
+
+    seen: list[httpx.Request] = []
+    bodies: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.method == "GET":
+            assert f"market={market}" in str(request.url)
+            return httpx.Response(200, json=payload)
+        bodies.append(json.loads(request.content.decode()))
+        return httpx.Response(200, json={})
+
+    _install(monkeypatch, handler)
+    out = activities.sync_instruments({"market": market})
+    return out, seen, bodies
+
+
+def test_market_is_passed_through_to_the_api(monkeypatch):
+    """`market` 不再是写死的 `cn` —— 传什么就按什么同步（N3 §3）。"""
+    out, seen, _ = _capture_put(monkeypatch,
+                                {"market": "hk", "items": [_HK], "source_count": 1}, "hk")
+    assert out["ok"] is True and out["market"] == "hk" and out["written"] == 1
+    assert [r.method for r in seen] == ["GET", "PUT"]
+
+
+def test_hk_item_keeps_market_currency_and_null_limits(monkeypatch):
+    """港股：market=HK / currency=HKD 写下去，**涨跌幅是 None 不是 0**。"""
+    _, _, bodies = _capture_put(monkeypatch,
+                                {"market": "hk", "items": [_HK], "source_count": 1}, "hk")
+    body = bodies[0]
+    assert body["market"] == "HK" and body["currency"] == "HKD"
+    assert body["lot_size"] == 100
+    assert body["limit_up_pct"] is None and body["limit_down_pct"] is None
+    assert body["source"].startswith("hkex_listofsecurities")
+
+
+def test_us_item_written_with_lot_one(monkeypatch):
+    _, _, bodies = _capture_put(monkeypatch,
+                                {"market": "us", "items": [_US], "source_count": 1}, "us")
+    body = bodies[0]
+    assert body["market"] == "US" and body["currency"] == "USD" and body["lot_size"] == 1
+
+
+def test_market_defaults_apply_when_api_omits_them(monkeypatch):
+    """老形状（api 没给 market/currency）→ 按本次同步的市场补，不写成 A 股。"""
+    item = {k: v for k, v in _HK.items() if k not in ("market", "currency")}
+    _, _, bodies = _capture_put(monkeypatch,
+                                {"market": "hk", "items": [item], "source_count": 1}, "hk")
+    assert bodies[0]["market"] == "HK" and bodies[0]["currency"] == "HKD"

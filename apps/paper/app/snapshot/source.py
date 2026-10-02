@@ -38,6 +38,8 @@ from zoneinfo import ZoneInfo
 
 from loguru import logger
 
+from app.market_time import UnknownMarket, canonical_market, market_of
+
 # 裸格式（无偏移）时间戳的兜底时区 = A 股 / 港股共同的 +08:00（两地均无夏令时）。
 # **美股不走这里**：统一结构给美股的 `event_time` 已带 `-04:00` / `-05:00` 偏移。
 # 用 IANA 时区名而不是固定偏移（N2）：镜像必须装 tzdata（见 Dockerfile）。
@@ -72,11 +74,20 @@ def _int(value: Any) -> Optional[int]:
 
 @dataclass(frozen=True)
 class Quote:
-    """一次报价。`quote_time is None` = **数据源没给时刻**（不是"我们没记"）。"""
+    """一次报价。`quote_time is None` = **数据源没给时刻**（不是"我们没记"）。
+
+    `market` / `quote_quality` 由 `apps/api` 的统一行情结构带上来（N3）——
+    `market` 是本仓统一三值（`CN_A` / `HK` / `US`），**快照归属哪个市场全靠它**，
+    以前它在这个边界被丢掉了。`quote_quality` 见设计文档附 B
+    （`full` 有盘口 / `last_only` 只有最新价 / `no_book` 无盘口按最新价撮合）。
+    两个都可为 `None`：老端点（M4 的假行情服务）不给，`capture` 会按代码形态补市场。
+    """
 
     code: str
     source: str
     quote_time: Optional[datetime]
+    market: Optional[str] = None
+    quote_quality: Optional[str] = None
     last_price: Optional[Decimal] = None
     prev_close: Optional[Decimal] = None
     bid1_price: Optional[Decimal] = None
@@ -192,20 +203,50 @@ class HttpQuoteSource:
                         (payload or {}).get("detail") or (payload or {}).get("error"))
             return None
 
+        bid1 = _dec(payload.get("bid1_price", payload.get("bid1")))
+        ask1 = _dec(payload.get("ask1_price", payload.get("ask1")))
         return Quote(
             code=payload.get("code") or code,
             source=(payload.get("source") or self.name),
             quote_time=_parse_quote_time(
                 payload.get("event_time") or payload.get("ts") or payload.get("updated_at") or ""
             ),
+            # market / quote_quality 逐段透传（N3）：api 的统一结构给了就用它，
+            # 老端点（假行情服务）没给 → 按代码形态判市场、按盘口判质量。
+            market=_market_of_payload(payload, code),
+            quote_quality=_quality_of_payload(payload, bid1, ask1),
             last_price=_dec(payload.get("last_price", payload.get("price"))),
             prev_close=_dec(payload.get("prev_close", payload.get("pre_close"))),
-            bid1_price=_dec(payload.get("bid1_price", payload.get("bid1"))),
+            bid1_price=bid1,
             bid1_volume=_int(payload.get("bid1_volume", payload.get("bid1v"))),
-            ask1_price=_dec(payload.get("ask1_price", payload.get("ask1"))),
+            ask1_price=ask1,
             ask1_volume=_int(payload.get("ask1_volume", payload.get("ask1v"))),
             raw=payload,
         )
+
+
+def _market_of_payload(payload: dict, code: str) -> Optional[str]:
+    """行情返回体里的市场 → 本仓统一三值。**透传优先，判不出按代码形态**。"""
+    raw = (payload.get("market") or "").strip()
+    if raw:
+        try:
+            return canonical_market(raw)      # CN_A / HK / US（含 a / cn / A 等写法）
+        except UnknownMarket:
+            logger.warning("[paper.snapshot] 行情给了不认识的市场 {!r}，按代码形态判", raw)
+    return market_of(code)
+
+
+# 与 `apps/api.fin_data.QUOTE_QUALITIES` 同一组值（两边各自留一份常量，
+# 口径来自设计文档附 B，别各改各的）。
+_QUOTE_QUALITIES = ("full", "last_only", "no_book")
+
+
+def _quality_of_payload(payload: dict, bid1, ask1) -> str:
+    """快照质量。**以上游给的 `quote_quality` 为准**，没给就按盘口推。"""
+    raw = (payload.get("quote_quality") or "").strip()
+    if raw in _QUOTE_QUALITIES:
+        return raw
+    return "full" if (bid1 is not None and ask1 is not None) else "last_only"
 
 
 def _has_price(payload: Optional[dict]) -> bool:

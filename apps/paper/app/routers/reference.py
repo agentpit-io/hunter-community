@@ -28,19 +28,20 @@ def upsert_instrument(code: str, body: InstrumentIn) -> dict:
             """
             INSERT INTO fin_instrument
               (code, name, exchange, board, is_st, limit_up_pct, limit_down_pct,
-               lot_size, listed_at, is_active, source)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               lot_size, listed_at, is_active, market, currency, source)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             ON CONFLICT (code) DO UPDATE SET
               name = EXCLUDED.name, exchange = EXCLUDED.exchange, board = EXCLUDED.board,
               is_st = EXCLUDED.is_st, limit_up_pct = EXCLUDED.limit_up_pct,
               limit_down_pct = EXCLUDED.limit_down_pct, lot_size = EXCLUDED.lot_size,
               listed_at = EXCLUDED.listed_at, is_active = EXCLUDED.is_active,
+              market = EXCLUDED.market, currency = EXCLUDED.currency,
               source = EXCLUDED.source, updated_at = now()
             RETURNING *
             """,
             (body.code, body.name, body.exchange, body.board, body.is_st,
              body.limit_up_pct, body.limit_down_pct, body.lot_size, body.listed_at,
-             body.is_active, body.source),
+             body.is_active, body.market, body.currency, body.source),
         )
         return cur.fetchone()
 

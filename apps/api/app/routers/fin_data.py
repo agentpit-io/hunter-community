@@ -48,24 +48,37 @@ def get_quote(request: Request, code: str) -> dict:
 @router.get("/instruments")
 def get_instruments(
     request: Request,
-    codes: str = Query("", description="逗号分隔的代码（A 股 6 位）；留空 = 全量"),
+    codes: str = Query("", description="逗号分隔的代码（A 股 6 位 / 港股 5 位 / 美股字母）；留空 = 全量"),
     market: str = Query("cn"),
     limit: int = Query(2000, ge=1, le=10000),
 ) -> dict:
     """把标的元数据解析出来给 fin-worker 同步进 `fin_instrument`。
 
-    名称 / 板块优先取 `company_master`（跨库但同实例，`09 §八`），没有就用
+    **三个市场都支持（N3 放开）**：
+
+    | market | 解析什么 | 每手股数来源 | 涨跌幅 |
+    |---|---|---|---|
+    | `cn` | 板块 → 涨跌停幅度 + ST（腾讯简称） | 100（交易所规则） | `limit_up_pct` |
+    | `hk` | 交易所 / 每手 / 名称 | 港交所官方 `data/hk_master.csv` | `NULL`（无涨跌幅限制） |
+    | `us` | 交易所 / 名称 | `1`（事实） | `NULL`（无涨跌幅限制） |
+
+    A 股：名称 / 板块优先取 `company_master`（跨库但同实例，`09 §八`），没有就用
     `stock_universe`，再没有就由代码形态推板块（公开规则）。**都判不出 → 该标的
     `available=false` 且带上原因**：调用方据此跳过它，风控第 4 条会拒绝它 ——
     绝不猜一个涨跌幅写进账本。
 
-    `codes` 留空 = 全量同步：两个 master 表的并集（上限 `limit`）。
+    `codes` 留空 = 全量同步（A 股 = 两个 master 表的并集；港股 = `stock_universe`
+    该市场行，空则回落港交所官方清单；美股 = `stock_universe` 该市场行，空则**拒绝并说明**
+    —— 美股没有本地清单，不猜）。
     """
     _auth(request)
     wanted = [c.strip() for c in codes.split(",") if c.strip()]
-    if market != "cn":
-        # 一期只做 A 股；港美股没有涨跌停口径，不在这里返回。
-        return {"market": market, "items": [], "note": "一期只同步 A 股标的元数据"}
+    mkt = (market or "cn").strip().lower()
+    if mkt in ("hk", "us"):
+        return _intl_instruments(mkt, wanted, limit)
+    if mkt != "cn":
+        return {"market": market, "items": [],
+                "note": f"未知市场 {market!r}（只认 cn / hk / us）"}
 
     from app.services import database
 
@@ -131,3 +144,65 @@ def get_instruments(
     ]
     return {"market": market, "items": items, "source_count": len(master),
             "st_name_source": "tencent-qt"}
+
+
+# ── 港美股标的（N3）────────────────────────────────────────────────────────
+
+def _universe_codes(market: str, limit: int) -> list[str]:
+    """该市场的标的清单：`stock_universe`（线上有）→ 港股再回落港交所官方清单。
+
+    美股没有本地清单可回落 —— 返回空由调用方如实说明（不猜代码）。
+    """
+    from app.services import database
+
+    out: list[str] = []
+    conn = None
+    try:
+        conn = database.get_conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT code FROM stock_universe WHERE market = %s ORDER BY code LIMIT %s",
+                (market, limit),
+            )
+            for row in cur.fetchall():
+                code = row.get("code") if isinstance(row, dict) else row[0]
+                if code:
+                    out.append(str(code).strip())
+    except Exception as exc:  # noqa: BLE001 —— 清单读不到就返回空，调用方如实处理
+        logger.warning("[internal.fin] 读 stock_universe({}) 失败：{}", market, exc)
+    finally:
+        if conn is not None:
+            conn.close()
+
+    if out or market != "hk":
+        return out
+    # 港股：线上的 stock_universe 为空时，回落港交所官方清单（仓库自带、零网络）。
+    return fin_data.hk_universe_codes(limit)
+
+
+def _intl_instruments(market: str, wanted: list[str], limit: int) -> dict:
+    """港 / 美标的元数据。每手股数与交易所**必须有来源**，判不出该条 `available=false`。"""
+    codes = list(wanted)
+    universe = "codes"
+    if not codes:
+        codes = _universe_codes(market, limit)
+        universe = "stock_universe" if codes else "none"
+        if not codes and market == "hk":
+            universe = "hkex_official_csv"
+    if not codes:
+        return {
+            "market": market,
+            "items": [],
+            "source_count": 0,
+            "universe": "none",
+            "note": (f"没有可用的 {market.upper()} 标的清单（stock_universe 里没有该市场的行，"
+                     "且未指定 codes）—— 传 codes 可显式同步"),
+        }
+    items = [fin_data.instrument_intl(c, market) for c in codes]
+    return {
+        "market": market,
+        "items": items,
+        "source_count": len(codes),
+        "universe": universe,
+        "lot_source": "hkex_listofsecurities" if market == "hk" else "us_lot_is_1",
+    }

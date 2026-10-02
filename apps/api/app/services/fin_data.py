@@ -95,6 +95,29 @@ def market_of(code: str) -> str:
     return "us"
 
 
+# 本仓统一的市场三值（设计文档附 B：`CN_A` / `HK` / `US`）。
+# 行情层内部沿用 `a` / `hk` / `us`（与 `market_source.market_of` 同口径，不破坏老的
+# 调用点），**边界输出**（`quote()` 的返回体、`fin_snapshot.market`）统一走这三值。
+_MARKET_LABEL = {"a": "CN_A", "hk": "HK", "us": "US"}
+
+
+def market_label(market: str) -> str:
+    """`a` / `hk` / `us` → 本仓统一的 `CN_A` / `HK` / `US`。"""
+    return _MARKET_LABEL.get(market, market)
+
+
+# `quote_quality`（设计文档附 B）：`full` 有盘口 / `last_only` 只有最新价 /
+# `no_book` 无盘口按最新价撮合。本期港美股只接限价单，所以落库的值是 `full`
+# （A 股，有买一卖一）或 `last_only`（港美股，实测无盘口）；`no_book` 留给
+# 本期不做的市价单撮合路径（见 `paper` 撮合引擎对港美股市价单的拒绝）。
+QUOTE_QUALITIES = ("full", "last_only", "no_book")
+
+
+def quote_quality_of(orderbook: bool) -> str:
+    """由「有没有买一/卖一盘口」判快照质量。"""
+    return "full" if orderbook else "last_only"
+
+
 def _qt_symbol(code: str) -> Optional[str]:
     """腾讯报价用的代码：`sh601398` / `hk00700` / `usAAPL`。"""
     market = market_of(code)
@@ -369,21 +392,53 @@ def _is_date_only(dt: Optional[datetime]) -> bool:
     return (dt is not None and dt.hour == 0 and dt.minute == 0
             and dt.second == 0 and dt.microsecond == 0)
 
+
+# provider 顺序（N0 报告 §一 / §九 的结论）。用**函数名字符串**而不是直接存函数对象：
+# 单测用 `monkeypatch.setattr(fin_data, "_tencent_quote", ...)` 换实现，按名字在调用时刻
+# 取才能换得动（存对象会在 import 时定死）。
+_CHAIN_CN_A = ("_official_quote", "_tencent_quote")     # A 股：hunter 优先（一期口径，不改）
+_CHAIN_INTL = ("_tencent_quote", "_official_quote")     # 港美股：腾讯优先（见下）
+
+_NO_DATA_GAP = {
+    "_official_quote": "official: 官方链路无数据（未配置 key / 上游不可用）",
+    "_tencent_quote": "tencent-qt: 腾讯免费通道无数据",
+}
+
+
+def _chain_for(market: str) -> list[tuple[str, object]]:
+    """按市场给出 provider 顺序。
+
+    · **A 股**：`official`（hunter 网关）优先 —— 一期口径，逐字节不变；
+    · **港美股**：**腾讯优先**。依据 N0 实测：hunter 网关的港美股 `updated_at`
+      **只到日期、且落后 1~2 个交易日** → 只能用于展示、**不得用于成交**
+      （同一期 M8 那个坑）；腾讯通道 `f[30]` **到秒**、免 key、覆盖全市场。
+      同时把港美股报价的 `source` 名不符实（实际来自腾讯 `_free_quote`，却标
+      `official`）改直 —— 现在它如实是 `tencent-qt`。
+    """
+    names = _CHAIN_CN_A if market == "a" else _CHAIN_INTL
+    return [(name, globals()[name]) for name in names]
+
+
 def quote(code: str) -> Optional[dict]:
-    """统一金融数据结构。**两个 provider 都拿不到 → `None`**（不返回零价）。
+    """统一金融数据结构。**provider 全拿不到 → `None`**（不返回零价）。
 
     返回体（字段固定，换数据源不改字段）：
     `code / name / market / last_price / prev_close / open / high / low /
      bid1_price / bid1_volume / ask1_price / ask1_volume /
-     event_time / ingested_at / source / orderbook / gaps`
+     event_time / ingested_at / source / orderbook / quote_quality / gaps`
+
+    `market` 输出本仓统一三值（`CN_A`/`HK`/`US`），`quote_quality` 见附 B。
     """
     now = datetime.now(UTC)
     gaps: list[str] = []
+    market = market_of(code)
 
-    hit = _official_quote(code)
-    if hit is None:
-        gaps.append("official: 官方链路无数据（未配置 key / 上游不可用）")
-        hit = _tencent_quote(code)
+    hit = None
+    for fname, provider in _chain_for(market):
+        hit = provider(code)
+        if hit is not None:
+            break
+        gaps.append(_NO_DATA_GAP[fname])
     if hit is None:
         return None
 
@@ -402,8 +457,11 @@ def quote(code: str) -> Optional[dict]:
     # 价格与来源仍是 hunter（拍板 §一），补了什么如实记进 `gaps`。
     bare = code.split(".")[0].strip().upper()
     name_missing = not (hit.get("name") or "").strip() or str(hit.get("name")).strip().upper() == bare
-    if _is_date_only(hit.get("event_time")) or (market_of(code) == "a" and name_missing):
-        tq = _tencent_quote(code) or {}
+    # 港美股那条链把腾讯排在前面：走到这里说明腾讯刚刚已经失败过一次，不再重复打
+    # （一次 5 秒超时；degraded 状态下不打两次）。
+    tencent_already_failed = market != "a"
+    if _is_date_only(hit.get("event_time")) or (market == "a" and name_missing):
+        tq = {} if tencent_already_failed else (_tencent_quote(code) or {})
         if _is_date_only(hit.get("event_time")):
             if tq.get("event_time") and not _is_date_only(tq["event_time"]):
                 hit["event_time"] = tq["event_time"]
@@ -417,13 +475,19 @@ def quote(code: str) -> Optional[dict]:
             gaps.append(f"name: {hit.get('source')} 返回的是代码本身，"
                         f"证券简称取自腾讯通道（{tq['name']}）")
 
-    if market_of(code) == "a" and hit.get("bid1_price") is None:
-        gaps.append("orderbook: 该来源没有买一/卖一盘口")
+    orderbook = hit.get("bid1_price") is not None and hit.get("ask1_price") is not None
+    if market == "a":
+        if hit.get("bid1_price") is None:
+            gaps.append("orderbook: 该来源没有买一/卖一盘口")
+    elif not orderbook:
+        # 港美股**结构性没有盘口**（N0 S2 实测，与 `_tencent_quote` 的注释一致）——
+        # 如实记进缺口，快照据此记 `quote_quality='last_only'`。
+        gaps.append("orderbook: 港美股通道没有买一/卖一盘口（快照 quote_quality=last_only）")
 
     return {
         "code": code,
         "name": hit.get("name"),
-        "market": market_of(code).upper(),
+        "market": market_label(market),
         "last_price": hit.get("last_price"),
         "prev_close": hit.get("prev_close"),
         "open": hit.get("open"),
@@ -436,7 +500,8 @@ def quote(code: str) -> Optional[dict]:
         "event_time": hit["event_time"].isoformat() if hit.get("event_time") else None,
         "ingested_at": now.isoformat(),
         "source": hit.get("source"),
-        "orderbook": hit.get("bid1_price") is not None and hit.get("ask1_price") is not None,
+        "orderbook": orderbook,
+        "quote_quality": quote_quality_of(orderbook),
         "gaps": gaps,
     }
 
@@ -530,3 +595,128 @@ def _normalize_board(board: Optional[str]) -> Optional[str]:
         if alias in text:
             return canonical
     return text
+
+
+# ── 标的元数据 · 港美股（N3 放开市场）──────────────────────────────────────
+#
+# 与 A 股那支 `instrument()` **分开**：A 股要判板块推涨跌停、要查 ST 简称；
+# 港美股**没有每日涨跌幅限制**（`limit_up_pct` / `limit_down_pct` 存 `NULL`，
+# 不编一个幅度 —— `price_limit_mode='none'`，见 N2），但多了两件**必须有来源**
+# 的事：**每手股数**（港股每只不同）与**交易所**（美股）。
+#
+# 来源（拍板 §3.3、N0 报告 S7）：
+#   · 港股每手 = 港交所官方 `ListOfSecurities` 导出 `data/hk_master.csv`（随仓库分发）；
+#   · 美股每手 = `1`（**事实，不是近似**）；
+#   · 美股交易所 = hunter 网关的标的档案（`findata_db.us_quote` 的 `exchange`）。
+# **判不出就不判**：拿不到来源的标的 `available=false` 且带原因，调用方跳过它
+# （沿用一期「同步不上就拒绝该标的」口径）。
+
+_US_EXCHANGES = ("NASDAQ", "NYSE", "AMEX", "CBOE")
+_US_LOT = 1
+_HK_LOT_HINT = "港交所官方 ListOfSecurities（data/hk_master.csv）"
+
+
+def _hk_master_row(code: str) -> Optional[dict]:
+    """港股主表一行（港交所官方 CSV）。不可用 → `None`（不抛）。"""
+    try:
+        from app.services.gm import findata_db
+
+        return findata_db.hk_master(code)
+    except Exception as exc:  # noqa: BLE001 —— 档案不可用按「判不出」处理
+        logger.info("[fin_data] 港股主表不可用 {} · {}", code, exc.__class__.__name__)
+        return None
+
+
+def hk_universe_codes(limit: int = 5000) -> list[str]:
+    """港股全量代码 —— 港交所官方清单（`data/hk_master.csv`，随仓库分发）。"""
+    try:
+        from app.services.gm import findata_db
+
+        rows = findata_db.hk_master_all()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[fin_data] 港股官方清单不可用：{}", exc)
+        return []
+    return [r["code"] for r in rows[:limit] if r.get("code")]
+
+
+def _us_exchange_and_name(code: str) -> tuple[Optional[str], Optional[str]]:
+    """美股交易所与名称 —— 来源 hunter 网关的标的档案。
+
+    `stock_universe` / `company_master` 在本机与开源版都是空的或只有 A 股，
+    所以交易所走网关；**判不出就判不出**，不拿代码形态猜一个交易所。
+    """
+    try:
+        from app.services.gm import findata_db
+
+        q = findata_db.us_quote(code)
+    except Exception as exc:  # noqa: BLE001
+        logger.info("[fin_data] 美股档案不可用 {} · {}", code, exc.__class__.__name__)
+        return None, None
+    if not q:
+        return None, None
+    exchange = (q.get("exchange") or "").strip().upper() or None
+    name = (q.get("name") or q.get("name_en") or "").strip() or None
+    return exchange, name
+
+
+def instrument_intl(code: str, market: str) -> dict:
+    """港 / 美标的的元数据（`fin_instrument` 的同步素材）。判不出 → `available=false`。"""
+    bare = (code or "").split(".")[0].strip().upper()
+    mkt = (market or "").strip().lower()
+
+    if mkt == "hk":
+        bare = bare.zfill(5)
+        row = _hk_master_row(bare)
+        lot = (row or {}).get("lot_size")
+        if not lot:
+            return {
+                "code": bare,
+                "available": False,
+                "reason": (f"港股每手股数拿不到（{_HK_LOT_HINT} 里没有这只）"
+                           "——拒绝该标的，不按 100 猜每手"),
+            }
+        return {
+            "code": bare,
+            "available": True,
+            # 港交所公开数据里**只有英文名**（CSV 生成的注释写明）——不臆造中文名。
+            "name": (row.get("name") or bare),
+            "exchange": "HKEX",
+            "board": "hk_main",
+            "is_st": False,
+            "limit_up_pct": None,
+            "limit_down_pct": None,
+            "lot_size": int(lot),
+            "market": "HK",
+            "currency": "HKD",
+            "source": "hkex_listofsecurities(data/hk_master.csv)",
+        }
+
+    if mkt == "us":
+        exchange, name = _us_exchange_and_name(bare)
+        if exchange not in _US_EXCHANGES:
+            return {
+                "code": bare,
+                "available": False,
+                "reason": (f"美股交易所判不出（网关标的档案没有 {bare} 或没给 exchange，"
+                           f"取到 {exchange!r}）——拒绝该标的，不猜交易所"),
+            }
+        return {
+            "code": bare,
+            "available": True,
+            "name": name or bare,
+            "exchange": exchange,
+            "board": "us_main",
+            "is_st": False,
+            "limit_up_pct": None,
+            "limit_down_pct": None,
+            "lot_size": _US_LOT,
+            "market": "US",
+            "currency": "USD",
+            "source": "hunter_gateway(us_quote.exchange)",
+        }
+
+    return {
+        "code": bare,
+        "available": False,
+        "reason": f"不支持的市场 {market!r}（港美股同步只认 hk / us）",
+    }

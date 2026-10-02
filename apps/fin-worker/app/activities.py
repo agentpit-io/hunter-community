@@ -420,8 +420,13 @@ def generate_daily_report(req: dict[str, Any]) -> dict[str, Any]:
 
 @activity.defn
 def sync_instruments(req: Optional[dict[str, Any]] = None) -> dict[str, Any]:
-    """把 A 股标的的**涨跌停幅度 / ST 判定**从 `company_master` / `stock_universe`
-    同步进 `fin_instrument`（`05 §3.3` M-20）。
+    """把标的元数据同步进 `fin_instrument`（`05 §3.3` M-20）—— **按市场**。
+
+    | market | 同步什么 | 每手股数来源 |
+    |---|---|---|
+    | `cn` | 涨跌停幅度 / ST 判定（`company_master` / `stock_universe` + 腾讯简称） | 交易所规则 100 |
+    | `hk` | 交易所 / 每手 / 名称 | 港交所官方 `data/hk_master.csv` |
+    | `us` | 交易所 / 名称 | `1`（事实） |
 
     三条不能破：
 
@@ -429,19 +434,20 @@ def sync_instruments(req: Optional[dict[str, Any]] = None) -> dict[str, Any]:
        走这条路（`sync_calendar` 也是这里），标的元数据同理 —— 它是**运行期数据**，
        不是 schema。
     2. **同步不上就不写**。api 侧返回的每条带 `available`；`available=false`（板块
-       判不出 / master 里没有）的那条**跳过**，`fin_instrument` 里就没有这一行，
-       于是风控第 4 条会**拒绝该标的** —— 「绝不猜涨跌幅」的兑现点在这里。
-       **不许**拿代码形态硬凑一个幅度顶上（那正是要防的静默错）。
+       判不出 / master 里没有 / 港美股每手或交易所拿不到）的那条**跳过**，
+       `fin_instrument` 里就没有这一行，于是风控第 4 条会**拒绝该标的** ——
+       「绝不猜涨跌幅 / 每手 / 交易所」的兑现点在这里。
     3. **失败要如实报**：一条都拿不到（api 挂了 / master 空）时返回 `ok=False` 与原因，
        工作流记下来；下一轮再试。
     """
     req = req or {}
+    market = (req.get("market") or "cn").strip().lower()
     api = HunterApiClient()
     try:
-        payload = api.fin_instruments(codes=req.get("codes"), market=req.get("market", "cn"))
+        payload = api.fin_instruments(codes=req.get("codes"), market=market)
     except ApiError as exc:
         logger.warning("[instruments] 标的元数据拉取失败：{}", exc)
-        return {"ok": False, "error": str(exc), "written": 0, "skipped": 0}
+        return {"ok": False, "error": str(exc), "written": 0, "skipped": 0, "market": market}
 
     items = payload.get("items") or []
     paper = PaperClient()
@@ -454,17 +460,27 @@ def sync_instruments(req: Optional[dict[str, Any]] = None) -> dict[str, Any]:
             continue
         paper.upsert_instrument({
             "code": item["code"], "name": item["name"], "exchange": item["exchange"],
-            "board": item["board"], "is_st": item["is_st"],
-            "limit_up_pct": item["limit_up_pct"], "limit_down_pct": item["limit_down_pct"],
+            "board": item["board"], "is_st": item.get("is_st", False),
+            # 港美股没有涨跌幅限制 → `None`（api 如实给 None，这里不填 0）。
+            "limit_up_pct": item.get("limit_up_pct"),
+            "limit_down_pct": item.get("limit_down_pct"),
             "lot_size": item["lot_size"], "listed_at": None, "is_active": True,
+            # 市场 / 币种按 api 返回的走；api 没给（老形状）就按本次同步的市场。
+            "market": item.get("market") or _SYNC_MARKET.get(market, "CN_A"),
+            "currency": item.get("currency") or _SYNC_CURRENCY.get(market, "CNY"),
             "source": item.get("source") or "company_master/stock_universe",
         })
         written += 1
 
-    logger.info("[instruments] 同步完成 · 写入 {} · 跳过 {} · 源 {} 条",
-                written, len(skipped), payload.get("source_count"))
-    return {"ok": True, "written": written, "skipped": len(skipped),
+    logger.info("[instruments] 同步完成 · market={} · 写入 {} · 跳过 {} · 源 {} 条",
+                market, written, len(skipped), payload.get("source_count"))
+    return {"ok": True, "market": market, "written": written, "skipped": len(skipped),
             "skipped_detail": skipped[:20], "source_count": payload.get("source_count")}
+
+
+# 同步通道用的市场写法（`cn` / `hk` / `us`）→ 本仓统一三值 / 币种。
+_SYNC_MARKET = {"cn": "CN_A", "hk": "HK", "us": "US"}
+_SYNC_CURRENCY = {"cn": "CNY", "hk": "HKD", "us": "USD"}
 
 
 # ── 数据面（「谁决定什么时候拉数据」的落点）───────────────────────────────
