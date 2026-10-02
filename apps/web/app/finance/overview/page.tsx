@@ -14,6 +14,7 @@ import {
   ArrowRight, Activity, Coins, TrendingUp, Wallet, Clock, ShieldCheck, CheckCircle2,
 } from 'lucide-react'
 import { Card, CardHead, Chip, Note, money, pct } from '../_ui'
+import { MarketSwitcher, MarketStatusLine, useCurrentMarket, useMarketStatus, currencyOf, MARKET_LABEL, type MarketStatus } from '../_market'
 import { Kpi, Grid, MiniChart, RowKV, SectionTitle, Sparkline, TimelineItem, EmptyState, ErrorState, LoadingCard } from '../_parts'
 import { useFinPage } from '../_data'
 
@@ -23,13 +24,23 @@ type Action = {
   status_text: string; outcome: 'traded' | 'declined' | 'open'; decline_reason: string | null
   trade_id: string | null; price: number | null; total_fee: number | null
   snapshot_id: string | null; created_at: string
+  market: string | null; currency: string | null
+}
+type Combined = {
+  by_market: { market: string; label: string; currency: string | null; total_assets: number | null; as_of: string | null }[]
+  terms: any[]
+  total_cny: number | null; currency: string
+  fx_source: string | null; fx_at: string | null; reason: string | null
 }
 type Overview = {
   project: { project_id: string; tier: string; initial_capital: number; opened_at: string; status: string } | null
+  market: string | null
+  currency: string | null
   as_of: string | null
   account: {
     available: number | null; frozen: number | null; market_value: number | null
     total_assets: number | null; nav: number | null; as_of: string | null; quality: string | null
+    market: string | null; currency: string | null
     equation: { available: number | null; frozen: number | null; market_value: number | null; sum: number | null; total_assets: number | null; ok: boolean } | null
     today: { date: string; prev_date: string; pnl: number; pnl_pct: number | null; nav: number | null } | null
     series: { date: string; nav: number | null; total_assets: number | null }[]
@@ -38,6 +49,8 @@ type Overview = {
   recent_actions: Action[]
   switch: { auto_enabled: boolean }
   schedule: { at: string; plain: string }[]
+  markets: MarketStatus[]
+  combined: Combined | null
   ops: { recon: { passed: boolean; as_of: string } | null; jobs: any[] }
   notes: string[]
 }
@@ -49,12 +62,21 @@ const ENTRIES = [
   { href: '/finance/help', t: '安全与帮助', d: '只做模拟的承诺、常见问题、怎么一键暂停。' },
 ]
 
-function nextRun(schedule: { at: string }[]): string | null {
+/** 下一轮运行。**按所选市场的当地时间**算（市场时区来自 `/markets`，不写死 +8）。 */
+function nextRun(schedule: { at: string }[], m: MarketStatus | undefined): string | null {
   if (!schedule.length) return null
-  const now = new Date()
-  const sh = new Date(now.getTime() + (now.getTimezoneOffset() + 480) * 60000)
-  const hhmm = `${String(sh.getHours()).padStart(2, '0')}:${String(sh.getMinutes()).padStart(2, '0')}`
-  const wd = sh.getDay()   // 0 周日
+  let hhmm = ''
+  let wd = -1
+  if (m?.local_time) {
+    const d = new Date(m.local_time)
+    if (!Number.isNaN(d.getTime())) { hhmm = d.toISOString().slice(11, 16); wd = d.getUTCDay() }
+  }
+  if (!hhmm) {
+    const now = new Date()
+    const sh = new Date(now.getTime() + (now.getTimezoneOffset() + 480) * 60000)
+    hhmm = `${String(sh.getHours()).padStart(2, '0')}:${String(sh.getMinutes()).padStart(2, '0')}`
+    wd = sh.getDay()
+  }
   for (const p of [...schedule].sort((a, b) => a.at.localeCompare(b.at))) {
     if (p.at > hhmm) return `今天 ${p.at}`
   }
@@ -62,7 +84,9 @@ function nextRun(schedule: { at: string }[]): string | null {
 }
 
 export default function FinanceOverviewPage() {
-  const { data, loading, error, noProject, reload } = useFinPage<Overview>('/overview')
+  const [market, setMarket] = useCurrentMarket()
+  const { data, loading, error, noProject, reload } = useFinPage<Overview>(`/overview?market=${market}`)
+  const { markets } = useMarketStatus()
 
   if (loading) return <Card><CardHead title="总览" sub="正在从模拟账本读取" /><div className="p-4"><LoadingCard title="加载中…" /></div></Card>
 
@@ -103,10 +127,33 @@ export default function FinanceOverviewPage() {
   const todayPnl = a.today?.pnl ?? null
   const todayPct = a.today?.pnl_pct ?? null
   const cumPct = a.nav !== null ? a.nav - 1 : null
-  const next = nextRun(data.schedule)
+  const mkList = data.markets || markets || []
+  const mk = mkList.find(m => m.market === market)
+  const next = nextRun(data.schedule, mk)
+  const cur = currencyOf(market, a.currency || data.currency)
+  const comb = data.combined
 
   return (
     <div className="flex flex-col gap-6 max-w-6xl">
+      {/* 市场切换器 + 市场状态（N5）—— 直接对齐策略中心那一排圆角按钮 */}
+      <Card>
+        <div className="p-4 flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <div className="text-sm font-bold" style={{ color: 'var(--text)' }}>看哪个市场</div>
+              <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                三个市场各自独立账本、各自本币记账。切换只换视角，不改任何设置。
+              </div>
+            </div>
+            <MarketSwitcher value={market} onChange={setMarket} />
+          </div>
+          <div className="flex gap-4 flex-wrap">
+            {mkList.map(m => <MarketStatusLine key={m.market} m={m} />)}
+            {mkList.length === 0 && <span className="text-xs" style={{ color: 'var(--text-muted)' }}>市场状态读取中…</span>}
+          </div>
+        </div>
+      </Card>
+
       {/* Hero */}
       <Card style={{ background: 'linear-gradient(135deg,rgba(176,106,50,.15),rgba(176,106,50,.03) 55%,var(--bg-card))', borderColor: 'rgba(176,106,50,.28)' }}>
         <div className="p-6 grid gap-6 lg:grid-cols-[1.4fr_1fr] items-center">
@@ -140,16 +187,16 @@ export default function FinanceOverviewPage() {
                 <Chip tone="ok">账本自洽 <CheckCircle2 className="w-3 h-3" /></Chip>
               </div>
               <div className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>模拟总资产{a.as_of ? ` · 截至 ${a.as_of.slice(0, 10)} 收盘` : ''}</div>
-              <div className="text-3xl font-extrabold" style={{ color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{money(a.total_assets)}</div>
+              <div className="text-3xl font-extrabold" style={{ color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{money(a.total_assets, cur)}</div>
               <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                 <span className="text-sm font-bold" style={{ color: (todayPnl ?? 0) >= 0 ? 'var(--red)' : 'var(--green)' }}>
-                  {todayPnl === null ? '—' : `${todayPnl >= 0 ? '+' : '−'}${money(Math.abs(todayPnl))}`}
+                  {todayPnl === null ? '—' : `${todayPnl >= 0 ? '+' : '−'}${money(Math.abs(todayPnl), cur)}`}
                 </span>
                 <span className="text-xs" style={{ color: 'var(--text-muted)' }}>最后交易日 · {pct(todayPct)}</span>
                 <Sparkline values={navs} width={96} height={28} />
               </div>
               <div className="mt-3 pt-3 text-xs flex items-center gap-2 flex-wrap" style={{ borderTop: '1px dashed rgba(216,205,186,.9)', color: 'var(--text-muted)' }}>
-                <Coins className="w-3.5 h-3.5" />初始资金 {money(data.project?.initial_capital)} · 市场范围 仅 A 股（沪深两市）
+                <Coins className="w-3.5 h-3.5" />初始资金 {money(data.project?.initial_capital, cur)} · 市场范围 {MARKET_LABEL[market] || market}
               </div>
               <div className="mt-2 text-xs flex items-center gap-2" style={{ color: 'var(--text-muted)' }}>
                 <Clock className="w-3.5 h-3.5" />下一轮自动运行：{next || '—'}
@@ -161,18 +208,67 @@ export default function FinanceOverviewPage() {
 
       {/* KPI */}
       <Grid cols={4}>
-        <Kpi label="模拟总资产" value={money(a.total_assets)} icon={<Coins className="w-4 h-4" />}
+        <Kpi label="模拟总资产" value={money(a.total_assets, cur)} icon={<Coins className="w-4 h-4" />}
           hint={`初始 ${money(data.project?.initial_capital)} · 仅 A 股`} />
-        <Kpi label="最后交易日盈亏" value={a.today ? `${todayPnl! >= 0 ? '+' : '−'}${money(Math.abs(todayPnl!))}` : '—'}
+        <Kpi label="最后交易日盈亏" value={a.today ? `${todayPnl! >= 0 ? '+' : '−'}${money(Math.abs(todayPnl!), cur)}` : '—'}
           delta={pct(todayPct)} deltaTone={(todayPct ?? 0) >= 0 ? 'up' : 'down'}
           icon={<TrendingUp className="w-4 h-4" />}
           hint={a.today ? `${a.today.prev_date} → ${a.today.date}` : '需要一个以上的收盘估值'} />
-        <Kpi label="累计收益率" value={pct(cumPct)} delta={money((a.total_assets ?? 0) - (data.project?.initial_capital ?? 0))}
+        <Kpi label="累计收益率" value={pct(cumPct)} delta={money((a.total_assets ?? 0) - (data.project?.initial_capital ?? 0), cur)}
           deltaTone={(cumPct ?? 0) >= 0 ? 'up' : 'down'} icon={<Activity className="w-4 h-4" />}
           hint={`净值 ${a.nav === null ? '—' : a.nav.toFixed(4)}`} />
         <Kpi label="已记录收盘估值" value={`${a.series.length} 个交易日`} icon={<Clock className="w-4 h-4" />}
           hint={data.ops.recon ? `对账${data.ops.recon.passed ? '通过' : '未通过'} · ${data.ops.recon.as_of?.slice(0, 10)}` : '还没有对账记录'} />
       </Grid>
+
+      {/* 按市场分列 + 跨市场合计（N5）—— 合计处标注汇率来源与时刻，取不到显示 — */}
+      <Card>
+        <CardHead title="三个市场分别有多少" icon={<Coins className="w-4 h-4" />}
+          sub="各自本币记账、不做折算；只有「跨市场合计」一处出现折算值"
+          right={comb && <Chip tone={comb.total_cny === null ? 'amber' : 'ok'}>
+            {comb.total_cny === null ? '合计算不出' : '合计可算'}</Chip>} />
+        <div className="p-4 grid gap-5 md:grid-cols-2">
+          <div>
+            {(comb?.by_market || []).length === 0
+              ? <EmptyState title="还读不到任何市场的估值" desc="每个市场收盘后各写一行估值，这里会出现分列。" />
+              : (comb!.by_market.map(b => (
+                <RowKV key={b.market}
+                  k={<span>{b.label}{b.market === market ? <Chip tone="copper">当前</Chip> : null}</span>}
+                  v={money(b.total_assets, currencyOf(b.market, b.currency))} />
+              )))}
+            <RowKV k={<b>跨市场合计（折人民币）</b>}
+              v={<b>{money(comb?.total_cny ?? null, 'CNY')}</b>} />
+          </div>
+          <div className="flex flex-col gap-3">
+            {comb?.total_cny !== null && comb?.fx_source && (
+              <Note tone="ok">
+                折算依据：汇率来源 <b>{comb.fx_source}</b>，取值时刻 <b>{comb.fx_at || '—'}</b>。
+                汇率**请求时现取**，不落账本（`11-…实施方案.md` §3.1 A 方案）。
+              </Note>
+            )}
+            {comb?.total_cny === null && (
+              <Note tone="warn">
+                跨市场合计显示 <b>—</b>（不是 0）。原因：{comb?.reason || '汇率不可得'}。
+                <b>取不到汇率就不折算</b>，这一列如实留空。
+              </Note>
+            )}
+            {comb?.terms?.some((t: any) => t.fx) && (
+              <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                {comb.terms.filter((t: any) => t.fx).map((t: any) => (
+                  <div key={t.market}>
+                    {t.label}：{money(t.total_assets, currencyOf(t.market, t.currency))} ×{' '}
+                    {t.fx.rate}（{t.fx.source}） = {money(t.converted, 'CNY')}
+                  </div>
+                ))}
+              </div>
+            )}
+            <Note tone="copper">
+              每个市场是**独立子账户**：港币盈亏不会因为汇率波动而改变账本数字。
+              这里的分列与合计都是只读展示，账本内没有任何跨币种换算。
+            </Note>
+          </div>
+        </div>
+      </Card>
 
       {/* 账目自洽 */}
       <Card>
@@ -181,11 +277,11 @@ export default function FinanceOverviewPage() {
           right={eq ? <Chip tone={eq.ok ? 'ok' : 'amber'}>{eq.ok ? '等式成立' : '等式不平'}</Chip> : undefined} />
         <div className="p-4 grid gap-5 md:grid-cols-2">
           <div>
-            <RowKV k="持仓市值" v={money(eq?.market_value)} />
-            <RowKV k="可用资金" v={money(eq?.available)} />
-            <RowKV k="冻结资金（挂单占用）" v={money(eq?.frozen)} />
-            <RowKV k={<b>合计</b>} v={<b>{money(eq?.sum)}</b>} />
-            <RowKV k="账本记录的总资产" v={<b>{money(eq?.total_assets)}</b>} />
+            <RowKV k="持仓市值" v={money(eq?.market_value, cur)} />
+            <RowKV k="可用资金" v={money(eq?.available, cur)} />
+            <RowKV k="冻结资金（挂单占用）" v={money(eq?.frozen, cur)} />
+            <RowKV k={<b>合计</b>} v={<b>{money(eq?.sum, cur)}</b>} />
+            <RowKV k="账本记录的总资产" v={<b>{money(eq?.total_assets, cur)}</b>} />
           </div>
           <div className="flex flex-col gap-3">
             {data.positions.missing_price_codes.length > 0 && (
@@ -215,12 +311,12 @@ export default function FinanceOverviewPage() {
                   <div key={p.code} className="flex items-center justify-between gap-3 py-2.5" style={{ borderBottom: '1px dashed rgba(216,205,186,.75)' }}>
                     <div className="min-w-0">
                       <div className="text-sm font-semibold" style={{ color: 'var(--text)' }}>{p.name || p.code} <span className="font-mono text-[11px]" style={{ color: 'var(--text-muted)' }}>{p.code}</span></div>
-                      <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{p.qty} 股 · 成本 {money(p.avg_cost)} · 现价 {money(p.last_price)}</div>
+                      <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{p.qty} 股 · 成本 {money(p.avg_cost, currencyOf(p.market, p.currency))} · 现价 {money(p.last_price, currencyOf(p.market, p.currency))}</div>
                     </div>
                     <div className="text-right shrink-0">
-                      <div className="text-sm font-bold" style={{ color: 'var(--text)' }}>{money(p.market_value)}</div>
+                      <div className="text-sm font-bold" style={{ color: 'var(--text)' }}>{money(p.market_value, currencyOf(p.market, p.currency))}</div>
                       <div className="text-[11px] font-semibold" style={{ color: (p.pnl ?? 0) >= 0 ? 'var(--red)' : 'var(--green)' }}>
-                        {p.pnl === null ? '—' : `${p.pnl >= 0 ? '+' : '−'}${money(Math.abs(p.pnl))} · ${pct(p.pnl_pct)}`}
+                        {p.pnl === null ? '—' : `${p.pnl >= 0 ? '+' : '−'}${money(Math.abs(p.pnl), currencyOf(p.market, p.currency))} · ${pct(p.pnl_pct)}`}
                       </div>
                     </div>
                   </div>
@@ -263,7 +359,7 @@ export default function FinanceOverviewPage() {
                 title={<>
                   {o.outcome === 'declined' ? '放弃' : o.outcome === 'open' ? '挂着' : ''}{o.side === 'buy' ? '买入' : '卖出'} {o.name || o.code}{' '}
                   <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>
-                    {o.filled_qty || o.qty} 股{o.price !== null ? ` · ${money(o.price)}` : ''}
+                    {o.filled_qty || o.qty} 股{o.price !== null ? ` · ${money(o.price, currencyOf(o.market, o.currency))}` : ''}
                   </span>
                 </>}
                 chip={<Chip tone={o.outcome === 'traded' ? 'ok' : o.outcome === 'declined' ? 'amber' : 'slate'}>{o.status_text}</Chip>}

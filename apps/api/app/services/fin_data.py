@@ -70,6 +70,60 @@ QT_TIMEOUT_S = 5.0
 _QT = "https://qt.gtimg.cn/q="
 _UA = {"User-Agent": "Mozilla/5.0"}
 
+# ── 汇率（只在「跨市场合计」这一处用；账本内永不折算）──────────────────────
+# 来源：新浪 `hq.sinajs.cn/list=fx_shkdcny,fx_susdcnh` —— 返回**带日期 + 时分秒**的报价
+# （`N0 §二 S5` 实测）。仓内 `mcp/market_tools._FX_APPROX` 那两个常量（0.91 / 7.20）
+# 是**编出来的**，`N0 §五` 明令禁止用于合计 —— 这里只走新浪通道，取不到就返回空 dict。
+_SINA_FX = "https://hq.sinajs.cn/list="
+_SINA_HEADERS = {"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn"}
+FX_TIMEOUT_S = 5.0
+# 货币对 → 新浪代码 + 报价里「本币兑人民币」第几个字段（`N0` 贴的原始返回逐字对照）。
+FX_PAIRS = {
+    "HKDCNY": "fx_shkdcny",
+    "USDCNY": "fx_susdcnh",   # 离岸人民币，与在岸 `fx_susdcny` 同量级、更新更勤
+}
+
+
+def fetch_fx(pairs: tuple[str, ...] = ("HKDCNY", "USDCNY")) -> dict[str, dict]:
+    """现取带时刻的汇率：`{pair: {"rate": float, "at": iso, "source": str}}`。
+
+    **拿不到就不返回该键**（调用方据此把合计置 `—`），绝不退回常量、绝不编数。
+    新浪返回形如 `var hq_str_fx_shkdcny="06:59:36,0.85448...,...,2026-10-03";`
+    —— 第 0 段是时刻、第 1 段是买入价（本币兑人民币）、最后一段是日期。
+    """
+    codes = [(p, FX_PAIRS[p]) for p in pairs if p in FX_PAIRS]
+    if not codes:
+        return {}
+    try:
+        import requests
+        resp = requests.get(_SINA_FX + ",".join(c for _, c in codes),
+                            headers=_SINA_HEADERS, timeout=FX_TIMEOUT_S)
+        resp.encoding = "gbk"          # 新浪返回 GBK
+        text = resp.text
+    except Exception as exc:  # noqa: BLE001 —— 拿不到就是不折算，不抛给上层
+        logger.warning("[fx] 汇率拉取失败：{}", exc)
+        return {}
+
+    out: dict[str, dict] = {}
+    for pair, code in codes:
+        m = re.search(rf'hq_str_{code}="([^"]*)"', text)
+        if not m or not m.group(1):
+            continue
+        parts = m.group(1).split(",")
+        if len(parts) < 2:
+            continue
+        hhmmss, rate_s = parts[0].strip(), parts[1].strip()
+        day = parts[-1].strip() if parts[-1].strip() else ""
+        try:
+            rate = float(rate_s)
+        except (TypeError, ValueError):
+            continue
+        if rate <= 0:
+            continue
+        at = f"{day}T{hhmmss}" if day and hhmmss else (day or hhmmss or "unknown")
+        out[pair] = {"rate": rate, "at": at, "source": f"sina:{code}"}
+    return out
+
 # 板块 → 涨跌停幅度。口径写死在这里、不猜（`总控规则 §八`）。
 #   · 沪深主板 ±10%、创业板/科创板 ±20%、北交所 ±30%。
 #   · ST 自 2025-07-07 起沪深主板也是 ±10%（CLAUDE.md「涨停后强势整理」一节的实测），

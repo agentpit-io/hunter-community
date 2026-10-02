@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<title>每日报告 · 2026-10-03 · 跨市场汇总</title>
+<style>
+ body{font:14px/1.7 -apple-system,"PingFang SC",sans-serif;color:#1d2129;max-width:860px;margin:24px auto;padding:0 16px}
+ h1{font-size:20px} h3{margin-top:28px;border-left:3px solid #165dff;padding-left:8px}
+ .kpi{display:inline-block;min-width:120px;margin:6px 10px 6px 0;padding:8px 12px;background:#f7f8fa;border-radius:8px}
+ .kpi .k{color:#86909c;font-size:12px} .kpi .v{font-size:18px;font-weight:600}
+ .rev{background:#f7f8fa;border-radius:8px;padding:10px 14px;margin:8px 0} .rev h4{margin:0 0 4px}
+ table{border-collapse:collapse;width:100%;font-size:12px} th,td{border:1px solid #e5e6eb;padding:4px 6px;text-align:left}
+ td.n{text-align:right;font-variant-numeric:tabular-nums} td.ref{color:#86909c;font-size:11px}
+ .warn{background:#fff7e8;border:1px solid #ffd591;border-radius:6px;padding:8px 12px}
+ .caliber{background:#e8f3ff;border-radius:6px;padding:8px 12px}
+</style></head><body>
+<h1>每日报告 · 2026-10-03 · 跨市场汇总</h1>
+<p>项目 <code>prj_fx_demo</code> · 档位 operate ·
+市场 <b>跨市场汇总</b>（—） ·
+估值时点 2026-10-03T00:00:00Z · 状态 <b>validated</b></p>
+
+<h3>收益与净值</h3>
+<div><div class='kpi'><div class='k'>A 股总资产（本币）</div><div class='v'>¥1,000,000.00</div></div><div class='kpi'><div class='k'>港股总资产（本币）</div><div class='v'>HK$999,942.72</div></div><div class='kpi'><div class='k'>美股总资产（本币）</div><div class='v'>$999,999.97</div></div><div class='kpi'><div class='k'>跨市场合计（折人民币）</div><div class='v'>—</div></div><div class='kpi'><div class='k'>HKD→CNY</div><div class='v'>—</div></div><div class='kpi'><div class='k'>USD→CNY</div><div class='v'>—</div></div></div>
+<p class="caliber">收益口径：实盘模拟（1 种）。本报告的收益只来自这一条模拟账本；回测 / 前向模拟 / 影子运行不与之拼成同一条曲线（01方案 §2.2）。本报告是跨市场汇总：逐市场金额是各自本币原值、未折算；「跨市场合计（折人民币）」按请求时现取的汇率折算，汇率来源与取值时刻见事实表 fx_HKDCNY / fx_USDCNY 两行的 source_ref，任一市场缺汇率或缺估值时该合计显示 — 并在 source_ref 写明原因。本报告是模拟盘 · 不接实盘（PAPER_MODE 恒为 PAPER，不配置任何交易凭证）；三个市场的交易日历、交易时段、费用、价格带与 T+1 规则各不相同，金额一律以该市场本币记账，账本内不做任何折算。</p>
+
+<h3>跨市场说明</h3>
+<p>本报告不产出单账户指标（净值 / 回撤 / 成交笔数在各市场报告里）。跨市场合计按上表 fx_* 两行的汇率与时刻折算；<b>取不到汇率时合计显示 —</b>，原因写在那一行的 source_ref 里。</p>
+
+<h3>今天的自我总结</h3>
+<div class='rev'><h4>做对了什么</h4><p>a</p></div><div class='rev'><h4>没做好什么</h4><p>b</p></div><div class='rev'><h4>明天怎么改</h4><p>c</p></div>
+
+<h3>分析</h3>
+<p>（本示例演示汇率不可得时的降级：合计显示 —，原因写在事实行 source_ref）</p>
+
+<h3>事实表（报告里每个数字的来源）</h3>
+<table><thead><tr><th>metric_key</th><th>值</th><th>单位</th><th>市场</th><th>币种</th><th>source_ref</th><th>computed_by</th></tr></thead>
+<tbody><tr><td>fx_HKDCNY</td><td class='n'>—</td><td>汇率</td><td>MULTI</td><td>—</td><td class='ref'>fx:unavailable·HKDCNY·拿不到带时刻的汇率，合计置 —</td><td class='ref'>fin.report.build_facts@n5.1</td></tr><tr><td>fx_USDCNY</td><td class='n'>—</td><td>汇率</td><td>MULTI</td><td>—</td><td class='ref'>fx:unavailable·USDCNY·拿不到带时刻的汇率，合计置 —</td><td class='ref'>fin.report.build_facts@n5.1</td></tr><tr><td>return_caliber_count</td><td class='n'>1</td><td>种</td><td>MULTI</td><td>—</td><td class='ref'>const:caliber=live_paper·01方案§2.2</td><td class='ref'>fin.report.build_facts@n5.1</td></tr><tr><td>total_assets__CN_A</td><td class='n'>¥1,000,000.00</td><td>money</td><td>MULTI</td><td>CNY</td><td class='ref'>fin_valuation:CN_A:2026-10-03</td><td class='ref'>fin.report.build_facts@n5.1</td></tr><tr><td>total_assets__HK</td><td class='n'>HK$999,942.72</td><td>money</td><td>MULTI</td><td>HKD</td><td class='ref'>fin_valuation:HK:2026-10-03</td><td class='ref'>fin.report.build_facts@n5.1</td></tr><tr><td>total_assets__US</td><td class='n'>$999,999.97</td><td>money</td><td>MULTI</td><td>USD</td><td class='ref'>fin_valuation:US:2026-10-03</td><td class='ref'>fin.report.build_facts@n5.1</td></tr><tr><td>total_assets_cny</td><td class='n'>—</td><td>money</td><td>MULTI</td><td>CNY</td><td class='ref'>fx:unavailable·合计置 —·原因：缺 HKD→CNY 汇率、缺 USD→CNY 汇率</td><td class='ref'>fin.report.build_facts@n5.1</td></tr></tbody></table>
+<p><small>模型 none · 提示词版本 fin-report-zh@1.1 ·
+生成于 x</small></p>
+</body></html>

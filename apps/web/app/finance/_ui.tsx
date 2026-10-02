@@ -138,10 +138,40 @@ export function Button({ children, onClick, kind = 'ghost', disabled, size = 'md
   )
 }
 
-/** ¥ 金额格式化（整数分位，A 股模拟盘金额都到分）。 */
-export function money(v: number | null | undefined): string {
+/**
+ * 币种 → 符号。**符号表只有这一处**，且**不把货币符号写死在源码里** ——
+ * 由 `Intl` 按 zh-CN 的货币数据给出（CNY→¥、HKD→HK$），与后端
+ * `report.CURRENCY_SYMBOL` 显示同一批符号。
+ *
+ * 为什么要覆盖 USD：zh-CN 的 Intl 数据把美元显示成 `US$`，而产品约定是 `$`
+ * （港股 `HK$` 与美元 `$` 并排时不至于混淆）。**只覆盖这一条**，其余一律信 Intl。
+ * 认不出的币种返回空串 —— 不加符号，**绝不默认成人民币**。
+ */
+const SYMBOL_OVERRIDE: Record<string, string> = { USD: '$' }
+const _symCache: Record<string, string> = {}
+
+export function currencySymbol(currency: string | null | undefined): string {
+  const c = (currency || '').toUpperCase()
+  if (!c) return ''
+  if (c in _symCache) return _symCache[c]
+  let sym = SYMBOL_OVERRIDE[c] || ''
+  if (!sym) {
+    try {
+      const parts = new Intl.NumberFormat('zh-CN', { style: 'currency', currency: c }).formatToParts(0)
+      sym = parts.find(p => p.type === 'currency')?.value || ''
+    } catch { sym = '' }
+  }
+  _symCache[c] = sym
+  return sym
+}
+
+/** 金额格式化（整数分位，模拟盘金额都到分）。
+ *
+ * 二期起**按币种出符号**（A 股 ¥、港股 HK$、美股 $）；`currency` 缺省 `CNY`，
+ * 一期调用点行为逐字不变。币种缺省/认不出时**不加符号**。 */
+export function money(v: number | null | undefined, currency: string = 'CNY'): string {
   if (v === null || v === undefined || !Number.isFinite(v)) return '—'
-  return '¥' + v.toLocaleString('zh-CN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+  return currencySymbol(currency) + v.toLocaleString('zh-CN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
 }
 
 export function pct(v: number | null | undefined): string {

@@ -16,7 +16,8 @@ import { useRouter } from 'next/navigation'
 import {
   Coins, Wallet, Lock, RefreshCw, ShieldCheck, Clock, TrendingUp, Activity, FileSearch, X,
 } from 'lucide-react'
-import { Button, Card, CardHead, Chip, Note, money, pct, finFetch } from '../_ui'
+import { Button, Card, CardHead, Chip, Note, money, pct, finFetch, currencySymbol } from '../_ui'
+import { MarketSwitcher, MarketStatusLine, useCurrentMarket, useMarketStatus, currencyOf, MARKET_LABEL, type MarketStatus } from '../_market'
 import { Grid, Kpi, Meter, MiniChart, RowKV, SectionTitle, Tbl, EmptyState, ErrorState, LoadingCard } from '../_parts'
 import { useFinPage, finPost } from '../_data'
 
@@ -27,9 +28,13 @@ type Snap = {
 }
 type Account = {
   project: { project_id: string; tier: string; status: string; initial_capital: number; currency: string; market_scope: string; opened_at: string; version: number } | null
+  market: string | null
+  currency: string | null
+  markets: MarketStatus[]
   account: {
     available: number | null; frozen: number | null; market_value: number | null
     total_assets: number | null; nav: number | null; as_of: string | null
+    market: string | null; currency: string | null
     equation: { sum: number | null; total_assets: number | null; ok: boolean } | null
     today: { date: string; prev_date: string; pnl: number; pnl_pct: number | null } | null
     series: { date: string; nav: number | null; total_assets: number | null }[]
@@ -47,7 +52,9 @@ const TIER_LABEL: Record<string, string> = { play: '个人玩玩', manage: '个�
 
 export default function FinanceAccountPage() {
   const router = useRouter()
-  const { data, loading, error, noProject, reload } = useFinPage<Account>('/account')
+  const [market, setMarket] = useCurrentMarket()
+  const { data, loading, error, noProject, reload } = useFinPage<Account>(`/account?market=${market}`)
+  const { markets } = useMarketStatus()
   const [voucher, setVoucher] = useState<{ id: string; snap: Snap | null; err: string; loading: boolean } | null>(null)
   const [newOpen, setNewOpen] = useState(false)
   const [newTier, setNewTier] = useState('manage')
@@ -102,20 +109,23 @@ export default function FinanceAccountPage() {
   const total = a.total_assets
   const pctOf = (v: number | null) => (v === null || !total ? null : (v / total) * 100)
   const lastTradeWithSnap = data.trades.find(t => t.snapshot_id)
+  const mkList = data.markets || markets || []
+  const mk = mkList.find(m => m.market === market)
+  const cur = currencyOf(market, a.currency || data.currency)
 
   return (
     <div className="flex flex-col gap-6 max-w-6xl">
       {/* 顶部大数字 */}
       <Grid cols={4}>
-        <Kpi label="模拟总资产" value={money(total)} icon={<Coins className="w-4 h-4" />}
+        <Kpi label="模拟总资产" value={money(total, cur)} icon={<Coins className="w-4 h-4" />}
           hint={`现金 + 持仓市值${a.as_of ? ` · 截至 ${a.as_of.slice(0, 10)} 收盘` : ''}`} />
-        <Kpi label="最后交易日盈亏" value={todayPnl === null ? '—' : `${todayPnl >= 0 ? '+' : '−'}${money(Math.abs(todayPnl))}`}
+        <Kpi label="最后交易日盈亏" value={todayPnl === null ? '—' : `${todayPnl >= 0 ? '+' : '−'}${money(Math.abs(todayPnl), cur)}`}
           delta={pct(a.today?.pnl_pct)} deltaTone={(a.today?.pnl_pct ?? 0) >= 0 ? 'up' : 'down'}
           icon={<TrendingUp className="w-4 h-4" />} hint={a.today ? `${a.today.prev_date} → ${a.today.date}` : '需要两个收盘估值'} />
-        <Kpi label="累计收益" value={pct(cumPct)} delta={money((total ?? 0) - (data.project?.initial_capital ?? 0))}
+        <Kpi label="累计收益" value={pct(cumPct)} delta={money((total ?? 0) - (data.project?.initial_capital ?? 0), cur)}
           deltaTone={(cumPct ?? 0) >= 0 ? 'up' : 'down'} icon={<Activity className="w-4 h-4" />}
           hint={`净值 ${a.nav === null ? '—' : a.nav.toFixed(4)}`} />
-        <Kpi label="持仓市值" value={money(mv)} icon={<Wallet className="w-4 h-4" />}
+        <Kpi label="持仓市值" value={money(mv, cur)} icon={<Wallet className="w-4 h-4" />}
           hint={`${data.positions.length} 只 · 占比 ${pct(pctOf(mv) === null ? null : pctOf(mv)! / 100)}`} />
       </Grid>
 
@@ -130,7 +140,7 @@ export default function FinanceAccountPage() {
               <div className="flex gap-2.5 items-center flex-wrap">
                 <span className="inline-flex items-center gap-2 rounded-[10px] border px-3 py-2"
                   style={{ borderColor: 'var(--border)', background: 'rgba(122,111,99,.08)' }}>
-                  <span className="text-sm" style={{ color: 'var(--text-muted)' }}>¥</span>
+                  <span className="text-sm" style={{ color: 'var(--text-muted)' }}>{currencySymbol(cur) || cur}</span>
                   {/* 只读：档位金额不可修改（03 §11.1 拍板 1）。input 带 readOnly，
                       并且没有 onChange —— 界面上根本没有能改它的路径。 */}
                   <input readOnly value={data.project ? data.project.initial_capital.toLocaleString('zh-CN') : ''}
@@ -141,7 +151,7 @@ export default function FinanceAccountPage() {
               </div>
               <div>
                 <RowKV k="所属档位" v={`${TIER_LABEL[data.project?.tier || ''] || data.project?.tier} · 金额不可修改`} />
-                <RowKV k="币种" v={`${data.project?.currency || 'CNY'}（固定，不可切换）`} />
+                <RowKV k="本币" v={`${cur}（该市场本币；账本内不做任何折算）`} />
                 <RowKV k="账户编号" v={data.project?.project_id} mono />
                 <RowKV k="项目开启" v={`${data.project?.opened_at?.slice(0, 10)} · 开启即锁定`} />
                 <RowKV k="账本版本" v={`v${data.project?.version}`} />
@@ -154,27 +164,33 @@ export default function FinanceAccountPage() {
           </Card>
 
           <Card>
-            <CardHead icon={<Wallet className="w-4 h-4" />} title="市场范围" sub="当前版本只做 A 股" />
+            <CardHead icon={<Wallet className="w-4 h-4" />} title="市场与子账户"
+              sub="一个项目下每个市场各一个子账户，各自本币记账" />
             <div className="p-4 flex flex-col gap-3">
-              <div className="flex items-center justify-between gap-3 rounded-xl border px-3.5 py-3"
-                style={{ borderColor: 'var(--blue)', background: 'rgba(176,106,50,.06)' }}>
-                <div>
-                  <div className="text-sm font-bold" style={{ color: 'var(--text)' }}>仅 A 股 · 沪深两市</div>
-                  <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>沪市主板 / 深市主板 / 创业板 / 科创板</div>
-                </div>
-                <Chip tone="copper">已启用</Chip>
-              </div>
-              <div className="flex items-center justify-between gap-3 rounded-xl border px-3.5 py-3"
-                style={{ borderColor: 'var(--border)', opacity: .6 }}>
-                <div>
-                  <div className="text-sm font-semibold" style={{ color: 'var(--text)' }}>港股 / 美股</div>
-                  <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>本版本不提供，也不申请交易权限</div>
-                </div>
-                <Chip tone="slate">未开放</Chip>
+              <MarketSwitcher value={market} onChange={setMarket} />
+              <div className="flex flex-col gap-2">
+                {mkList.length === 0 && <div className="text-xs" style={{ color: 'var(--text-muted)' }}>市场状态读取中…</div>}
+                {mkList.map(m => (
+                  <div key={m.market} className="flex items-center justify-between gap-3 rounded-xl border px-3.5 py-2.5"
+                    style={{
+                      borderColor: m.market === market ? 'var(--blue)' : 'var(--border)',
+                      background: m.market === market ? 'rgba(176,106,50,.06)' : 'var(--bg-card)',
+                    }}>
+                    <div>
+                      <div className="text-sm font-semibold" style={{ color: 'var(--text)' }}>
+                        {m.label} · {m.currency}
+                      </div>
+                      <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>{m.note}</div>
+                    </div>
+                    <Chip tone={m.state === 'open' ? 'ok' : m.state === 'unknown' ? 'amber' : 'slate'}>
+                      {m.state_label}
+                    </Chip>
+                  </div>
+                ))}
               </div>
               <Note tone="ok">
-                只做 A 股不是「暂时省事」，而是刻意收口：交易时段、涨跌停、T+1、整手、费用这五条规则在 A 股内自成一套，
-                先把一套做准，再谈扩展。
+                三个市场的交易时段、T+1 / T+0、整手、价格带、费用规则各不相同，各自按市场规则执行；
+                <b>金额一律以该市场本币记账，账本内不做任何折算</b>。要用哪个市场，用上面的切换器切过去即可。
               </Note>
               <div className="pt-3" style={{ borderTop: '1px dashed rgba(216,205,186,.9)' }}>
                 <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -215,19 +231,19 @@ export default function FinanceAccountPage() {
           <CardHead icon={<Coins className="w-4 h-4" />} title="账户构成" sub="现金 / 持仓 比例" />
           <div className="p-4 flex flex-col gap-4">
             <div>
-              <div className="flex justify-between text-xs mb-1.5"><span style={{ color: 'var(--text-muted)' }}>持仓市值</span><b>{money(mv)} · {pct(pctOf(mv) === null ? null : pctOf(mv)! / 100)}</b></div>
+              <div className="flex justify-between text-xs mb-1.5"><span style={{ color: 'var(--text-muted)' }}>持仓市值</span><b>{money(mv, cur)} · {pct(pctOf(mv) === null ? null : pctOf(mv)! / 100)}</b></div>
               <Meter pct={pctOf(mv)} />
             </div>
             <div>
-              <div className="flex justify-between text-xs mb-1.5"><span style={{ color: 'var(--text-muted)' }}>可用资金</span><b>{money(a.available)} · {pct(pctOf(a.available) === null ? null : pctOf(a.available)! / 100)}</b></div>
+              <div className="flex justify-between text-xs mb-1.5"><span style={{ color: 'var(--text-muted)' }}>可用资金</span><b>{money(a.available, cur)} · {pct(pctOf(a.available) === null ? null : pctOf(a.available)! / 100)}</b></div>
               <Meter pct={pctOf(a.available)} tone="green" />
             </div>
             <div>
-              <div className="flex justify-between text-xs mb-1.5"><span style={{ color: 'var(--text-muted)' }}>冻结资金（挂单占用）</span><b>{money(a.frozen)} · {pct(pctOf(a.frozen) === null ? null : pctOf(a.frozen)! / 100)}</b></div>
+              <div className="flex justify-between text-xs mb-1.5"><span style={{ color: 'var(--text-muted)' }}>冻结资金（挂单占用）</span><b>{money(a.frozen, cur)} · {pct(pctOf(a.frozen) === null ? null : pctOf(a.frozen)! / 100)}</b></div>
               <Meter pct={pctOf(a.frozen)} tone="red" />
             </div>
             <div>
-              <RowKV k="初始资金" v={money(data.project?.initial_capital)} />
+              <RowKV k="初始资金" v={money(data.project?.initial_capital, cur)} />
               <RowKV k="冻结原因" v={data.cash_entries.find(e => e.kind === 'freeze')?.memo || '—'} />
               <RowKV k="模式" v={<Chip tone="ok">仅模拟 · 不可切换</Chip>} />
             </div>
@@ -238,7 +254,7 @@ export default function FinanceAccountPage() {
       {/* 持仓表 */}
       <Card>
         <CardHead icon={<Wallet className="w-4 h-4" />} title="当前持仓"
-          sub={`${data.positions.length} 只 · 市值 ${money(mv)}`} />
+          sub={`${data.positions.length} 只 · 市值 ${money(mv, cur)}`} />
         {data.positions.length === 0 ? (
           <div className="p-4"><EmptyState title="账户里还没有持仓" desc="打开自动交易并跑完第一轮后，这里会出现持仓明细。" /></div>
         ) : (
@@ -247,9 +263,9 @@ export default function FinanceAccountPage() {
             rows={data.positions.map(p => [
               <><span className="font-semibold">{p.name || p.code}</span><br /><span className="font-mono text-[11px]" style={{ color: 'var(--text-muted)' }}>{p.code}{p.board ? ` · ${p.board}` : ''}</span></>,
               `${p.qty} 股`,
-              money(p.avg_cost),
-              money(p.last_price),
-              <span style={{ color: (p.pnl ?? 0) >= 0 ? 'var(--red)' : 'var(--green)', fontWeight: 600 }}>{p.pnl === null ? '—' : `${p.pnl >= 0 ? '+' : '−'}${money(Math.abs(p.pnl))}`}</span>,
+              money(p.avg_cost, currencyOf(p.market, p.currency)),
+              money(p.last_price, currencyOf(p.market, p.currency)),
+              <span style={{ color: (p.pnl ?? 0) >= 0 ? 'var(--red)' : 'var(--green)', fontWeight: 600 }}>{p.pnl === null ? '—' : `${p.pnl >= 0 ? '+' : '−'}${money(Math.abs(p.pnl), currencyOf(p.market, p.currency))}`}</span>,
               <span style={{ color: (p.pnl_pct ?? 0) >= 0 ? 'var(--red)' : 'var(--green)' }}>{pct(p.pnl_pct)}</span>,
               pct(pctOf(p.market_value) === null ? null : pctOf(p.market_value)! / 100),
             ])}
@@ -273,7 +289,7 @@ export default function FinanceAccountPage() {
               <><span className="font-semibold">{t.name || t.code}</span> <span className="font-mono text-[11px]" style={{ color: 'var(--text-muted)' }}>{t.code}</span></>,
               `${t.qty} 股`,
               <div>
-                <span className="font-semibold">{money(t.price)}</span>
+                <span className="font-semibold">{money(t.price, currencyOf(t.market, t.currency))}</span>
                 <div className="text-[11px] mt-0.5">
                   {t.snapshot_id
                     ? <button onClick={() => openVoucher(t.snapshot_id)} className="inline-flex items-center gap-1 font-mono"
@@ -283,7 +299,7 @@ export default function FinanceAccountPage() {
                     : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                 </div>
               </div>,
-              money(t.total_fee),
+              money(t.total_fee, currencyOf(t.market, t.currency)),
             ])}
             foot={<><ShieldCheck className="w-3.5 h-3.5" /><span>每一笔委托都带唯一编号与请求摘要，<b>重复提交不会重复下单</b>。点快照编号可以展开那份凭证。</span></>}
           />
@@ -308,9 +324,9 @@ export default function FinanceAccountPage() {
                   <RowKV k="数据源" v={voucher.snap.source} mono />
                 </div>
                 <div>
-                  <RowKV k="最新价" v={money(voucher.snap.last_price)} />
-                  <RowKV k="买一 / 卖一" v={`${money(voucher.snap.bid1_price)} / ${money(voucher.snap.ask1_price)}`} />
-                  <RowKV k="昨收" v={money(voucher.snap.prev_close)} />
+                  <RowKV k="最新价" v={money(voucher.snap.last_price, cur)} />
+                  <RowKV k="买一 / 卖一" v={`${money(voucher.snap.bid1_price, cur)} / ${money(voucher.snap.ask1_price, cur)}`} />
+                  <RowKV k="昨收" v={money(voucher.snap.prev_close, cur)} />
                   <RowKV k="质量" v={<Chip tone={voucher.snap.quality === 'ok' ? 'ok' : 'amber'}>{voucher.snap.quality}</Chip>} />
                 </div>
               </div>
@@ -353,8 +369,8 @@ export default function FinanceAccountPage() {
                 <RowKV k="标的" v={`${lastTradeWithSnap.name || ''} ${lastTradeWithSnap.code}`} />
                 <RowKV k="成交时刻" v={String(lastTradeWithSnap.traded_at).slice(0, 19).replace('T', ' ')} mono />
                 <RowKV k="行情快照时间" v={String(lastTradeWithSnap.snapshot_time || '').slice(0, 19).replace('T', ' ')} mono />
-                <RowKV k="快照最新价" v={money(lastTradeWithSnap.snapshot_price)} />
-                <RowKV k="成交价" v={<b>{money(lastTradeWithSnap.price)}</b>} />
+                <RowKV k="快照最新价" v={money(lastTradeWithSnap.snapshot_price, cur)} />
+                <RowKV k="成交价" v={<b>{money(lastTradeWithSnap.price, cur)}</b>} />
                 <RowKV k="凭证编号" v={
                   <button onClick={() => openVoucher(lastTradeWithSnap.snapshot_id)} className="font-mono"
                     style={{ color: '#8A5A18', textDecoration: 'underline', cursor: 'pointer' }}>{lastTradeWithSnap.snapshot_id}</button>
@@ -373,7 +389,8 @@ export default function FinanceAccountPage() {
 
       {/* ③ A 股规则六条 */}
       <div>
-        <SectionTitle title="③ A 股规则（本版本全部生效）" sub="这些不是参数，是硬约束，策略与 AI 都改不了" />
+        <SectionTitle title={`③ ${MARKET_LABEL[market] || market}规则（本版本全部生效）`}
+          sub="这些不是参数，是硬约束，策略与 AI 都改不了 · 港美股未做价格带校验的条目已如实标注" />
         <Card>
           <div className="p-4 flex flex-col gap-3">
             {data.constraints.map(c => (

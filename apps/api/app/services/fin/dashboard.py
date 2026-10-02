@@ -76,15 +76,19 @@ def param(cur, project_id: str) -> Optional[dict]:
 
 # ── 估值（总资产 / 净值 / 今日盈亏的唯一来源）──────────────────────────────
 
-def valuations(cur, project_id: str, limit: int = 90) -> list[dict]:
-    """按时间倒序取估值行（最新的在前）。最后一行的 `total_assets` 是收盘口径的总资产。"""
+def valuations(cur, project_id: str, limit: int = 90, market: Optional[str] = None) -> list[dict]:
+    """按时间倒序取估值行（最新的在前）。最后一行的 `total_assets` 是收盘口径的总资产。
+
+    `market` 给了就只取该子账户（二期分市场）；不给取全部（一期语义）。
+    """
+    mf = " AND market = %s" if market else ""
     cur.execute(
-        """
+        f"""
         SELECT as_of, cash_available, cash_frozen, market_value, total_assets,
-               nav, price_source, quality, missing_flag
-          FROM fin_valuation WHERE project_id = %s
+               nav, price_source, quality, missing_flag, market, currency
+          FROM fin_valuation WHERE project_id = %s{mf}
          ORDER BY as_of DESC LIMIT %s
-        """, (project_id, limit))
+        """, (project_id, *((market,) if market else ()), limit))
     return [_d(r) for r in cur.fetchall()]
 
 
@@ -99,7 +103,8 @@ def account_from_valuation(rows: list[dict]) -> dict[str, Any]:
         return {
             "available": None, "frozen": None, "market_value": None,
             "total_assets": None, "nav": None, "as_of": None, "price_source": None,
-            "quality": None, "equation": None, "today": None, "series": [],
+            "quality": None, "market": None, "currency": None,
+            "equation": None, "today": None, "series": [],
         }
     last = rows[0]
     available = last["cash_available"]
@@ -135,21 +140,26 @@ def account_from_valuation(rows: list[dict]) -> dict[str, Any]:
         "available": available, "frozen": frozen, "market_value": market,
         "total_assets": total, "nav": last["nav"], "as_of": last["as_of"],
         "price_source": last["price_source"], "quality": last["quality"],
+        "market": last.get("market"), "currency": last.get("currency"),
         "equation": equation, "today": today, "series": series,
     }
 
 
 # ── 持仓 ──────────────────────────────────────────────────────────────────
 
-def positions_with_price(cur, project_id: str) -> list[dict]:
+def positions_with_price(cur, project_id: str, market: Optional[str] = None) -> list[dict]:
     """持仓 + 每个代码最新一份快照价。
 
     现价取不到（没有快照）时 `last_price` / `market_value` / `pnl` 一律 `None` ——
     用成本价顶替会让「浮动盈亏 0」看起来像一个结论。
+
+    `market` 给了就只取该子账户（二期分市场）；不给取全部（一期语义）。
     """
+    mf = " AND p.market = %s" if market else ""
     cur.execute(
-        """
+        f"""
         SELECT p.code, p.qty, p.sellable_qty, p.avg_cost, p.custody, p.opened_at,
+               p.market, p.currency,
                i.name AS name, i.board AS board,
                s.last_price, s.snapshot_id, s.snapshot_time
           FROM fin_position p
@@ -159,9 +169,9 @@ def positions_with_price(cur, project_id: str) -> list[dict]:
                   FROM fin_snapshot WHERE code = p.code
                  ORDER BY snapshot_time DESC LIMIT 1
           ) s ON true
-         WHERE p.project_id = %s AND p.qty > 0
+         WHERE p.project_id = %s AND p.qty > 0{mf}
          ORDER BY p.code
-        """, (project_id,))
+        """, (project_id, *((market,) if market else ())))
     out = []
     for r in cur.fetchall():
         row = _d(r)
@@ -183,59 +193,65 @@ def positions_with_price(cur, project_id: str) -> list[dict]:
 
 # ── 动作（委托与成交）─────────────────────────────────────────────────────
 
-def recent_orders(cur, project_id: str, limit: int = RECENT_ACTIONS_LIMIT) -> list[dict]:
+def recent_orders(cur, project_id: str, limit: int = RECENT_ACTIONS_LIMIT,
+                  market: Optional[str] = None) -> list[dict]:
+    mf = " AND o.market = %s" if market else ""
     cur.execute(
-        """
+        f"""
         SELECT o.order_id, o.code, o.side, o.qty, o.price_type, o.limit_price,
                o.status, o.filled_qty, o.decline_reason, o.decision_ref,
-               o.intent_ref, o.created_at, o.updated_at,
+               o.intent_ref, o.created_at, o.updated_at, o.market, o.currency,
                i.name AS name,
                t.trade_id, t.price AS trade_price, t.total_fee, t.snapshot_id,
                t.traded_at
           FROM fin_order o
           LEFT JOIN fin_instrument i ON i.code = o.code
           LEFT JOIN fin_trade t ON t.order_id = o.order_id
-         WHERE o.project_id = %s
+         WHERE o.project_id = %s{mf}
          ORDER BY o.created_at DESC, t.traded_at DESC
          LIMIT %s
-        """, (project_id, limit))
+        """, (project_id, *((market,) if market else ()), limit))
     return [_d(r) for r in cur.fetchall()]
 
 
-def orders_on_date(cur, project_id: str, day: str) -> list[dict]:
-    """某一天（上海时间）产生的动作 —— 「它今天做了什么」。"""
+def orders_on_date(cur, project_id: str, day: str, market: Optional[str] = None) -> list[dict]:
+    """某一天（上海时间）产生的动作 —— 「它今天做了什么」。`market` 给了就只取该子账户。"""
+    mf = " AND o.market = %s" if market else ""
     cur.execute(
-        """
+        f"""
         SELECT o.order_id, o.code, o.side, o.qty, o.price_type, o.status,
                o.filled_qty, o.decline_reason, o.decision_ref, o.intent_ref,
-               o.created_at, i.name AS name,
+               o.created_at, o.market, o.currency, o.limit_price,
+               i.name AS name,
                t.trade_id, t.price AS trade_price, t.total_fee, t.snapshot_id
           FROM fin_order o
           LEFT JOIN fin_instrument i ON i.code = o.code
           LEFT JOIN fin_trade t ON t.order_id = o.order_id
          WHERE o.project_id = %s
-           AND (o.created_at AT TIME ZONE 'Asia/Shanghai')::date = %s
+           AND (o.created_at AT TIME ZONE 'Asia/Shanghai')::date = %s{mf}
          ORDER BY o.created_at
-        """, (project_id, day))
+        """, (project_id, day, *((market,) if market else ())))
     return [_d(r) for r in cur.fetchall()]
 
 
-def trades(cur, project_id: str, limit: int = 50) -> list[dict]:
+def trades(cur, project_id: str, limit: int = 50, market: Optional[str] = None) -> list[dict]:
+    mf = " AND t.market = %s" if market else ""
     cur.execute(
-        """
+        f"""
         SELECT t.trade_id, t.order_id, t.code, t.side, t.qty, t.price, t.amount,
                t.commission, t.stamp_tax, t.transfer_fee, t.total_fee,
                t.snapshot_id, t.source, t.fee_model_version, t.traded_at,
+               t.market, t.currency,
                i.name AS name,
                s.snapshot_time, s.source AS snapshot_source, s.last_price AS snapshot_price,
                s.bid1_price, s.ask1_price, s.quality AS snapshot_quality
           FROM fin_trade t
           LEFT JOIN fin_instrument i ON i.code = t.code
           LEFT JOIN fin_snapshot s ON s.snapshot_id = t.snapshot_id
-         WHERE t.project_id = %s
+         WHERE t.project_id = %s{mf}
          ORDER BY t.traded_at DESC
          LIMIT %s
-        """, (project_id, limit))
+        """, (project_id, *((market,) if market else ()), limit))
     return [_d(r) for r in cur.fetchall()]
 
 
@@ -261,13 +277,15 @@ def used_snapshot_ids(cur, project_id: str) -> dict[str, int]:
     return {r["snapshot_id"]: int(r["n"]) for r in cur.fetchall()}
 
 
-def cash_entries(cur, project_id: str, limit: int = 50) -> list[dict]:
+def cash_entries(cur, project_id: str, limit: int = 50, market: Optional[str] = None) -> list[dict]:
+    mf = " AND market = %s" if market else ""
     cur.execute(
-        """
-        SELECT entry_id, kind, amount, available_after, frozen_after, memo, created_at
-          FROM fin_cash_ledger WHERE project_id = %s
+        f"""
+        SELECT entry_id, kind, amount, available_after, frozen_after, memo, created_at,
+               market, currency
+          FROM fin_cash_ledger WHERE project_id = %s{mf}
          ORDER BY entry_id DESC LIMIT %s
-        """, (project_id, limit))
+        """, (project_id, *((market,) if market else ()), limit))
     return [_d(r) for r in cur.fetchall()]
 
 

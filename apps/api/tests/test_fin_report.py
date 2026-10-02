@@ -211,3 +211,81 @@ def test_parse_analysis_json_from_fenced_block():
 def test_parse_analysis_json_rejects_garbage():
     with pytest.raises(ValueError):
         R._parse_analysis_json("模型今天不想输出 JSON")
+
+
+# ── N5 · 市场维度：币种格式化 / 逐市场事实 / 跨市场汇总（纯函数）──────────────
+
+def test_format_value_by_currency_symbol():
+    """金额按币种出符号（A 股 ¥、港股 HK$、美股 $）；币种缺失不加符号、不猜。"""
+    assert R.format_value(Decimal("1234.5"), R.MONEY_UNIT, "CNY") == "¥1,234.50"
+    assert R.format_value(Decimal("1234.5"), R.MONEY_UNIT, "HKD") == "HK$1,234.50"
+    assert R.format_value(Decimal("1234.5"), R.MONEY_UNIT, "USD") == "$1,234.50"
+    assert R.format_value(Decimal("1234.5"), R.MONEY_UNIT, None) == "1,234.50"   # 不猜 ¥
+    assert R.format_value(None, R.MONEY_UNIT, "USD") == "—"
+
+
+def test_build_facts_carry_market_and_currency():
+    """事实层加 market 维度：每行带市场，金额行带该市场本币。"""
+    ctx = _ctx(navs=(1.0, 1.02))
+    ctx["market"], ctx["currency"] = "HK", "HKD"
+    fm = R.facts_map(R.build_facts(ctx))
+    assert all(f["market"] == "HK" for f in fm.values())
+    assert fm["total_assets"]["currency"] == "HKD"
+    assert fm["total_assets"]["unit"] == R.MONEY_UNIT
+    assert fm["nav"]["currency"] is None          # 非金额行不带币种
+    assert fm["return_pct"]["currency"] is None
+
+
+def _mctx(market, currency, total):
+    return {"market": market, "currency": currency,
+            "valuation_latest": {"as_of": _dt("2026-09-30"), "total_assets": Decimal(str(total))}}
+
+
+def test_summary_facts_combine_with_fx():
+    """跨市场合计按现取汇率折算，并把 fx_source / fx_at 写进事实行。"""
+    fx = {"HKDCNY": {"rate": 0.85, "at": "2026-10-03T06:59:36", "source": "sina:fx_shkdcny"},
+          "USDCNY": {"rate": 6.70, "at": "2026-10-03T04:59:58", "source": "sina:fx_susdcnh"}}
+    facts = R.build_summary_facts(
+        [_mctx("CN_A", "CNY", 100000), _mctx("HK", "HKD", 20000), _mctx("US", "USD", 1000)], fx)
+    fm = R.facts_map(facts)
+    # 100000 + 20000*0.85 + 1000*6.70 = 100000 + 17000 + 6700 = 123700
+    assert fm["total_assets_cny"]["value"] == Decimal("123700.0000")
+    assert fm["total_assets_cny"]["currency"] == "CNY"
+    assert "sina:fx_shkdcny" in fm["fx_HKDCNY"]["source_ref"]
+    assert "2026-10-03T06:59:36" in fm["fx_HKDCNY"]["source_ref"]
+    # 逐市场本币原值（不折算）
+    assert fm["total_assets__HK"]["value"] == Decimal("20000.0000")
+    assert fm["total_assets__HK"]["currency"] == "HKD"
+
+
+def test_summary_facts_missing_fx_shows_dash_with_reason():
+    """**取不到汇率 → 合计显示 — 并写明原因**（绝不拿缺项当 0 凑一个完整合计）。"""
+    facts = R.build_summary_facts([_mctx("CN_A", "CNY", 100000), _mctx("US", "USD", 1000)], {})
+    fm = R.facts_map(facts)
+    assert fm["total_assets_cny"]["value"] is None
+    assert fm["fx_USDCNY"]["value"] is None
+    assert "拿不到" in fm["fx_USDCNY"]["source_ref"] or "unavailable" in fm["fx_USDCNY"]["source_ref"]
+    assert "缺 USD→CNY 汇率" in fm["total_assets_cny"]["source_ref"]
+
+
+def test_summary_caliber_row_present():
+    assert R.assert_single_caliber(R.build_summary_facts([_mctx("CN_A", "CNY", 1)], {})) == []
+
+
+def test_report_id_differs_by_market():
+    a = R.report_id_for("prj_1", "2026-09-30", "CN_A")
+    b = R.report_id_for("prj_1", "2026-09-30", "HK")
+    c = R.report_id_for("prj_1", "2026-09-30", "MULTI")
+    assert len({a, b, c}) == 3
+    # 同一 (项目, 日, 市场) 稳定
+    assert a == R.report_id_for("prj_1", "2026-09-30", "CN_A")
+
+
+def test_caliber_note_states_paper_and_multi_market():
+    """报告口径文案要写清「模拟盘」+ 各市场规则不同（不能只写「实盘模拟」）。"""
+    for m in ("CN_A", "HK", "US", R.SUMMARY_MARKET):
+        note = R.caliber_note_of(m)
+        assert "模拟盘" in note and "不接实盘" in note
+        assert "回测 / 前向模拟 / 影子运行不与之拼成同一条曲线" in note
+    assert "跨市场汇总" in R.caliber_note_of(R.SUMMARY_MARKET)
+    assert "港股" in R.caliber_note_of("HK")

@@ -401,7 +401,7 @@ export default function SetupWizardPage() {
               <div>
                 <KV k="档位" v={tier.label} />
                 <KV k="初始资金" v={`${money(tier.initial_capital)}（固定）`} />
-                <KV k="币种 / 市场" v="人民币 CNY · 仅 A 股" />
+                <KV k="币种 / 市场" v="开户默认开设 A 股（人民币 CNY）子账户" />
                 <KV k="持仓上限" v={`${tier.max_positions} 只 · 单只 ≤ ${pct(tier.max_position_pct)}`} />
                 <KV k="单笔最小金额" v={money(tier.min_order_amount)} />
                 <KV k="可买股价上限" v={`≤ ${money(tier.max_price)}`} />
@@ -461,7 +461,7 @@ export default function SetupWizardPage() {
                 <KV k="止盈 / 止损" v={`${pct(tier.take_profit_pct)} / ${pct(tier.stop_loss_pct)}`} />
                 <KV k="每日开新仓" v={`${tier.daily_max_new} 笔`} />
                 <KV k="账户停手线" v={pct(tier.account_drawdown_halt_pct)} />
-                <KV k="币种 / 市场" v="CNY · 仅 A 股" />
+                <KV k="币种 / 市场" v="CNY · 默认子账户为 A 股" />
                 <div className="text-[11px] mt-3 leading-relaxed flex gap-1.5" style={{ color: 'var(--text-muted)' }}>
                   <TriangleAlert className="w-3.5 h-3.5 mt-0.5 shrink-0" />
                   <span>档位金额<b>不可改</b>；想换档位就开新项目（需先关停当前项目）。</span>

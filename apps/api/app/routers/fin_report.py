@@ -84,18 +84,23 @@ def _owned_report(uid: str, report_id: str) -> dict:
 
 
 @router.get("/v1/fin/projects/{project_id}/reports/{trade_date}")
-async def get_report_by_date(project_id: str, trade_date: str, request: Request):
-    """某项目某交易日的报告。**没有报告时返回空态**（不是 404、更不是空白）。"""
+async def get_report_by_date(project_id: str, trade_date: str, request: Request,
+                             market: Optional[str] = None):
+    """某项目某交易日（某市场）的报告。**没有报告时返回空态**（不是 404、更不是空白）。
+
+    `market` 给了就取该市场那份；不给保持一期行为（旧的单市场报告 id 稳定可读回）。
+    """
     uid = _uid(request)
     conn = report_svc.get_conn()
     try:
+        report_svc.ensure_columns(conn)     # 老库里 fin_report 还没有 market 列
         with conn.cursor() as cur:
             cur.execute("SELECT user_id FROM fin_project WHERE project_id = %s", (project_id,))
             row = cur.fetchone()
         if not row or row[0] != uid:
             raise HTTPException(404, "项目不存在")
 
-        report_id = report_svc.report_id_for(project_id, trade_date)
+        report_id = report_svc.report_id_for(project_id, trade_date, market)
         loaded = report_svc.load_report(conn, report_id)
         if not loaded:
             return {

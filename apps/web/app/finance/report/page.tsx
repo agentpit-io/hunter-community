@@ -14,14 +14,15 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { FileText, Check, TriangleAlert, Sparkles, ListTree, ExternalLink } from 'lucide-react'
-import { Card, CardHead, Chip, Note, finFetch } from '../_ui'
+import { Card, CardHead, Chip, Note, finFetch, currencySymbol } from '../_ui'
+import { MARKET_LABEL } from '../_market'
 import { Grid, SectionTitle, Tbl, EmptyState, ErrorState, LoadingCard } from '../_parts'
 import { useFinPage } from '../_data'
 
-type Fact = { metric_key: string; value: number | null; unit: string | null; source_ref: string; computed_by: string }
+type Fact = { metric_key: string; value: number | null; unit: string | null; market?: string | null; currency?: string | null; source_ref: string; computed_by: string }
 type Report = {
   report: {
-    report_id: string; trade_date: string; status: string; analysis_text: string | null
+    report_id: string; trade_date: string; market?: string | null; status: string; analysis_text: string | null
     self_review: { did_well?: string; did_bad?: string; change_tomorrow?: string } | null
     llm_provider: string | null; llm_model: string | null; prompt_version: string | null
     artifact_ref: string | null; created_at: string
@@ -32,7 +33,7 @@ type Report = {
 }
 type Payload = {
   project_id: string
-  items: { report_id: string; trade_date: string; status: string; llm_provider: string | null; llm_model: string | null; has_artifact: boolean; artifact_ref: string | null; fact_count: number }[]
+  items: { report_id: string; trade_date: string; market?: string | null; status: string; llm_provider: string | null; llm_model: string | null; has_artifact: boolean; artifact_ref: string | null; fact_count: number }[]
   latest: Report | null
   empty_state: { reason: string } | null
 }
@@ -90,6 +91,14 @@ export default function FinanceReportPage() {
 
   const shown = picked || data.latest
   const sr = shown?.report.self_review || null
+  const shownMarket = MARKET_LABEL[shown?.report.market || ''] || shown?.report.market || ''
+
+  /** 事实值：金额按币种出符号（`unit= money`），其余原样带单位。 */
+  function factValue(f: Fact): string {
+    if (f.value === null || f.value === undefined) return '—'
+    if (f.unit === 'money') return currencySymbol(f.currency) + Number(f.value).toLocaleString('zh-CN', { maximumFractionDigits: 2 })
+    return `${f.value}${f.unit || ''}`
+  }
 
   return (
     <div className="flex flex-col gap-6 max-w-6xl">
@@ -108,7 +117,7 @@ export default function FinanceReportPage() {
           {/* 正文 */}
           <Card>
             <CardHead icon={<FileText className="w-4 h-4" />}
-              title={`${picked ? '历史报告' : '今日报告'} · ${shown.report.trade_date}`}
+              title={`${picked ? '历史报告' : '今日报告'} · ${shown.report.trade_date}${shownMarket ? ' · ' + shownMarket : ''}`}
               sub="由 AI 根据当天真实成交与账户变化生成 · 结论附证据"
               right={<Chip tone={shown.report.status === 'failed' ? 'amber' : 'ok'}>{shown.report.status}</Chip>} />
             <div className="p-4 flex flex-col gap-3">
@@ -124,6 +133,7 @@ export default function FinanceReportPage() {
 
               <div className="flex gap-4 flex-wrap pt-3 text-[11px]" style={{ borderTop: '1px dashed rgba(216,205,186,.9)', color: 'var(--text-muted)' }}>
                 <span>事实行 {shown.facts.length} 条</span>
+                {shownMarket && <span>市场：{shownMarket}</span>}
                 <span>写手：{shown.report.llm_provider || '—'}{shown.report.llm_model ? ` · ${shown.report.llm_model}` : ''}</span>
                 <span>回读校验：{shown.validate ? `${shown.validate.numbers_inspected} 个数字 · 违规 ${shown.validate.violations.length} 处` : '—'}</span>
               </div>
@@ -156,7 +166,7 @@ export default function FinanceReportPage() {
                       head={['指标', { t: '值', r: true }, '从哪来（source_ref）', '哪段代码算的']}
                       rows={shown.facts.map(f => [
                         <span className="font-mono text-xs">{f.metric_key}</span>,
-                        <span className="font-mono text-xs">{f.value === null ? '—' : `${f.value}${f.unit || ''}`}</span>,
+                        <span className="font-mono text-xs">{factValue(f)}</span>,
                         <span className="font-mono text-[11px]" style={{ color: 'var(--text-muted)' }}>{f.source_ref}</span>,
                         <span className="font-mono text-[11px]" style={{ color: 'var(--text-muted)' }}>{f.computed_by}</span>,
                       ])} />
@@ -186,7 +196,7 @@ export default function FinanceReportPage() {
                     <div key={f.metric_key} className="flex items-baseline justify-between gap-2 py-1.5 text-xs"
                       style={{ borderBottom: '1px dashed rgba(216,205,186,.75)' }}>
                       <span className="font-mono" style={{ color: 'var(--text-muted)' }}>{f.metric_key}</span>
-                      <b style={{ color: 'var(--text)' }}>{f.value === null ? '—' : `${f.value}${f.unit || ''}`}</b>
+                      <b style={{ color: 'var(--text)' }}>{factValue(f)}</b>
                     </div>
                   ))}
                 </div>
@@ -227,7 +237,7 @@ export default function FinanceReportPage() {
             <div className="p-4"><EmptyState title="还没有历史报告" desc="第一个交易日收盘后，这里会出现第一条记录。" /></div>
           ) : (
             <Tbl
-              head={['日期', '状态', '事实行', '写手', '产物']}
+              head={['日期', '市场', '状态', '事实行', '写手', '产物']}
               rows={data.items.map(it => {
                 const on = (picked?.report.report_id || data.latest?.report.report_id) === it.report_id
                 return [
@@ -235,6 +245,7 @@ export default function FinanceReportPage() {
                     style={{ color: on ? '#8A5A18' : 'var(--text)', textDecoration: 'underline', cursor: 'pointer' }}>
                     {it.trade_date}
                   </button>,
+                  <Chip tone={it.market === 'MULTI' ? 'copper' : 'slate'}>{MARKET_LABEL[it.market || ''] || it.market || '—'}</Chip>,
                   <Chip tone={it.status === 'failed' ? 'amber' : it.status === 'validated' || it.status === 'published' ? 'ok' : 'slate'}>{it.status}</Chip>,
                   `${it.fact_count} 条`,
                   <span className="text-xs">{it.llm_provider || '—'}{it.llm_model ? ` · ${it.llm_model}` : ''}</span>,

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<title>每日报告 · 2026-10-03 · 美股</title>
+<style>
+ body{font:14px/1.7 -apple-system,"PingFang SC",sans-serif;color:#1d2129;max-width:860px;margin:24px auto;padding:0 16px}
+ h1{font-size:20px} h3{margin-top:28px;border-left:3px solid #165dff;padding-left:8px}
+ .kpi{display:inline-block;min-width:120px;margin:6px 10px 6px 0;padding:8px 12px;background:#f7f8fa;border-radius:8px}
+ .kpi .k{color:#86909c;font-size:12px} .kpi .v{font-size:18px;font-weight:600}
+ .rev{background:#f7f8fa;border-radius:8px;padding:10px 14px;margin:8px 0} .rev h4{margin:0 0 4px}
+ table{border-collapse:collapse;width:100%;font-size:12px} th,td{border:1px solid #e5e6eb;padding:4px 6px;text-align:left}
+ td.n{text-align:right;font-variant-numeric:tabular-nums} td.ref{color:#86909c;font-size:11px}
+ .warn{background:#fff7e8;border:1px solid #ffd591;border-radius:6px;padding:8px 12px}
+ .caliber{background:#e8f3ff;border-radius:6px;padding:8px 12px}
+</style></head><body>
+<h1>每日报告 · 2026-10-03 · 美股</h1>
+<p>项目 <code>prj_b7791191b3af462791ed496b</code> · 档位 operate ·
+市场 <b>美股</b>（USD） ·
+估值时点 2026-10-03 00:00:00+00:00 · 状态 <b>validated</b></p>
+
+<h3>收益与净值</h3>
+<div><div class='kpi'><div class='k'>净值</div><div class='v'>1.0000</div></div><div class='kpi'><div class='k'>累计收益率</div><div class='v'>+0.00%</div></div><div class='kpi'><div class='k'>当日收益率</div><div class='v'>—</div></div><div class='kpi'><div class='k'>最大回撤</div><div class='v'>—</div></div><div class='kpi'><div class='k'>总资产</div><div class='v'>$999,999.97</div></div><div class='kpi'><div class='k'>持仓市值</div><div class='v'>$333.69</div></div><div class='kpi'><div class='k'>可用资金</div><div class='v'>$999,666.28</div></div><div class='kpi'><div class='k'>累计费用</div><div class='v'>$0.03</div></div></div>
+<p class="caliber">收益口径：实盘模拟（1 种）。本报告的收益只来自这一条模拟账本；回测 / 前向模拟 / 影子运行不与之拼成同一条曲线（01方案 §2.2）。本报告只覆盖 美股 一个市场（USD 本币）。本报告是模拟盘 · 不接实盘（PAPER_MODE 恒为 PAPER，不配置任何交易凭证）；三个市场的交易日历、交易时段、费用、价格带与 T+1 规则各不相同，金额一律以该市场本币记账，账本内不做任何折算。</p>
+
+<h3>今日操作与费用</h3>
+<p>当日成交 <b>1</b> 笔，累计成交 <b>1</b> 笔；当日费用 <b>$0.03</b>，累计费用 <b>$0.03</b>。持仓 <b>1</b> 只，未成交挂单 <b>0</b> 笔。</p><h3>账本与数据质量</h3><p>对账通过：<b>—</b>（1 = 通过）；估值数据完整：<b>1</b>（1 = 完整）。已运行交易日 <b>1</b> 天。</p>
+
+<h3>今天的自我总结</h3>
+<div class='rev'><h4>做对了什么</h4><p>本期按既定规则运行，账本自洽性以对账结果为准（口径见事实表）。</p></div><div class='rev'><h4>没做好什么</h4><p>未启用模型分析，无法给出定性复盘；请检查大模型配置后重跑。</p></div><div class='rev'><h4>明天怎么改</h4><p>补齐大模型配置，让分析层基于事实表产出归因与改进项。</p></div>
+
+<h3>分析</h3>
+<p>（未启用 AI 分析：RuntimeError: 大模型尚未配置:缺 base_url。在 .env 里填 LLM_BASE_URL(如 https://api.openai.com/v1),或在首页完成初始化向导。。以下为按事实表生成的自动摘要，只复述数字。）<br>本交易日账本读数：净值 1.0000，累计收益率 +0.00%，当日收益率 —，最大回撤 —。当日成交 1 笔，持仓 1 只。累计费用 $0.03，对账通过 —。</p>
+
+<h3>事实表（报告里每个数字的来源）</h3>
+<table><thead><tr><th>metric_key</th><th>值</th><th>单位</th><th>市场</th><th>币种</th><th>source_ref</th><th>computed_by</th></tr></thead>
+<tbody><tr><td>cash_available</td><td class='n'>$999,666.28</td><td>money</td><td>US</td><td>USD</td><td class='ref'>fin_valuation:2026-10-03</td><td class='ref'>fin.report.build_facts@n5.1</td></tr><tr><td>cash_frozen</td><td class='n'>$0.00</td><td>money</td><td>US</td><td>USD</td><td class='ref'>fin_valuation:2026-10-03</td><td class='ref'>fin.report.build_facts@n5.1</td></tr><tr><td>daily_return_pct</td><td class='n'>—</td><td>%</td><td>US</td><td>—</td><td class='ref'>fin_valuation:2026-10-03</td><td class='ref'>fin.report.build_facts@n5.1</td></tr><tr><td>data_quality_ok</td><td class='n'>1</td><td>—</td><td>US</td><td>—</td><td class='ref'>fin_valuation:2026-10-03</td><td class='ref'>fin.report.build_facts@n5.1</td></tr><tr><td>days_traded</td><td class='n'>1</td><td>日</td><td>US</td><td>—</td><td class='ref'>fin_valuation:*</td><td class='ref'>fin.report.build_facts@n5.1</td></tr><tr><td>fee_today</td><td class='n'>$0.03</td><td>money</td><td>US</td><td>USD</td><td class='ref'>fin_trade:2026-10-03</td><td class='ref'>fin.report.build_facts@n5.1</td></tr><tr><td>fee_total</td><td class='n'>$0.03</td><td>money</td><td>US</td><td>USD</td><td class='ref'>fin_trade:*</td><td class='ref'>fin.report.build_facts@n5.1</td></tr><tr><td>initial_capital</td><td class='n'>$1,000,000.00</td><td>money</td><td>US</td><td>USD</td><td class='ref'>fin_project:prj_b7791191b3af462791ed496b</td><td class='ref'>fin.report.build_facts@n5.1</td></tr><tr><td>market_value</td><td class='n'>$333.69</td><td>money</td><td>US</td><td>USD</td><td class='ref'>fin_valuation:2026-10-03</td><td class='ref'>fin.report.build_facts@n5.1</td></tr><tr><td>max_drawdown</td><td class='n'>—</td><td>%</td><td>US</td><td>—</td><td class='ref'>fin_valuation:*（1 根净值）</td><td class='ref'>fin.report.build_facts@n5.1</td></tr><tr><td>nav</td><td class='n'>1.0000</td><td>倍</td><td>US</td><td>—</td><td class='ref'>fin_valuation:2026-10-03</td><td class='ref'>fin.report.build_facts@n5.1</td></tr><tr><td>open_order_count</td><td class='n'>0</td><td>笔</td><td>US</td><td>—</td><td class='ref'>fin_order:pending</td><td class='ref'>fin.report.build_facts@n5.1</td></tr><tr><td>position_count</td><td class='n'>1</td><td>只</td><td>US</td><td>—</td><td class='ref'>fin_position:*</td><td class='ref'>fin.report.build_facts@n5.1</td></tr><tr><td>recon_passed</td><td class='n'>—</td><td>—</td><td>US</td><td>—</td><td class='ref'>fin_recon_log:*</td><td class='ref'>fin.report.build_facts@n5.1</td></tr><tr><td>return_caliber_count</td><td class='n'>1</td><td>种</td><td>US</td><td>—</td><td class='ref'>const:caliber=live_paper·01方案§2.2</td><td class='ref'>fin.report.build_facts@n5.1</td></tr><tr><td>return_pct</td><td class='n'>+0.00%</td><td>%</td><td>US</td><td>—</td><td class='ref'>fin_valuation:2026-10-03</td><td class='ref'>fin.report.build_facts@n5.1</td></tr><tr><td>total_assets</td><td class='n'>$999,999.97</td><td>money</td><td>US</td><td>USD</td><td class='ref'>fin_valuation:2026-10-03</td><td class='ref'>fin.report.build_facts@n5.1</td></tr><tr><td>trade_count_today</td><td class='n'>1</td><td>笔</td><td>US</td><td>—</td><td class='ref'>fin_trade:2026-10-03</td><td class='ref'>fin.report.build_facts@n5.1</td></tr><tr><td>trade_count_total</td><td class='n'>1</td><td>笔</td><td>US</td><td>—</td><td class='ref'>fin_trade:*</td><td class='ref'>fin.report.build_facts@n5.1</td></tr></tbody></table>
+<p><small>模型 none · 提示词版本 fin-report-zh@1.1 ·
+生成于 2026-10-02 23:40:21.595087+00:00</small></p>
+</body></html>

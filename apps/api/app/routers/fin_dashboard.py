@@ -30,6 +30,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from app.services.fin import control, dashboard as dash, store, views
+from app.services.fin import markets as markets_svc
 from app.services.fin import report as report_svc
 
 router = APIRouter(tags=["fin-dashboard"])
@@ -87,18 +88,38 @@ def _read(project_id: Optional[str], request: Request, build):
 
 
 @router.get("/v1/fin/overview")
-async def overview(request: Request, project_id: Optional[str] = None):
-    return _read(project_id, request, lambda cur, pid: views.overview_payload(cur, pid, _today()))
+async def overview(request: Request, project_id: Optional[str] = None, market: Optional[str] = None):
+    return _read(project_id, request,
+                 lambda cur, pid: views.overview_payload(cur, pid, _today(), market=market))
+
+
+@router.get("/v1/fin/markets")
+async def markets(request: Request, trade_date: Optional[str] = None):
+    """三个市场的状态（前端市场切换器与市场状态条）。**只读、不扣任何额度、不需要项目。**
+
+    `trade_date` 指定就看那一天（用于回看「A 股休市那天港美股在不在交易」）；
+    不给就是「现在」。日历缺行 → 状态 `unknown`（未知 ≠ 交易日）。
+    """
+    _uid(request)
+    conn = _conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            payload = {"markets": markets_svc.market_status(cur, trade_date=trade_date)}
+        conn.rollback()
+        return payload
+    finally:
+        conn.close()
 
 
 @router.get("/v1/fin/auto-trade")
-async def auto_trade(request: Request, project_id: Optional[str] = None):
-    return _read(project_id, request, lambda cur, pid: views.auto_trade_payload(cur, pid, _today()))
+async def auto_trade(request: Request, project_id: Optional[str] = None, market: Optional[str] = None):
+    return _read(project_id, request,
+                 lambda cur, pid: views.auto_trade_payload(cur, pid, _today(), market=market))
 
 
 @router.get("/v1/fin/account")
-async def account(request: Request, project_id: Optional[str] = None):
-    return _read(project_id, request, lambda cur, pid: views.account_payload(cur, pid))
+async def account(request: Request, project_id: Optional[str] = None, market: Optional[str] = None):
+    return _read(project_id, request, lambda cur, pid: views.account_payload(cur, pid, market=market))
 
 
 @router.get("/v1/fin/snapshots/{snapshot_id}")
@@ -179,14 +200,15 @@ async def set_risk(body: RiskIn, request: Request):
 # ── 每日报告页（一次请求拿全：列表 + 最新一份正文 + 事实行）────────────────
 
 def _report_lines(conn, project_id: str, limit: int) -> list[dict]:
+    report_svc.ensure_columns(conn)     # 老库里 fin_report 还没有 market / fact 的新列
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         cur.execute(
             """
-            SELECT r.report_id, r.trade_date, r.status, r.llm_provider, r.llm_model,
+            SELECT r.report_id, r.trade_date, r.market, r.status, r.llm_provider, r.llm_model,
                    r.artifact_ref, r.created_at,
                    (SELECT count(*) FROM fin_report_fact f WHERE f.report_id = r.report_id) AS fact_count
               FROM fin_report r WHERE r.project_id = %s
-             ORDER BY r.trade_date DESC LIMIT %s
+             ORDER BY r.trade_date DESC, r.market ASC LIMIT %s
             """, (project_id, limit))
         return [dash._d(r) for r in cur.fetchall()]
 
@@ -227,7 +249,8 @@ async def latest_report(request: Request, project_id: Optional[str] = None, limi
 
 def _report_item(r: dict) -> dict:
     return {
-        "report_id": r["report_id"], "trade_date": r["trade_date"], "status": r["status"],
+        "report_id": r["report_id"], "trade_date": r["trade_date"], "market": r.get("market"),
+        "status": r["status"],
         "llm_provider": r["llm_provider"], "llm_model": r["llm_model"],
         "has_artifact": bool(r.get("artifact_ref")), "artifact_ref": r.get("artifact_ref"),
         "fact_count": int(r.get("fact_count") or 0), "created_at": r["created_at"],
@@ -247,10 +270,10 @@ async def list_reports(project_id: str, request: Request, limit: int = 30):
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 """
-                SELECT report_id, trade_date, status, valuation_as_of, llm_provider,
+                SELECT report_id, trade_date, market, status, valuation_as_of, llm_provider,
                        llm_model, artifact_ref, created_at
                   FROM fin_report WHERE project_id = %s
-                 ORDER BY trade_date DESC LIMIT %s
+                 ORDER BY trade_date DESC, market ASC LIMIT %s
                 """, (pid, max(1, min(limit, 200))))
             rows = [dash._d(r) for r in cur.fetchall()]
         conn.rollback()
@@ -258,6 +281,7 @@ async def list_reports(project_id: str, request: Request, limit: int = 30):
             "project_id": pid,
             "items": [
                 {"report_id": r["report_id"], "trade_date": r["trade_date"],
+                 "market": r.get("market"),
                  "status": r["status"], "llm_provider": r["llm_provider"],
                  "llm_model": r["llm_model"], "has_artifact": bool(r.get("artifact_ref")),
                  "artifact_ref": r.get("artifact_ref"), "created_at": r["created_at"]}

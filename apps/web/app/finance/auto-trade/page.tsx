@@ -15,7 +15,8 @@ import { useState } from 'react'
 import {
   Zap, Play, Pause, Shield, SlidersHorizontal, ListChecks, Scale, Lock, TriangleAlert,
 } from 'lucide-react'
-import { Button, Card, CardHead, Chip, Note, pct } from '../_ui'
+import { Button, Card, CardHead, Chip, Note, pct, money } from '../_ui'
+import { MarketSwitcher, MarketStatusLine, useCurrentMarket, useMarketStatus, currencyOf, MARKET_LABEL, type MarketStatus } from '../_market'
 import { Grid, RowKV, SectionTitle, TimelineItem, EmptyState, ErrorState, LoadingCard } from '../_parts'
 import { useFinPage, finPost } from '../_data'
 
@@ -34,6 +35,9 @@ type AutoTrade = {
   }
   today: { date: string; actions: any[] }
   recent_actions: any[]
+  market: string | null
+  schedule_market: string
+  markets: MarketStatus[]
   schedule: { key: string; at: string; title: string; plain: string }[]
   constraints: { key: string; title: string; text: string; source: string | null }[]
   param_change_log: { id: number; actor: string; field: string; old_value: any; new_value: any; changed_at: string }[]
@@ -60,7 +64,9 @@ function Switch({ on, busy, onToggle }: { on: boolean; busy: boolean; onToggle: 
 }
 
 export default function FinanceAutoTradePage() {
-  const { data, loading, error, noProject, reload } = useFinPage<AutoTrade>('/auto-trade')
+  const [market, setMarket] = useCurrentMarket()
+  const { data, loading, error, noProject, reload } = useFinPage<AutoTrade>(`/auto-trade?market=${market}`)
+  const { markets } = useMarketStatus()
   const [busy, setBusy] = useState('')
   const [flash, setFlash] = useState('')
   const [confirm, setConfirm] = useState<{ tier: string; loosened: any[] } | null>(null)
@@ -101,10 +107,30 @@ export default function FinanceAutoTradePage() {
   const sw = data.switch.auto_enabled
   const activeKey = data.active_strategy?.key
   const risk = data.risk
+  const mkList = data.markets || markets || []
+  const mkLocal = mkList.find(m => m.market === data.schedule_market)
 
   return (
     <div className="flex flex-col gap-6 max-w-6xl">
       {flash && <Note tone="copper">{flash}</Note>}
+
+      {/* 市场切换器 + 市场状态（N5）—— 直接对齐策略中心那一排圆角按钮 */}
+      <Card>
+        <div className="p-4 flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <div className="text-sm font-bold" style={{ color: 'var(--text)' }}>看哪个市场</div>
+              <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                时刻表、硬约束、今天的动作都随市场切换（各市场规则不同，互不套用）。
+              </div>
+            </div>
+            <MarketSwitcher value={market} onChange={setMarket} />
+          </div>
+          <div className="flex gap-4 flex-wrap">
+            {mkList.map(m => <MarketStatusLine key={m.market} m={m} />)}
+          </div>
+        </div>
+      </Card>
 
       {/* 大开关 */}
       <Card>
@@ -116,7 +142,7 @@ export default function FinanceAutoTradePage() {
             <Switch on={sw} busy={busy !== ''} onToggle={() => act('/auto-trade/switch', { enabled: !sw }, sw ? '已暂停：不再产生新委托' : '已恢复：按时刻表继续运行')} />
             <div className="min-w-0 text-sm" style={{ color: 'var(--text)' }}>
               {sw
-                ? <>正在<b>按时刻表自动运行</b> · 每个交易日按 09:15 / 09:30 / 11:30 / 13:00 / 14:55 / 15:30 六个时点跑</>
+                ? <>正在<b>按时刻表自动运行</b> · {MARKET_LABEL[data.schedule_market] || data.schedule_market}每个交易日按 {data.schedule.map(p => p.at).join(' / ')} 六个时点跑</>
                 : <>已暂停 · <b>不会再下新单</b>，已有持仓保持不变</>}
             </div>
           </div>
@@ -242,7 +268,7 @@ export default function FinanceAutoTradePage() {
                   {o.outcome === 'declined' ? '放弃' : o.outcome === 'open' ? '挂着' : ''}
                   {o.side === 'buy' ? '买入' : '卖出'} {o.name || o.code}{' '}
                   <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>
-                    {o.filled_qty || o.qty} 股{o.price !== null ? ` · ${'¥' + Number(o.price).toLocaleString('zh-CN')}` : ''}
+                    {o.filled_qty || o.qty} 股{o.price !== null ? ` · ${money(o.price, currencyOf(o.market, o.currency))}` : ''}
                   </span>
                 </>}
                 chip={<Chip tone={o.outcome === 'traded' ? 'ok' : o.outcome === 'declined' ? 'amber' : 'slate'}>{o.status_text}</Chip>}
@@ -256,7 +282,8 @@ export default function FinanceAutoTradePage() {
 
       {/* 时刻表 */}
       <div>
-        <SectionTitle title="它每天什么时候自动运行" sub="按沪深交易日历走 · 周末与节假日自动跳过" />
+        <SectionTitle title="它每天什么时候自动运行"
+          sub={`按${MARKET_LABEL[data.schedule_market] || data.schedule_market}交易日历走（${mkLocal?.local_time ? mkLocal.local_time.slice(11,16) : '—'} 当地时间）· 周末与节假日由交易日历自动跳过，cron 只管工作日`} />
         <Card>
           <div className="p-4">
             {data.schedule.map(p => (
@@ -277,7 +304,8 @@ export default function FinanceAutoTradePage() {
 
       {/* A 股硬约束 */}
       <div>
-        <SectionTitle title="A 股硬约束" sub="它再想买，也越不过这几条 · 本版本只做 A 股" />
+        <SectionTitle title={`${MARKET_LABEL[market] || market}硬约束`}
+          sub="它再想买，也越不过这几条 · 切到别的市场看那一套规则（港美股未做价格带校验的已如实标注）" />
         <Card>
           <div className="p-4 flex flex-col gap-3">
             {data.constraints.map(c => (

@@ -3,6 +3,54 @@
 All notable changes to HunterCode · Community Edition follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-10-03
+
+> **次要版本 · 智能交易板块支持港美股模拟交易（二期出口）**。有数据库迁移
+> （新增 `0029`~`0035` 共 7 个迁移，由 api 启动时自动执行，**只加列 / 只放松约束 / 可重复执行**），
+> 有 **`paper` / `fin-worker` 镜像的更新**（本期它们的调度、账本、风控都改了）。
+>
+> 升级主站：`.env` 里的 **`HUNTER_VERSION` 与 `FIN_TAG` 都改成 `1.4.0`**
+> （`web` / `api` / `paper` / `fin-worker` 四个镜像都动了），然后
+> `docker compose pull && docker compose up -d`。
+> 部署与回滚的逐步清单见 `docs/开发文档/N5-上线清单.md`。
+
+### ✨ 新增 · Added
+
+- **港股 / 美股模拟交易**：三个市场（`CN_A` / `HK` / `US`）各一个子账户、**各自本币记账**
+  （CNY / HKD / USD），**账本内永不折算**。港股 / 美股本期只接**限价单**，
+  价格带校验模式为 `none` 并在回执与报告里**如实标注「未做」**。
+  - 交易日历各自独立（表主键 `(market, trade_date)`，来源标在行上）：**A 股休市时港股 / 美股照常运行**。
+  - 每市场一组调度时点、各自 IANA 时区（夏令时交给 Temporal，不写死偏移）。
+  - 风控六条**逻辑不变、参数按市场取**：时段 / T+1 或 T+0 / 每手 / 价格带 / 费率 / 子账户资金。
+- **每日报告按市场出**：每个市场一份 + **一份跨市场汇总**。金额按币种出符号
+  （A 股 `¥`、港股 `HK$`、美股 `$`）；汇总里的跨币种合计**带汇率来源与取值时刻**
+  （`fx_source` / `fx_at`，新浪外汇通道现取），**取不到就显示 `—` 并写明原因**。
+- **前端市场切换器**（对齐策略中心已有的 A股/美股 切换）+ 市场状态条
+  （读 `fin_market_calendar`，**日历缺失显示「日历缺失」而不是猜**）；
+  总览页按市场分列资产并给出跨市场合计；自动交易页的时刻表与硬约束随市场切换。
+
+### 🔧 变更 · Changed
+
+- `apps/api` 的 `report.py`：`METRIC_SPEC` 的金额单位从写死的 `"CNY"` 改为 `money` +
+  指标级 `currency`；事实表新增 `market` / `currency` 两列；报告口径文案写清
+  「模拟盘 · 不接实盘」与「各市场规则不同」。
+- `apps/api` 的 `overview` / `account` / `auto-trade` 三个读接口新增可选 `market` 参数
+  （缺省回落项目 `market_scope`，**A 股旧调用点行为逐字不变**）；新增 `GET /api/v1/fin/markets`。
+- `apps/web` 的 `money()` 加 `currency` 形参；`apps/web/app/finance/` 下不再有硬编码货币符号。
+
+### 🗄️ 迁移 · Migrations
+
+`0029` 市场维度 / `0030` 市场规则表 / `0031` 账本币种 / `0032` 印花税方向 /
+`0033` 快照盘口质量 / `0034` 调度与账本市场列 / `0035` 报告市场维度。
+一律 `ADD COLUMN IF NOT EXISTS` / `CREATE TABLE IF NOT EXISTS`，历史行按 `'CNY'` / `'CN_A'` 回填
+（**现有账本全是 A 股，回填是事实不是猜**）。
+
+### ⚠️ 已知边界
+
+- 港美股费率是**回测级近似**（三项征费合成一个 bps、美股 SEC 费率未按年分档）。
+- 港股收市竞价（16:00–16:10）计入可交易时段 —— 数据源的港股最新价本来就是收市竞价打印。
+- `market_scope='MULTI'` 的项目目前不驱动任何市场的自动调度（见研究报告遗留项）。
+
 ## [1.3.1] - 2026-10-02
 
 > **修订版 · 顶栏补上「hunter 智能体自动炒股」主菜单**。只改前端一个组件
