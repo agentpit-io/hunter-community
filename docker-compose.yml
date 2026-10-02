@@ -222,6 +222,43 @@ services:
     ports:
       - "${API_HOST_PORT:-8100}:8000"
 
+  # ── 智能炒股 · Paper Service（唯一账本 + 确定性风控）─────────────────────
+  #
+  # 与 api 同栈、**独立镜像、独立进程**。全仓唯一持有账本库运行期角色
+  # `fin_paper_rw` 的服务（08 方案 §二「服务落点」/ §四「库与数据治理」）。
+  # 它只 `INSERT`/`SELECT` 追加表，库层就没给 UPDATE/DELETE —— 「唯一账本」
+  # 不是约定，是一条 GRANT。
+  #
+  # PAPER_MODE 固定 PAPER，不接实盘、不配置任何交易凭证（01方案 §7.4）。
+  # 启动时跑 `python -m app.selfcheck`：模式 / 内部口令 / 库连通 / 表齐 /
+  # **角色在追加表上没有 UPDATE、DELETE** —— 任一不过直接退出，不「带病启动」。
+  #
+  # 端口只绑 127.0.0.1：由 api / fin-worker 在 docker 网络内调用，不对外。
+  #
+  # ⚠️ 放在 `fin` profile 下（**有意**）：它需要 `FIN_PAPER_PASSWORD` 与账本库
+  #    里已 provision 好的角色，而默认 `docker compose up -d` 必须保持
+  #    「拉镜像就能跑」（仓内铁律）。不 provision 就启动只会得到一个永远
+  #    重启的容器。要用时：
+  #        bash scripts/fin_provision_paper_role.sh   # 一次
+  #        docker compose --profile fin up -d paper
+  paper:
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-paper:${FIN_TAG:-latest}
+    <<: *restart
+    profiles: ["fin"]
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      # 账本库连接串。M1 实测：`fin_*` 表建在**应用库**里（独立库 hunter_fin
+      # 在 app.migrate「一个文件一个事务」下建不出来 —— 见 0023 文件头与
+      # M1 成果报告「偏离 1」）。所以连的是应用库、用的是**运行期角色
+      # fin_paper_rw**：设计意图（谁能写账本是一条 GRANT）完整保留。
+      # 密码不写进仓库，部署时 provision（scripts/fin_provision_paper_role.sh）。
+      DATABASE_URL: postgresql://fin_paper_rw:${FIN_PAPER_PASSWORD:-}@postgres:5432/${POSTGRES_DB:-hunter}
+      PAPER_MODE: PAPER                 # 固定，不接受请求参数切换（01方案 §7.4）
+      HUNTER_INTERNAL_KEY: ${HUNTER_INTERNAL_KEY:-}
+    ports:
+      - "127.0.0.1:${PAPER_HOST_PORT:-8200}:8000"
+
   web:
     image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-web:${HUNTER_VERSION:-1.2.3}
     <<: *restart
