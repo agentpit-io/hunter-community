@@ -2,7 +2,7 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
-import { LayoutGrid, Activity, Bell, Plus, X, Loader2, Shield, History, LogOut, ChevronDown, ClipboardList, Globe, Zap, TrendingUp, Settings, Briefcase, Gift, Sparkles, Users } from 'lucide-react'
+import { LayoutGrid, Activity, Bell, Plus, X, Loader2, Shield, History, LogOut, ChevronDown, ClipboardList, Globe, Zap, TrendingUp, Settings, Briefcase, Gift, Sparkles, Users, Bot } from 'lucide-react'
 import { isSingleUser } from '../lib/localSession'
 import AddStockModal, { emitWatchlistChanged } from './AddStockModal'
 
@@ -179,6 +179,12 @@ export default function Sidebar() {
           <NavItem href="/online-analysis" icon={<Shield className="w-4 h-4" />} label="在线分析" badge="抗投毒" />
           <NavItem href="/online-analysis/history" icon={<History className="w-4 h-4" />} label="分析历史" />
           <NavItem href="/kpred" icon={<TrendingUp className="w-4 h-4" />} label="K线预测" badge="AI" />
+
+          {/* 智能交易板块（一期 M1）· href 指 /finance，板块内任一子路由都高亮。
+              /finance 由 server 端 redirect 到 /finance/overview。 */}
+          <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wider mt-3 mb-1"
+            style={{ color: 'var(--text-muted)' }}>智能交易</div>
+          <NavItem href="/finance" icon={<Bot className="w-4 h-4" />} label="智能交易" badge="模拟" />
 
           <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wider mt-3 mb-1"
             style={{ color: 'var(--text-muted)' }}>市场信号</div>

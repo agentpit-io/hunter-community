@@ -464,6 +464,11 @@ app.include_router(catalog_router.router, prefix="/api")
 from app.routers import capability_groups as capability_groups_router
 app.include_router(capability_groups_router.router, prefix="/api")
 
+# ── 智能炒股 · 项目与开户（一期 M1）· /api/v1/fin/* ──
+# 走默认硬鉴权（不在 middleware 的免登录前缀里）；账本表见 db/migrations/0023_fin_core.sql
+from app.routers import fin_project as fin_project_router
+app.include_router(fin_project_router.router, prefix="/api")
+
 @app.get("/api/health")
 async def health():
     # hunter_api_key 字段让 docker healthcheck 和运维一眼看出 SaaS 功能可不可用
