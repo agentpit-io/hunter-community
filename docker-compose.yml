@@ -256,6 +256,14 @@ services:
       DATABASE_URL: postgresql://fin_paper_rw:${FIN_PAPER_PASSWORD:-}@postgres:5432/${POSTGRES_DB:-hunter}
       PAPER_MODE: PAPER                 # 固定，不接受请求参数切换（01方案 §7.4）
       HUNTER_INTERNAL_KEY: ${HUNTER_INTERNAL_KEY:-}
+      # 行情来源（M3 起快照由 paper 自己取）：打 api 的 `GET /api/quote/{code}`，
+      # 那条链路背后就是现仓的 `providers.data_source`（08 §五「数据源抽象」一行）。
+      # **不配 = 一律不成交**（`NullQuoteSource`，走「行情断流 → 挂单」分支）——
+      # 拿不到报价就不该有成交，这是安全的一侧。
+      PAPER_QUOTE_URL: ${PAPER_QUOTE_URL:-http://api:8000}
+      # 快照「新鲜」上限（秒）：超过它标 `stale` + `missing_flag=true`，撮合不成交。
+      # 默认 900（15 分钟）对应 A 股行情链路的延迟量级。
+      PAPER_SNAPSHOT_STALE_SECONDS: ${PAPER_SNAPSHOT_STALE_SECONDS:-900}
     ports:
       - "127.0.0.1:${PAPER_HOST_PORT:-8200}:8000"
 

@@ -1,0 +1,498 @@
+"""四步链路的编排（`05 §3.2` M-12）。
+
+```text
+① 取快照（唯一编号 + 数据源时间戳）
+② 过规则（M2 的六条风控 + 有效期检查）
+③ 按快照撮合（限价不劣才成 / 市价按对手价+滑点 / 不可成交则挂单 / 收盘撤单解冻）
+④ 记账并绑快照编号（fin_trade.snapshot_id）
+```
+
+**成交价 = 委托到达时刻的快照价**：不用当日均价、不用收盘价、不回填。
+唯一的价格来源是 `fin_snapshot` 里那一行，而那一行的 `snapshot_time` 来自数据源。
+
+四步的**顺序有一个反直觉的地方**：撮合被算了两次。
+
+第一次是**试算**（纯函数，没有副作用），只为给风控一个价 —— 市价单的资金校验
+需要知道「按对手价加滑点大概要花多少钱」，而那个价只有撮合算得出来。
+第二次是把试算结果**落账**。两次之间隔着的只有风控；风控不过就整笔拒掉，
+试算的那个价一个字都不会进账本。这样六条风控一条不少，且都在记账之前跑完。
+
+拒与挂单的分界：
+
+| 情形 | 结果 |
+|---|---|
+| 风控不过 / 过了有效期 / 没有可用快照 | `rejected`（留 `decline_reason`） |
+| 快照有、但不可成交（断流 / 限价没到） | `pending`（买入冻结资金） |
+| 能成交 | `filled`（写成交、绑快照、改持仓、版本 +1） |
+
+「没有可用快照」是 `rejected` 而不是 `pending`：一张连涨跌停都算不出来的委托
+挂进队列，等于把风控绕过延后到了成交那一刻。挂单的前提是**我们已经见过这只票
+的有效报价**（有一个 `prev_close` 可以用来判涨跌停）。行情完全拿不到时，
+行情未接通就是未接通 —— 拒绝，并且理由里说清楚。
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from decimal import Decimal
+from typing import Optional
+
+from loguru import logger
+
+from app import idempotency, ledger, snapshot
+from app.matching.model import load_execution_model
+from app.matching.pricing import FILLED, MatchResult, OrderSpec, match
+from app.risk import RiskInputs, evaluate
+
+CST_OFFSET_HOURS = 8
+
+
+class NoSnapshot(Exception):
+    """行情未接通 / 断流到连一张快照都落不下来。调用方转成 `rejected` 委托。"""
+
+
+# ── ① 取快照 ──────────────────────────────────────────────────────────────
+
+def take_snapshot(cur, code: str, *, now: Optional[datetime] = None) -> dict:
+    """取一张快照并落库。拿不到 → 抛 `NoSnapshot`（**不落行**，也不编时间戳）。"""
+    snap = snapshot.capture(cur, code, now=now)
+    if snap is None:
+        raise NoSnapshot(
+            f"{code} 没有可用快照（行情未接通或数据源未给出时间戳），"
+            "无法校验涨跌停与定价，拒绝委托"
+        )
+    return snap
+
+
+# ── ④ 记账 ────────────────────────────────────────────────────────────────
+
+def _book_fill(cur, project, order_id, req, snap, match, fee, amount, source, fee_version) -> str:
+    """成交记账：委托 → 成交（绑快照）→ 现金 → 持仓 → 版本。返回 `trade_id`。"""
+    project_id = project["project_id"]
+    side = req["side"]
+    code = req["code"]
+    qty = int(req["qty"])
+
+    ledger.update_order_filled(cur, order_id, "filled", qty)
+
+    trade_id = ledger.new_id("trd")
+    ledger.insert_trade(
+        cur, trade_id, order_id, project_id, code, side, qty, match.price, amount,
+        fee, snap["snapshot_id"], source, fee_version, snap["snapshot_time"],
+    )
+    if side == "buy":
+        order = ledger.get_order(cur, order_id)
+        ledger.settle_buy(cur, project_id, order_id, trade_id, amount, fee,
+                          order["frozen_amount"])
+    else:
+        ledger.settle_sell(cur, project_id, order_id, trade_id, amount, fee)
+
+    ledger.apply_position(cur, project_id, code, side, qty, match.price, snap["snapshot_time"])
+    ledger.bump_version(cur, project_id)
+    ledger.lock_params(cur, project_id)
+    return trade_id
+
+
+def _park(cur, project, order_id, req, snap, match, fee, source, frozen_amount) -> None:
+    """挂单：把状态改成 `pending`。
+
+    买入的资金在**受理时**（`insert_order` 之后）就已经冻上了，见 `execute` ——
+    受理即成交与挂单两条路都要先冻再结算，这样「成交时从冻结里付」这句话
+    在两条路上是同一条。卖出没有现金冻结（券的占用由 `fin_order` 推导）。
+    """
+    ledger.update_order_filled(cur, order_id, "pending", 0, match.pending_reason)
+
+
+def _reject(order_id: str, reason: str, **extra) -> dict:
+    """被拒回执。委托行由调用方**先**用 `status='rejected'` 落好（留痕）；
+    这里只拼回执，不再动账本。"""
+    return {
+        "order_id": order_id,
+        "status": "rejected",
+        "decline_reason": reason,
+        "filled_qty": 0,
+        "trade_id": None,
+        "snapshot_id": extra.get("snapshot_id"),
+        "snapshot_time": extra.get("snapshot_time"),
+        "snapshot_quality": extra.get("snapshot_quality"),
+        "snapshot_missing_flag": extra.get("snapshot_missing_flag"),
+        "price": None,
+        "amount": None,
+        "fee": None,
+        "pending_reason": None,
+        "risk": extra.get("risk"),
+    }
+
+
+def _risk_view(outcome) -> dict:
+    return {r.name: {"ok": r.ok, "reason": r.reason, "detail": r.detail}
+            for r in outcome.results}
+
+
+def _snapshot_view(snap: Optional[dict]) -> dict:
+    if not snap:
+        return {"snapshot_id": None, "snapshot_time": None,
+                "snapshot_quality": None, "snapshot_missing_flag": None}
+    return {
+        "snapshot_id": snap["snapshot_id"],
+        "snapshot_time": snap["snapshot_time"],
+        "snapshot_quality": snap["quality"],
+        "snapshot_missing_flag": bool(snap["missing_flag"]),
+    }
+
+
+# ── 主入口 ────────────────────────────────────────────────────────────────
+
+def execute(cur, req: dict, *, now: Optional[datetime] = None) -> dict:
+    """走完四步链路。**一个请求一个事务**，任何一步失败整笔回滚。"""
+    project_id = req["project_id"]
+    project = ledger.get_project(cur, project_id)
+    if not project:
+        raise LookupError(f"项目不存在：{project_id}")
+    if project["status"] != "active":
+        raise ValueError(f"项目不在进行中（status={project['status']}），不接受新委托")
+
+    code = req["code"]
+    side = req["side"]
+    qty = int(req["qty"])
+    source = req.get("source") or "ai"
+    actor = req.get("actor") or "system"
+    price_type = req.get("price_type") or "limit"
+    key = req.get("idempotency_key")
+    req_hash = idempotency.request_hash(req)
+
+    # ── 幂等：**先**返回原回执，**再**校验账户版本（`01方案 §11.1` 末两条）──
+    # 顺序写反的后果：一次「已成功、只是回执丢在路上」的重试会被版本校验拒掉，
+    # 用户看到「账户版本冲突」而他只是重试了一次已经成功的下单。
+    replayed = idempotency.replay_or_conflict(cur, key, req_hash)
+    if replayed is not None:
+        return replayed
+
+    # ── 账户版本（乐观锁，`09 §六-4`）────────────────────────────────────
+    expected = req.get("expected_version")
+    if expected is not None and int(expected) != int(project["version"]):
+        return _version_conflict(cur, project, req, key, req_hash, expected)
+
+    order_id = ledger.new_id("ord")
+
+    # ── ① 取快照 ─────────────────────────────────────────────────────────
+    try:
+        snap = take_snapshot(cur, code, now=now)
+    except NoSnapshot as exc:
+        ledger.insert_order(
+            cur, order_id, project_id, code, side, qty, price_type, req.get("limit_price"),
+            status="rejected", filled_qty=0, source=source, actor=actor,
+            decline_reason=str(exc), intent_ref=req.get("intent_ref"),
+            decision_ref=req.get("decision_ref"), valid_until=req.get("valid_until"),
+        )
+        receipt = _reject(order_id, str(exc))
+        _remember(cur, key, req_hash, project_id, receipt, order_id)
+        return receipt
+
+    # ── ②-预 有效期（`fin_order.valid_until`：过期不补单）────────────────
+    if req.get("valid_until") is not None:
+        valid_until = ledger.as_dt(req["valid_until"])
+        if snap["snapshot_time"] > valid_until:
+            reason = (f"委托已过有效期（有效期至 {valid_until.isoformat()}，"
+                      f"快照时刻 {snap['snapshot_time'].isoformat()}）")
+            ledger.insert_order(
+                cur, order_id, project_id, code, side, qty, price_type, req.get("limit_price"),
+                status="rejected", filled_qty=0, source=source, actor=actor,
+                decline_reason=reason, intent_ref=req.get("intent_ref"),
+                decision_ref=req.get("decision_ref"), valid_until=req.get("valid_until"),
+            )
+            receipt = _reject(order_id, reason, **_snapshot_view(snap))
+            _remember(cur, key, req_hash, project_id, receipt, order_id)
+            return receipt
+
+    # ── ③-试算：撮合（纯函数，没有副作用）──────────────────────────────
+    model = load_execution_model(cur)
+    if model is None:
+        raise ValueError("账本里没有执行模型（fin_execution_model 为空），拒绝撮合")
+
+    spec = OrderSpec(
+        side=side, qty=qty, price_type=price_type,
+        limit_price=None if req.get("limit_price") is None else Decimal(str(req["limit_price"])),
+    )
+    trial = match(spec, snap, model)
+
+    # ── ② 过规则：六条风控 ───────────────────────────────────────────────
+    fee_model = ledger.get_fee_model(cur)
+    if fee_model is None:
+        raise ValueError("没有可用的费用模型（fin_fee_model 为空），拒绝撮合")
+
+    risk_price = _risk_price(req, snap, trial)
+    instrument = ledger.get_instrument(cur, code)
+    calendar = ledger.get_calendar(cur, snap["snapshot_time"].astimezone(_cst()).date())
+    available, _frozen = ledger.cash_balance(cur, project_id)
+    position = ledger.get_position(cur, project_id, code) or {"qty": 0, "sellable_qty": 0}
+    committed = ledger.open_sell_committed(cur, project_id, code)
+
+    inputs = RiskInputs(
+        at=snap["snapshot_time"],
+        side=side,
+        qty=qty,
+        price=risk_price,
+        calendar=calendar,
+        instrument=instrument,
+        fee_model=fee_model,
+        prev_close=None if snap["prev_close"] is None else Decimal(str(snap["prev_close"])),
+        available=available,
+        position_qty=int(position["qty"]),
+        # 挂单占用的股数要在**可卖量**里扣掉，否则同一批股能被两张挂单各卖一次
+        sellable_qty=max(0, int(position["sellable_qty"]) - committed),
+        lot_size=int(instrument["lot_size"]) if instrument else 100,
+    )
+    outcome = evaluate(inputs)
+
+    if not outcome.passed:
+        ledger.insert_order(
+            cur, order_id, project_id, code, side, qty, price_type, req.get("limit_price"),
+            status="rejected", filled_qty=0, source=source, actor=actor,
+            decline_reason=outcome.decline_reason, intent_ref=req.get("intent_ref"),
+            decision_ref=req.get("decision_ref"), valid_until=req.get("valid_until"),
+        )
+        receipt = _reject(order_id, outcome.decline_reason,
+                          risk=_risk_view(outcome), **_snapshot_view(snap))
+        receipt["failed_checks"] = outcome.failed_names
+        _remember(cur, key, req_hash, project_id, receipt, order_id)
+        return receipt
+
+    amount = (Decimal(qty) * risk_price).quantize(Decimal("0.0001"))
+    fee = outcome.fee
+
+    # ── 落委托（成交 / 挂单都在这一步之前先把委托写下来：fin_trade 有 FK）──
+    fill_amount = None
+    if trial.filled:
+        fill_amount = (Decimal(qty) * Decimal(str(trial.price))).quantize(Decimal("0.0001"))
+        fill_fee = _recompute_fee(side, fill_amount, fee_model)
+    else:
+        fill_fee = fee
+
+    frozen_amount = (amount + fee.total).quantize(Decimal("0.0001")) if side == "buy" else Decimal("0.0000")
+    # 受理时按**限价**冻（限价单），市价单按试算价冻 —— 两者都是「当时知道的最坏价」
+    ledger.insert_order(
+        cur, order_id, project_id, code, side, qty, price_type, req.get("limit_price"),
+        status="pending", filled_qty=0, source=source, actor=actor,
+        decline_reason=None, intent_ref=req.get("intent_ref"),
+        decision_ref=req.get("decision_ref"), valid_until=req.get("valid_until"),
+        frozen_amount=frozen_amount,
+    )
+    # 买入**先冻再结算**：受理即成交与挂单两条路都先把钱搬到冻结，成交时再从冻结里付。
+    # 不这么做的话，受理即成交那一路会直接去动一个空的冻结额（`frozen_after` 变负）。
+    if side == "buy" and frozen_amount > 0:
+        ledger.freeze_cash(cur, project_id, order_id, frozen_amount, "委托受理冻结")
+
+    # ── ④ 记账 ───────────────────────────────────────────────────────────
+    if trial.filled:
+        trade_id = _book_fill(cur, project, order_id, req, snap,
+                              MatchResult(FILLED, Decimal(str(trial.price)), trial.basis),
+                              fill_fee, fill_amount, source, fee_model["version"])
+        receipt = {
+            "order_id": order_id,
+            "status": "filled",
+            "trade_id": trade_id,
+            "filled_qty": qty,
+            "price": Decimal(str(trial.price)),
+            "amount": fill_amount,
+            "fee": _fee_view(fill_fee),
+            "decline_reason": None,
+            "pending_reason": None,
+            "price_basis": trial.basis,
+            "risk": _risk_view(outcome),
+            **_snapshot_view(snap),
+        }
+    else:
+        _park(cur, project, order_id, req, snap, trial, fill_fee, source, frozen_amount)
+        receipt = {
+            "order_id": order_id,
+            "status": "pending",
+            "trade_id": None,
+            "filled_qty": 0,
+            "price": None,
+            "amount": None,
+            "fee": None,
+            "decline_reason": None,
+            "pending_reason": trial.pending_reason,
+            "price_basis": trial.basis,
+            "frozen_amount": frozen_amount,
+            "risk": _risk_view(outcome),
+            **_snapshot_view(snap),
+        }
+
+    _remember(cur, key, req_hash, project_id, receipt, receipt.get("trade_id") or order_id)
+    return receipt
+
+
+def _risk_price(req, snap, trial) -> Decimal:
+    """风控用的价。限价单用**限价**（那是委托的边界），市价单用撮合出来的价
+    （对手价 ± 滑点）—— 市价单没有别的价能代表「最多花多少」。"""
+    if (req.get("price_type") or "limit") == "limit" and req.get("limit_price") is not None:
+        return Decimal(str(req["limit_price"]))
+    if trial.price is not None:
+        return Decimal(str(trial.price))
+    return Decimal(str(snap["last_price"]))
+
+
+def _recompute_fee(side: str, amount: Decimal, fee_model: dict):
+    """按**实际成交额**重算费用。
+
+    试算价（限价单用限价）与实际成交价（快照价）不同时，费用必须按实际成交额算 ——
+    否则佣金会按一个没发生的金额收（限价 10.50 成交在 10.00 上，佣金按 10.50 收）。
+    """
+    from app.risk import fee as fee_mod
+
+    return fee_mod.compute_fee(side, amount, fee_model)
+
+
+def _fee_view(fee) -> dict:
+    return {
+        "commission": fee.commission,
+        "stamp_tax": fee.stamp_tax,
+        "transfer_fee": fee.transfer_fee,
+        "total": fee.total,
+    }
+
+
+def _cst():
+    from datetime import timedelta, timezone
+
+    return timezone(timedelta(hours=CST_OFFSET_HOURS))
+
+
+def _remember(cur, key, req_hash, project_id, receipt, response_ref) -> None:
+    """把回执与幂等键**在同一个事务里**记下（`01方案 §11.1` 最后一条）。"""
+    if not key:
+        return
+    idempotency.record(cur, key, req_hash, project_id, receipt, response_ref)
+
+
+def _version_conflict(cur, project, req, key, req_hash, expected) -> dict:
+    """账户版本对不上：**拒绝并留痕**（一条 `rejected` 委托）。
+
+    留痕用委托表而不是日志：二期人工委托会复用同一条拒绝路径，
+    界面上能直接看到「这笔为什么没成」。
+    """
+    project_id = project["project_id"]
+    actual = int(project["version"])
+    reason = (f"账户版本冲突：委托基于 version={int(expected)}，当前 version={actual}。"
+              "同一账户的并发命令里，后到者被版本校验拦下")
+    order_id = ledger.new_id("ord")
+    ledger.insert_order(
+        cur, order_id, project_id, req["code"], req["side"], int(req["qty"]),
+        req.get("price_type") or "limit", req.get("limit_price"),
+        status="rejected", filled_qty=0, source=req.get("source") or "ai",
+        actor=req.get("actor") or "system", decline_reason=reason,
+        intent_ref=req.get("intent_ref"), decision_ref=req.get("decision_ref"),
+        valid_until=req.get("valid_until"),
+    )
+    logger.warning("[paper.matching] 版本冲突 · project={} 期望={} 实际={}",
+                   project_id, expected, actual)
+    receipt = {
+        "order_id": order_id,
+        "status": "rejected",
+        "decline_reason": reason,
+        "failed_checks": ["project_version"],
+        "filled_qty": 0,
+        "trade_id": None,
+        "price": None,
+        "amount": None,
+        "fee": None,
+        "pending_reason": None,
+        "expected_version": int(expected),
+        "actual_version": actual,
+        "snapshot_id": None,
+        "snapshot_time": None,
+        "risk": None,
+    }
+    _remember(cur, key, req_hash, project_id, receipt, order_id)
+    return receipt
+
+
+# ── 收盘撤单 / 解冻 ───────────────────────────────────────────────────────
+
+def expire_open_orders(
+    cur, project_id: str, at: datetime, *, reason: str = "close",
+) -> dict:
+    """撤掉未成交的挂单并**解冻**。
+
+    `reason='close'`   —— 收盘撤单（当日未成交的全部撤掉）。
+    `reason='validity'`—— 只撤已经越过 `valid_until` 的。
+
+    解冻按 `fin_order.frozen_amount` 原样退回，不重算 —— 受理时冻了多少就退多少。
+    """
+    orders = ledger.list_open_orders(cur, project_id)
+    expired: list[dict] = []
+    for order in orders:
+        if reason == "validity":
+            if order["valid_until"] is None or at <= order["valid_until"]:
+                continue
+        ledger.update_order_filled(cur, order["order_id"], "expired", 0,
+                                   f"未成交撤单（{reason}），冻结资金已解冻")
+        frozen = order.get("frozen_amount") or Decimal("0.0000")
+        ledger.unfreeze_cash(cur, project_id, order["order_id"], frozen, "撤单解冻")
+        expired.append({
+            "order_id": order["order_id"],
+            "code": order["code"],
+            "side": order["side"],
+            "unfrozen": Decimal(str(frozen)),
+        })
+    return {"expired": len(expired), "orders": expired}
+
+
+def cancel_order(cur, project_id: str, order_id: str, memo: str = "人工撤单") -> dict:
+    """撤一张挂单（`cancelled`）。已成交 / 已终态的单返回原样，不报错。"""
+    order = ledger.get_order(cur, order_id)
+    if not order or order["project_id"] != project_id:
+        raise LookupError(f"委托不存在：{order_id}")
+    if order["status"] not in ("pending", "accepted", "partially_filled"):
+        return {"order_id": order_id, "status": order["status"], "changed": False,
+                "unfrozen": Decimal("0.0000")}
+    ledger.update_order_filled(cur, order_id, "cancelled", 0, f"{memo}，冻结资金已解冻")
+    frozen = order.get("frozen_amount") or Decimal("0.0000")
+    ledger.unfreeze_cash(cur, project_id, order_id, frozen, "撤单解冻")
+    return {"order_id": order_id, "status": "cancelled", "changed": True,
+            "unfrozen": Decimal(str(frozen))}
+
+
+# ── 挂单再撮合 ────────────────────────────────────────────────────────────
+
+def match_open_orders(cur, project_id: str, *, now: Optional[datetime] = None) -> dict:
+    """拿新快照再撮一遍挂单（M4 的时点工作流按时刻调它）。
+
+    不再跑六条风控：受理时已经跑过，而且
+      · 买入的钱冻着（`used ≤ frozen_amount` 由「成交价 ≤ 限价」保证）；
+      · 卖出的股由 `open_sell_committed` 占着，别的挂单抢不走。
+    这两条让「再撮合」是安全的：它只可能把一张已经通过风控的单变成成交。
+    """
+    orders = ledger.list_open_orders(cur, project_id)
+    model = load_execution_model(cur)
+    if model is None:
+        raise ValueError("账本里没有执行模型（fin_execution_model 为空），拒绝撮合")
+
+    filled: list[dict] = []
+    for order in orders:
+        snap = snapshot.capture(cur, order["code"], now=now)
+        if snap is None:
+            continue
+        spec = OrderSpec(
+            side=order["side"], qty=int(order["qty"]), price_type=order["price_type"],
+            limit_price=order["limit_price"],
+        )
+        result = match(spec, snap, model)
+        if not result.filled:
+            continue
+        project = ledger.get_project(cur, project_id)
+        fee_model = ledger.get_fee_model(cur)
+        qty = int(order["qty"])
+        fill_amount = (Decimal(qty) * Decimal(str(result.price))).quantize(Decimal("0.0001"))
+        fee = _recompute_fee(order["side"], fill_amount, fee_model)
+        req = {"side": order["side"], "code": order["code"], "qty": qty}
+        trade_id = _book_fill(cur, project, order["order_id"], req, snap,
+                              MatchResult(FILLED, Decimal(str(result.price)),
+                                                  result.basis),
+                              fee, fill_amount, order["source"], fee_model["version"])
+        filled.append({"order_id": order["order_id"], "trade_id": trade_id,
+                       "price": Decimal(str(result.price)), "qty": qty,
+                       "snapshot_id": snap["snapshot_id"]})
+    return {"matched": len(filled), "fills": filled}

@@ -1,9 +1,9 @@
-"""参考数据的读与写：标的元数据 / 交易日历 / 费用模型。
+"""参考数据的读与写：标的元数据 / 交易日历 / 费用模型 / 执行模型。
 
-这些不是账本（不在「只追加」的表里），是风控的**输入**：
+这些不是账本（不在「只追加」的表里），是风控与撮合的**输入**：
 涨跌停幅度来自 `fin_instrument`、交易时段来自 `fin_market_calendar`、
-费率来自 `fin_fee_model`。M2 提供 upsert 让 `fin-worker`（M4）能把它们同步进来；
-M1 已把表建好，本模块只补入口。
+费率来自 `fin_fee_model`、滑点与最小变动价位来自 `fin_execution_model`。
+M2 提供 upsert 让 `fin-worker`（M4）能把它们同步进来；M1 已把表建好，本模块只补入口。
 
 写入一律 `INSERT ... ON CONFLICT DO UPDATE`（幂等）——参考数据是可被更正的；
 账本数据才只追加。
@@ -14,7 +14,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from app import db
-from app.schemas import CalendarIn, FeeModelIn, InstrumentIn
+from app.schemas import CalendarIn, ExecutionModelIn, FeeModelIn, InstrumentIn
 
 router = APIRouter(tags=["reference"])
 
@@ -110,4 +110,38 @@ def upsert_fee_model(version: str, body: FeeModelIn) -> dict:
 def list_fee_models() -> dict:
     with db.cursor() as cur:
         cur.execute("SELECT * FROM fin_fee_model ORDER BY effective_from DESC, version DESC")
+        return {"items": cur.fetchall()}
+
+
+@router.put("/api/v1/execution-models/{version}")
+def upsert_execution_model(version: str, body: ExecutionModelIn) -> dict:
+    """执行模型：滑点 = `slippage_ticks` 个**最小变动价位**（`09 §4.3`）。
+
+    一期默认行 `paper-model-v1`（`slippage_ticks=1, tick_size=0.01`）由迁移
+    `0025` 种下；这里提供入口是为了换参数时不用改代码。
+    """
+    if body.version != version:
+        raise HTTPException(400, "路径版本与请求体版本不一致")
+    with db.cursor(commit=True) as cur:
+        cur.execute(
+            """
+            INSERT INTO fin_execution_model (version, slippage_ticks, tick_size, part_fill, note)
+            VALUES (%s,%s,%s,%s,%s)
+            ON CONFLICT (version) DO UPDATE SET
+              slippage_ticks = EXCLUDED.slippage_ticks,
+              tick_size = EXCLUDED.tick_size,
+              part_fill = EXCLUDED.part_fill,
+              note = EXCLUDED.note,
+              effective_from = now()
+            RETURNING *
+            """,
+            (body.version, body.slippage_ticks, body.tick_size, body.part_fill, body.note),
+        )
+        return cur.fetchone()
+
+
+@router.get("/api/v1/execution-models")
+def list_execution_models() -> dict:
+    with db.cursor() as cur:
+        cur.execute("SELECT * FROM fin_execution_model ORDER BY effective_from DESC, version DESC")
         return {"items": cur.fetchall()}

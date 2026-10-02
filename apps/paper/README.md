@@ -52,27 +52,56 @@ uvicorn app.main:app --port 8000
 | POST | `/api/v1/projects/{id}/valuation` | 估值（缺价 → 409，不拿成本价顶替） |
 | GET  | `/api/v1/projects/{id}/valuation/latest` | 最近一次估值 |
 | POST/GET | `/api/v1/projects/{id}/recon` | 对账：跑七项检查并写 `fin_recon_log` |
-| PUT/GET | `/api/v1/instruments/{code}` · `/market-calendar/{date}` · `/fee-models/{version}` | 风控的输入（参考数据，可更正） |
+| PUT/GET | `/api/v1/instruments/{code}` · `/market-calendar/{date}` · `/fee-models/{version}` · `/execution-models/{version}` | 风控与撮合的输入（参考数据，可更正） |
+| POST | `/api/v1/snapshots?code=…` | 取一张快照（M3 起快照由服务端采集） |
+| GET  | `/api/v1/snapshots/{snapshot_id}` · `/api/v1/snapshots?code=…` | 读快照 |
+| POST | `/api/v1/orders/{order_id}/cancel` | 撤一张挂单并解冻 |
+| POST | `/api/v1/projects/{id}/orders/expire` | 收盘（`close`）或过期（`validity`）批量撤单解冻 |
+| POST | `/api/v1/projects/{id}/orders/match-open` | 拿新快照再撮一遍挂单（M4 的时点工作流调它） |
+| POST | `/api/v1/jobs` · `/jobs/{id}` · `/jobs/{id}/{running,succeed,fail,cancel}` | 长任务协议（`01方案 §10.4`） |
 
 **没有** `PUT/PATCH/DELETE` 指向成交、流水、持仓、估值、对账的任何一条。
-`PUT` 只用在参考数据的 upsert 上（标的 / 日历 / 费率——它们不是账本）。
+`PUT` 只用在参考数据的 upsert 上（标的 / 日历 / 费率 / 执行模型——它们不是账本）。
 `/docs` 与 `/openapi.json` 关闭：它们不吃 app 级鉴权，实测无密钥也能 200。
+
+## 四步链路（M3 · `app/matching/`）
+
+`POST /api/v1/orders` 走完：**取快照 → 过规则 → 按快照撮合 → 记账并绑快照编号**。
+
+| 口径 | 取值 |
+|---|---|
+| 成交价 | **委托到达时刻的快照价**（不用当日均价、不用收盘价、不回填） |
+| 限价单 | 快照价**不劣于**限价才成交（买 `≤`、卖 `≥`），成交在快照价上 |
+| 市价单 | **对手价 + 滑点**（买卖一 `+`、卖买一 `−`；滑点 = `slippage_ticks × tick_size`） |
+| 不可成交 | 挂单（`pending`，买入冻结资金）；收盘仍未成交 → 撤单（`expired`）并**解冻** |
+| 行情断流 | `missing_flag=true` → **一律不成交**（宁可挂单，绝不用过期价成交） |
+| 部分成交 | 一期 `part_fill=false`：整笔成交或挂单 |
+
+快照编号 `SNAP-{日期}-{时刻}-{代码}`，**时刻来自数据源**（`PAPER_QUOTE_URL` 指向
+api 的 `GET /api/quote/{code}`，背后是现仓的 `providers.data_source`）。
+数据源没给时间戳 → **不落这一行**，委托被拒（拿不到报价就不该有成交）。
+
+幂等（`app/idempotency.py`）：同键同内容 → 返回原回执；同键不同内容 → 409 不覆盖。
+**先返回原回执、再校验账户版本**（`01方案 §11.1` 末两条）——
+写反了会让「已经成功、只是回执丢了」的重试被版本校验拒掉。
 
 ## 账本语义（`app/ledger.py` 头部有完整表）
 
-- 买入 = `freeze → buy → fee` 三条流水（冻结在同一事务里归零）；
-- 卖出 = `sell → fee → tax` 三条；
+- 买入（受理即成交）= `freeze → buy → fee [→ unfreeze]`；
+- 买入（挂单）= `freeze`，成交时再 `buy → fee [→ unfreeze]`，撤单时 `unfreeze`；
+- 卖出 = `sell → fee → tax`（券的占用不建账本列，由未成交卖单算出来）；
 - `amount` = 该条对**现金总额**的变动，因此 `Σ(amount) == 可用 + 冻结`；
 - 一笔成交的流水之和 == 那笔的现金影响（买入 `−(金额+费用)`，卖出 `+(金额−费用)`）。
 
-对账（`app/recon.py`）每天核这七项：现金合计 / 资产负债表恒等式 / 买入整手 /
-成交与流水逐笔对上 / 持仓 = 成交净额 / 版本号 = 成交笔数 / 无挂单时冻结归零。
+对账（`app/recon.py`）每天核这八项：现金合计 / 资产负债表恒等式 / 买入整手 /
+成交与流水逐笔对上 / 持仓 = 成交净额 / 版本号 = 成交笔数 / 无挂单时冻结归零 /
+**冻结额 = 未成交买单的占用之和**。
 
 ## 测试
 
 ```sh
 cd apps/paper
-python -m pytest tests/ -q                      # 纯风控用例 + 鉴权（不连库）
+python -m pytest tests/ -q                      # 快照 / 撮合 / 风控 / 鉴权（纯函数，不连库）
 PAPER_TEST_DSN=postgresql://fin_paper_rw:pw@127.0.0.1:5432/hunter \
-python -m pytest tests/ -q                      # 另加账本端到端
+python -m pytest tests/ -q                      # 另加账本端到端、幂等、长任务
 ```

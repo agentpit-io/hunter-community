@@ -12,7 +12,10 @@ os.environ.setdefault("PAPER_MODE", "PAPER")
 
 from app.main import app  # noqa: E402  须在设置 env 之后导入
 
-client = TestClient(app)
+# `raise_server_exceptions=False`：这一组测的是**鉴权**，不该因为「这台机器上没有账本库」
+# 就地炸掉 —— 拿对钥匙的请求会走到路由、再由路由去连库，连不上时应当是一个 5xx，
+# 而断言关心的是「它不是 401」。
+client = TestClient(app, raise_server_exceptions=False)
 KEY = {"X-Hunter-Internal-Key": "test-internal-key"}
 
 
