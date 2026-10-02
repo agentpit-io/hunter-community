@@ -93,6 +93,9 @@ def uid():
     conn = psycopg2.connect(TEST_DATABASE_URL)
     try:
         with conn.cursor() as cur:
+            # M-16 起 fin_param_change_log 也会引用项目（关停留痕），先删它
+            cur.execute("DELETE FROM fin_param_change_log WHERE project_id IN "
+                        "(SELECT project_id FROM fin_project WHERE user_id = %s)", (u,))
             cur.execute("DELETE FROM fin_param WHERE project_id IN "
                         "(SELECT project_id FROM fin_project WHERE user_id = %s)", (u,))
             cur.execute("DELETE FROM fin_project WHERE user_id = %s", (u,))
@@ -193,3 +196,99 @@ def test_未知档位_400(uid):
     r = client.post("/api/v1/fin/projects", json={"tier": "rich"}, headers={"x-test-user": uid})
     assert r.status_code == 400
     assert _count_active(uid) == 0
+
+
+# ══════════════════════════════════════════════════════════════════════
+# M-16 · 项目制与「开新项目」
+# ══════════════════════════════════════════════════════════════════════
+
+def _change_log(project_id: str) -> list[tuple]:
+    conn = psycopg2.connect(TEST_DATABASE_URL)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT field, old_value, new_value FROM fin_param_change_log "
+                "WHERE project_id = %s ORDER BY id", (project_id,))
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+
+def test_开新项目先关闭旧项目不是暂停(uid):
+    r1 = client.post("/api/v1/fin/projects", json={"tier": "play"}, headers={"x-test-user": uid})
+    old_id = r1.json()["project"]["project_id"]
+
+    r2 = client.post("/api/v1/fin/projects/new",
+                     json={"tier": "manage", "reason": "换成 10 万档重来"},
+                     headers={"x-test-user": uid})
+    assert r2.status_code == 200, r2.text
+    body = r2.json()
+    assert body["created"] is True
+    assert body["project"]["tier"] == "manage"
+    assert body["closed_project"]["project_id"] == old_id
+    assert body["closed_project"]["status"] == "closed"
+    assert body["closed_project"]["close_reason"] == "换成 10 万档重来"
+    assert body["closed_project"]["closed_at"] is not None
+
+    # 旧项目真的落成 closed（不是 paused —— 状态枚举里根本没有 paused）
+    r_old = client.get(f"/api/v1/fin/projects/{old_id}", headers={"x-test-user": uid})
+    assert r_old.status_code == 200
+    assert r_old.json()["project"]["status"] == "closed"
+    assert r_old.json()["project"]["close_reason"] == "换成 10 万档重来"
+
+    # 同一用户仍然只有一个 active
+    assert _count_active(uid) == 1
+
+
+def test_开新项目关停动作记入变更日志(uid):
+    r1 = client.post("/api/v1/fin/projects", json={"tier": "play"}, headers={"x-test-user": uid})
+    old_id = r1.json()["project"]["project_id"]
+    client.post("/api/v1/fin/projects/new",
+                json={"tier": "operate", "reason": "重开"}, headers={"x-test-user": uid})
+
+    entries = dict((f, (o, n)) for f, o, n in _change_log(old_id))
+    assert entries["status"] == ("active", "closed")
+    assert entries["close_reason"] == (None, "重开")
+
+
+def test_连续开新项目始终只有一个active(uid):
+    ids = []
+    for tier in ("play", "manage", "operate", "manage"):
+        r = client.post("/api/v1/fin/projects/new",
+                        json={"tier": tier, "reason": "再开一个"}, headers={"x-test-user": uid})
+        assert r.status_code == 200, r.text
+        ids.append(r.json()["project"]["project_id"])
+        assert _count_active(uid) == 1          # 每一步都只有一个 active
+    # 旧的那几个都还能读到，且都是 closed
+    for old in ids[:-1]:
+        got = client.get(f"/api/v1/fin/projects/{old}", headers={"x-test-user": uid})
+        assert got.status_code == 200
+        assert got.json()["project"]["status"] == "closed"
+
+
+def test_列表能看到全部项目含已关闭(uid):
+    r1 = client.post("/api/v1/fin/projects", json={"tier": "play"}, headers={"x-test-user": uid})
+    client.post("/api/v1/fin/projects/new",
+                json={"tier": "manage", "reason": "重开"}, headers={"x-test-user": uid})
+    r = client.get("/api/v1/fin/projects", headers={"x-test-user": uid})
+    items = r.json()["items"]
+    assert len(items) == 2
+    statuses = {i["project_id"]: i["status"] for i in items}
+    assert statuses[r1.json()["project"]["project_id"]] == "closed"
+    assert sorted(statuses.values()) == ["active", "closed"]
+
+
+def test_读别人的项目_404(uid):
+    r1 = client.post("/api/v1/fin/projects", json={"tier": "play"}, headers={"x-test-user": uid})
+    other = "u-" + uuid.uuid4().hex
+    r = client.get(f"/api/v1/fin/projects/{r1.json()['project']['project_id']}",
+                   headers={"x-test-user": other})
+    assert r.status_code == 404
+
+
+def test_开新项目_空原因_400(uid):
+    client.post("/api/v1/fin/projects", json={"tier": "play"}, headers={"x-test-user": uid})
+    r = client.post("/api/v1/fin/projects/new",
+                    json={"tier": "play", "reason": "  "}, headers={"x-test-user": uid})
+    assert r.status_code == 400
+    assert _count_active(uid) == 1

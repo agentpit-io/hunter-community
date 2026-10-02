@@ -142,6 +142,22 @@ def fail(cur, job_id: str, checkpoint: Optional[dict] = None) -> dict:
     return _transition(cur, job_id, FAILED, checkpoint=checkpoint)
 
 
+def set_checkpoint(cur, job_id: str, checkpoint: dict) -> dict:
+    """只写业务检查点，**不动状态**（`01方案 §11.2`：长计算中断按检查点恢复）。
+
+    与 `_transition` 分开：状态迁移有它的状态机，检查点写入与状态无关 ——
+    RUNNING 的任务要能一边跑一边更新「跑到哪一步了」。
+    """
+    row = get(cur, job_id)
+    if not row:
+        raise LookupError(f"任务不存在：{job_id}")
+    cur.execute(
+        "UPDATE fin_job SET checkpoint = %s, updated_at = now() WHERE job_id = %s RETURNING *",
+        (psycopg2.extras.Json(checkpoint or {}), job_id),
+    )
+    return cur.fetchone()
+
+
 def request_cancel(cur, job_id: str) -> dict:
     """请求取消。已经终态的任务返回原样（取消一个已完成的任务不是错误）。"""
     row = get(cur, job_id)

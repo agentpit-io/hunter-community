@@ -29,6 +29,13 @@ class CreateProjectIn(BaseModel):
     tier: str
 
 
+class NewProjectIn(BaseModel):
+    """开新项目（M-16）。`reason` 只用于关停留痕，不参与任何计算。"""
+
+    tier: str
+    reason: str = "user_opened_new"
+
+
 def _require_user(request: Request) -> str:
     uid = getattr(request.state, "user_id", None)
     if not uid:
@@ -59,6 +66,36 @@ async def open_project(body: CreateProjectIn, request: Request):
     return {"ok": True, **result}
 
 
+@router.post("/v1/fin/projects/new")
+async def open_new_project(body: NewProjectIn, request: Request):
+    """**开新项目**（M-16）：先关闭当前项目，再开一个新的。
+
+    与 `POST /v1/fin/projects` 的区别是**不幂等**：那个是「开户」（已有就返回现成的），
+    这个是「换一段账本」——旧项目落 `status='closed'` + `closed_at` + `close_reason`，
+    动作记进 `fin_param_change_log`；旧账本 / 旧成交 / 旧报告原样保留、可回看。
+
+    同一用户任何时刻只有一个 `active` 项目（`fin_project_one_active` 部分唯一索引）。
+    """
+    uid = _require_user(request)
+    if not (body.reason or "").strip():
+        raise HTTPException(status_code=400, detail="close_reason 不能为空")
+    try:
+        result = store.open_new_project(uid, body.tier, reason=body.reason.strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, **result}
+
+
+@router.get("/v1/fin/projects")
+async def list_projects(request: Request):
+    """该用户**全部**项目（进行中 + 已关闭）。
+
+    开新项目之后，旧的那一段从这里仍然看得到 —— 这是「旧账本可回看」的读入口。
+    """
+    uid = _require_user(request)
+    return {"items": store.list_projects(uid)}
+
+
 @router.get("/v1/fin/projects/current")
 async def current_project(request: Request):
     """当前项目 + 参数；没有进行中的项目时 `project` 为 null（不是 404）。"""
@@ -67,3 +104,13 @@ async def current_project(request: Request):
     if not current:
         return {"project": None, "param": None, "tier_template": None}
     return current
+
+
+@router.get("/v1/fin/projects/{project_id}")
+async def get_project(project_id: str, request: Request):
+    """读一个项目（**含已关闭**）。不属于当前用户 → 404（不泄露存在性）。"""
+    uid = _require_user(request)
+    found = store.get_project(uid, project_id)
+    if not found:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    return found

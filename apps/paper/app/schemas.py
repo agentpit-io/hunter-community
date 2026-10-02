@@ -124,6 +124,12 @@ class JobSucceedIn(BaseModel):
     checkpoint: Optional[dict[str, Any]] = None
 
 
+class CheckpointIn(BaseModel):
+    """只写业务检查点，不改状态（`01方案 §11.2` 长计算中断按检查点恢复）。"""
+
+    checkpoint: dict[str, Any] = Field(default_factory=dict)
+
+
 class ExpireIn(BaseModel):
     """收盘撤单 / 过期撤单。`reason='close'` 撤当日全部挂单，`'validity'` 只撤过期的。"""
 
