@@ -46,6 +46,18 @@ services:
       # 密钥卷照旧(它不是仓库文件,默认文件里也有)
       - hunter_secrets:/opt/hunter-secrets
 
+  # 智能炒股 · Paper Service · 本地构建 + 源码 bind mount（改完 restart 即生效）。
+  # 上下文是 apps/paper（自包含，不依赖仓库其他目录），与默认文件里的镜像一致。
+  # 默认文件把它放在 `fin` profile 下，这里也一样（profiles 会合并，不会被清掉）：
+  #   docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile fin up -d paper
+  paper:
+    image: hunter-community-paper:dev
+    build:
+      context: ./apps/paper
+      dockerfile: Dockerfile
+    volumes:
+      - ./apps/paper/app:/app/app:ro
+
   web:
     image: hunter-community-web:dev
     build:
