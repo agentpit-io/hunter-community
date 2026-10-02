@@ -21,6 +21,41 @@ def _require_project(cur, project_id: str) -> dict:
     return project
 
 
+@router.get("/api/v1/projects")
+def list_projects(status: str = "active", limit: int = 500) -> dict:
+    """按状态列项目。**M4 的时点工作流靠它找「今天要为哪些项目干活」**。
+
+    `status` 只认 `active` / `closed`（其它值一律当 `active`，不做花式过滤）。
+    """
+    want = status if status in ("active", "closed") else "active"
+    with db.cursor() as cur:
+        cur.execute(
+            """
+            SELECT project_id, user_id, tier, status, initial_capital, currency,
+                   market_scope, version, run_mode, opened_at, closed_at, close_reason
+              FROM fin_project
+             WHERE status = %s
+             ORDER BY opened_at DESC
+             LIMIT %s
+            """,
+            (want, limit),
+        )
+        return {"items": cur.fetchall(), "status": want}
+
+
+@router.post("/api/v1/projects/{project_id}/confirm-t1")
+def confirm_t1(project_id: str) -> dict:
+    """T+1 日切：把买入的持仓转为可卖。**每个交易日开盘前**由时点工作流调用。
+
+    排在 `preopen`（09:15）：那时没有挂单（昨天的已在昨天收盘撤掉），
+    日切不会影响任何在途占用（`M3 报告 · 遗留 5`）。
+    """
+    with db.cursor(commit=True) as cur:
+        _require_project(cur, project_id)
+        changed = ledger.confirm_t1(cur, project_id)
+    return {"project_id": project_id, "positions_made_sellable": changed}
+
+
 @router.get("/api/v1/projects/{project_id}")
 def get_project(project_id: str) -> dict:
     with db.cursor() as cur:

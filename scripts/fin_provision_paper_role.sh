@@ -38,8 +38,12 @@ PG_USER="${PG_USER:-hunter}"
 PG_DB="${PG_DB:-hunter}"
 
 echo "[fin] 给 fin_paper_rw 设置密码（库=${PG_DB} · 用户=${PG_USER}）"
+# ⚠️ psql 的 `-v` 变量在 `-c` 里**不做替换**（M4 实测：`-c "... :'pw'"` 报
+#    `syntax error at or near ":"`，一次性 provision 直接失败）。要走 stdin。
+#    这里用 heredoc 把 SQL 喂给 psql，`:'pw'` 才会被替换成带引号的字面量。
 docker compose exec -T postgres \
-    psql -U "$PG_USER" -d "$PG_DB" -v ON_ERROR_STOP=1 -v pw="$FIN_PAPER_PASSWORD" \
-    -c "ALTER ROLE fin_paper_rw WITH LOGIN PASSWORD :'pw';"
+    psql -U "$PG_USER" -d "$PG_DB" -v ON_ERROR_STOP=1 -v pw="$FIN_PAPER_PASSWORD" <<'SQL'
+ALTER ROLE fin_paper_rw WITH LOGIN PASSWORD :'pw';
+SQL
 
 echo "[fin] 完成。起服务： docker compose --profile fin up -d paper"

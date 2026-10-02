@@ -58,6 +58,17 @@ services:
     volumes:
       - ./apps/paper/app:/app/app:ro
 
+  # 智能炒股 · fin-worker · 本地构建 + 源码 bind mount（改完 restart 即生效）。
+  # 上下文是 apps/fin-worker（自包含）。与 paper 一样在 `fin` profile 下：
+  #   docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile fin up -d fin-worker
+  fin-worker:
+    image: hunter-community-fin-worker:dev
+    build:
+      context: ./apps/fin-worker
+      dockerfile: Dockerfile
+    volumes:
+      - ./apps/fin-worker/app:/app/app:ro
+
   web:
     image: hunter-community-web:dev
     build:

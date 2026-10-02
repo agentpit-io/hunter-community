@@ -10,8 +10,6 @@ from app.services.collector import start_collector, stop_collector
 from app.services.database import init_db, get_stocks
 from app.services.finance_data_client import register_stocks
 from app.services import signal_monitor
-from app.services.data import klines_etl
-from datetime import datetime, timezone, timedelta
 import asyncio
 import os
 
@@ -39,61 +37,20 @@ if not _HUNTER_API_KEY_CONFIGURED:
 _signal_task = None
 _gm_alert_task = None
 _backtest_task = None
-_klines_etl_task = None
-
-# 东八区 —— A 股/港股收盘 + 美股次日凌晨的触发窗口都按 CST 算
-CST = timezone(timedelta(hours=8))
-
-
-async def _klines_etl_loop():
-    """每 10 min 检查一次 · 在收盘后的触发窗口内跑 klines_etl.
-
-    ⚠ 适配说明:klines_etl.py(小王 bc19dc0)对外只暴露同步的
-    ``run_market(market=...)`` 和 ``health()``,并**没有** ``daily_etl`` /
-    ``target_date`` —— run_market 每次直接从三源(腾讯/akshare/新浪)拉最近
-    MAX_BARS(800)根日线并 UPSERT,天然覆盖当日最新一根,所以不需要按日期取。
-    该文件属小王代码,此处只 import 不改,故按其真实签名调用。
-
-    run_market 是阻塞函数(逐只 sleep + 网络 IO),放线程里跑,别堵事件循环。
-    """
-    _last_trigger = {}  # 防止同一触发窗口内重复跑(键: 市场 → 日期)
-    while True:
-        try:
-            now = datetime.now(CST)
-            hour_min = now.hour * 60 + now.minute
-            weekday = now.weekday()  # 0-6 · 中国节假日暂不判断(P2)
-            today = now.date()
-
-            is_trading_day = weekday < 5
-
-            # 15:25-15:40 CST → A 股当日 ETL
-            if is_trading_day and 925 <= hour_min <= 940 and _last_trigger.get('cn') != today:
-                await asyncio.to_thread(klines_etl.run_market, 'cn')
-                _last_trigger['cn'] = today
-
-            # 16:40-16:55 CST → 港股当日 ETL
-            elif is_trading_day and 1000 <= hour_min <= 1015 and _last_trigger.get('hk') != today:
-                await asyncio.to_thread(klines_etl.run_market, 'hk')
-                _last_trigger['hk'] = today
-
-            # 03:25-03:40 CST 次日 → 美股(dedup 键按前一交易日算)
-            elif 205 <= hour_min <= 220:
-                yesterday = today - timedelta(days=1)
-                if _last_trigger.get('us') != yesterday:
-                    await asyncio.to_thread(klines_etl.run_market, 'us')
-                    _last_trigger['us'] = yesterday
-
-            await asyncio.sleep(600)  # 10 min 检查一次
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("_klines_etl_loop 错误 · 60s 后重试")
-            await asyncio.sleep(60)
+# ⚠️ 这里原来有一个 `_klines_etl_loop()`（每 10 分钟检查一次触发窗口的进程内
+# asyncio 循环）。**M4 已删除**：`01方案 §5.3`「上层调度只有一个权威」——
+# 六个交易时点与「什么时候拉 K 线」都归 Temporal（容器 `temporal` +
+# `apps/fin-worker`）。取数的实现函数 `klines_etl.run_market` 一个字符没改，
+# 由 `POST /api/internal/etl/run-market`（`routers/internal_etl.py`）暴露给
+# Temporal 工作流调用。
+#
+# **不要再把它加回来，也不许在别处补一条兜底 cron / 定时器** ——
+# 两套调度器同时存在，就会出现「都以为自己是权威」，而这不会有任何报错。
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _signal_task, _gm_alert_task, _backtest_task, _klines_etl_task
+    global _signal_task, _gm_alert_task, _backtest_task
 
     # ─── Business tables · always ensure (idempotent · no side effects) ───
     try:
@@ -172,12 +129,8 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("[backtest] scheduler 启动失败(非致命): {}", e)
 
-    try:
-        _klines_etl_task = asyncio.create_task(_klines_etl_loop())
-        logger.info("[klines.etl] 每日 ETL loop 已挂载(A股 15:30 · 港股 17:00 · 美股次日 03:30 CST)")
-    except Exception as e:
-        logger.warning("[klines.etl] loop 挂载失败(非致命): {}", e)
-
+    # K 线 ETL 的触发已交给 Temporal（见 main.py 顶部那段说明）。
+    # 这里不再挂任何进程内定时器。
     # 魔法筛选器:官方示例「最近一次命中的日子」定时预热(2026-09-16 用户要求)。只读自家日线,
     # 没下载过日线的实例直接跳过;放在 MINIMAL_BOOT 之前,生产开着那个开关
     try:
@@ -256,9 +209,6 @@ async def lifespan(app: FastAPI):
         _gm_alert_task.cancel()
     if _backtest_task:
         _backtest_task.cancel()
-    if _klines_etl_task:
-        _klines_etl_task.cancel()
-        await asyncio.gather(_klines_etl_task, return_exceptions=True)
 
 # FastAPI Swagger + OpenAPI closed by default · they leak full API surface.
 # Ops who want them can set HUNTER_ENABLE_DOCS=1 (behind their own auth layer).
@@ -325,6 +275,10 @@ from app.routers import research_assistant
 app.include_router(research_assistant.router, prefix="/api")
 from app.routers import admin_etl
 app.include_router(admin_etl.router, prefix="/api")
+# M4：K 线 ETL 的触发与交易日历改由 Temporal（fin-worker）经内网端点调用。
+# `01方案 §5.3`「上层调度只有一个权威」——进程内 ETL 循环已删除。
+from app.routers import internal_etl
+app.include_router(internal_etl.router, prefix="/api")
 
 # P4 · Per-user SaaS accelerator config
 from app.routers import settings as settings_router

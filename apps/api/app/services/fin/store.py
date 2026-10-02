@@ -102,20 +102,84 @@ def get_current(user_id: str) -> Optional[dict[str, Any]]:
         conn.close()
 
 
-def create_project(user_id: str, tier: str) -> dict[str, Any]:
-    """开户：按档位写死本金与整套参数，建项目。
+def _insert_project(cur, user_id: str, tier: str) -> tuple[dict[str, Any], Optional[dict[str, Any]]]:
+    """往库里插一个项目 + 一套参数（**不提交**，由调用方决定事务边界）。"""
+    template = tiers.build_template(tier)
 
-    返回 `{"project", "param", "tier_template", "created"}`；已存在 active 项目时
-    `created=False` 且返回的是那一份（**不新建**）。
+    # 账户：一个用户一个账户，项目是它的「一段」
+    account_id = "acct_" + uuid.uuid4().hex[:24]
+    cur.execute(
+        """
+        INSERT INTO fin_account (account_id, user_id, locked_at)
+        VALUES (%s, %s, now())
+        ON CONFLICT (user_id) DO NOTHING
+        """,
+        (account_id, user_id),
+    )
+
+    # 项目：本金由档位写死，写入后不可改
+    project_id = "prj_" + uuid.uuid4().hex[:24]
+    cur.execute(
+        """
+        INSERT INTO fin_project (project_id, user_id, tier, initial_capital)
+        VALUES (%s, %s, %s, %s)
+        RETURNING project_id, user_id, tier, status, initial_capital, currency,
+                  market_scope, version, run_mode, opened_at, closed_at, close_reason
+        """,
+        (project_id, user_id, tier, template["initial_capital"]),
+    )
+    project = _row_to_dict(cur.fetchone())
+
+    # 参数：整套从档位模板写死。params_locked_at 留空 —— 一期没有成交，
+    # 「首次成交时刻」还没发生（`03 §九`）；档位的不可改由「改档位只能开新项目」保证。
+    cur.execute(
+        """
+        INSERT INTO fin_param (
+          project_id, board_flags, sector_prefs,
+          liquidity_min_amount, liquidity_max_participation, strategies,
+          hold_days_max, stop_loss_pct, take_profit_pct,
+          max_positions, max_position_pct, min_order_amount,
+          daily_max_new, daily_max_orders,
+          daily_loss_halt_pct, account_drawdown_halt_pct,
+          params_locked_at
+        ) VALUES (
+          %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL
+        )
+        """,
+        (
+            project_id,
+            psycopg2.extras.Json(template["board_flags"]),
+            psycopg2.extras.Json(template["sector_prefs"]),
+            template["liquidity_min_amount"],
+            template["liquidity_max_participation"],
+            psycopg2.extras.Json(template["strategies"]),
+            template["hold_days_max"],
+            template["stop_loss_pct"],
+            template["take_profit_pct"],
+            template["max_positions"],
+            template["max_position_pct"],
+            template["min_order_amount"],
+            template["daily_max_new"],
+            template["daily_max_orders"],
+            template["daily_loss_halt_pct"],
+            template["account_drawdown_halt_pct"],
+        ),
+    )
+    return project, _param_row(cur, project_id)
+
+
+def create_project(user_id: str, tier: str) -> dict[str, Any]:
+    """开户（幂等）：已存在 active 项目时**返回现成的那个**，不新建。
+
+    这是向导第六步「提交 → 重复点」的路径 —— 重复提交不该给用户一个红色报错。
+    **要换档位 / 开新账本走 `open_new_project()`**（M-16：先关旧的，再开新的）。
     """
     if tier not in tiers.TIER_ORDER:
         raise ValueError(f"未知档位：{tier!r}（可选 {', '.join(tiers.TIER_ORDER)}）")
 
-    template = tiers.build_template(tier)
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            # 1) 已有进行中项目 → 直接返回（幂等）
             existing = _project_row(cur, user_id)
             if existing:
                 param = _param_row(cur, existing["project_id"])
@@ -126,67 +190,8 @@ def create_project(user_id: str, tier: str) -> dict[str, Any]:
                     "tier_template": tiers.build_template(existing["tier"]),
                     "created": False,
                 }
-
-            # 2) 账户：一个用户一个账户，项目是它的「一段」
-            account_id = "acct_" + uuid.uuid4().hex[:24]
-            cur.execute(
-                """
-                INSERT INTO fin_account (account_id, user_id, locked_at)
-                VALUES (%s, %s, now())
-                ON CONFLICT (user_id) DO NOTHING
-                """,
-                (account_id, user_id),
-            )
-
-            # 3) 项目：本金由档位写死，写入后不可改
-            project_id = "prj_" + uuid.uuid4().hex[:24]
-            cur.execute(
-                """
-                INSERT INTO fin_project (project_id, user_id, tier, initial_capital)
-                VALUES (%s, %s, %s, %s)
-                RETURNING project_id, user_id, tier, status, initial_capital, currency,
-                          market_scope, version, run_mode, opened_at, closed_at, close_reason
-                """,
-                (project_id, user_id, tier, template["initial_capital"]),
-            )
-            project = _row_to_dict(cur.fetchone())
-
-            # 4) 参数：整套从档位模板写死。params_locked_at 留空 —— 一期没有成交，
-            #    「首次成交时刻」还没发生（`03 §九`）；档位的不可改由 fin_project 无更新路径保证。
-            cur.execute(
-                """
-                INSERT INTO fin_param (
-                  project_id, board_flags, sector_prefs,
-                  liquidity_min_amount, liquidity_max_participation, strategies,
-                  hold_days_max, stop_loss_pct, take_profit_pct,
-                  max_positions, max_position_pct, min_order_amount,
-                  daily_max_new, daily_max_orders,
-                  daily_loss_halt_pct, account_drawdown_halt_pct,
-                  params_locked_at
-                ) VALUES (
-                  %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL
-                )
-                """,
-                (
-                    project_id,
-                    psycopg2.extras.Json(template["board_flags"]),
-                    psycopg2.extras.Json(template["sector_prefs"]),
-                    template["liquidity_min_amount"],
-                    template["liquidity_max_participation"],
-                    psycopg2.extras.Json(template["strategies"]),
-                    template["hold_days_max"],
-                    template["stop_loss_pct"],
-                    template["take_profit_pct"],
-                    template["max_positions"],
-                    template["max_position_pct"],
-                    template["min_order_amount"],
-                    template["daily_max_new"],
-                    template["daily_max_orders"],
-                    template["daily_loss_halt_pct"],
-                    template["account_drawdown_halt_pct"],
-                ),
-            )
-            param = _param_row(cur, project_id)
+            project, param = _insert_project(cur, user_id, tier)
+            template = tiers.build_template(tier)
         conn.commit()
         return {"project": project, "param": param, "tier_template": template, "created": True}
     except psycopg2.errors.UniqueViolation:
@@ -197,5 +202,130 @@ def create_project(user_id: str, tier: str) -> dict[str, Any]:
             current["created"] = False
             return current
         raise
+    finally:
+        conn.close()
+
+
+def open_new_project(user_id: str, tier: str, reason: str = "user_opened_new") -> dict[str, Any]:
+    """**开新项目**（`05 §3.2` M-16）。
+
+    用户原话口径：**先关闭当前项目，再开新的**。所以这里是「关旧 + 开新」的
+    **一个事务**，不是「暂停」——`status='closed'` + `closed_at` + `close_reason` 三样都写，
+    并把关停动作记进 `fin_param_change_log`（只追加，不给改）。
+
+    旧账本、旧成交、旧报告**一行都不动**（`fin_*` 的追加表没有 DELETE/UPDATE），
+    所以开新项目之后旧的那一段仍然可读可回看。
+
+    `fin_project_one_active` 部分唯一索引照旧生效：同一用户任何时刻只能有一个
+    `status='active'`。关停在同事务里先做，所以新插的那行不会撞索引；真撞上
+    （并发开新项目）会让整个事务回滚 —— 于是**不会出现两个 active**。
+    """
+    if tier not in tiers.TIER_ORDER:
+        raise ValueError(f"未知档位：{tier!r}（可选 {', '.join(tiers.TIER_ORDER)}）")
+
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            closed = None
+            existing = _project_row(cur, user_id)
+            if existing:
+                cur.execute(
+                    """
+                    UPDATE fin_project
+                       SET status = 'closed', closed_at = now(), close_reason = %s
+                     WHERE project_id = %s
+                     RETURNING project_id, user_id, tier, status, initial_capital, currency,
+                               market_scope, version, run_mode, opened_at, closed_at, close_reason
+                    """,
+                    (reason, existing["project_id"]),
+                )
+                closed = _row_to_dict(cur.fetchone())
+                # 关停动作进变更日志（`05 §3.2` M-16 验收项：记入变更日志）
+                for field, old, new in (
+                    ("status", "active", "closed"),
+                    ("close_reason", None, reason),
+                ):
+                    cur.execute(
+                        """
+                        INSERT INTO fin_param_change_log (project_id, actor, field, old_value, new_value)
+                        VALUES (%s, %s, %s, %s, %s)
+                        """,
+                        (existing["project_id"], user_id, field,
+                         psycopg2.extras.Json(old), psycopg2.extras.Json(new)),
+                    )
+
+            project, param = _insert_project(cur, user_id, tier)
+            # 新项目的开立也要留痕（同一条日志表）
+            cur.execute(
+                """
+                INSERT INTO fin_param_change_log (project_id, actor, field, old_value, new_value)
+                VALUES (%s, %s, 'opened', NULL, %s)
+                """,
+                (project["project_id"], user_id, psycopg2.extras.Json({"tier": tier})),
+            )
+            template = tiers.build_template(tier)
+        conn.commit()
+        return {
+            "project": project,
+            "param": param,
+            "tier_template": template,
+            "created": True,
+            "closed_project": closed,
+        }
+    finally:
+        conn.close()
+
+
+def list_projects(user_id: str) -> list[dict[str, Any]]:
+    """该用户的**全部**项目（进行中 + 已关闭），按开立时间倒序。
+
+    开新项目之后旧账本仍要可回看 —— 这就是那个「回看」的读入口。
+    """
+    if not user_id:
+        return []
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT project_id, user_id, tier, status, initial_capital, currency,
+                       market_scope, version, run_mode, opened_at, closed_at, close_reason
+                  FROM fin_project
+                 WHERE user_id = %s
+                 ORDER BY opened_at DESC
+                """,
+                (user_id,),
+            )
+            rows = [_row_to_dict(r) for r in cur.fetchall()]
+        conn.rollback()
+        return rows
+    finally:
+        conn.close()
+
+
+def get_project(user_id: str, project_id: str) -> Optional[dict[str, Any]]:
+    """读**任意**一个属于该用户的项目（含已关闭）。不属于该用户 → None。"""
+    if not user_id or not project_id:
+        return None
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT project_id, user_id, tier, status, initial_capital, currency,
+                       market_scope, version, run_mode, opened_at, closed_at, close_reason
+                  FROM fin_project
+                 WHERE project_id = %s AND user_id = %s
+                """,
+                (project_id, user_id),
+            )
+            row = cur.fetchone()
+            if not row:
+                conn.rollback()
+                return None
+            project = _row_to_dict(row)
+            param = _param_row(cur, project_id)
+        conn.rollback()
+        return {"project": project, "param": param}
     finally:
         conn.close()

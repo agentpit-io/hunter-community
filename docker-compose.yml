@@ -267,6 +267,100 @@ services:
     ports:
       - "127.0.0.1:${PAPER_HOST_PORT:-8200}:8000"
 
+  # ── 智能炒股 · Temporal 服务端（唯一的上层调度权威）──────────────────────
+  #
+  # `01方案 §5.3`「上层调度只有一个权威」。六个交易时点、以及「什么时候拉 K 线」
+  # 都归它（`08 §1.3`）。**没有第二条 cron 兜底** —— 留了就是两套调度都以为自己是权威。
+  #
+  # 版本：`08 §3.1` 写的是 `1.25`，实测镜像 tag 就是 `1.25`（可拉取）。
+  # `auto-setup` 会在同一个 postgres 实例上自建 `temporal` 与 `temporal_visibility`
+  # 两个库；**不碰 hunter_fin、不碰应用库**（`08 §四`：工作流状态不代替业务账本）。
+  #
+  # 端口只绑 127.0.0.1：gRPC 只在开发机/容器网内可达。
+  temporal:
+    image: temporalio/auto-setup:1.25
+    <<: *restart
+    profiles: ["fin"]
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-hunter}
+      POSTGRES_PWD: ${POSTGRES_PASSWORD:-hunter}
+      POSTGRES_SEEDS: postgres
+      DBNAME: temporal
+      VISIBILITY_DBNAME: temporal_visibility
+    ports:
+      - "127.0.0.1:${TEMPORAL_HOST_PORT:-7233}:7233"
+    healthcheck:
+      # 镜像自带 `temporal` CLI（实测 /usr/local/bin/temporal）。
+      # ⚠️ 地址必须是**服务名**，不能写 127.0.0.1 —— temporal-server 只绑容器网卡
+      #    （实测 `ss` 显示 172.x.x.x:7233，不监听 loopback），写 127.0.0.1 会
+      #    一直 connection refused、容器永远 unhealthy。
+      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "temporal:7233"]
+      interval: 10s
+      timeout: 5s
+      start_period: 40s
+      retries: 12
+
+  # UI 是**另一个镜像** —— auto-setup 只提供 7233（gRPC）。
+  # 排障工具，只绑本机，不对公网开放。
+  # 版本：`08 §3.1` 写 `2.34`，实测 Docker Hub 上该 tag 叫 `2.34.0`（按 2.34.0 钉死）。
+  temporal-ui:
+    image: temporalio/ui:2.34.0
+    <<: *restart
+    profiles: ["fin"]
+    depends_on:
+      temporal: { condition: service_started }
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:${TEMPORAL_UI_HOST_PORT:-8233}
+    ports:
+      - "127.0.0.1:${TEMPORAL_UI_HOST_PORT:-8233}:8080"
+    healthcheck:
+      # 上游 UI 镜像自带 wget（Alpine），但**没有** HEALTHCHECK —— 补一个，
+      # 否则 `docker compose ps` 里它永远只有 "Up"，看不出是不是真活着。
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+  #
+  # `08 §3.3`：只能通过 `paper` 的 HTTP 接口改账本，**不直连 hunter_fin 写**
+  # （`01方案 §7.4` / §11.3：推理区不能绕过执行区）。
+  #
+  # ⚠️ 与 `08 §3.1` 的一处**有意偏离**：这里**不注入 `DATABASE_URL`**。
+  #    方案示例给 fin-worker 配了账本库连接串，但这条连接串正是验收项
+  #    「fin-worker 没有 hunter_fin 的写连接」要防的东西 —— 给它一条连接串，
+  #    然后靠「约定不写」来保证边界，就是把红线押在纪律上。M4 的选择是
+  #    **依赖里根本没有 DB 驱动**（见 requirements.txt），写账本只有一个入口：
+  #    `PAPER_BASE_URL`。理由与 grep 证据写在 `docs/开发文档/M4-成果与测试报告.md`。
+  fin-worker:
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-fin-worker:${FIN_TAG:-latest}
+    <<: *restart
+    profiles: ["fin"]
+    depends_on:
+      paper: { condition: service_started }
+      temporal: { condition: service_started }
+    environment:
+      PAPER_BASE_URL: ${PAPER_BASE_URL:-http://paper:8000}
+      API_BASE_URL: ${FIN_WORKER_API_BASE_URL:-http://api:8000}
+      TEMPORAL_ADDRESS: ${TEMPORAL_ADDRESS:-temporal:7233}
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
+      TEMPORAL_TASK_QUEUE: ${TEMPORAL_TASK_QUEUE:-fin-trading}
+      HUNTER_INTERNAL_KEY: ${HUNTER_INTERNAL_KEY:-}
+      FIN_WORKER_HTTP_PORT: "8300"
+      # 一期固定示例策略（管道跑通优先，`08 §二`）
+      FIN_SAMPLE_CODE: ${FIN_SAMPLE_CODE:-601398}
+      FIN_SAMPLE_STRATEGY_KEY: ${FIN_SAMPLE_STRATEGY_KEY:-sample-fixed}
+      FIN_SAMPLE_STRATEGY_VERSION: ${FIN_SAMPLE_STRATEGY_VERSION:-1.0}
+      FIN_INTENT_TTL_SECONDS: ${FIN_INTENT_TTL_SECONDS:-1800}
+      FIN_SCHEDULES_ENABLED: ${FIN_SCHEDULES_ENABLED:-1}
+    ports:
+      # 内部 HTTP（给 api 触发用）。只绑本机，不对外。
+      - "127.0.0.1:${FIN_WORKER_HOST_PORT:-8300}:8300"
+
   web:
     image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-web:${HUNTER_VERSION:-1.2.3}
     <<: *restart

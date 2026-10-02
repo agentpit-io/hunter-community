@@ -58,7 +58,9 @@ uvicorn app.main:app --port 8000
 | POST | `/api/v1/orders/{order_id}/cancel` | 撤一张挂单并解冻 |
 | POST | `/api/v1/projects/{id}/orders/expire` | 收盘（`close`）或过期（`validity`）批量撤单解冻 |
 | POST | `/api/v1/projects/{id}/orders/match-open` | 拿新快照再撮一遍挂单（M4 的时点工作流调它） |
-| POST | `/api/v1/jobs` · `/jobs/{id}` · `/jobs/{id}/{running,succeed,fail,cancel}` | 长任务协议（`01方案 §10.4`） |
+| GET  | `/api/v1/projects?status=active\|closed` | 按状态列项目（M4 的时点工作流用它找「今天为哪些项目干活」） |
+| POST | `/api/v1/projects/{id}/confirm-t1` | T+1 日切：把买入的持仓转为可卖（`preopen` 时点调） |
+| POST | `/api/v1/jobs` · `/jobs/{id}` · `/jobs/{id}/{running,checkpoint,succeed,fail,cancel}` | 长任务协议（`01方案 §10.4`） |
 
 **没有** `PUT/PATCH/DELETE` 指向成交、流水、持仓、估值、对账的任何一条。
 `PUT` 只用在参考数据的 upsert 上（标的 / 日历 / 费率 / 执行模型——它们不是账本）。

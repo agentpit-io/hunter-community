@@ -9,7 +9,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from app import db, jobs
-from app.schemas import JobIn, JobSucceedIn
+from app.schemas import CheckpointIn, JobIn, JobSucceedIn
 
 router = APIRouter(tags=["jobs"])
 
@@ -39,6 +39,16 @@ def get_job(job_id: str) -> dict:
 def list_jobs(project_id: str, limit: int = 100) -> dict:
     with db.cursor() as cur:
         return {"items": jobs.list_for_project(cur, project_id, limit)}
+
+
+@router.post("/api/v1/jobs/{job_id}/checkpoint")
+def set_checkpoint(job_id: str, body: CheckpointIn) -> dict:
+    """只写业务检查点，不改状态（M4 的时点工作流用它记「跑到哪一步」）。"""
+    try:
+        with db.cursor(commit=True) as cur:
+            return jobs.set_checkpoint(cur, job_id, body.checkpoint)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
 
 
 @router.post("/api/v1/jobs/{job_id}/cancel")
