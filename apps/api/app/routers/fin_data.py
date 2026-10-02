@@ -5,7 +5,7 @@
 | 路径 | 谁调 | 干什么 |
 |---|---|---|
 | `GET /internal/fin/quote/{code}` | paper 的行情适配层 | 统一行情结构（最新价 + 买一/卖一盘口 + 数据源时刻） |
-| `GET /internal/fin/instruments` | fin-worker 的同步任务 | 从 `company_master` / `stock_universe` 解析涨跌停 / ST 元数据 |
+| `GET /internal/fin/instruments` | fin-worker 的同步任务 | 解析涨跌停（代码形态）/ ST（腾讯通道简称）元数据 |
 
 鉴权与 `/api/internal/*` 其余端点同一把口令（`X-Hunter-Internal-Key`）。
 
@@ -109,9 +109,25 @@ def get_instruments(
             conn.close()
 
     targets = wanted or sorted(master.keys())[:limit]
+
+    # ST 判定必须走能给出**真实证券简称**的通道（拍板 2026-10-02 §七）：
+    # hunter 网关的 `name` 就是代码本身、`company_master` 只有 300 行，两者都
+    # 判不出 ST。这里统一从腾讯 `qt.gtimg.cn` 批量取简称（免 key、全市场覆盖），
+    # 取不到的那只 `available=false`（零容忍，绝不猜）。
+    # 取数失败不阻断整条链路：拿不到简称的标的自然落到「拒绝该标的」。
+    quote_names: dict[str, str] = {}
+    if targets:
+        try:
+            quote_names = fin_data.tencent_names(targets)
+        except fin_data.TencentWafBlocked as exc:
+            logger.warning("[internal.fin] ST 名称通道被 WAF 拦下，本批按「判不出」处理：{}", exc)
+
     items = [
         fin_data.instrument(code, name=(master.get(code) or {}).get("name"),
-                            board=(master.get(code) or {}).get("board"))
+                            board=(master.get(code) or {}).get("board"),
+                            st_name=quote_names.get(code),
+                            require_st_name=True)
         for code in targets
     ]
-    return {"market": market, "items": items, "source_count": len(master)}
+    return {"market": market, "items": items, "source_count": len(master),
+            "st_name_source": "tencent-qt"}

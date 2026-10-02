@@ -18,4 +18,4 @@ The first visit opens a five-step setup wizard: enter the setup token, run the e
 - The setup token is generated during installation and can be read at any time under App - Parameters.
 - The app runs in multi-user mode; the first account you register becomes the administrator.
 - Only the web service publishes a host port (3180 by default). Put a reverse proxy with HTTPS in front of it.
-- Minimum 2 vCPU / 2 GB RAM, 2 vCPU / 4 GB recommended, 10 GB or more free disk.
+- Minimum 2 vCPU / 3 GB RAM, 2 vCPU / 6 GB recommended, 10 GB or more free disk.

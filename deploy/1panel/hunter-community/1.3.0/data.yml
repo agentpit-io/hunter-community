@@ -7,9 +7,12 @@
 #  · 密钥类必须 type: password;
 #  · 每个 label 要覆盖 appstore 全量语言集。
 #
-# ⚠️ 这里**故意没有** JWT_SECRET / HUNTER_INTERNAL_KEY 两个字段:它们由 api
-#    容器首启自动生成并写进 ./data/secrets/secrets.env,web 与 opencode 只读
-#    挂同一个目录读回来。做成表单项只会多出「三处填不一致 → 对话莫名 401」的坑。
+# ⚠️ 这里**故意没有** JWT_SECRET 字段:它由 api 容器首启自动生成并写进
+#    ./data/secrets/secrets.env,web 与 opencode 只读挂同一个目录读回来。
+#    做成表单项只会多出「多处填不一致 → 对话莫名 401」的坑。
+# ⚠️ HUNTER_INTERNAL_KEY 则**有**字段(见下):智能交易的 paper / fin-worker
+#    只认环境变量、不读密钥目录,所以这一把必须由表单给全五个服务。用户不用
+#    手填 —— 它是 random 字段。
 # ⚠️ 这里也**故意没有** HUNTER_SINGLE_USER:面板部署面向公网,必须是 0,
 #    在 compose 里写死。做成可改项等于给用户留一个「谁都能拿 admin token」的开关。
 additionalProperties:
@@ -174,3 +177,57 @@ additionalProperties:
         zh: "这些邮箱注册的账号直接具备管理员权限。留空则第一个注册的账号自动成为管理员。"
         zh-Hant: "這些信箱註冊的帳號直接具備管理員權限。留空則第一個註冊的帳號自動成為管理員。"
         en: "Accounts registered with these addresses get administrator rights. Leave it empty and the first registered account becomes the administrator."
+    # ── 智能交易 · 账本库运行期角色口令 ───────────────────────
+    # `0023_fin_core.sql` 建 `fin_paper_rw` 角色时故意不写密码(密码不进仓库),
+    # 由 fin-init 一次性服务在建出角色后 ALTER ROLE 设上 —— 这里必须给一个值。
+    - envKey: FIN_PAPER_PASSWORD
+      type: password
+      rule: paramCommon
+      default: change-me-on-install
+      random: true
+      required: true
+      edit: true
+      labelZh: 账本库角色口令
+      labelEn: Ledger Role Password
+      label:
+        en: Ledger Role Password
+        es-es: Contraseña del rol del libro mayor
+        fa: 'رمز عبور نقش دفتر کل'
+        ja: 台帳ロールのパスワード
+        ko: 원장 역할 비밀번호
+        ms: Kata Laluan Peranan Lejar
+        pt-br: Senha do perfil do razao
+        ru: Пароль роли реестра
+        tr: Defter Rolu Parolasi
+        zh-Hant: 帳本庫角色密碼
+        zh: 账本库角色口令
+      description:
+        zh: "智能交易的 paper 服务用这个口令以受限角色(只增不改)连账本库。由 fin-init 一次性服务在 api 迁移建出角色后设置;留空会让 paper 连不上库而反复重启,请保留自动生成的随机值。"
+        zh-Hant: "智能交易的 paper 服務以這個密碼用受限角色(只增不改)連線帳本庫。由 fin-init 一次性服務在 api 遷移建出角色後設定;留空會讓 paper 連不上庫而反覆重啟。"
+        en: "Paper service uses this to connect to the ledger DB as a restricted (append-only) role. A one-shot fin-init service sets it after the api migration creates the role; leaving it empty makes paper crash-loop."
+    # ── 智能交易 · 服务间共享口令 ─────────────────────────────
+    - envKey: HUNTER_INTERNAL_KEY
+      type: password
+      rule: paramCommon
+      default: change-me-on-install
+      random: true
+      required: true
+      edit: true
+      labelZh: 服务间共享口令
+      labelEn: Internal Shared Key
+      label:
+        en: Internal Shared Key
+        es-es: Clave interna compartida
+        fa: 'کلید مشترک داخلی'
+        ja: サービス間共有キー
+        ko: 서비스 간 공유 키
+        ms: Kunci Kongsi Dalaman
+        pt-br: Chave interna compartilhada
+        ru: Общий внутренний ключ
+        tr: Dahili Paylasilan Anahtar
+        zh-Hant: 服務間共用口令
+        zh: 服务间共享口令
+      description:
+        zh: "api / web / opencode / paper / fin-worker 五个服务共用的内部口令,用于 /api/internal/* 与智能交易链的鉴权。智能交易的 paper / fin-worker 不读密钥目录,只认环境变量,所以必须由表单给全五个服务。留空会让对话与账本链路一律 401,请保留自动生成的随机值。"
+        zh-Hant: "api / web / opencode / paper / fin-worker 五個服務共用的內部口令,用於 /api/internal/* 與智能交易鏈的鑑權。paper / fin-worker 不讀密鑰目錄,只認環境變數,所以必須由表單給全五個服務。"
+        en: "Shared internal key for api / web / opencode / paper / fin-worker, used to authorize /api/internal/* and the trading chain. paper / fin-worker only read env vars (not the secrets dir), so all five services get it from this form field."

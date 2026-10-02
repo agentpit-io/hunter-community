@@ -50,11 +50,11 @@ Measured on the full six-service stack (see the project's `R0` pre-study):
 
 | | |
 |---|---|
-| Idle | 1171 MB across all six containers |
+| Idle | 1171 MB across the six core containers (+~0.6 GB for the four trading services: paper / temporal / temporal-ui / fin-worker) |
 | Peak (deep analysis + a full-market scan, concurrently) | **1271 MB** |
-| Minimum | 2 vCPU / 2 GB |
-| Recommended | 2 vCPU / 4 GB |
-| Disk | ≥ 10 GB (images ~3.8 GB + data) |
+| Minimum | 2 vCPU / 3 GB |
+| Recommended | 2 vCPU / 6 GB |
+| Disk | ≥ 10 GB (images ~4 GB + data) |
 
 The single largest consumer is the `opencode` component at ~869 MB, and it is
 almost load-independent — that is resident usage, not a spike risk.

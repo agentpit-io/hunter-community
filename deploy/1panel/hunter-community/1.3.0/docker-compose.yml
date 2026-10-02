@@ -19,12 +19,23 @@
 #    (.github/workflows/renovate-app-version.sh)升级时取 `.services | keys | .[0]`
 #    的镜像标签,**拿它去重命名版本目录**。postgres 排第一的话,某次自动升级会把
 #    目录改成 `16-alpine`,整个应用的版本号就毁了。
+#
+# ── 智能交易(fin 链)· paper / temporal / temporal-ui / fin-worker / fin-init ──
+# 与仓库根 docker-compose.yml 的 `fin` profile 等价,面板场景默认常开:
+#   · temporal     智能交易链**唯一的上层调度权威**(六个交易时点 + 拉 K 线),
+#                  工作流状态存在 postgres 的 temporal 库,不碰业务账本。
+#   · paper        全栈唯一持有账本库运行期角色 fin_paper_rw 的服务;账本**只追加** ——
+#                  该角色在追加表上没有任何 UPDATE / DELETE,「唯一账本」是一条 GRANT。
+#   · fin-worker   推理区 → 执行区的桥,**不直连账本**,写账本只有 paper 的 HTTP 一个入口。
+#   · temporal-ui  排障面板,仅内网。
+#   · fin-init     一次性服务:等 api 迁移建出 fin_paper_rw 后给它设运行期口令,
+#                  paper 等它跑完才起(没有任何平台需要人工 provision)。
 
 services:
   # ── 前端 · 本应用唯一对外暴露的服务 ──────────────────────────
   # 它是主服务,所以用裸 ${CONTAINER_NAME};面板的「访问」按钮指向这里。
   web:
-    image: ghcr.io/agentpit-io/hunter-community-web:1.1.0
+    image: ghcr.io/agentpit-io/hunter-community-web:1.3.0
     container_name: ${CONTAINER_NAME}
     restart: always
     depends_on:
@@ -40,6 +51,8 @@ services:
       OPENCODE_SERVER_PASSWORD: ""
       # BFF 要回调 api 查会话归属;不传会 503 ownership_unavailable
       HERMES_API_URL: http://${CONTAINER_NAME}-api:8000
+      # 与 api / opencode / paper / fin-worker 同值(BFF 调 /api/internal/* 要用)
+      HUNTER_INTERNAL_KEY: ${HUNTER_INTERNAL_KEY}
     volumes:
       # 只读 · web 的 BFF 调 /api/internal/ocr/extract 要和 api 用同一把
       # HUNTER_INTERNAL_KEY,否则「上传图片没反应」(其实是 401)。
@@ -55,7 +68,7 @@ services:
   api:
     # **钉具体版本,别用 latest** —— 浮动标签意味着某次 pull 会无声换掉运行的
     # 代码,排查时连「什么时候变的」都查不出来。
-    image: ghcr.io/agentpit-io/hunter-community-api:1.1.0
+    image: ghcr.io/agentpit-io/hunter-community-api:1.3.0
     container_name: ${CONTAINER_NAME}-api
     restart: always
     depends_on:
@@ -68,11 +81,13 @@ services:
       HUNTER_MINIMAL_BOOT: "1"
       DATABASE_URL: postgresql://hunter:${POSTGRES_PASSWORD}@${CONTAINER_NAME}-postgres:5432/hunter
       REDIS_URL: redis://${CONTAINER_NAME}-redis:6379/0
-      # JWT_SECRET / HUNTER_INTERNAL_KEY **故意不在这里出现**。
-      # 留空(= 不注入)时 api 首启会各生成一把 64 位随机串写进
-      # ./data/secrets/secrets.env(属主 1001:1001 · 权限 640),
+      # JWT_SECRET **故意不在这里出现**:留空(= 不注入)时 api 首启会生成一把
+      # 64 位随机串写进 ./data/secrets/secrets.env(属主 1001:1001 · 权限 640),
       # web 与 opencode 只读挂同一个目录读回来 —— 三家同值靠的就是这个目录。
-      # 在表单里让用户填这两个值只会带来「三处填不一致 → 对话莫名 401」的坑。
+      # ⚠️ HUNTER_INTERNAL_KEY 则**显式注入**:智能交易的 paper / fin-worker 只认
+      #    环境变量、不读密钥卷,所以这一把必须由表单给全 api / web / opencode /
+      #    paper / fin-worker 五个服务(表单里是 random 字段,用户不用手填)。
+      HUNTER_INTERNAL_KEY: ${HUNTER_INTERNAL_KEY}
       JWT_ACCESS_TTL: "3600"
       JWT_REFRESH_TTL: "2592000"
       # 首启向导的初始化口令 · **非空 = 一律要口令**(不管来源看起来是不是本机)。
@@ -116,7 +131,7 @@ services:
 
   # ── 对话引擎 · 不对外映射端口 ────────────────────────────────
   opencode:
-    image: ghcr.io/agentpit-io/hunter-community-opencode:1.1.0
+    image: ghcr.io/agentpit-io/hunter-community-opencode:1.3.0
     container_name: ${CONTAINER_NAME}-opencode
     restart: always
     depends_on:
@@ -125,8 +140,10 @@ services:
       llm-shim:
         condition: service_healthy
     environment:
-      # JWT_SECRET / HUNTER_INTERNAL_KEY 同样不注入 —— 由入口脚本从下面那个
-      # 只读密钥目录读 api 生成的那一份(hunter-auth 插件要用 JWT_SECRET 验签)。
+      # JWT_SECRET 不注入 —— 由入口脚本从下面那个只读密钥目录读 api 生成的那一份
+      # (hunter-auth 插件要用 JWT_SECRET 验签)。
+      # 与 api / web / paper / fin-worker 同值(HUNTER_INTERNAL_KEY 走环境变量)。
+      HUNTER_INTERNAL_KEY: ${HUNTER_INTERNAL_KEY}
       HERMES_API_URL: http://${CONTAINER_NAME}-api:8000
       LLM_PROVIDER: openai_compat
       # 审计日志必须落在持久化目录里(容器可写层一次 recreate 就没了,
@@ -158,7 +175,7 @@ services:
   # 这一层只洗 tools[].function.parameters,其余原样转发。
   # 用非 Gemini 模型时这个容器空转,不影响任何东西。
   llm-shim:
-    image: ghcr.io/agentpit-io/hunter-community-llm-shim:1.1.0
+    image: ghcr.io/agentpit-io/hunter-community-llm-shim:1.3.0
     container_name: ${CONTAINER_NAME}-llm-shim
     restart: always
     networks:
@@ -203,6 +220,145 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    networks:
+      - 1panel-network
+    labels:
+      createdBy: "Apps"
+
+  # ── fin-init · 一次性 provision 账本库运行期角色 ────────────────
+  # `0023_fin_core.sql` 建 `fin_paper_rw` 时**故意不写密码**(密码不进仓库),
+  # 而 paper 要经 TCP + 口令认证连库。这里等 api 迁移把角色建出来(循环重试、
+  # 不成功不退出),再 `ALTER ROLE … PASSWORD`。
+  fin-init:
+    image: postgres:16-alpine
+    container_name: ${CONTAINER_NAME}-fin-init
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: ${CONTAINER_NAME}-postgres
+      PGPORT: "5432"
+      PGUSER: hunter
+      PGDATABASE: hunter
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      FIN_PAPER_PASSWORD: ${FIN_PAPER_PASSWORD}
+    command:
+      - /bin/sh
+      - -c
+      - |
+        until psql -tAc "SELECT rolname FROM pg_roles" 2>/dev/null | grep -qx fin_paper_rw; do
+          echo '[fin-init] 等待 api 迁移创建 fin_paper_rw …'; sleep 3
+        done
+        until printf "ALTER ROLE fin_paper_rw WITH LOGIN PASSWORD :'pw';\n" | psql -v ON_ERROR_STOP=1 -v pw="$FIN_PAPER_PASSWORD" >/dev/null 2>&1; do
+          echo '[fin-init] 设置 fin_paper_rw 口令失败，重试…'; sleep 3
+        done
+        echo '[fin-init] fin_paper_rw 运行期口令已就绪'
+    networks:
+      - 1panel-network
+    labels:
+      createdBy: "Apps"
+
+  # ── paper · 唯一账本服务(只追加) ──────────────────────────────
+  paper:
+    image: ghcr.io/agentpit-io/hunter-community-paper:1.3.0
+    container_name: ${CONTAINER_NAME}-paper
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      fin-init:
+        # 等 fin-init 真把运行期口令设好,paper 才起(自检不过会直接退出)
+        condition: service_completed_successfully
+    environment:
+      # 连应用库、用运行期角色 fin_paper_rw(表权限 0023 已给,只差口令)
+      DATABASE_URL: postgresql://fin_paper_rw:${FIN_PAPER_PASSWORD}@${CONTAINER_NAME}-postgres:5432/hunter
+      PAPER_MODE: PAPER
+      HUNTER_INTERNAL_KEY: ${HUNTER_INTERNAL_KEY}
+      # 行情来源:打 api 的 GET /api/quote/{code};取不到就不成交(安全的一侧)
+      PAPER_QUOTE_URL: http://${CONTAINER_NAME}-api:8000
+      PAPER_SNAPSHOT_STALE_SECONDS: "900"
+    networks:
+      - 1panel-network
+    labels:
+      createdBy: "Apps"
+
+  # ── temporal · 智能交易链唯一的上层调度权威 ────────────────────
+  # auto-setup 在同一个 postgres 上自建 temporal / temporal_visibility 两个库,
+  # 不碰业务账本(工作流状态不代替业务账本)。
+  temporal:
+    image: temporalio/auto-setup:1.25
+    container_name: ${CONTAINER_NAME}-temporal
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_USER: hunter
+      POSTGRES_PWD: ${POSTGRES_PASSWORD}
+      POSTGRES_SEEDS: ${CONTAINER_NAME}-postgres
+      DBNAME: temporal
+      VISIBILITY_DBNAME: temporal_visibility
+    healthcheck:
+      # 地址必须是**服务名**:temporal-server 只绑容器网卡,写 127.0.0.1 永远连不上
+      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "${CONTAINER_NAME}-temporal:7233"]
+      interval: 10s
+      timeout: 5s
+      start_period: 40s
+      retries: 12
+    networks:
+      - 1panel-network
+    labels:
+      createdBy: "Apps"
+
+  # ── temporal-ui · 排障面板(仅内网,不对外) ─────────────────────
+  temporal-ui:
+    image: temporalio/ui:2.34.0
+    container_name: ${CONTAINER_NAME}-temporal-ui
+    restart: always
+    depends_on:
+      temporal:
+        condition: service_started
+    environment:
+      TEMPORAL_ADDRESS: ${CONTAINER_NAME}-temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:8233
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+    networks:
+      - 1panel-network
+    labels:
+      createdBy: "Apps"
+
+  # ── fin-worker · 推理区 → 执行区的桥(不直连账本) ───────────────
+  fin-worker:
+    image: ghcr.io/agentpit-io/hunter-community-fin-worker:1.3.0
+    container_name: ${CONTAINER_NAME}-fin-worker
+    restart: always
+    depends_on:
+      paper:
+        condition: service_started
+      temporal:
+        condition: service_started
+    environment:
+      # 写账本只有 paper 一个入口;镜像里连 DB 驱动都没有,「不直连账本」是事实
+      PAPER_BASE_URL: http://${CONTAINER_NAME}-paper:8000
+      API_BASE_URL: http://${CONTAINER_NAME}-api:8000
+      TEMPORAL_ADDRESS: ${CONTAINER_NAME}-temporal:7233
+      TEMPORAL_NAMESPACE: default
+      TEMPORAL_TASK_QUEUE: fin-trading
+      HUNTER_INTERNAL_KEY: ${HUNTER_INTERNAL_KEY}
+      FIN_WORKER_HTTP_PORT: "8300"
+      FIN_SAMPLE_CODE: "601398"
+      FIN_SAMPLE_STRATEGY_KEY: sample-fixed
+      FIN_SAMPLE_STRATEGY_VERSION: "1.0"
+      FIN_INTENT_TTL_SECONDS: "1800"
+      FIN_SCHEDULES_ENABLED: "1"
     networks:
       - 1panel-network
     labels:

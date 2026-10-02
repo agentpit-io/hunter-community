@@ -1,4 +1,5 @@
-# 构建并推送四个自家镜像到 GHCR,每个都是 linux/amd64 + linux/arm64 的多架构 manifest。
+# 构建并推送六个自家镜像到 GHCR,每个都是 linux/amd64 + linux/arm64 的多架构 manifest。
+# (api / web / opencode / llm-shim + 智能炒股的 paper / fin-worker)
 #
 # 为什么不是一个 job 里 `platforms: linux/amd64,linux/arm64` + QEMU:
 # web 的 Next.js 构建和 api 的 pip 编译在 QEMU 模拟下会慢一个数量级(几十分钟起,
@@ -25,7 +26,7 @@ env:
 
 jobs:
   build:
-    # 4 个镜像 × 2 个平台 = 8 个并行 job
+    # 6 个镜像 × 2 个平台 = 12 个并行 job
     name: 构建 ${{ matrix.image.name }} · ${{ matrix.platform }}
     runs-on: ${{ matrix.platform == 'linux/arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     permissions:
@@ -50,6 +51,14 @@ jobs:
           - name: llm-shim
             context: .
             dockerfile: deploy/llm-shim.Dockerfile
+          # 智能炒股 · 两个自包含服务,构建上下文就是各自的子目录
+          # (它们不 COPY 仓库根下的 skills/ data/ db/migrations)。
+          - name: paper
+            context: apps/paper
+            dockerfile: apps/paper/Dockerfile
+          - name: fin-worker
+            context: apps/fin-worker
+            dockerfile: apps/fin-worker/Dockerfile
         platform:
           - linux/amd64
           - linux/arm64
@@ -124,7 +133,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [api, web, opencode, llm-shim]
+        image: [api, web, opencode, llm-shim, paper, fin-worker]
     steps:
       - name: 准备变量
         run: echo "REGISTRY_IMAGE=${{ env.REGISTRY }}/${{ env.OWNER }}/hunter-community-${{ matrix.image }}" >> $GITHUB_ENV

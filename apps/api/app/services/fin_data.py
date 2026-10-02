@@ -36,6 +36,15 @@
 
 `market_source.quote` 对 A 股返回 `None`（设计如此），港美股仍优先用它。
 
+## ST 判定走哪条通道（拍板 2026-10-02 §七 · 与行情主数据**分开**）
+
+行情与涨跌停主数据走 hunter 网关（`official`），**但 ST 不行**：该网关 `quote`
+返回的 `name` **就是代码本身**（实测 `600519` → `"name":"600519"`），既无中文
+简称也无 ST 标记。`company_master` 也不能当权威 —— 演示库里只有 300 行种子，
+判全市场会大面积漏判。所以 ST 一律看**腾讯通道的 `f(1)`**（真实中文简称，
+免 key、全市场覆盖，见下面的 `tencent_names()`）；判不出 ST 的标的
+`available=false`，风控第 4 条直接拒绝它。**绝不猜。**
+
 ## 买一 / 卖一盘口
 
 腾讯 A 股报文里 `f[9]/f[10]` 是买一价/量、`f[19]/f[20]` 是卖一价/量（本机实测
@@ -280,7 +289,85 @@ def _tencent_quote(code: str) -> Optional[dict]:
     }
 
 
+# ── ST 判定专用 · 腾讯通道的证券简称（拍板 2026-10-02 §七）──────────────────
+#
+# **为什么 ST 不能走 hunter 通道**：hunter 网关 `quote` 返回的 `name` 字段
+# **就是代码本身**（实测 `600519` → `"name":"600519"`），既无中文简称也无 ST
+# 标记，判不出来。腾讯 `qt.gtimg.cn` 的 `f(1)` 是真实中文简称
+# （`贵州茅台` / `*ST 某某` / `退市某某`），免 key、覆盖全市场 A 股。
+#
+# **为什么不能拿 `company_master` 当权威**：演示库里它只有 300 行（沪深 300
+# 种子），用它判全市场 ST 会大面积漏判 —— 漏判的后果是把一只 ST 股当成 ±10%
+# 主板股撮合。所以 master 的名称只作**展示**用，ST 一律看这一条通道。
+#
+# 批量：一张 URL 能带多个代码（`q=sh600519,sz000001`），返回多行
+# `v_sh600519="..."`，实测 60 个一次约 0.3 秒。
+_NAME_BATCH = 50
+# 批间隔。腾讯的 WAF 有前科（`CLAUDE.md`「全市场日线管线」一节：13 次/秒把
+# fin-r1 打进过黑名单），这里主动限速到约 1 批/秒；见 501（WAF 拦截信号）
+# **立即中止整批**，不硬闯。
+_NAME_GAP_S = 1.0
+
+
+class TencentWafBlocked(RuntimeError):
+    """腾讯通道返回 501 —— WAF 把本机拦了。调用方据此中止整批，别硬闯。"""
+
+
+def tencent_names(codes: list[str]) -> dict[str, str]:
+    """批量取腾讯通道的**证券简称**，只用于 ST 判定（见本节头部）。
+
+    返回 `{六位代码: 简称}`；某只取不到就**不进字典**，调用方按「ST 判不出」
+    处理（拍板 §七：零容忍，绝不猜）。网络异常不抛给调用方（同步任务不该因为
+    一次抖动整批失败），但 **501 会抛 `TencentWafBlocked`** —— 那时再打下去
+    只会把整机 IP 送进黑名单。
+    """
+    import time
+
+    symbols: dict[str, str] = {}
+    for code in codes:
+        sym = _qt_symbol(code)
+        if sym:
+            symbols[sym] = code.split(".")[0].strip().upper()
+    out: dict[str, str] = {}
+    syms = list(symbols)
+    for i in range(0, len(syms), _NAME_BATCH):
+        chunk = syms[i:i + _NAME_BATCH]
+        if i:
+            time.sleep(_NAME_GAP_S)
+        try:
+            import requests
+
+            resp = requests.get(_QT + ",".join(chunk), headers=_UA, timeout=QT_TIMEOUT_S)
+            if resp.status_code == 501:
+                raise TencentWafBlocked(
+                    f"腾讯通道返回 501（WAF 拦截），已取 {len(out)}/{len(syms)} 只，中止")
+            text = resp.content.decode("gbk", "ignore")
+        except TencentWafBlocked:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[fin_data] 腾讯名称通道失败({} 个) · {}", len(chunk), exc)
+            continue
+        for m in re.finditer(r'v_([a-zA-Z]{2}\d{0,6}[A-Za-z.]*)="([^"]*)"', text):
+            fields = m.group(2).split("~")
+            if len(fields) < 3:
+                continue
+            name = fields[1].strip()
+            code = symbols.get(m.group(1))
+            if code and name:
+                out[code] = name
+    return out
+
+
 # ── 统一入口 ───────────────────────────────────────────────────────────────
+
+def _is_date_only(dt: Optional[datetime]) -> bool:
+    """时刻只有日期、没有盘中时间（00:00:00.000）。
+
+    hunter 网关的 A 股报价就是这种形状（`ts = "2026-09-30"`）。A 股不存在
+    真正在零点成交的行情，所以「零点」在这里只有一个含义：**数据源没给时刻**。
+    """
+    return (dt is not None and dt.hour == 0 and dt.minute == 0
+            and dt.second == 0 and dt.microsecond == 0)
 
 def quote(code: str) -> Optional[dict]:
     """统一金融数据结构。**两个 provider 都拿不到 → `None`**（不返回零价）。
@@ -304,6 +391,31 @@ def quote(code: str) -> Optional[dict]:
         # 数据源没给时刻。**仍然返回**，让上层按「不落快照」处理并留下缺口记录 ——
         # 直接返回 None 会让「行情还在、只是没时间戳」和「完全没有行情」混成一种。
         gaps.append("event_time: 数据源没有给出行情时刻")
+
+    # hunter 网关的两个已知缺口（2026-10-02 实测，拍板 §七 同一条实测）：
+    #   ① A 股报价的 `ts` 只到**日期**（`"2026-09-30"`），没有盘中时刻；
+    #   ② `name` **就是代码本身**（`"600519"`），没有中文简称。
+    # ① 对账本是致命的：快照时刻落成当天 00:00 之后，风控的交易时段校验必然判
+    # 「不在交易时段内」、新鲜度必然判 stale —— 两条都会让委托**永远不成交**，
+    # 而且不报错，看起来像策略没信号。② 只是难看，但把代码当名字显示给用户。
+    # 两处都补一次腾讯通道（免 key、到秒、有真实中文简称），**只补字段、不换价格** ——
+    # 价格与来源仍是 hunter（拍板 §一），补了什么如实记进 `gaps`。
+    bare = code.split(".")[0].strip().upper()
+    name_missing = not (hit.get("name") or "").strip() or str(hit.get("name")).strip().upper() == bare
+    if _is_date_only(hit.get("event_time")) or (market_of(code) == "a" and name_missing):
+        tq = _tencent_quote(code) or {}
+        if _is_date_only(hit.get("event_time")):
+            if tq.get("event_time") and not _is_date_only(tq["event_time"]):
+                hit["event_time"] = tq["event_time"]
+                gaps.append(f"event_time: {hit.get('source')} 只给到日期，"
+                            f"盘中时刻取自腾讯通道（{tq['event_time'].isoformat()}）")
+            else:
+                gaps.append(f"event_time: {hit.get('source')} 只给到日期，"
+                            f"且腾讯通道也取不到盘中时刻")
+        if name_missing and (tq.get("name") or "").strip():
+            hit["name"] = tq["name"]
+            gaps.append(f"name: {hit.get('source')} 返回的是代码本身，"
+                        f"证券简称取自腾讯通道（{tq['name']}）")
 
     if market_of(code) == "a" and hit.get("bid1_price") is None:
         gaps.append("orderbook: 该来源没有买一/卖一盘口")
@@ -332,13 +444,24 @@ def quote(code: str) -> Optional[dict]:
 # ── 标的元数据（fin_instrument 的同步素材）────────────────────────────────
 
 def instrument(code: str, *, name: Optional[str] = None,
-               board: Optional[str] = None) -> dict:
+               board: Optional[str] = None,
+               st_name: Optional[str] = None,
+               require_st_name: bool = False) -> dict:
     """把「某个 A 股代码的涨跌停 / ST 元数据」解析出来。
 
-    `company_master` / `stock_universe` 是**跨库同步源**（`09 §八`）——它们提供
-    名称与板块；板块也可以由代码形态推出来（公开规则，不是猜）。**两处都判不出
-    → `available=False`**，调用方（fin-worker）据此**不写 `fin_instrument`**，
-    于是风控第 4 条会拒绝这个标的 —— 绝不猜一个涨跌幅写进账本。
+    三个名称来源，口径不同（拍板 2026-10-02 §二 / §七）：
+
+    | 参数 | 是谁 | 用途 |
+    |---|---|---|
+    | `st_name` | **行情通道**的证券简称（腾讯 `f(1)`） | **ST 判定的唯一权威** |
+    | `name` | `company_master` / `stock_universe` 的中文名 | 展示用；不作为 ST 依据 |
+    | `board` | master 的板块 | 归一后判涨跌停；判不出就由代码形态推 |
+
+    板块：master 没有就由**代码形态**推（公开规则，不是猜）。ST：**只认
+    `st_name`** —— hunter 网关的 `name` 是代码本身、`company_master` 只有 300
+    行，两者都靠不住。`require_st_name=True` 时**拿不到简称即 `available=False`**
+    （拍板 §七零容忍）：调用方（fin-worker）据此不写 `fin_instrument`，风控第 4
+    条会拒绝该标的。**绝不猜 ST、绝不猜涨跌停。**
     """
     bare = (code or "").split(".")[0].strip()
     derived_exchange, derived_board = board_of(bare)
@@ -361,19 +484,31 @@ def instrument(code: str, *, name: Optional[str] = None,
             "reason": f"未知板块 {resolved_board!r}——拒绝该标的，不猜涨跌停幅度",
         }
 
-    is_st = bool(re.search(r"ST|退", (name or ""), re.IGNORECASE))
+    # ST 只认行情通道的简称。空 / 等于代码本身 = 没拿到真简称。
+    quote_name = (st_name or "").strip()
+    master_name = (name or "").strip()
+    st_usable = bool(quote_name) and quote_name != bare
+    if require_st_name and not st_usable:
+        return {
+            "code": bare,
+            "available": False,
+            "reason": ("ST 状态判不出（行情通道没有返回证券简称）——拒绝该标的，绝不猜 ST"),
+        }
+
+    is_st = bool(st_usable and re.search(r"ST|退", quote_name, re.IGNORECASE))
     limit = BOARD_LIMIT[resolved_board]
     return {
         "code": bare,
         "available": True,
-        "name": name or bare,
+        "name": master_name or quote_name or bare,
         "exchange": derived_exchange,
         "board": resolved_board,
         "is_st": is_st,
         "limit_up_pct": limit,
         "limit_down_pct": limit,
         "lot_size": _BOARD_LOT,
-        "source": "company_master/stock_universe",
+        # 记的是**ST 判定**的来源（拍板 §二 ⑤ 要求 fin_instrument.source 留痕）
+        "source": "quote_name" if st_usable else "company_master/stock_universe",
     }
 
 

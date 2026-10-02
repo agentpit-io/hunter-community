@@ -291,7 +291,7 @@ bash scripts/migrate-volumes.sh          # ⚠️ 只有老用户需要,见下
 - 流式对话 · 富卡片(报价 / 新闻 / 预测)
 - 侧栏三层:数据源 / 工具箱 / SKILL
 - 自选股卡片 · 持仓 · 投资论点
-- 策略中心
+- 策略中心 · **智能交易**(纸上交易账本)
 
 </td>
 <td width="25%" valign="top">
@@ -305,6 +305,38 @@ bash scripts/migrate-volumes.sh          # ⚠️ 只有老用户需要,见下
 </td>
 </tr>
 </table>
+
+---
+
+## 🤖 智能交易(纸上交易账本)
+
+策略中心里的第四个板块:**只做模拟盘,不接实盘**。它自己按时点跑一条完整的交易链路 ——
+取行情快照 → 风控校验 → 撮合成交 → 记账 → 出报告 —— 你可以看到每一笔委托为什么成交、
+账目对不对得上,以及策略这一周做了什么。
+
+| 页面 | 看什么 |
+|---|---|
+| 总览 | 总资产 / 持仓 / 当日盈亏 + 净值曲线 |
+| 持仓 | 每只票的成本、现价、浮盈、仓位占比 |
+| 委托与成交 | 每一笔委托的四步链路:意图 → 风控 → 撮合 → 记账 |
+| 报告 | 系统每天写的操作报告(数字由代码算,文字才由模型写) |
+| 帮助 | 这份板的规则与边界 |
+
+**几个从设计上就定死的口径:**
+
+- **`PAPER_MODE` 恒为 `PAPER`**。请求参数里出现任何实盘相关字段即报错;
+  交易所凭证一个都不配。这是隔离,不是开关。
+- **账本只有一个权威**。`paper` 服务是全仓唯一持有账本库运行期角色(`fin_paper_rw`)的进程,
+  而那个角色在追加表上**没有 `UPDATE` / `DELETE` 权限** —— 「不可篡改」是一条 GRANT,不是一句约定。
+- **调度只有一个权威**。六个交易时点(09:15 / 09:30 / 11:30 / 13:00 / 14:55 / 15:30)由
+  [Temporal](https://temporal.io) 驱动,**不留兜底 cron**。Worker 崩了按执行历史恢复,不会重复下单。
+- **报告三层分离**:事实由代码算、文字由模型写、写完回读校验 —— 校验不过就不发布,
+  宁可显示 `—` 也不让模型编数字。
+
+> 这几个服务(`paper` / `fin-worker` / `temporal` / `temporal-ui`)都在 compose 的 `fin` profile 下,
+> **默认 `docker compose up -d` 不会起它们**。要开:
+> `bash scripts/fin_provision_paper_role.sh` 再 `docker compose --profile fin up -d`。
+> 这一版**只做 A 股**,行情走现仓的 `providers.data_source`。
 
 ---
 
@@ -613,6 +645,13 @@ python scripts/check_skill_sync.py       # 比对磁盘与 opencode 实际加载
         —— 模板与文档就绪并做过等价验证,但**都还没在真实平台上跑过、也都没上架**,
         所以本版不放部署按钮,见 [一键部署到云平台](#-一键部署到云平台)
   - 进度与实测数据:[`docs/setup-wizard/`](./docs/setup-wizard/)
+- [x] **v1.3.0**(2026-10-02)· **智能交易**板块(纸上交易账本)一期出口 —— 见 [CHANGELOG](./CHANGELOG.md)
+  - [x] 唯一账本服务 `paper`:追加表 + 库层 GRANT 拒绝 `UPDATE`/`DELETE`,确定性 A 股风控六条
+  - [x] 撮合四步链路(意图 → 风控 → 撮合 → 记账)绑数据源快照,行情断了就挂单、不拿过期价成交
+  - [x] 六个交易时点交给 Temporal(**只调度智能炒股链路,无兜底 cron**),崩溃按执行历史恢复
+  - [x] 报告三层分离:事实由代码算、文字由模型写、回读校验不过就不发布
+  - [x] 前端五个正文页接真账本;`PAPER_MODE` 恒为 `PAPER`,请求带实盘字段即报错
+  - [x] 新增两个镜像 `hunter-community-paper` / `hunter-community-fin-worker`(amd64 + arm64)
 - [ ] **下一步** · 拿到平台账号后逐个实测并上架(那时才加按钮)、国内镜像源、arm64 真机验证
 
 想要什么功能?到 [讨论区想法分区](https://github.com/agentpit-io/hunter-community/discussions/categories/ideas) 投票。
