@@ -1,6 +1,6 @@
 """对账：每天（以及被叫到时）把账本自洽性核一遍，写一行 `fin_recon_log`。
 
-六项检查，`checks` 里逐项 `{name, expected, actual, passed}`。任何一项不过就
+八项检查，`checks` 里逐项 `{name, expected, actual, passed}`。任何一项不过就
 `passed=false` 并打 ERROR 日志（`08 §七` 的告警出口）——**不平不能悄悄过去**。
 
 规则来源：`05 §3.2` M-30「任意时点 持仓市值 + 可用 + 冻结 = 总资产；买入数量恒为
@@ -148,6 +148,14 @@ def run(cur, project_id: str, as_of) -> dict:
     frozen_ok = open_orders > 0 or frozen == 0
     checks.append(
         _check("frozen_zero_no_open", "0.0000", str(frozen), frozen_ok)
+    )
+
+    # ── 8 · 冻结额 = 未成交买单的占用之和（M3：有挂单之后才成立的一条）────
+    # 只核「挂单撤了钱有没有退回去」不够 —— 还要核「冻着的钱正好是那些挂单该冻的钱」。
+    # 多冻一分是资金被无故锁死，少冻一分是同一笔钱能下两张单。
+    expected_frozen = ledger.open_buy_frozen(cur, project_id)
+    checks.append(
+        _check("frozen_matches_open", expected_frozen, frozen, expected_frozen == frozen)
     )
 
     passed = all(c["passed"] for c in checks)

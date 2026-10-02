@@ -25,9 +25,24 @@ if _DSN:
     # config.database_url() 优先读 PAPER_DATABASE_URL
     os.environ["PAPER_DATABASE_URL"] = _DSN
 
+# 用例里的报价用的是**固定日期**（2026-10-02 10:00 之类），而新鲜度判定要拿真时钟比。
+# 默认按 100 年放宽（用例的报价日期从 1990 年起派生），固定日期才不会
+# 「明天就跑不过了」；要测「断流 → 挂单」的用例
+# 自己用 `helpers.relax_staleness(60)` 临时收紧。
+os.environ.setdefault("PAPER_SNAPSHOT_STALE_SECONDS", str(100 * 365 * 24 * 3600))
+
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "db: 需要真实账本库（PAPER_TEST_DSN）")
+
+
+@pytest.fixture(autouse=True)
+def _reset_quote_source():
+    """每个用例后把行情来源复位，免得一个用例装的假报价漏到下一个用例。"""
+    yield
+    from app.snapshot.source import set_source
+
+    set_source(None)
 
 
 @pytest.fixture

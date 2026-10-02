@@ -42,6 +42,12 @@ COPY --from=builder /opt/venv /opt/venv
 
 WORKDIR /app
 COPY app /app/app
+# ⚠️ `boot.sh` 必须一起 COPY 进来：`CMD` 指向 `/app/boot.sh`，不拷就是
+#    「镜像构建成功、一跑就 exec: /app/boot.sh: no such file or directory」。
+#    开发用的是 dev compose 的 bind mount，只有本地跑过才知道 ——
+#    M3 用真实镜像起容器时踩到，这里补上（构建期挡不住，镜像里没这个文件）。
+COPY boot.sh /app/boot.sh
+RUN chmod +x /app/boot.sh
 
 EXPOSE 8000
 

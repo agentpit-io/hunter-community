@@ -21,8 +21,18 @@
 **余额不存字段**：可用 / 冻结是流水**最后一行的 `*_after`**。「存一份余额」等于多一个
 可能和流水不一致的权威，是账本不平的经典来源（`09 §4.5` 底注）。
 
-一期成交即成交（撮合四步链路在 M3）：买入走 `freeze → buy → fee` 三条，冻结在同一个
-事务里归零；卖出走 `sell → fee → tax` 三条（券的冻结一期不建模，没有挂单）。
+M3 起有挂单，于是买入分两种走法：
+
+| 情形 | 流水 |
+|---|---|
+| 受理即成交 | `freeze → buy → fee [→ unfreeze]`（`unfreeze` 只在成交价低于限价、有多冻时出现） |
+| 受理后挂单 | `freeze` 一条，钱留在冻结里；成交时再走 `buy → fee [→ unfreeze]`，撤单时走 `unfreeze` |
+
+卖出仍是 `sell → fee → tax` 三条 —— 券的占用**不建账本列**，它由未成交卖单
+（`fin_order`）算出来，见 `open_sell_committed`。
+
+四步链路（取快照 → 过规则 → 撮合 → 记账）在 `app/matching/engine.py`，
+本模块只负责「怎么在账本里落下来」。
 """
 
 from __future__ import annotations
@@ -33,8 +43,6 @@ from decimal import Decimal
 from typing import Optional
 
 import psycopg2.extras
-
-from app.risk import RiskInputs, evaluate
 
 # 上海时间（中国无夏令时，固定 +08:00；与 apps/api/main.py 同口径）。
 CST = timezone(timedelta(hours=8))
@@ -118,7 +126,7 @@ def list_orders(cur, project_id: str, limit: int = 200) -> list[dict]:
     cur.execute(
         """
         SELECT order_id, code, side, qty, price_type, limit_price, status, filled_qty,
-               source, actor, decline_reason, created_at
+               source, actor, decline_reason, valid_until, frozen_amount, created_at
           FROM fin_order WHERE project_id = %s ORDER BY created_at DESC LIMIT %s
         """,
         (project_id, limit),
@@ -219,174 +227,105 @@ def _insert_cash(
     return cur.fetchone()["entry_id"]
 
 
-# ── 写：一笔委托（风控 → 成交 → 记账）────────────────────────────────────
+# ── 写：委托、成交、现金、持仓（M3 起的四步链路的下游）─────────────────────
+#
+# 四步链路本身在 `app/matching/engine.py`（取快照 → 过规则 → 撮合 → 记账）。
+# 本层只负责「怎么在账本里落下来」，且只管三种现金动作：
+#
+#   · `freeze_cash`   —— 受理挂单时把钱从可用搬到冻结（现金总额不变，amount = 0）；
+#   · `settle_buy`    —— 成交：冻结里付出成交额与费用，多冻的部分退回可用；
+#   · `unfreeze_cash` —— 撤单 / 过期：把冻着的钱原样搬回可用。
+#
+# `fin_order.frozen_amount` 记着「这笔委托受理时冻了多少」，解冻与退款都以它为准 ——
+# 不靠「重算一遍费用模型」去推（费用模型改过版本就推不出来了）。
 
-def place_order(cur, req: dict) -> dict:
-    """提交一笔委托。
+def get_order(cur, order_id: str) -> Optional[dict]:
+    return _fetchone(cur, "SELECT * FROM fin_order WHERE order_id = %s", (order_id,))
 
-    **不论过不过，都会落一条 `fin_order`**：过的记成 `filled` 并产生成交与流水，
-    不过的记成 `rejected` 并留下 `decline_reason`（`05 §3.2` M-11：为二期的
-    `decline_reason` 复用同一条路径）。没有任何分支读 `source`。
+
+def list_open_orders(cur, project_id: str, code: Optional[str] = None) -> list[dict]:
+    sql = (
+        "SELECT * FROM fin_order WHERE project_id = %s "
+        "AND status IN ('pending','accepted','partially_filled')"
+    )
+    params: list = [project_id]
+    if code:
+        sql += " AND code = %s"
+        params.append(code)
+    sql += " ORDER BY created_at"
+    cur.execute(sql, tuple(params))
+    return cur.fetchall()
+
+
+def open_sell_committed(cur, project_id: str, code: str) -> int:
+    """该标的上**还没成交的卖单**占用的股数。
+
+    一期的「券的冻结」不建账本列 —— 它可以从 `fin_order` 精确算出来，
+    而 `fin_order` 本来就是权威。风控第 2 条（T+1）与第 6 条（持仓）要拿
+    `可卖量 − 这个数` 去判，否则同一批股能被两张挂单各卖一次。
     """
-    project_id = req["project_id"]
-    project = get_project(cur, project_id)
-    if not project:
-        raise LookupError(f"项目不存在：{project_id}")
-    if project["status"] != "active":
-        raise ValueError(f"项目不在进行中（status={project['status']}），不接受新委托")
-
-    code = req["code"]
-    side = req["side"]
-    qty = int(req["qty"])
-    source = req.get("source") or "ai"
-    actor = req.get("actor") or "system"
-    price_type = req.get("price_type") or "limit"
-
-    snap = req["snapshot"]
-    snap_time = _as_dt(snap["snapshot_time"])
-    prev_close = snap.get("prev_close")
-    last_price = snap.get("last_price")
-    if last_price is None:
-        raise ValueError("快照缺少 last_price，无法确定成交价")
-
-    instrument = get_instrument(cur, code)
-    calendar = get_calendar(cur, snap_time.astimezone(CST).date())
-    fee_model = get_fee_model(cur)
-    available, frozen = cash_balance(cur, project_id)
-    position = get_position(cur, project_id, code) or {"qty": 0, "sellable_qty": 0}
-
-    # 委托价：限价单用委托价（风控据此判涨跌停），市价单用快照价。
-    risk_price = req.get("limit_price") if price_type == "limit" and req.get("limit_price") else last_price
-
-    inputs = RiskInputs(
-        at=snap_time,
-        side=side,
-        qty=qty,
-        price=Decimal(str(risk_price)),
-        calendar=calendar,
-        instrument=instrument,
-        fee_model=fee_model,
-        prev_close=None if prev_close is None else Decimal(str(prev_close)),
-        available=available,
-        position_qty=int(position["qty"]),
-        sellable_qty=int(position["sellable_qty"]),
-        lot_size=int(instrument["lot_size"]) if instrument else 100,
+    row = _fetchone(
+        cur,
+        """
+        SELECT COALESCE(SUM(qty - filled_qty), 0) AS n FROM fin_order
+         WHERE project_id = %s AND code = %s AND side = 'sell'
+           AND status IN ('pending','accepted','partially_filled')
+        """,
+        (project_id, code),
     )
-    outcome = evaluate(inputs)
+    return int(row["n"]) if row else 0
 
-    order_id = new_id("ord")
-    if not outcome.passed:
-        _insert_order(
-            cur, order_id, project_id, code, side, qty, price_type, req.get("limit_price"),
-            status="rejected", filled_qty=0, source=source, actor=actor,
-            decline_reason=outcome.decline_reason, intent_ref=req.get("intent_ref"),
-            decision_ref=req.get("decision_ref"), valid_until=req.get("valid_until"),
-        )
-        return {
-            "order_id": order_id,
-            "status": "rejected",
-            "decline_reason": outcome.decline_reason,
-            "failed_checks": outcome.failed_names,
-            "risk": _risk_view(outcome),
-        }
 
-    # ── 过了风控：落委托 → 快照 → 成交 → 流水 → 持仓 → 版本 ─────────
-    # 委托必须先落：`fin_trade.order_id` 是 FK（09 §二「账本内部表之间加 FK」）。
-    # 整个请求一个事务，任何一步失败都会连这条委托一起回滚。
-    _insert_order(
-        cur, order_id, project_id, code, side, qty, price_type, req.get("limit_price"),
-        status="filled", filled_qty=qty, source=source, actor=actor, decline_reason=None,
-        intent_ref=req.get("intent_ref"), decision_ref=req.get("decision_ref"),
-        valid_until=req.get("valid_until"),
+def open_buy_frozen(cur, project_id: str) -> Decimal:
+    """还没成交的买单占用的冻结额之和。对账用它核「冻结 = 挂单占用」。"""
+    row = _fetchone(
+        cur,
+        """
+        SELECT COALESCE(SUM(frozen_amount), 0) AS s FROM fin_order
+         WHERE project_id = %s AND side = 'buy'
+           AND status IN ('pending','accepted','partially_filled')
+        """,
+        (project_id,),
     )
-
-    snapshot_id = _ensure_snapshot(cur, snap, code)
-    trade_id = new_id("trd")
-    price = Decimal(str(last_price))          # 成交价 = 快照价（M3 换成四步撮合）
-    amount = _money(Decimal(qty) * price)
-    fee = outcome.fee
-
-    _insert_trade(
-        cur, trade_id, order_id, project_id, code, side, qty, price, amount, fee,
-        snapshot_id, source, fee_model["version"], snap_time,
-    )
-    _apply_cash(cur, project_id, side, amount, fee, order_id, trade_id)
-    _apply_position(cur, project_id, code, side, qty, price, snap_time)
-    _bump_version(cur, project_id)
-    _lock_params(cur, project_id)
-
-    return {
-        "order_id": order_id,
-        "trade_id": trade_id,
-        "status": "filled",
-        "snapshot_id": snapshot_id,
-        "filled_qty": qty,
-        "price": price,
-        "amount": amount,
-        "fee": {
-            "commission": fee.commission,
-            "stamp_tax": fee.stamp_tax,
-            "transfer_fee": fee.transfer_fee,
-            "total": fee.total,
-        },
-        "decline_reason": None,
-        "risk": _risk_view(outcome),
-    }
+    return _money(row["s"]) if row else Decimal("0.0000")
 
 
-# ── 内部：落库的四种写 ───────────────────────────────────────────────────
-
-def _risk_view(outcome) -> dict:
-    return {
-        r.name: {"ok": r.ok, "reason": r.reason, "detail": r.detail}
-        for r in outcome.results
-    }
-
-
-def _insert_order(cur, order_id, project_id, code, side, qty, price_type, limit_price,
-                  status, filled_qty, source, actor, decline_reason, intent_ref,
-                  decision_ref, valid_until) -> None:
+def insert_order(
+    cur, order_id, project_id, code, side, qty, price_type, limit_price,
+    status, filled_qty, source, actor, decline_reason, intent_ref,
+    decision_ref, valid_until, frozen_amount=Decimal("0.0000"),
+) -> None:
     cur.execute(
         """
         INSERT INTO fin_order
           (order_id, project_id, code, side, qty, price_type, limit_price, status,
-           filled_qty, source, actor, intent_ref, decline_reason, decision_ref, valid_until)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+           filled_qty, source, actor, intent_ref, decline_reason, decision_ref,
+           valid_until, frozen_amount)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         """,
         (
             order_id, project_id, code, side, qty, price_type,
             None if limit_price is None else _money(limit_price),
             status, filled_qty, source, actor,
             None if intent_ref is None else psycopg2.extras.Json(intent_ref),
-            decline_reason, decision_ref, valid_until,
+            decline_reason, decision_ref, valid_until, _money(frozen_amount),
         ),
     )
 
 
-def _ensure_snapshot(cur, snap: dict, code: str) -> str:
-    """M2：允许占位快照（M3 起必须是采集到的真快照）。已存在则原样用。"""
+def update_order_filled(cur, order_id: str, status: str, filled_qty: int,
+                        decline_reason: Optional[str] = None) -> None:
+    """只动 `fin_order` 的**状态列**（0023 的 GRANT 注释：UPDATE 只用于状态列）。"""
     cur.execute(
-        """
-        INSERT INTO fin_snapshot
-          (snapshot_id, code, snapshot_time, source, last_price, prev_close,
-           bid1_price, ask1_price, quality, missing_flag)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-        ON CONFLICT (snapshot_id) DO NOTHING
-        """,
-        (
-            snap["snapshot_id"], code, _as_dt(snap["snapshot_time"]), snap.get("source") or "placeholder",
-            _money(snap["last_price"]),
-            None if snap.get("prev_close") is None else _money(snap["prev_close"]),
-            None if snap.get("bid1_price") is None else _money(snap["bid1_price"]),
-            None if snap.get("ask1_price") is None else _money(snap["ask1_price"]),
-            snap.get("quality") or "ok", bool(snap.get("missing_flag", False)),
-        ),
+        "UPDATE fin_order SET status = %s, filled_qty = %s, "
+        "decline_reason = COALESCE(%s, decline_reason), updated_at = now() "
+        "WHERE order_id = %s",
+        (status, filled_qty, decline_reason, order_id),
     )
-    return snap["snapshot_id"]
 
 
-def _insert_trade(cur, trade_id, order_id, project_id, code, side, qty, price, amount,
-                  fee, snapshot_id, source, fee_version, traded_at) -> None:
+def insert_trade(cur, trade_id, order_id, project_id, code, side, qty, price, amount,
+                 fee, snapshot_id, source, fee_version, traded_at) -> None:
     cur.execute(
         """
         INSERT INTO fin_trade
@@ -402,40 +341,79 @@ def _insert_trade(cur, trade_id, order_id, project_id, code, side, qty, price, a
     )
 
 
-def _apply_cash(cur, project_id, side, amount, fee, order_id, trade_id) -> None:
+# ── 现金三动作 ────────────────────────────────────────────────────────────
+
+def freeze_cash(cur, project_id: str, order_id: str, need: Decimal, memo: str) -> None:
+    """可用 → 冻结。现金总额不变，所以 `amount = 0`（见文件头的流水语义表）。"""
     available, frozen = cash_balance(cur, project_id)
-    if side == "buy":
-        need = _money(amount + fee.total)
-        # freeze：可用 → 冻结（现金总额不变，amount = 0）
-        available_after = _money(available - need)
-        frozen_after = _money(frozen + need)
-        _insert_cash(cur, project_id, "freeze", Decimal("0.0000"),
-                     available_after, frozen_after, order_id, None, "委托冻结")
-        # buy：从冻结里付出成交金额
-        frozen_after = _money(frozen_after - amount)
-        _insert_cash(cur, project_id, "buy", _money(-amount),
-                     available_after, frozen_after, order_id, trade_id, "买入成交")
-        # fee：从冻结里付出费用（冻结归零）
-        frozen_after = _money(frozen_after - fee.total)
-        _insert_cash(cur, project_id, "fee", _money(-fee.total),
-                     available_after, frozen_after, order_id, trade_id, "买入费用")
-    else:
-        # sell：成交金额入可用
-        available_after = _money(available + amount)
-        _insert_cash(cur, project_id, "sell", amount, available_after, frozen,
-                     order_id, trade_id, "卖出成交")
-        # 佣金 + 过户费
-        fee_only = _money(fee.commission + fee.transfer_fee)
-        available_after = _money(available_after - fee_only)
-        _insert_cash(cur, project_id, "fee", _money(-fee_only), available_after, frozen,
-                     order_id, trade_id, "卖出费用")
-        # 印花税（仅卖出）
-        available_after = _money(available_after - fee.stamp_tax)
-        _insert_cash(cur, project_id, "tax", _money(-fee.stamp_tax), available_after, frozen,
-                     order_id, trade_id, "卖出印花税")
+    _insert_cash(cur, project_id, "freeze", Decimal("0.0000"),
+                 _money(available - need), _money(frozen + need), order_id, None, memo)
 
 
-def _apply_position(cur, project_id, code, side, qty, price, at) -> None:
+def unfreeze_cash(cur, project_id: str, order_id: str, amount: Decimal, memo: str) -> None:
+    """冻结 → 可用。`amount ≤ 0` 时不动账（撤一张没冻过钱的单不该产生流水）。"""
+    if amount is None or _money(amount) <= 0:
+        return
+    available, frozen = cash_balance(cur, project_id)
+    _insert_cash(cur, project_id, "unfreeze", Decimal("0.0000"),
+                 _money(available + amount), _money(frozen - amount), order_id, None, memo)
+
+
+def settle_buy(cur, project_id, order_id, trade_id, amount, fee, frozen_amount) -> None:
+    """买入成交：从冻结里付出成交额与费用，**多冻的部分退回可用**。
+
+    多冻从哪来：受理挂单时按**限价**冻（`限价 × 数量 + 费用`），成交却发生在
+    快照价上（限价买要求 `快照价 ≤ 限价`），于是必然有多冻。不退回去，
+    那笔钱就永远躺在冻结里 —— 对账的 `frozen_zero_no_open` 会在收盘后报警。
+    """
+    available, frozen = cash_balance(cur, project_id)
+    used = _money(Decimal(str(amount)) + fee.total)
+
+    if used > _money(frozen_amount):
+        # 兜底：费用模型在受理与成交之间改过版本，理论上到不了这里。
+        # 补一笔冻结把差额搬进冻结，保证 frozen_after 不会变负。
+        shortfall = _money(used - _money(frozen_amount))
+        available = _money(available - shortfall)
+        frozen = _money(frozen + shortfall)
+        _insert_cash(cur, project_id, "freeze", Decimal("0.0000"), available, frozen,
+                     order_id, None, "补冻（成交额+费用超过受理时冻结额）")
+        frozen_amount = used
+
+    frozen_after = _money(frozen - Decimal(str(amount)))
+    _insert_cash(cur, project_id, "buy", _money(-Decimal(str(amount))),
+                 available, frozen_after, order_id, trade_id, "买入成交")
+
+    frozen_after = _money(frozen_after - fee.total)
+    _insert_cash(cur, project_id, "fee", _money(-fee.total),
+                 available, frozen_after, order_id, trade_id, "买入费用")
+
+    refund = _money(_money(frozen_amount) - used)
+    if refund > 0:
+        _insert_cash(cur, project_id, "unfreeze", Decimal("0.0000"),
+                     _money(available + refund), _money(frozen_after - refund),
+                     order_id, trade_id, "成交后解冻多冻部分")
+
+
+def settle_sell(cur, project_id, order_id, trade_id, amount, fee) -> None:
+    """卖出成交：金额入可用，佣金 + 过户费 + 印花税从可用扣。"""
+    available, frozen = cash_balance(cur, project_id)
+    available_after = _money(available + Decimal(str(amount)))
+    _insert_cash(cur, project_id, "sell", _money(amount), available_after,
+                 frozen, order_id, trade_id, "卖出成交")
+
+    fee_only = _money(fee.commission + fee.transfer_fee)
+    available_after = _money(available_after - fee_only)
+    _insert_cash(cur, project_id, "fee", _money(-fee_only), available_after,
+                 frozen, order_id, trade_id, "卖出费用")
+
+    available_after = _money(available_after - fee.stamp_tax)
+    _insert_cash(cur, project_id, "tax", _money(-fee.stamp_tax), available_after,
+                 frozen, order_id, trade_id, "卖出印花税")
+
+
+# ── 持仓 / 版本 / 参数 ────────────────────────────────────────────────────
+
+def apply_position(cur, project_id, code, side, qty, price, at) -> None:
     pos = get_position(cur, project_id, code)
     if pos is None:
         cur.execute(
@@ -474,13 +452,13 @@ def _apply_position(cur, project_id, code, side, qty, price, at) -> None:
         )
 
 
-def _bump_version(cur, project_id) -> None:
+def bump_version(cur, project_id) -> None:
     cur.execute(
         "UPDATE fin_project SET version = version + 1 WHERE project_id = %s", (project_id,)
     )
 
 
-def _lock_params(cur, project_id) -> None:
+def lock_params(cur, project_id) -> None:
     """首次成交 → 参数锁定时刻（M1 遗留 #6）。"""
     cur.execute(
         "UPDATE fin_param SET params_locked_at = COALESCE(params_locked_at, now()) "
@@ -492,7 +470,9 @@ def _lock_params(cur, project_id) -> None:
 def confirm_t1(cur, project_id: str, trade_date=None) -> int:
     """把某日之前买入的持仓转为可卖（T+1 的日切）。返回受影响行数。
 
-    M2 只提供这个原语；何时调用（每个交易日开盘前）由 M4 的时点工作流决定。
+    挂单占用的股数不在这里处理：占用是**算出来的**（`open_sell_committed`），
+    风控在判「可卖量」时现场减掉。日切只负责「昨天的买入今天能卖了」。
+    何时调用（每个交易日开盘前）由 M4 的时点工作流决定。
     """
     cur.execute(
         """
@@ -507,7 +487,7 @@ def confirm_t1(cur, project_id: str, trade_date=None) -> int:
 
 # ── 时间 ──────────────────────────────────────────────────────────────────
 
-def _as_dt(value) -> datetime:
+def as_dt(value) -> datetime:
     """把请求里的时间（ISO 串或 datetime）统一成**带时区**的 datetime。"""
     if isinstance(value, datetime):
         dt = value

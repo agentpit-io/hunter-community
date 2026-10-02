@@ -15,7 +15,7 @@ from __future__ import annotations
 from fastapi import Depends, FastAPI
 
 from app.jsonresp import LedgerJSONResponse
-from app.routers import health, orders, projects, reference
+from app.routers import health, jobs, orders, projects, reference, snapshots
 from app.security import LiveFieldGuard, require_internal_key
 
 app = FastAPI(
@@ -37,3 +37,5 @@ app.include_router(health.router)
 app.include_router(orders.router)
 app.include_router(projects.router)
 app.include_router(reference.router)
+app.include_router(snapshots.router)
+app.include_router(jobs.router)
