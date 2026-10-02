@@ -66,7 +66,10 @@ def upsert_calendar(trade_date: str, body: CalendarIn) -> dict:
             """
             INSERT INTO fin_market_calendar (trade_date, is_trading, sessions, note)
             VALUES (%s,%s,%s,%s)
-            ON CONFLICT (trade_date) DO UPDATE SET
+            -- 0029 起主键是 (market, trade_date)：冲突目标必须跟着换，否则本端点会报
+            -- 「no unique or exclusion constraint matching the ON CONFLICT specification」。
+            -- 本路径只写 A 股日历，market 走列默认 'CN_A'。
+            ON CONFLICT (market, trade_date) DO UPDATE SET
               is_trading = EXCLUDED.is_trading, sessions = EXCLUDED.sessions, note = EXCLUDED.note
             RETURNING *
             """,

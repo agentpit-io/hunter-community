@@ -81,7 +81,8 @@ def seed_reference(pg, code="600519", trade_date="2026-10-02"):
         """
         INSERT INTO fin_market_calendar (trade_date, is_trading, sessions)
         VALUES (%s, true, %s)
-        ON CONFLICT (trade_date) DO UPDATE SET is_trading = EXCLUDED.is_trading,
+        -- 0029 起主键是 (market, trade_date)；测试夹具写 A 股日历，market 走默认 'CN_A'。
+        ON CONFLICT (market, trade_date) DO UPDATE SET is_trading = EXCLUDED.is_trading,
           sessions = EXCLUDED.sessions
         """,
         (trade_date, psycopg2.extras.Json(
