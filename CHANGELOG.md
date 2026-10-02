@@ -3,6 +3,57 @@
 All notable changes to HunterCode · Community Edition follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-10-02
+
+> **次要版本 · 新增「智能交易」板块(纸上交易账本一期)**。有数据库迁移(新增
+> `0023`~`0028` 共 6 个 `fin_*` 迁移),由 api 启动时自动执行;有新增可选服务
+> (`paper` / `fin-worker` / `temporal` / `temporal-ui`,都在 compose 的 `fin` profile 下,
+> **默认 `up -d` 不会起**)。
+>
+> 升级主站:`.env` 里的 `HUNTER_VERSION` 改成 `1.3.0`,`docker compose pull && docker compose up -d`。
+> 要用智能交易再:设 `FIN_PAPER_PASSWORD=$(openssl rand -hex 24)` →
+> `bash scripts/fin_provision_paper_role.sh` → `docker compose --profile fin up -d`。
+
+**上线前实测**:本次没有浏览器端到端实测的缺口 —— 回归清单在部署机逐条真跑,
+命令与结果见 `docs/开发文档/M8-成果与回归报告.md`。
+
+### ✨ 新增 · Added
+
+- **智能交易 · 纸上交易账本(一期出口)**。策略中心里的第四个板块,**只做模拟盘**。
+  五个正文页(总览 / 持仓 / 委托与成交 / 报告 / 帮助)全部接真账本,不是静态样张。
+  - **唯一账本服务 `paper`**:全仓唯一持有账本库运行期角色 `fin_paper_rw` 的进程。
+    那个角色在追加表上**没有 `UPDATE` / `DELETE` 权限** ——「不可篡改」是一条 GRANT。
+    启动时自检模式、内部口令、库连通、表齐与角色权限,任一不过直接退出,不带病启动。
+  - **撮合四步链路**:策略意图 → 确定性风控(A 股六条:涨跌停 / T+1 / 100 股整手 /
+    资金与持仓 / 单笔上限 / 黑名单)→ 撮合 → 记账。每一步都绑上行情快照;
+    **拿不到报价就不成交**(挂单),不拿过期价成交。
+  - **六个交易时点交给 Temporal**(09:15 / 09:30 / 11:30 / 13:00 / 14:55 / 15:30),
+    **不留兜底 cron**。Worker 崩溃后按执行历史恢复,不重复下单。
+  - **报告三层分离**:事实由代码算、文字由模型写、写完回读校验 —— 校验不过就不发布,
+    宁可显示 `—` 也不让模型编数字。
+  - **实盘隔离**:`PAPER_MODE` 恒为 `PAPER`,不配置任何交易凭证,请求参数里出现
+    实盘相关字段即报错。新服务端口除 web 外全部只绑 `127.0.0.1`。
+  - 一期**只做 A 股**;行情走现仓的 `providers.data_source`(hunter 网关优先,
+    `tencent-qt` 免费通道兜底)。
+- **两个新镜像**:`ghcr.io/agentpit-io/hunter-community-paper` 与
+  `...-fin-worker`,amd64 + arm64 双架构,与现有四个镜像走同一条发布流水线。
+- **五个一键部署模板同步**:Dokploy / Coolify / Railway / Zeabur / Sealos(以及 1Panel 应用包)
+  都补上了这四个服务,并各带一个一次性 `fin-init` 容器给账本角色设口令
+  (云平台上没有人工跑 provision 脚本这一步)。
+
+### 🔧 其他 · Changed
+
+- `deploy/tools/template-to-compose.py` 与 `validate-templates.py` 跟随模板更新,
+  六个平台的等价 compose 都能生成并通过结构校验。
+- `NOTICE` 补上 Temporal(MIT,服务端 / UI 镜像 + Python SDK)与 PostgreSQL。
+
+### 📌 已知边界
+
+- 行情数据源第一顺位是 hunter 网关;仓库**不含**任何明文 key,需自行申请填入 `.env`。
+- `company_master` 只是演示种子,不是全市场 ST 权威 —— ST 判定走行情通道返回的证券简称,
+  判不出即拒绝该标的(零容忍),绝不猜涨跌幅。
+- 账本数据(`fin_*` 表)只做加法迁移,回滚镜像不需要回滚数据库。
+
 ## [1.2.3] - 2026-09-29
 
 > 补丁版本,无数据库变更、无新环境变量。

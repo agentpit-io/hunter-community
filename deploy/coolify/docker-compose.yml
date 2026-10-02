@@ -22,16 +22,30 @@
 #   SERVICE_PASSWORD_64_<ID>   64 位。
 #   生成的值会存进资源的 Environment Variables，**重新部署不会变**，可以在那里查看和改。
 #
-# 💡 JWT_SECRET 与 HUNTER_INTERNAL_KEY **故意不在这里出现**。Coolify 是单机 Docker，
-#    三个容器可以共享一个卷：留空时 api 首启会各生成一把 64 位随机串写进
-#    hunter_secrets 卷，web 与 opencode 只读挂同一个卷读回同一把。
-#    让用户在三处分别填同一个值，只会带来「填不一致 → 对话莫名 401」的坑。
-#    （Zeabur / Sealos / Railway 上不能这么做，那些平台的服务之间不共享磁盘。）
+# 💡 JWT_SECRET **故意不在这里出现**。Coolify 是单机 Docker，三个容器可以共享一个卷：
+#    留空时 api 首启会生成一把 64 位随机串写进 hunter_secrets 卷，web 与 opencode
+#    只读挂同一个卷读回同一把。让用户在三处分别填同一个值，只会带来「填不一致 →
+#    对话莫名 401」的坑。（Zeabur / Sealos / Railway 上不能这么做，那些平台的服务
+#    之间不共享磁盘。）
+# ⚠️ HUNTER_INTERNAL_KEY 则是**显式注入**的：智能交易的 paper / fin-worker 只认环境
+#    变量、不读密钥卷，所以这一把必须由模板给全 api / web / opencode / paper /
+#    fin-worker 五个服务（同值，用同一个 magic 变量）。
+#
+# ── 智能交易（fin 链）· paper / temporal / temporal-ui / fin-worker / fin-init ──
+# 与仓库根 docker-compose.yml 的 `fin` profile 等价，这里默认常开：
+#   · temporal     智能交易链**唯一的上层调度权威**（六个交易时点 + 拉 K 线），
+#                  工作流状态存在 postgres 的 temporal 库，不碰业务账本。
+#   · paper        全栈唯一持有账本库运行期角色 fin_paper_rw 的服务；账本**只追加** ——
+#                  该角色在追加表上没有任何 UPDATE / DELETE，「唯一账本」是一条 GRANT。
+#   · fin-worker   推理区 → 执行区的桥，**不直连账本**，写账本只有 paper 的 HTTP 一个入口。
+#   · temporal-ui  排障面板，仅内网。
+#   · fin-init     一次性服务：等 api 迁移建出 fin_paper_rw 后给它设运行期口令，
+#                  paper 等它跑完才起（没有任何平台需要人工 provision）。
 
 services:
   # ── web · 本应用唯一对外的服务 ───────────────────────────────
   web:
-    image: ghcr.io/agentpit-io/hunter-community-web:1.1.0
+    image: ghcr.io/agentpit-io/hunter-community-web:1.3.0
     restart: unless-stopped
     depends_on:
       api:
@@ -49,6 +63,8 @@ services:
       OPENCODE_URL: http://opencode:3901
       OPENCODE_SERVER_USERNAME: ""
       OPENCODE_SERVER_PASSWORD: ""
+      # 与 api / opencode / paper / fin-worker 同值（BFF 调 /api/internal/* 要用）
+      HUNTER_INTERNAL_KEY: ${SERVICE_PASSWORD_INTERNKEY}
     volumes:
       # 只读 · web 的 BFF 调 /api/internal/ocr/extract 要和 api 用同一把
       # HUNTER_INTERNAL_KEY，否则「上传图片没反应」（其实是 401）
@@ -62,7 +78,7 @@ services:
 
   # ── api · 后端 + 自动迁移 + 首启向导 ─────────────────────────
   api:
-    image: ghcr.io/agentpit-io/hunter-community-api:1.1.0
+    image: ghcr.io/agentpit-io/hunter-community-api:1.3.0
     restart: unless-stopped
     depends_on:
       postgres:
@@ -73,6 +89,9 @@ services:
       HUNTER_MINIMAL_BOOT: "1"
       DATABASE_URL: postgresql://hunter:${SERVICE_PASSWORD_PGPASS}@postgres:5432/hunter
       REDIS_URL: redis://redis:6379/0
+      # ⚠️ 与 web / opencode / paper / fin-worker 必须同值。这里**显式注入而不走
+      #    密钥卷** —— 智能交易的 paper / fin-worker 只读环境变量、不读密钥卷。
+      HUNTER_INTERNAL_KEY: ${SERVICE_PASSWORD_INTERNKEY}
       # 首启向导第 0 步的初始化口令。**必须非空** —— 公网上不设口令等于
       # 谁先打开谁就能配大模型、看别人的 key。部署后在 Environment Variables 里查。
       HUNTER_SETUP_TOKEN: ${SERVICE_PASSWORD_SETUPTOKEN}
@@ -109,7 +128,7 @@ services:
 
   # ── opencode · 对话内核（会话正文在卷里）─────────────────────
   opencode:
-    image: ghcr.io/agentpit-io/hunter-community-opencode:1.1.0
+    image: ghcr.io/agentpit-io/hunter-community-opencode:1.3.0
     restart: unless-stopped
     depends_on:
       api:
@@ -125,6 +144,8 @@ services:
       HUNTER_AUDIT_PATH: /home/hunter/.local/share/hunter-audit/AUDIT.jsonl
       # 自部署用户付的是自己的大模型账单，不该被限额
       HUNTER_BUDGET_ENABLED: "false"
+      # 与 api / web / paper / fin-worker 同值
+      HUNTER_INTERNAL_KEY: ${SERVICE_PASSWORD_INTERNKEY}
     volumes:
       # ⚠️ 会话正文（opencode-local.db · 所有对话内容）必须落在卷上。
       #    2026-09-07 事故：没挂卷时一次容器重建让 33 个用户会话全部消失且不可恢复 ——
@@ -142,7 +163,7 @@ services:
   # opencode 送出的是完整 JSON Schema，Gemini 只认 OpenAPI 子集。
   # 用非 Gemini 模型时这个容器空转，不影响任何东西。
   llm-shim:
-    image: ghcr.io/agentpit-io/hunter-community-llm-shim:1.1.0
+    image: ghcr.io/agentpit-io/hunter-community-llm-shim:1.3.0
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request as u;u.urlopen('http://127.0.0.1:3999/health',timeout=3)\" || exit 1"]
@@ -178,6 +199,123 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  # ── fin-init · 一次性 provision 账本库运行期角色 ─────────────────
+  # `0023_fin_core.sql` 建 `fin_paper_rw` 时**故意不写密码**（密码不进仓库），
+  # 而 paper 要经 TCP + 口令认证连库。这里等 api 迁移把角色建出来（循环重试、
+  # 不成功不退出），再 `ALTER ROLE … PASSWORD`。**不依赖启动顺序**：没有
+  # depends_on 的平台（如 Railway）靠 paper 自身重启 + 这里持续重试最终收敛。
+  fin-init:
+    image: postgres:16-alpine
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: hunter
+      PGDATABASE: hunter
+      # 迁移执行者（api 用的）管理员口令 · 与 postgres/api 同源
+      PGPASSWORD: ${SERVICE_PASSWORD_PGPASS}
+      # 运行期角色的口令 · 与下面 paper 的 DATABASE_URL 同源（同一个 magic 变量）
+      FIN_PAPER_PASSWORD: ${SERVICE_PASSWORD_FINPAPER}
+    command:
+      - /bin/sh
+      - -c
+      - |
+        until psql -tAc "SELECT rolname FROM pg_roles" 2>/dev/null | grep -qx fin_paper_rw; do
+          echo '[fin-init] 等待 api 迁移创建 fin_paper_rw …'; sleep 3
+        done
+        until printf "ALTER ROLE fin_paper_rw WITH LOGIN PASSWORD :'pw';\n" | psql -v ON_ERROR_STOP=1 -v pw="$FIN_PAPER_PASSWORD" >/dev/null 2>&1; do
+          echo '[fin-init] 设置 fin_paper_rw 口令失败，重试…'; sleep 3
+        done
+        echo '[fin-init] fin_paper_rw 运行期口令已就绪'
+
+  # ── paper · 唯一账本服务（只追加）─────────────────────────────────
+  paper:
+    image: ghcr.io/agentpit-io/hunter-community-paper:1.3.0
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      fin-init:
+        # 等 fin-init 真把运行期口令设好，paper 才起（自检不过会直接退出）
+        condition: service_completed_successfully
+    environment:
+      # 连应用库、用运行期角色 fin_paper_rw（表权限 0023 已给，只差口令）
+      DATABASE_URL: postgresql://fin_paper_rw:${SERVICE_PASSWORD_FINPAPER}@postgres:5432/hunter
+      PAPER_MODE: PAPER
+      HUNTER_INTERNAL_KEY: ${SERVICE_PASSWORD_INTERNKEY}
+      # 行情来源：打 api 的 GET /api/quote/{code}；取不到就不成交（安全的一侧）
+      PAPER_QUOTE_URL: http://api:8000
+      PAPER_SNAPSHOT_STALE_SECONDS: "900"
+
+  # ── temporal · 智能交易链唯一的上层调度权威 ─────────────────────
+  # auto-setup 在同一个 postgres 上自建 temporal / temporal_visibility 两个库，
+  # 不碰业务账本（工作流状态不代替业务账本）。
+  temporal:
+    image: temporalio/auto-setup:1.25
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_USER: hunter
+      POSTGRES_PWD: ${SERVICE_PASSWORD_PGPASS}
+      POSTGRES_SEEDS: postgres
+      DBNAME: temporal
+      VISIBILITY_DBNAME: temporal_visibility
+    healthcheck:
+      # 地址必须是**服务名**：temporal-server 只绑容器网卡，写 127.0.0.1 永远连不上
+      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "temporal:7233"]
+      interval: 10s
+      timeout: 5s
+      start_period: 40s
+      retries: 12
+
+  # ── temporal-ui · 排障面板（仅内网，不对外）──────────────────────
+  temporal-ui:
+    image: temporalio/ui:2.34.0
+    restart: unless-stopped
+    depends_on:
+      temporal:
+        condition: service_started
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:8233
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
+  # ── fin-worker · 推理区 → 执行区的桥（不直连账本）────────────────
+  fin-worker:
+    image: ghcr.io/agentpit-io/hunter-community-fin-worker:1.3.0
+    restart: unless-stopped
+    depends_on:
+      paper:
+        condition: service_started
+      temporal:
+        condition: service_started
+    environment:
+      # 写账本只有 paper 一个入口；镜像里连 DB 驱动都没有，「不直连账本」是事实
+      PAPER_BASE_URL: http://paper:8000
+      API_BASE_URL: http://api:8000
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: default
+      TEMPORAL_TASK_QUEUE: fin-trading
+      HUNTER_INTERNAL_KEY: ${SERVICE_PASSWORD_INTERNKEY}
+      FIN_WORKER_HTTP_PORT: "8300"
+      FIN_SAMPLE_CODE: "601398"
+      FIN_SAMPLE_STRATEGY_KEY: sample-fixed
+      FIN_SAMPLE_STRATEGY_VERSION: "1.0"
+      FIN_INTENT_TTL_SECONDS: "1800"
+      FIN_SCHEDULES_ENABLED: "1"
 
 volumes:
   hunter_pg:

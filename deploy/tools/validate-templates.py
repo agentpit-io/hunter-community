@@ -274,6 +274,7 @@ def check_sealos_k8s(docs: list) -> None:
         "defaults.app_name": "huntercode-abcd1234", "defaults.app_host": "huntercode-abcd1234",
         "defaults.jwt_secret": "x" * 48, "defaults.internal_key": "y" * 48,
         "defaults.setup_token_gen": "z" * 16, "inputs.setup_token": "z" * 16,
+        "defaults.fin_paper_password": "p" * 24,
         "inputs.session_volume_size": "5", "inputs.data_volume_size": "3",
         "SEALOS_NAMESPACE": "ns-demo", "SEALOS_CLOUD_DOMAIN": "sealos.io",
         "SEALOS_CERT_SECRET_NAME": "wildcard-cert", "SEALOS_SERVICE_ACCOUNT": "sa-demo",

@@ -85,9 +85,67 @@ def test_instrument_reads_master_board_when_given():
     assert item["available"] is True and item["board"] == "chinext"
 
 
-def test_instrument_marks_st_from_name():
-    assert fin_data.instrument("600519", name="*ST 测试")["is_st"] is True
-    assert fin_data.instrument("600519", name="贵州茅台")["is_st"] is False
+def test_instrument_marks_st_from_quote_name():
+    """**ST 只认行情通道的简称**（拍板 2026-10-02 §二 / §七）。
+
+    `name=`（`company_master` 的中文名）只作展示，**不作 ST 依据** —— hunter
+    网关的 name 就是代码本身、master 只有 300 行种子，两者都不权威。
+    """
+    assert fin_data.instrument("600519", st_name="*ST 测试")["is_st"] is True
+    assert fin_data.instrument("600519", st_name="退市工行")["is_st"] is True
+    assert fin_data.instrument("600519", st_name="贵州茅台")["is_st"] is False
+    # master 名字里有 ST 不算数（口径变更前它是唯一来源，正是要堵的那条路）
+    assert fin_data.instrument("600519", name="*ST 测试")["is_st"] is False
+    # 简称等于代码本身 = 没拿到真简称（hunter 通道就是这个形状）
+    assert fin_data.instrument("600519", st_name="600519")["is_st"] is False
+
+
+def test_instrument_records_st_source():
+    """`source` 记的是 **ST 判定**的来源，供 `fin_instrument.source` 留痕。"""
+    assert fin_data.instrument("600519", st_name="贵州茅台")["source"] == "quote_name"
+    assert fin_data.instrument("600519", name="贵州茅台")["source"] == "company_master/stock_universe"
+
+
+def test_instrument_refuses_when_st_unknown():
+    """同步路径（`require_st_name=True`）：**判不出 ST 状态 → 拒绝该标的**。
+
+    拍板 §七 零容忍：拿不到真实证券简称时绝不假设「它不是 ST」—— 假设错的
+    后果是把一只 5% 的 ST 股按 10% 撮合。
+    """
+    item = fin_data.instrument("600519", require_st_name=True)
+    assert item["available"] is False
+    assert "ST" in item["reason"] and "拒绝该标的" in item["reason"]
+    # 拿得到简称就正常放行
+    ok = fin_data.instrument("600519", st_name="贵州茅台", require_st_name=True)
+    assert ok["available"] is True and ok["is_st"] is False
+
+
+def test_tencent_names_parses_batch_payload(monkeypatch):
+    """批量简称解析：一张 URL 多个代码、GBK 解码、按符号回填代码。"""
+    payload = (
+        'v_sh600519="1~贵州茅台~600519~1258.62~";\n'
+        'v_sz000001="1~平安银行~000001~11.20~";\n'
+        'v_sh600000="1~~600000~0~";\n'          # 没名字的那条不收录
+    ).encode("gbk")
+
+    class _Resp:
+        status_code = 200
+        content = payload
+
+    monkeypatch.setattr("requests.get", lambda *a, **kw: _Resp())
+    out = fin_data.tencent_names(["600519", "000001", "600000"])
+    assert out == {"600519": "贵州茅台", "000001": "平安银行"}
+
+
+def test_tencent_names_raises_on_waf_501(monkeypatch):
+    """见 501（WAF 拦截）**立即中止整批** —— 硬闯会把整机 IP 送进黑名单。"""
+    class _Resp:
+        status_code = 501
+        content = b""
+
+    monkeypatch.setattr("requests.get", lambda *a, **kw: _Resp())
+    with pytest.raises(fin_data.TencentWafBlocked):
+        fin_data.tencent_names(["600519"])
 
 
 def test_instrument_refuses_unknown_board():
@@ -156,3 +214,67 @@ def test_tencent_zero_price_is_none(monkeypatch):
     body = ('v_sh601398="1~x~601398~0~0~0~0";').encode("gbk")
     _patch_requests(monkeypatch, body, {})
     assert fin_data._tencent_quote("601398") is None
+
+
+# ── hunter 网关的两个已知缺口（2026-10-02 实测）· 补齐路径 ──────────────────
+#
+# hunter `quote` 的 A 股返回：`ts` 只到日期（`"2026-09-30"`）、`name` 就是代码
+# （`"600519"`）。前者会让快照落成当天 00:00 → 交易时段校验与新鲜度双杀，
+# 委托永远不成交；后者让卡片把代码当名字显示。两处都用腾讯通道补，
+# **只补字段、不换价格**（拍板 §一 价格仍归 hunter）。
+
+def _cst(h, m=0, s=0):
+    from datetime import datetime, timezone, timedelta
+    return datetime(2026, 9, 30, h, m, s, tzinfo=timezone(timedelta(hours=8)))
+
+
+_OFFICIAL_DATE_ONLY = {
+    "name": "601398", "last_price": "8.28", "prev_close": "8.16",
+    "open": "8.17", "high": "8.30", "low": "8.15",
+    "bid1_price": None, "bid1_volume": None, "ask1_price": None, "ask1_volume": None,
+    "event_time": _cst(0), "source": "official",
+}
+
+
+def test_quote_fills_date_only_time_and_code_name(monkeypatch):
+    monkeypatch.setattr(fin_data, "_official_quote", lambda code: dict(_OFFICIAL_DATE_ONLY))
+    monkeypatch.setattr(fin_data, "_tencent_quote", lambda code: {
+        "name": "工商银行", "last_price": "8.28",
+        "event_time": _cst(14, 55, 1), "source": "tencent-qt"})
+
+    q = fin_data.quote("601398")
+    assert q["source"] == "official" and q["last_price"] == "8.28"   # 价格与来源不变
+    assert q["name"] == "工商银行"                                   # 简称补齐
+    assert q["event_time"].startswith("2026-09-30T14:55:01")         # 盘中时刻补齐
+    assert any("盘中时刻取自腾讯通道" in g for g in q["gaps"])
+    assert any("证券简称取自腾讯通道" in g for g in q["gaps"])
+
+
+def test_quote_keeps_official_when_intraday_time_present(monkeypatch):
+    """时刻已经是盘中的 → 只补 name，不碰 event_time。"""
+    hit = dict(_OFFICIAL_DATE_ONLY)
+    hit["event_time"] = _cst(10, 0, 0)
+    monkeypatch.setattr(fin_data, "_official_quote", lambda code: dict(hit))
+    monkeypatch.setattr(fin_data, "_tencent_quote", lambda code: {
+        "name": "工商银行", "event_time": _cst(10, 0, 5), "source": "tencent-qt"})
+
+    q = fin_data.quote("601398")
+    assert q["event_time"].startswith("2026-09-30T10:00:00")   # 用官方那个，不是腾讯的
+    assert q["name"] == "工商银行"
+    assert not any("盘中时刻取自腾讯通道" in g for g in q["gaps"])
+
+
+def test_quote_keeps_date_only_when_tencent_also_fails(monkeypatch):
+    """腾讯也取不到 → **如实记缺口**，不编一个时刻出来。"""
+    monkeypatch.setattr(fin_data, "_official_quote", lambda code: dict(_OFFICIAL_DATE_ONLY))
+    monkeypatch.setattr(fin_data, "_tencent_quote", lambda code: None)
+
+    q = fin_data.quote("601398")
+    assert q["event_time"].startswith("2026-09-30T00:00:00")
+    assert any("腾讯通道也取不到盘中时刻" in g for g in q["gaps"])
+
+
+def test_is_date_only():
+    assert fin_data._is_date_only(_cst(0)) is True
+    assert fin_data._is_date_only(_cst(0, 0, 1)) is False
+    assert fin_data._is_date_only(None) is False

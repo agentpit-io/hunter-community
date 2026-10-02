@@ -62,5 +62,14 @@ This product includes software developed by third parties:
   * yfinance (Apache 2.0)
       https://github.com/ranaroussi/yfinance
 
+  * Temporal (MIT)
+      Temporal Technologies · https://github.com/temporalio/temporal
+      Consumed as prebuilt images only (temporalio/auto-setup, temporalio/ui)
+      and the Python SDK (temporalio). Drives the 智能交易 (paper-trading)
+      workflow scheduling; it stores workflow state only and is not a ledger.
+
+  * PostgreSQL (PostgreSQL License)
+      https://www.postgresql.org/ · image: postgres
+
 Version details for Python and Node dependencies are listed in
 apps/api/requirements.txt and apps/web/package-lock.json.

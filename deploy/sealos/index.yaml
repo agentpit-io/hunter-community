@@ -47,6 +47,12 @@ spec:
     setup_token_gen:
       type: string
       value: ${{ random(16) }}
+    # 智能交易 · 账本库运行期角色 fin_paper_rw 的口令。
+    # `0023_fin_core.sql` 建角色时**故意不写密码**（密码不进仓库），由 paper 的
+    # initContainer `fin-init` 在 api 迁移建出角色后 `ALTER ROLE … PASSWORD` 设上。
+    fin_paper_password:
+      type: string
+      value: ${{ random(24) }}
 
   # ── 用户表单 ───────────────────────────────────────────────────────
   # 刻意不要求填任何大模型配置：那些全部交给部署后的图形化首启向导。
@@ -294,7 +300,7 @@ kind: Deployment
 metadata:
   name: ${{ defaults.app_name }}-llm-shim
   annotations:
-    originImageName: ghcr.io/agentpit-io/hunter-community-llm-shim:1.1.0
+    originImageName: ghcr.io/agentpit-io/hunter-community-llm-shim:1.3.0
     deploy.cloud.sealos.io/minReplicas: '1'
     deploy.cloud.sealos.io/maxReplicas: '1'
   labels:
@@ -314,7 +320,7 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: ${{ defaults.app_name }}-llm-shim
-          image: ghcr.io/agentpit-io/hunter-community-llm-shim:1.1.0
+          image: ghcr.io/agentpit-io/hunter-community-llm-shim:1.3.0
           env:
             # 大模型地址由首启向导写进数据库后热生效，这里留空即可
             - name: LLM_BASE_URL
@@ -369,7 +375,7 @@ kind: StatefulSet
 metadata:
   name: ${{ defaults.app_name }}-api
   annotations:
-    originImageName: ghcr.io/agentpit-io/hunter-community-api:1.1.0
+    originImageName: ghcr.io/agentpit-io/hunter-community-api:1.3.0
     deploy.cloud.sealos.io/minReplicas: '1'
     deploy.cloud.sealos.io/maxReplicas: '1'
   labels:
@@ -392,7 +398,7 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: ${{ defaults.app_name }}-api
-          image: ghcr.io/agentpit-io/hunter-community-api:1.1.0
+          image: ghcr.io/agentpit-io/hunter-community-api:1.3.0
           env:
             # ── postgres 连接 · 凭据来自 KubeBlocks 生成的 Secret ──────
             # $(VAR) 是 K8s 的 env 互引用，只能引用**同一个列表里靠前**的项，
@@ -573,7 +579,7 @@ kind: StatefulSet
 metadata:
   name: ${{ defaults.app_name }}-opencode
   annotations:
-    originImageName: ghcr.io/agentpit-io/hunter-community-opencode:1.1.0
+    originImageName: ghcr.io/agentpit-io/hunter-community-opencode:1.3.0
     deploy.cloud.sealos.io/minReplicas: '1'
     deploy.cloud.sealos.io/maxReplicas: '1'
   labels:
@@ -599,7 +605,7 @@ spec:
         fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: ${{ defaults.app_name }}-opencode
-          image: ghcr.io/agentpit-io/hunter-community-opencode:1.1.0
+          image: ghcr.io/agentpit-io/hunter-community-opencode:1.3.0
           env:
             - name: JWT_SECRET
               value: ${{ defaults.jwt_secret }}
@@ -684,7 +690,7 @@ kind: Deployment
 metadata:
   name: ${{ defaults.app_name }}
   annotations:
-    originImageName: ghcr.io/agentpit-io/hunter-community-web:1.1.0
+    originImageName: ghcr.io/agentpit-io/hunter-community-web:1.3.0
     deploy.cloud.sealos.io/minReplicas: '1'
     deploy.cloud.sealos.io/maxReplicas: '1'
   labels:
@@ -704,7 +710,7 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: ${{ defaults.app_name }}
-          image: ghcr.io/agentpit-io/hunter-community-web:1.1.0
+          image: ghcr.io/agentpit-io/hunter-community-web:1.3.0
           env:
             - name: NODE_ENV
               value: production
@@ -756,6 +762,388 @@ spec:
       name: http
   selector:
     app: ${{ defaults.app_name }}
+
+---
+# ══════════════════════════════════════════════════════════════════════
+# 智能交易（fin 链）· paper / temporal / temporal-ui / fin-worker
+#
+# · temporal 是智能交易链**唯一的上层调度权威**（六个交易时点 + 拉 K 线），
+#   工作流状态存在 postgres 的 temporal / temporal_visibility 两个库，不碰业务账本。
+# · paper 是全栈唯一持有账本库运行期角色 fin_paper_rw 的服务；账本**只追加** ——
+#   该角色在追加表上没有任何 UPDATE / DELETE，「唯一账本」是一条 GRANT。
+#   它的 initContainer `fin-init` 等 api 迁移建出角色后设运行期口令，设好 paper 才起。
+# · fin-worker 是推理区 → 执行区的桥，**不直连账本**，写账本只有 paper 的 HTTP 一个入口。
+# · temporal-ui 是排障面板，仅集群内。
+# ══════════════════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${{ defaults.app_name }}-paper
+  annotations:
+    originImageName: ghcr.io/agentpit-io/hunter-community-paper:1.3.0
+    deploy.cloud.sealos.io/minReplicas: '1'
+    deploy.cloud.sealos.io/maxReplicas: '1'
+  labels:
+    cloud.sealos.io/app-deploy-manager: ${{ defaults.app_name }}-paper
+    app: ${{ defaults.app_name }}-paper
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  minReadySeconds: 10
+  selector:
+    matchLabels:
+      app: ${{ defaults.app_name }}-paper
+  template:
+    metadata:
+      labels:
+        app: ${{ defaults.app_name }}-paper
+    spec:
+      automountServiceAccountToken: false
+      initContainers:
+        # 一次性 provision：等 api 迁移建出 fin_paper_rw → ALTER ROLE 设口令。
+        # 循环重试、只在成功后退出；initContainer 失败时 K8s 会按 Pod 重启策略重跑，
+        # 所以「迁移还没跑完」只会让它等，不会把 paper 永久卡住。
+        - name: fin-init
+          image: postgres:16-alpine
+          command:
+            - /bin/sh
+            - -c
+            - |
+              until psql -tAc "SELECT rolname FROM pg_roles" 2>/dev/null | grep -qx fin_paper_rw; do
+                echo '[fin-init] 等待 api 迁移创建 fin_paper_rw …'; sleep 3
+              done
+              until printf "ALTER ROLE fin_paper_rw WITH LOGIN PASSWORD :'pw';\n" | psql -v ON_ERROR_STOP=1 -v pw="$FIN_PAPER_PASSWORD" >/dev/null 2>&1; do
+                echo '[fin-init] 设置 fin_paper_rw 口令失败，重试…'; sleep 3
+              done
+              echo '[fin-init] fin_paper_rw 运行期口令已就绪'
+          env:
+            - name: PGHOST
+              valueFrom:
+                secretKeyRef:
+                  name: ${{ defaults.app_name }}-pg-conn-credential
+                  key: host
+            - name: PGPORT
+              valueFrom:
+                secretKeyRef:
+                  name: ${{ defaults.app_name }}-pg-conn-credential
+                  key: port
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: ${{ defaults.app_name }}-pg-conn-credential
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ${{ defaults.app_name }}-pg-conn-credential
+                  key: password
+            - name: PGDATABASE
+              value: postgres
+            - name: FIN_PAPER_PASSWORD
+              value: ${{ defaults.fin_paper_password }}
+      containers:
+        - name: ${{ defaults.app_name }}-paper
+          image: ghcr.io/agentpit-io/hunter-community-paper:1.3.0
+          env:
+            # $(VAR) 是 K8s 的 env 互引用，只能引用**同一个列表里靠前**的项。
+            - name: PG_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: ${{ defaults.app_name }}-pg-conn-credential
+                  key: host
+            - name: FIN_PAPER_PASSWORD
+              value: ${{ defaults.fin_paper_password }}
+            # 连应用库、用运行期角色 fin_paper_rw（表权限 0023 已给，只差口令）
+            - name: DATABASE_URL
+              value: postgresql://fin_paper_rw:$(FIN_PAPER_PASSWORD)@$(PG_HOST):5432/postgres
+            - name: PAPER_MODE
+              value: PAPER
+            - name: HUNTER_INTERNAL_KEY
+              value: ${{ defaults.internal_key }}
+            # 行情来源：打 api 的 GET /api/quote/{code}；取不到就不成交（安全的一侧）
+            - name: PAPER_QUOTE_URL
+              value: http://${{ defaults.app_name }}-api.${{ SEALOS_NAMESPACE }}.svc:8000
+            - name: PAPER_SNAPSHOT_STALE_SECONDS
+              value: '900'
+          ports:
+            - name: http
+              containerPort: 8000
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            failureThreshold: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          imagePullPolicy: IfNotPresent
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${{ defaults.app_name }}-paper
+  labels:
+    cloud.sealos.io/app-deploy-manager: ${{ defaults.app_name }}-paper
+spec:
+  ports:
+    - port: 8000
+      targetPort: 8000
+      name: http
+  selector:
+    app: ${{ defaults.app_name }}-paper
+
+---
+# temporal · 智能交易链唯一的上层调度权威
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${{ defaults.app_name }}-temporal
+  annotations:
+    originImageName: temporalio/auto-setup:1.25
+    deploy.cloud.sealos.io/minReplicas: '1'
+    deploy.cloud.sealos.io/maxReplicas: '1'
+  labels:
+    cloud.sealos.io/app-deploy-manager: ${{ defaults.app_name }}-temporal
+    app: ${{ defaults.app_name }}-temporal
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  selector:
+    matchLabels:
+      app: ${{ defaults.app_name }}-temporal
+  template:
+    metadata:
+      labels:
+        app: ${{ defaults.app_name }}-temporal
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: ${{ defaults.app_name }}-temporal
+          image: temporalio/auto-setup:1.25
+          env:
+            - name: DB
+              value: postgres12
+            - name: DB_PORT
+              value: '5432'
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: ${{ defaults.app_name }}-pg-conn-credential
+                  key: username
+            - name: POSTGRES_PWD
+              valueFrom:
+                secretKeyRef:
+                  name: ${{ defaults.app_name }}-pg-conn-credential
+                  key: password
+            - name: POSTGRES_SEEDS
+              valueFrom:
+                secretKeyRef:
+                  name: ${{ defaults.app_name }}-pg-conn-credential
+                  key: host
+            - name: DBNAME
+              value: temporal
+            - name: VISIBILITY_DBNAME
+              value: temporal_visibility
+          ports:
+            - name: grpc
+              containerPort: 7233
+          startupProbe:
+            tcpSocket:
+              port: 7233
+            failureThreshold: 30
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: 7233
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1024Mi
+          imagePullPolicy: IfNotPresent
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${{ defaults.app_name }}-temporal
+  labels:
+    cloud.sealos.io/app-deploy-manager: ${{ defaults.app_name }}-temporal
+spec:
+  ports:
+    - port: 7233
+      targetPort: 7233
+      name: grpc
+  selector:
+    app: ${{ defaults.app_name }}-temporal
+
+---
+# temporal-ui · 排障面板（仅集群内，不对外）
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${{ defaults.app_name }}-temporal-ui
+  annotations:
+    originImageName: temporalio/ui:2.34.0
+    deploy.cloud.sealos.io/minReplicas: '1'
+    deploy.cloud.sealos.io/maxReplicas: '1'
+  labels:
+    cloud.sealos.io/app-deploy-manager: ${{ defaults.app_name }}-temporal-ui
+    app: ${{ defaults.app_name }}-temporal-ui
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  selector:
+    matchLabels:
+      app: ${{ defaults.app_name }}-temporal-ui
+  template:
+    metadata:
+      labels:
+        app: ${{ defaults.app_name }}-temporal-ui
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: ${{ defaults.app_name }}-temporal-ui
+          image: temporalio/ui:2.34.0
+          env:
+            - name: TEMPORAL_ADDRESS
+              value: ${{ defaults.app_name }}-temporal.${{ SEALOS_NAMESPACE }}.svc:7233
+            - name: TEMPORAL_CORS_ORIGINS
+              value: http://localhost:8233
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+          imagePullPolicy: IfNotPresent
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${{ defaults.app_name }}-temporal-ui
+  labels:
+    cloud.sealos.io/app-deploy-manager: ${{ defaults.app_name }}-temporal-ui
+spec:
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http
+  selector:
+    app: ${{ defaults.app_name }}-temporal-ui
+
+---
+# fin-worker · 推理区 → 执行区的桥（不直连账本）
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${{ defaults.app_name }}-fin-worker
+  annotations:
+    originImageName: ghcr.io/agentpit-io/hunter-community-fin-worker:1.3.0
+    deploy.cloud.sealos.io/minReplicas: '1'
+    deploy.cloud.sealos.io/maxReplicas: '1'
+  labels:
+    cloud.sealos.io/app-deploy-manager: ${{ defaults.app_name }}-fin-worker
+    app: ${{ defaults.app_name }}-fin-worker
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  selector:
+    matchLabels:
+      app: ${{ defaults.app_name }}-fin-worker
+  template:
+    metadata:
+      labels:
+        app: ${{ defaults.app_name }}-fin-worker
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: ${{ defaults.app_name }}-fin-worker
+          image: ghcr.io/agentpit-io/hunter-community-fin-worker:1.3.0
+          env:
+            # 写账本只有 paper 一个入口；镜像里连 DB 驱动都没有，「不直连账本」是事实
+            - name: PAPER_BASE_URL
+              value: http://${{ defaults.app_name }}-paper.${{ SEALOS_NAMESPACE }}.svc:8000
+            - name: API_BASE_URL
+              value: http://${{ defaults.app_name }}-api.${{ SEALOS_NAMESPACE }}.svc:8000
+            - name: TEMPORAL_ADDRESS
+              value: ${{ defaults.app_name }}-temporal.${{ SEALOS_NAMESPACE }}.svc:7233
+            - name: TEMPORAL_NAMESPACE
+              value: default
+            - name: TEMPORAL_TASK_QUEUE
+              value: fin-trading
+            - name: HUNTER_INTERNAL_KEY
+              value: ${{ defaults.internal_key }}
+            - name: FIN_WORKER_HTTP_PORT
+              value: '8300'
+            - name: FIN_SAMPLE_CODE
+              value: '601398'
+            - name: FIN_SAMPLE_STRATEGY_KEY
+              value: sample-fixed
+            - name: FIN_SAMPLE_STRATEGY_VERSION
+              value: '1.0'
+            - name: FIN_INTENT_TTL_SECONDS
+              value: '1800'
+            - name: FIN_SCHEDULES_ENABLED
+              value: '1'
+          ports:
+            - name: http
+              containerPort: 8300
+          readinessProbe:
+            tcpSocket:
+              port: 8300
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          imagePullPolicy: IfNotPresent
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${{ defaults.app_name }}-fin-worker
+  labels:
+    cloud.sealos.io/app-deploy-manager: ${{ defaults.app_name }}-fin-worker
+spec:
+  ports:
+    - port: 8300
+      targetPort: 8300
+      name: http
+  selector:
+    app: ${{ defaults.app_name }}-fin-worker
 
 ---
 apiVersion: networking.k8s.io/v1

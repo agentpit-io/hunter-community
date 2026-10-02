@@ -33,8 +33,20 @@ template:
   # 唯一对外的服务。Railway 上点 web 服务的 Settings → Networking → Generate Domain。
   publicService: web
 
+# ── 智能交易（fin 链）· paper / temporal / temporalui / finworker / fininit ──
+# 与仓库根 docker-compose.yml 的 `fin` profile 等价：
+#   · temporal     智能交易链**唯一的上层调度权威**（六个交易时点 + 拉 K 线），
+#                  工作流状态存在 postgres 的 temporal 库，不碰业务账本。
+#   · paper        全栈唯一持有账本库运行期角色 fin_paper_rw 的服务；账本**只追加** ——
+#                  该角色在追加表上没有任何 UPDATE / DELETE，「唯一账本」是一条 GRANT。
+#   · finworker    推理区 → 执行区的桥，**不直连账本**，写账本只有 paper 的 HTTP 一个入口。
+#   · temporalui   排障面板，仅内网。
+#   · fininit      **一次性** provision 服务：Railway 没有启动顺序，它靠自身的 psql
+#                  重试循环等 api 迁移建出 fin_paper_rw 再设运行期口令；paper 用它
+#                  生成的那把口令（引用变量）—— 顺序不保证也最终收敛。
+#
 # ── 服务命名约定 ──────────────────────────────────────────────────────
-# 六个服务名全部**不带连字符**（llmshim 而不是 llm-shim）。原因：引用变量的语法是
+# 所有服务名**不带连字符**（llmshim 而不是 llm-shim）。原因：引用变量的语法是
 # ${{ServiceName.VAR}}，官方文档里的例子都是不带连字符的标识符，带连字符能不能解析
 # 官方没写。服务名只影响私有主机名，而所有跨服务地址我们都显式写成变量，
 # 所以改名的代价为零 —— 不值得为了好看去赌一个没写在文档里的解析规则。
@@ -86,7 +98,7 @@ services:
 
   # ── llmshim ─────────────────────────────────────────────────────────
   - name: llmshim
-    image: ghcr.io/agentpit-io/hunter-community-llm-shim:1.1.0
+    image: ghcr.io/agentpit-io/hunter-community-llm-shim:1.3.0
     listenPort: 3999
     public: false
     healthcheckPath: /health
@@ -106,7 +118,7 @@ services:
 
   # ── api ─────────────────────────────────────────────────────────────
   - name: api
-    image: ghcr.io/agentpit-io/hunter-community-api:1.1.0
+    image: ghcr.io/agentpit-io/hunter-community-api:1.3.0
     listenPort: 8000
     public: false
     healthcheckPath: /api/health
@@ -174,7 +186,7 @@ services:
 
   # ── opencode ────────────────────────────────────────────────────────
   - name: opencode
-    image: ghcr.io/agentpit-io/hunter-community-opencode:1.1.0
+    image: ghcr.io/agentpit-io/hunter-community-opencode:1.3.0
     listenPort: 3901
     public: false
     # TCP 探活即可 —— opencode 的 / 本来就不返回 200
@@ -207,7 +219,7 @@ services:
 
   # ── web（唯一对外）──────────────────────────────────────────────────
   - name: web
-    image: ghcr.io/agentpit-io/hunter-community-web:1.1.0
+    image: ghcr.io/agentpit-io/hunter-community-web:1.3.0
     listenPort: 3000
     public: true
     healthcheckPath: /
@@ -228,3 +240,101 @@ services:
       HUNTER_INTERNAL_KEY:
         value: ${{api.HUNTER_INTERNAL_KEY}}
         note: 必须与 api 同值，否则图片 OCR 一律 401（症状只是「上传图片没反应」）
+
+  # ── fininit · 一次性 provision 账本库运行期角色 ──────────────────────
+  # ⚠️ Railway 里要给这个服务设 **Start Command**（控制台 → Settings → Deploy →
+  #    Custom Start Command），内容就是下面 command 那一段。它跑完就退出；
+  #    Railway 会重启它，重跑一次 ALTER ROLE（幂等、无害）—— 顺序不保证也能收敛。
+  - name: fininit
+    image: postgres:16-alpine
+    public: false
+    command:
+      - /bin/sh
+      - -c
+      - |
+        until psql -tAc "SELECT rolname FROM pg_roles" 2>/dev/null | grep -qx fin_paper_rw; do
+          echo '[fin-init] 等待 api 迁移创建 fin_paper_rw …'; sleep 3
+        done
+        until printf "ALTER ROLE fin_paper_rw WITH LOGIN PASSWORD :'pw';\n" | psql -v ON_ERROR_STOP=1 -v pw="$FIN_PAPER_PASSWORD" >/dev/null 2>&1; do
+          echo '[fin-init] 设置 fin_paper_rw 口令失败，重试…'; sleep 3
+        done
+        echo '[fin-init] fin_paper_rw 运行期口令已就绪'
+    variables:
+      FIN_PAPER_PASSWORD:
+        value: ${{secret(24)}}
+        note: >-
+          账本库运行期角色 fin_paper_rw 的口令。由这个服务自己生成，paper 用引用变量
+          ${{fininit.FIN_PAPER_PASSWORD}} 取同一个值 —— 两边必须一致，否则 paper 连不上库。
+      PGHOST: { value: "${{postgres.RAILWAY_PRIVATE_DOMAIN}}", note: 走私有网络 }
+      PGPORT: { value: "5432" }
+      PGUSER: { value: hunter }
+      PGDATABASE: { value: hunter }
+      PGPASSWORD:
+        value: ${{postgres.POSTGRES_PASSWORD}}
+        note: 迁移执行者（api 用的）管理员口令 · 与 postgres/api 同源
+
+  # ── paper · 唯一账本服务（只追加）────────────────────────────────────
+  - name: paper
+    image: ghcr.io/agentpit-io/hunter-community-paper:1.3.0
+    listenPort: 8000
+    public: false
+    healthcheckPath: /healthz
+    variables:
+      # 连应用库、用运行期角色 fin_paper_rw（表权限 0023 已给，只差口令）
+      DATABASE_URL:
+        value: postgresql://fin_paper_rw:${{fininit.FIN_PAPER_PASSWORD}}@${{postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/hunter
+        note: 口令取自 fininit · 没有启动顺序时 paper 会先重启几次，等 fininit 设好口令即通
+      PAPER_MODE: { value: PAPER }
+      HUNTER_INTERNAL_KEY: { value: "${{api.HUNTER_INTERNAL_KEY}}", note: 与 api / web / opencode / finworker 同值 }
+      PAPER_QUOTE_URL:
+        value: "http://${{api.RAILWAY_PRIVATE_DOMAIN}}:8000"
+        note: 行情来源打 api 的 GET /api/quote/{code}；取不到就不成交（安全的一侧）
+      PAPER_SNAPSHOT_STALE_SECONDS: { value: "900" }
+
+  # ── temporal · 智能交易链唯一的上层调度权威 ──────────────────────────
+  # auto-setup 在同一个 postgres 上自建 temporal / temporal_visibility 两个库，
+  # 不碰业务账本（工作流状态不代替业务账本）。
+  - name: temporal
+    image: temporalio/auto-setup:1.25
+    listenPort: 7233
+    public: false
+    healthcheckPath: null
+    variables:
+      DB: { value: postgres12 }
+      DB_PORT: { value: "5432" }
+      POSTGRES_USER: { value: hunter }
+      POSTGRES_PWD: { value: "${{postgres.POSTGRES_PASSWORD}}" }
+      POSTGRES_SEEDS: { value: "${{postgres.RAILWAY_PRIVATE_DOMAIN}}" }
+      DBNAME: { value: temporal }
+      VISIBILITY_DBNAME: { value: temporal_visibility }
+
+  # ── temporalui · 排障面板（仅内网，不对外）──────────────────────────
+  - name: temporalui
+    image: temporalio/ui:2.34.0
+    listenPort: 8080
+    public: false
+    healthcheckPath: null
+    variables:
+      TEMPORAL_ADDRESS: { value: "temporal.railway.internal:7233" }
+      TEMPORAL_CORS_ORIGINS: { value: "http://localhost:8233" }
+
+  # ── finworker · 推理区 → 执行区的桥（不直连账本）────────────────────
+  - name: finworker
+    image: ghcr.io/agentpit-io/hunter-community-fin-worker:1.3.0
+    listenPort: 8300
+    public: false
+    healthcheckPath: null
+    variables:
+      # 写账本只有 paper 一个入口；镜像里连 DB 驱动都没有，「不直连账本」是事实
+      PAPER_BASE_URL: { value: "http://${{paper.RAILWAY_PRIVATE_DOMAIN}}:8000" }
+      API_BASE_URL: { value: "http://${{api.RAILWAY_PRIVATE_DOMAIN}}:8000" }
+      TEMPORAL_ADDRESS: { value: "temporal.railway.internal:7233" }
+      TEMPORAL_NAMESPACE: { value: default }
+      TEMPORAL_TASK_QUEUE: { value: fin-trading }
+      HUNTER_INTERNAL_KEY: { value: "${{api.HUNTER_INTERNAL_KEY}}", note: 与 api / web / opencode / paper 同值 }
+      FIN_WORKER_HTTP_PORT: { value: "8300" }
+      FIN_SAMPLE_CODE: { value: "601398" }
+      FIN_SAMPLE_STRATEGY_KEY: { value: sample-fixed }
+      FIN_SAMPLE_STRATEGY_VERSION: { value: "1.0" }
+      FIN_INTENT_TTL_SECONDS: { value: "1800" }
+      FIN_SCHEDULES_ENABLED: { value: "1" }
