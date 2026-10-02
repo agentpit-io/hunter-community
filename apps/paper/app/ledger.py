@@ -80,15 +80,30 @@ def get_param(cur, project_id: str) -> Optional[dict]:
     return _fetchone(cur, "SELECT * FROM fin_param WHERE project_id = %s", (project_id,))
 
 
-def cash_balance(cur, project_id: str) -> tuple[Decimal, Decimal]:
-    """可用 / 冻结 = 流水最后一行。没有流水 → (0, 0)（不是「余额字段」）。"""
+# ── 子账户（`(project_id, market)`）────────────────────────────────────────
+#
+# N4 起账本按**市场子账户**隔离：可用 / 冻结 / 持仓 / 委托 / 成交 / 估值都带
+# `market` 列，`market` 给了就只读该子账户的行。**`market=None` 保持旧行为**
+# （不按市场过滤）—— 只用于「还没接市场的旧调用点」，A 股专用路径不受影响。
+# 判据见 N4 成果报告：一行 A 股买入只动 CN_A 那本流水。
+
+def _market_clause(market: Optional[str]) -> tuple[str, tuple]:
+    if not market:
+        return "", ()
+    return " AND market = %s", (market,)
+
+
+def cash_balance(cur, project_id: str, market: Optional[str] = None) -> tuple[Decimal, Decimal]:
+    """**该市场子账户**的可用 / 冻结 = 流水最后一行。没有流水 → (0, 0)。
+
+    `market=None` 时不过滤（旧行为：取项目全部流水最后一行）。
+    """
+    clause, params = _market_clause(market)
     row = _fetchone(
         cur,
-        """
-        SELECT available_after, frozen_after FROM fin_cash_ledger
-         WHERE project_id = %s ORDER BY entry_id DESC LIMIT 1
-        """,
-        (project_id,),
+        "SELECT available_after, frozen_after FROM fin_cash_ledger "
+        " WHERE project_id = %s" + clause + " ORDER BY entry_id DESC LIMIT 1",
+        (project_id, *params),
     )
     if not row:
         return Decimal("0.0000"), Decimal("0.0000")
@@ -103,44 +118,52 @@ def get_position(cur, project_id: str, code: str) -> Optional[dict]:
     )
 
 
-def list_positions(cur, project_id: str) -> list[dict]:
+def list_positions(cur, project_id: str, market: Optional[str] = None) -> list[dict]:
+    clause, params = _market_clause(market)
     cur.execute(
-        "SELECT * FROM fin_position WHERE project_id = %s ORDER BY code", (project_id,)
+        "SELECT * FROM fin_position WHERE project_id = %s" + clause + " ORDER BY code",
+        (project_id, *params),
     )
     return cur.fetchall()
 
 
-def list_cash(cur, project_id: str, limit: int = 200) -> list[dict]:
+def list_cash(cur, project_id: str, limit: int = 200, market: Optional[str] = None) -> list[dict]:
+    clause, params = _market_clause(market)
     cur.execute(
         """
-        SELECT entry_id, kind, amount, available_after, frozen_after, order_id, trade_id, memo, created_at
-          FROM fin_cash_ledger WHERE project_id = %s ORDER BY entry_id DESC LIMIT %s
-        """,
-        (project_id, limit),
+        SELECT entry_id, kind, amount, available_after, frozen_after, order_id, trade_id,
+               market, currency, memo, created_at
+          FROM fin_cash_ledger WHERE project_id = %s
+        """ + clause + " ORDER BY entry_id DESC LIMIT %s",
+        (project_id, *params, limit),
     )
     return cur.fetchall()
 
 
-def list_orders(cur, project_id: str, limit: int = 200) -> list[dict]:
+def list_orders(cur, project_id: str, limit: int = 200, market: Optional[str] = None) -> list[dict]:
+    clause, params = _market_clause(market)
     cur.execute(
         """
         SELECT order_id, code, side, qty, price_type, limit_price, status, filled_qty,
-               source, actor, decline_reason, valid_until, frozen_amount, created_at
-          FROM fin_order WHERE project_id = %s ORDER BY created_at DESC LIMIT %s
-        """,
-        (project_id, limit),
+               source, actor, decline_reason, valid_until, frozen_amount, market, currency,
+               created_at
+          FROM fin_order WHERE project_id = %s
+        """ + clause + " ORDER BY created_at DESC LIMIT %s",
+        (project_id, *params, limit),
     )
     return cur.fetchall()
 
 
-def list_trades(cur, project_id: str, limit: int = 200) -> list[dict]:
+def list_trades(cur, project_id: str, limit: int = 200, market: Optional[str] = None) -> list[dict]:
+    clause, params = _market_clause(market)
     cur.execute(
         """
         SELECT trade_id, order_id, code, side, qty, price, amount, commission, stamp_tax,
-               transfer_fee, total_fee, snapshot_id, source, fee_model_version, traded_at
-          FROM fin_trade WHERE project_id = %s ORDER BY traded_at DESC LIMIT %s
-        """,
-        (project_id, limit),
+               transfer_fee, total_fee, snapshot_id, source, fee_model_version, market,
+               currency, traded_at
+          FROM fin_trade WHERE project_id = %s
+        """ + clause + " ORDER BY traded_at DESC LIMIT %s",
+        (project_id, *params, limit),
     )
     return cur.fetchall()
 
@@ -166,6 +189,39 @@ def lock_project(cur, project_id: str) -> None:
 def get_market_rule(cur, market: str) -> Optional[dict]:
     """`fin_market_rule` 的一行（六条风控的参数来源，按市场）。取不到 → `None`。"""
     return _fetchone(cur, "SELECT * FROM fin_market_rule WHERE market = %s", (market,))
+
+
+def list_market_rules(cur) -> list[dict]:
+    """三个市场各一行（含 `points` / `timezone` / `currency`）。
+
+    给 fin-worker 的调度用 —— 它**没有账本库连接**，只能经 HTTP 读（N4 加
+    `GET /api/v1/market-rules` 暴露本函数）。顺序固定 CN_A → HK → US。
+    """
+    cur.execute(
+        "SELECT * FROM fin_market_rule ORDER BY "
+        " array_position(ARRAY['CN_A','HK','US'], market)"
+    )
+    return cur.fetchall()
+
+
+# 市场 → 币种（ISO 4217，事实）。只在市场规则行取不到时兜底；正常从规则行读。
+MARKET_CURRENCY: dict[str, str] = {"CN_A": "CNY", "HK": "HKD", "US": "USD"}
+
+
+def resolve_market(project: Optional[dict], market: Optional[str] = None) -> str:
+    """把「调用方给的市场 / 项目 market_scope」归一成一个**合法市场三值**。
+
+    项目 `market_scope` 可能是 `MULTI`（二期多市场）—— 那不是单个子账户，
+    缺省时落到 `CN_A`（一期语义），需要港美股子账户时必须显式传 `market`。
+    """
+    m = market or (project or {}).get("market_scope")
+    return m if m in MARKET_CURRENCY else "CN_A"
+
+
+def currency_for(cur, market: str) -> Optional[str]:
+    """该市场的本币（CNY / HKD / USD）。优先市场规则行，取不到用 ISO 表兜底。"""
+    rule = get_market_rule(cur, market) or {}
+    return rule.get("currency") or MARKET_CURRENCY.get(market)
 
 
 def get_calendar(cur, trade_date, market: str = "CN_A") -> Optional[dict]:
@@ -239,8 +295,9 @@ def latest_snapshot_at(cur, code: str, at: datetime) -> Optional[dict]:
     )
 
 
-def cash_state_at(cur, project_id: str, at: datetime) -> tuple[Decimal, Decimal, int]:
-    """**截至 `at`** 的 `(可用, 冻结, 最高 entry_id)`。
+def cash_state_at(cur, project_id: str, at: datetime,
+                  market: Optional[str] = None) -> tuple[Decimal, Decimal, int]:
+    """**截至 `at`** 的 `(可用, 冻结, 最高 entry_id)`（可按市场子账户限定）。
 
     时间轴取「业务时刻优先」：整个项目只按挂钟过滤会漏掉业务时刻在更早、
     却在本机稍后才落库的行（测试夹具与历史回放都是这种形状）。所以 cutoff 取两者之大：
@@ -250,7 +307,10 @@ def cash_state_at(cur, project_id: str, at: datetime) -> tuple[Decimal, Decimal,
 
     `项目本金 deposit` 排在所有成交之前，会被业务 cutoff 一并带进来 —— 这是对的：
     没有本金就没有后面的成交。
+
+    `market` 给了就只在该市场子账户里算（对账按子账户核）。
     """
+    clause, params = _market_clause(market)
     row = _fetchone(
         cur,
         """
@@ -260,8 +320,8 @@ def cash_state_at(cur, project_id: str, at: datetime) -> tuple[Decimal, Decimal,
            AND (created_at <= %s
                 OR trade_id IN (SELECT trade_id FROM fin_trade
                                  WHERE project_id = %s AND traded_at <= %s))
-        """,
-        (project_id, at, project_id, at),
+        """ + clause,
+        (project_id, at, project_id, at, *params),
     )
     cutoff = int(row["cutoff"]) if row else 0
     if cutoff <= 0:
@@ -269,8 +329,9 @@ def cash_state_at(cur, project_id: str, at: datetime) -> tuple[Decimal, Decimal,
     last = _fetchone(
         cur,
         "SELECT available_after, frozen_after FROM fin_cash_ledger "
-        " WHERE project_id = %s AND entry_id <= %s ORDER BY entry_id DESC LIMIT 1",
-        (project_id, cutoff),
+        " WHERE project_id = %s AND entry_id <= %s" + clause +
+        " ORDER BY entry_id DESC LIMIT 1",
+        (project_id, cutoff, *params),
     )
     if not last:
         return Decimal("0.0000"), Decimal("0.0000"), 0
@@ -279,27 +340,37 @@ def cash_state_at(cur, project_id: str, at: datetime) -> tuple[Decimal, Decimal,
 
 # ── 写：入金（幂等）───────────────────────────────────────────────────────
 
-def seed_funding(cur, project_id: str) -> dict:
-    """把项目本金记成一条 `deposit` 流水。**幂等**：已有 deposit 就原样返回。
+def seed_funding(cur, project_id: str, market: Optional[str] = None) -> dict:
+    """把**该市场子账户**的本金记成一条 `deposit` 流水。**幂等**：已有 deposit 就原样返回。
+
+    子账户 = `(project_id, market)`：每个市场子账户各有自己的本金流水，
+    金额取项目 `initial_capital`，币种取该市场本币（CNY / HKD / USD）。
+    `market=None` → 项目 `market_scope`（A 股项目 = `CN_A`，行为与一期逐字一致）。
 
     这是「账本从哪里开始」的显式一步 —— 不做隐式补记（隐藏的写会让对账说不清）。
     """
     project = get_project(cur, project_id)
     if not project:
         raise LookupError(f"项目不存在：{project_id}")
+    market = resolve_market(project, market)
+    currency = currency_for(cur, market) or "CNY"
     existing = _fetchone(
         cur,
-        "SELECT entry_id, amount FROM fin_cash_ledger WHERE project_id = %s AND kind = 'deposit' LIMIT 1",
-        (project_id,),
+        "SELECT entry_id, amount FROM fin_cash_ledger "
+        " WHERE project_id = %s AND market = %s AND kind = 'deposit' LIMIT 1",
+        (project_id, market),
     )
     if existing:
-        return {"created": False, "entry_id": existing["entry_id"], "amount": existing["amount"]}
+        return {"created": False, "entry_id": existing["entry_id"],
+                "amount": existing["amount"], "market": market, "currency": currency}
 
     capital = _money(project["initial_capital"])
     entry_id = _insert_cash(
-        cur, project_id, "deposit", capital, capital, Decimal("0.0000"), memo="项目本金"
+        cur, project_id, "deposit", capital, capital, Decimal("0.0000"),
+        market=market, currency=currency, memo="项目本金",
     )
-    return {"created": True, "entry_id": entry_id, "amount": capital}
+    return {"created": True, "entry_id": entry_id, "amount": capital,
+            "market": market, "currency": currency}
 
 
 def _insert_cash(
@@ -312,16 +383,20 @@ def _insert_cash(
     order_id: Optional[str] = None,
     trade_id: Optional[str] = None,
     memo: Optional[str] = None,
+    *,
+    market: str = "CN_A",
+    currency: str = "CNY",
 ) -> int:
     cur.execute(
         """
         INSERT INTO fin_cash_ledger
-          (project_id, kind, amount, available_after, frozen_after, order_id, trade_id, memo)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+          (project_id, kind, amount, available_after, frozen_after, order_id, trade_id,
+           memo, market, currency)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING entry_id
         """,
         (project_id, kind, _money(amount), _money(available_after), _money(frozen_after),
-         order_id, trade_id, memo),
+         order_id, trade_id, memo, market, currency),
     )
     return cur.fetchone()["entry_id"]
 
@@ -342,7 +417,8 @@ def get_order(cur, order_id: str) -> Optional[dict]:
     return _fetchone(cur, "SELECT * FROM fin_order WHERE order_id = %s", (order_id,))
 
 
-def list_open_orders(cur, project_id: str, code: Optional[str] = None) -> list[dict]:
+def list_open_orders(cur, project_id: str, code: Optional[str] = None,
+                     market: Optional[str] = None) -> list[dict]:
     sql = (
         "SELECT * FROM fin_order WHERE project_id = %s "
         "AND status IN ('pending','accepted','partially_filled')"
@@ -351,40 +427,47 @@ def list_open_orders(cur, project_id: str, code: Optional[str] = None) -> list[d
     if code:
         sql += " AND code = %s"
         params.append(code)
+    if market:
+        sql += " AND market = %s"
+        params.append(market)
     sql += " ORDER BY created_at"
     cur.execute(sql, tuple(params))
     return cur.fetchall()
 
 
-def open_sell_committed(cur, project_id: str, code: str) -> int:
+def open_sell_committed(cur, project_id: str, code: str, market: Optional[str] = None) -> int:
     """该标的上**还没成交的卖单**占用的股数。
 
     一期的「券的冻结」不建账本列 —— 它可以从 `fin_order` 精确算出来，
     而 `fin_order` 本来就是权威。风控第 2 条（T+1）与第 6 条（持仓）要拿
     `可卖量 − 这个数` 去判，否则同一批股能被两张挂单各卖一次。
+
+    `code` 本身已隐含市场（600519 只可能是 A 股），`market` 只作可选加固。
     """
+    clause, params = _market_clause(market)
     row = _fetchone(
         cur,
         """
         SELECT COALESCE(SUM(qty - filled_qty), 0) AS n FROM fin_order
          WHERE project_id = %s AND code = %s AND side = 'sell'
            AND status IN ('pending','accepted','partially_filled')
-        """,
-        (project_id, code),
+        """ + clause,
+        (project_id, code, *params),
     )
     return int(row["n"]) if row else 0
 
 
-def open_buy_frozen(cur, project_id: str) -> Decimal:
-    """还没成交的买单占用的冻结额之和。对账用它核「冻结 = 挂单占用」。"""
+def open_buy_frozen(cur, project_id: str, market: Optional[str] = None) -> Decimal:
+    """**该市场子账户**还没成交的买单占用的冻结额之和。对账用它核「冻结 = 挂单占用」。"""
+    clause, params = _market_clause(market)
     row = _fetchone(
         cur,
         """
         SELECT COALESCE(SUM(frozen_amount), 0) AS s FROM fin_order
          WHERE project_id = %s AND side = 'buy'
            AND status IN ('pending','accepted','partially_filled')
-        """,
-        (project_id,),
+        """ + clause,
+        (project_id, *params),
     )
     return _money(row["s"]) if row else Decimal("0.0000")
 
@@ -393,14 +476,15 @@ def insert_order(
     cur, order_id, project_id, code, side, qty, price_type, limit_price,
     status, filled_qty, source, actor, decline_reason, intent_ref,
     decision_ref, valid_until, frozen_amount=Decimal("0.0000"),
+    *, market: str = "CN_A", currency: str = "CNY",
 ) -> None:
     cur.execute(
         """
         INSERT INTO fin_order
           (order_id, project_id, code, side, qty, price_type, limit_price, status,
            filled_qty, source, actor, intent_ref, decline_reason, decision_ref,
-           valid_until, frozen_amount)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+           valid_until, frozen_amount, market, currency)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         """,
         (
             order_id, project_id, code, side, qty, price_type,
@@ -408,6 +492,7 @@ def insert_order(
             status, filled_qty, source, actor,
             None if intent_ref is None else psycopg2.extras.Json(intent_ref),
             decline_reason, decision_ref, valid_until, _money(frozen_amount),
+            market, currency,
         ),
     )
 
@@ -424,48 +509,55 @@ def update_order_filled(cur, order_id: str, status: str, filled_qty: int,
 
 
 def insert_trade(cur, trade_id, order_id, project_id, code, side, qty, price, amount,
-                 fee, snapshot_id, source, fee_version, traded_at) -> None:
+                 fee, snapshot_id, source, fee_version, traded_at,
+                 *, market: str = "CN_A", currency: str = "CNY") -> None:
     cur.execute(
         """
         INSERT INTO fin_trade
           (trade_id, order_id, project_id, code, side, qty, price, amount, commission,
-           stamp_tax, transfer_fee, total_fee, snapshot_id, source, fee_model_version, traded_at)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+           stamp_tax, transfer_fee, total_fee, snapshot_id, source, fee_model_version,
+           traded_at, market, currency)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         """,
         (
             trade_id, order_id, project_id, code, side, qty, _money(price), amount,
             fee.commission, fee.stamp_tax, fee.transfer_fee, fee.total,
-            snapshot_id, source, fee_version, traded_at,
+            snapshot_id, source, fee_version, traded_at, market, currency,
         ),
     )
 
 
 # ── 现金三动作 ────────────────────────────────────────────────────────────
 
-def freeze_cash(cur, project_id: str, order_id: str, need: Decimal, memo: str) -> None:
+def freeze_cash(cur, project_id: str, order_id: str, need: Decimal, memo: str, *,
+                market: str = "CN_A", currency: str = "CNY") -> None:
     """可用 → 冻结。现金总额不变，所以 `amount = 0`（见文件头的流水语义表）。"""
-    available, frozen = cash_balance(cur, project_id)
+    available, frozen = cash_balance(cur, project_id, market)
     _insert_cash(cur, project_id, "freeze", Decimal("0.0000"),
-                 _money(available - need), _money(frozen + need), order_id, None, memo)
+                 _money(available - need), _money(frozen + need), order_id, None, memo,
+                 market=market, currency=currency)
 
 
-def unfreeze_cash(cur, project_id: str, order_id: str, amount: Decimal, memo: str) -> None:
+def unfreeze_cash(cur, project_id: str, order_id: str, amount: Decimal, memo: str, *,
+                  market: str = "CN_A", currency: str = "CNY") -> None:
     """冻结 → 可用。`amount ≤ 0` 时不动账（撤一张没冻过钱的单不该产生流水）。"""
     if amount is None or _money(amount) <= 0:
         return
-    available, frozen = cash_balance(cur, project_id)
+    available, frozen = cash_balance(cur, project_id, market)
     _insert_cash(cur, project_id, "unfreeze", Decimal("0.0000"),
-                 _money(available + amount), _money(frozen - amount), order_id, None, memo)
+                 _money(available + amount), _money(frozen - amount), order_id, None, memo,
+                 market=market, currency=currency)
 
 
-def settle_buy(cur, project_id, order_id, trade_id, amount, fee, frozen_amount) -> None:
+def settle_buy(cur, project_id, order_id, trade_id, amount, fee, frozen_amount, *,
+               market: str = "CN_A", currency: str = "CNY") -> None:
     """买入成交：从冻结里付出成交额与费用，**多冻的部分退回可用**。
 
     多冻从哪来：受理挂单时按**限价**冻（`限价 × 数量 + 费用`），成交却发生在
     快照价上（限价买要求 `快照价 ≤ 限价`），于是必然有多冻。不退回去，
     那笔钱就永远躺在冻结里 —— 对账的 `frozen_zero_no_open` 会在收盘后报警。
     """
-    available, frozen = cash_balance(cur, project_id)
+    available, frozen = cash_balance(cur, project_id, market)
     used = _money(Decimal(str(amount)) + fee.total)
 
     if used > _money(frozen_amount):
@@ -475,53 +567,64 @@ def settle_buy(cur, project_id, order_id, trade_id, amount, fee, frozen_amount) 
         available = _money(available - shortfall)
         frozen = _money(frozen + shortfall)
         _insert_cash(cur, project_id, "freeze", Decimal("0.0000"), available, frozen,
-                     order_id, None, "补冻（成交额+费用超过受理时冻结额）")
+                     order_id, None, "补冻（成交额+费用超过受理时冻结额）",
+                     market=market, currency=currency)
         frozen_amount = used
 
     frozen_after = _money(frozen - Decimal(str(amount)))
     _insert_cash(cur, project_id, "buy", _money(-Decimal(str(amount))),
-                 available, frozen_after, order_id, trade_id, "买入成交")
+                 available, frozen_after, order_id, trade_id, "买入成交",
+                 market=market, currency=currency)
 
     frozen_after = _money(frozen_after - fee.total)
     _insert_cash(cur, project_id, "fee", _money(-fee.total),
-                 available, frozen_after, order_id, trade_id, "买入费用")
+                 available, frozen_after, order_id, trade_id, "买入费用",
+                 market=market, currency=currency)
 
     refund = _money(_money(frozen_amount) - used)
     if refund > 0:
         _insert_cash(cur, project_id, "unfreeze", Decimal("0.0000"),
                      _money(available + refund), _money(frozen_after - refund),
-                     order_id, trade_id, "成交后解冻多冻部分")
+                     order_id, trade_id, "成交后解冻多冻部分",
+                     market=market, currency=currency)
 
 
-def settle_sell(cur, project_id, order_id, trade_id, amount, fee) -> None:
+def settle_sell(cur, project_id, order_id, trade_id, amount, fee, *,
+                market: str = "CN_A", currency: str = "CNY") -> None:
     """卖出成交：金额入可用，佣金 + 过户费 + 印花税从可用扣。"""
-    available, frozen = cash_balance(cur, project_id)
+    available, frozen = cash_balance(cur, project_id, market)
     available_after = _money(available + Decimal(str(amount)))
     _insert_cash(cur, project_id, "sell", _money(amount), available_after,
-                 frozen, order_id, trade_id, "卖出成交")
+                 frozen, order_id, trade_id, "卖出成交",
+                 market=market, currency=currency)
 
     fee_only = _money(fee.commission + fee.transfer_fee)
     available_after = _money(available_after - fee_only)
     _insert_cash(cur, project_id, "fee", _money(-fee_only), available_after,
-                 frozen, order_id, trade_id, "卖出费用")
+                 frozen, order_id, trade_id, "卖出费用",
+                 market=market, currency=currency)
 
     available_after = _money(available_after - fee.stamp_tax)
     _insert_cash(cur, project_id, "tax", _money(-fee.stamp_tax), available_after,
-                 frozen, order_id, trade_id, "卖出印花税")
+                 frozen, order_id, trade_id, "卖出印花税",
+                 market=market, currency=currency)
 
 
 # ── 持仓 / 版本 / 参数 ────────────────────────────────────────────────────
 
-def apply_position(cur, project_id, code, side, qty, price, at) -> None:
+def apply_position(cur, project_id, code, side, qty, price, at, *,
+                   market: str = "CN_A", currency: str = "CNY") -> None:
     pos = get_position(cur, project_id, code)
     if pos is None:
         cur.execute(
             """
-            INSERT INTO fin_position (project_id, code, qty, sellable_qty, avg_cost, opened_at, updated_at)
-            VALUES (%s,%s,0,0,0,%s,now())
+            INSERT INTO fin_position
+              (project_id, code, qty, sellable_qty, avg_cost, opened_at, updated_at,
+               market, currency)
+            VALUES (%s,%s,0,0,0,%s,now(),%s,%s)
             ON CONFLICT (project_id, code) DO NOTHING
             """,
-            (project_id, code, at),
+            (project_id, code, at, market, currency),
         )
         pos = get_position(cur, project_id, code)
 

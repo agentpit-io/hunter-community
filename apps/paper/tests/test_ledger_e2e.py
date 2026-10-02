@@ -45,7 +45,23 @@ from app.main import app  # noqa: E402
 # 而估值 / 对账按「该代码截至 as_of 的最新一张快照」取价 —— 用同一个代码就会取到
 # 夹具的价，`market_value` 与用例无关地变成 1724.50。换一个夹具不用的代码，
 # 断言就只依赖本用例自己种下的那一张快照（与 `uniq_when` 避开撞快照编号同一思路）。
-CODE = "600000"
+#
+# ⚠ **每个用例一个独有的代码**（`ready` fixture 按 project_id 现算并改写本全局）：
+# `fin_snapshot` 是全库共享、只追加的，而估值 / 对账按「该代码 ≤ as_of 的最新快照」
+# 取价 —— 全文件共用一个代码时，后跑的用例会取到前一个用例留下的、**日期更晚**的
+# 那张快照（报价日期是随机的 1990–2022，谁大谁赢）。这是本文件自 M3 起就有的
+# 非幂等缺陷（N3 基线同样随机失败 1~2 条），表现为 `market_value` 差一截 /
+# `balance_equation` 报「缺价」。按用例隔离代码后，每个用例只看得到自己那张快照。
+CODE = "600000"        # 默认值；`ready` fixture 会按项目改写（见下）
+
+
+def _code_for(project_id: str) -> str:
+    """由 project_id 派一个**纯数字**的独有代码（6 位，归 CN_A）。
+
+    纯数字是必须的：`market_of()` 按代码形态判市场，带字母会被判成美股。
+    """
+    n = int(project_id.rsplit("_", 1)[-1], 16) % 900000
+    return f"6{n + 100000:06d}"
 
 
 def _snap_id(when: str, code: str) -> str:
@@ -75,7 +91,13 @@ def ready(pg, project):
 
     快照编号只到秒，而 `fin_snapshot` 是全库共享、只追加的 —— 时刻不唯一的话，
     两个用例会抢同一行快照（`ON CONFLICT DO NOTHING`），第二个拿到第一个的价格。
+
+    本 fixture **同时给用例一个独有代码**（改写模块级 `CODE`）：估值 / 对账按
+    「该代码 ≤ as_of 的最新快照」取价，共用代码会让后跑的用例取到别人的价。
+    用例都是在调用时才读 `CODE`，所以在 fixture 里改写即可覆盖全文件。
     """
+    global CODE
+    CODE = _code_for(project)
     seed_reference(pg, code=CODE, trade_date=uniq_date(project))
     pg.connection.commit()
     install_quote_source(when=uniq_when(project), code=CODE)
@@ -98,7 +120,7 @@ def test_buy_updates_all_seven_entities(ready, pg):
 
     status, receipt = _post("/api/v1/orders", order_body(ready, code=CODE))
     assert status == 200, receipt
-    assert receipt["status"] == "filled"
+    assert receipt["status"] == "filled", receipt
     assert receipt["amount"] == "1000.0000"
     assert receipt["fee"]["total"] == "5.0100"
     assert receipt["price_basis"] == "snapshot_last_price"
@@ -203,7 +225,10 @@ def test_missing_instrument_rejected(ready):
 
 
 def test_outside_session_rejected(ready, pg):
-    prime_quote(pg, ready, salt=1, when=uniq_date(ready, 1) + "T12:00:00+08:00")
+    # 用**不带偏移**的时刻串，由 `helpers.at()` 按真实 `Asia/Shanghai` 补偏移 ——
+    # 写死 `+08:00` 时，1990/1991 夏令时那几个月的 12:00 实际是当地 13:00（午休结束），
+    # 就落进下午时段、不再被拒（N3 起就有的非幂等，见 helpers.CST 的注释）。
+    prime_quote(pg, ready, salt=1, when=uniq_date(ready, 1) + "T12:00:00")
     status, rec = _post("/api/v1/orders", order_body(ready, code=CODE))
     assert status == 200 and rec["status"] == "rejected"
     assert "session" in rec["failed_checks"]
@@ -268,7 +293,7 @@ def test_unusable_snapshot_parks_the_order(ready, pg):
     previous = relax_staleness(60)
     try:
         prime_quote(pg, ready, salt=9,
-                    when=uniq_date(ready, 9) + "T10:00:00+08:00")
+                    when=uniq_date(ready, 9) + "T10:00:00")   # 同上：偏移交给 helpers.at()
         status, rec = _post("/api/v1/orders", order_body(ready, code=CODE))
     finally:
         restore_staleness(previous)
@@ -332,7 +357,7 @@ def test_expire_open_orders_unfreezes(ready, pg):
     """收盘仍未成交 → 撤单（`expired`）并**解冻**。"""
     prime_quote(pg, ready, salt=5, price="10.50", prev_close="10.50")
     status, rec = _post("/api/v1/orders", order_body(ready, code=CODE, price="10.00"))
-    assert rec["status"] == "pending"
+    assert rec["status"] == "pending", rec
     order_id = rec["order_id"]
 
     before = _get(f"/api/v1/projects/{ready}/cash")

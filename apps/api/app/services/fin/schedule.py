@@ -1,12 +1,15 @@
-"""六个交易时点的**展示用**副本（M6 自动交易页「它每天什么时候自动运行」）。
+"""**A 股**六个交易时点的展示用副本（M6 自动交易页「它每天什么时候自动运行」）。
 
-**权威在 `apps/fin-worker/app/points.py`** —— 真正按这个时刻表跑的是 fin-worker 的
-Temporal Schedule。这里只把同一份清单交给前端渲染，所以：
+**权威在 `apps/fin-worker/app/points.py`** —— N4 起时点是**每市场一组**
+（CN_A / HK / US 各六个），真正按时刻表跑的是 fin-worker 的 Temporal Schedule。
+本文件是**给前端渲染的 CN_A 子集副本**（自动交易页现在只讲 A 股；多市场切换器
+是 N5 的事），所以：
 
 - 字段名与那个文件保持一致（`key` / `at` / `kind` / `title` / `cron`）；
-- `tests/test_fin_schedule.py` 会**真的去读 `apps/fin-worker/app/points.py` 里的
-  `POINTS` 字面量**逐条比对 —— 两处漂了，测试当场红。这不是「约定」，
-  是仓内「同一件事写在多处 = 两套指令打架」那条铁律的机器化形式。
+- `tests/test_fin_schedule.py` 会**真的加载 `apps/fin-worker/app/points.py`**（它
+  零外部依赖），把本副本与其中 `market == "CN_A"` 的那六个时点逐条比对 —— 两处漂了，
+  测试当场红。这不是「约定」，是仓内「同一件事写在多处 = 两套指令打架」那条铁律的
+  机器化形式。
 - 副本里**没有** `workflow` / 执行逻辑，只有时刻与标题：展示层不该知道工作流类型名。
 
 `cron` 用 5 段式（分 时 日 月 周），`1-5` = 周一到周五。**节假日不在 cron 里**
@@ -16,19 +19,20 @@ Temporal Schedule。这里只把同一份清单交给前端渲染，所以：
 
 from __future__ import annotations
 
-# 与 fin-worker/app/points.py 的 POINTS 逐条对应（同序、同 key / at / kind / cron / title）。
+# 与 fin-worker/app/points.py 里 `market == "CN_A"` 的六个时点逐条对应
+# （同序、同 key / at / kind / cron / title）。key 带 `CN_A-` 前缀，与权威一致。
 POINTS: tuple[dict[str, str], ...] = (
-    {"key": "0915", "at": "09:15", "kind": "preopen",
+    {"key": "CN_A-0915", "at": "09:15", "kind": "preopen",
      "cron": "15 9 * * 1-5", "title": "开盘前 · 日历同步与 T+1 日切"},
-    {"key": "0930", "at": "09:30", "kind": "decide",
+    {"key": "CN_A-0930", "at": "09:30", "kind": "decide",
      "cron": "30 9 * * 1-5", "title": "开盘 · 策略出意图并提交委托"},
-    {"key": "1130", "at": "11:30", "kind": "match",
-     "cron": "30 11 * * 1-5", "title": "午间 · 挂单再撮合"},
-    {"key": "1300", "at": "13:00", "kind": "match",
-     "cron": "0 13 * * 1-5", "title": "午后 · 挂单再撮合"},
-    {"key": "1455", "at": "14:55", "kind": "match",
-     "cron": "55 14 * * 1-5", "title": "尾盘 · 挂单再撮合"},
-    {"key": "1530", "at": "15:30", "kind": "close",
+    {"key": "CN_A-1130", "at": "11:30", "kind": "match",
+     "cron": "30 11 * * 1-5", "title": "盘中 · 挂单再撮合（一）"},
+    {"key": "CN_A-1300", "at": "13:00", "kind": "match",
+     "cron": "0 13 * * 1-5", "title": "盘中 · 挂单再撮合（二）"},
+    {"key": "CN_A-1455", "at": "14:55", "kind": "match",
+     "cron": "55 14 * * 1-5", "title": "盘中 · 挂单再撮合（三）"},
+    {"key": "CN_A-1530", "at": "15:30", "kind": "close",
      "cron": "30 15 * * 1-5", "title": "收盘 · 撤单 / 估值 / 对账"},
 )
 

@@ -26,13 +26,17 @@ class MissingPrice(Exception):
         super().__init__(f"以下持仓标的没有可用快照价，无法估值：{', '.join(codes)}")
 
 
-def compute(cur, project_id: str, as_of: datetime) -> dict:
+def compute(cur, project_id: str, as_of: datetime, market: Optional[str] = None) -> dict:
     project = ledger.get_project(cur, project_id)
     if not project:
         raise LookupError(f"项目不存在：{project_id}")
 
-    available, frozen = ledger.cash_balance(cur, project_id)
-    positions = [p for p in ledger.list_positions(cur, project_id) if int(p["qty"]) > 0]
+    # 子账户 = (project_id, market)；缺省取项目 market_scope（A 股项目 = CN_A，行为不变）。
+    market = ledger.resolve_market(project, market)
+    currency = ledger.currency_for(cur, market) or "CNY"
+
+    available, frozen = ledger.cash_balance(cur, project_id, market)
+    positions = [p for p in ledger.list_positions(cur, project_id, market) if int(p["qty"]) > 0]
 
     market_value = Decimal("0.0000")
     missing: list[str] = []
@@ -59,6 +63,8 @@ def compute(cur, project_id: str, as_of: datetime) -> dict:
     return {
         "project_id": project_id,
         "as_of": as_of,
+        "market": market,
+        "currency": currency,
         "cash_available": available,
         "cash_frozen": frozen,
         "market_value": market_value,
@@ -70,27 +76,34 @@ def compute(cur, project_id: str, as_of: datetime) -> dict:
     }
 
 
-def store(cur, project_id: str, as_of: datetime) -> dict:
-    """写一行 `fin_valuation`。PK 是 (project_id, as_of)，重复时返回已有行（只追加）。"""
+def store(cur, project_id: str, as_of: datetime, market: Optional[str] = None) -> dict:
+    """写一行 `fin_valuation`（**子账户级**）。PK 是 `(project_id, market, as_of)`
+    （0034 起），重复时返回已有行（只追加）。缺省市场取项目 `market_scope`。
+    """
+    project = ledger.get_project(cur, project_id)
+    if not project:
+        raise LookupError(f"项目不存在：{project_id}")
+    market = ledger.resolve_market(project, market)
     existing = ledger._fetchone(
         cur,
-        "SELECT * FROM fin_valuation WHERE project_id = %s AND as_of = %s",
-        (project_id, as_of),
+        "SELECT * FROM fin_valuation WHERE project_id = %s AND market = %s AND as_of = %s",
+        (project_id, market, as_of),
     )
     if existing:
         return {**existing, "created": False}
 
-    row = compute(cur, project_id, as_of)
+    row = compute(cur, project_id, as_of, market)
     cur.execute(
         """
         INSERT INTO fin_valuation
-          (project_id, as_of, cash_available, cash_frozen, market_value, total_assets,
-           nav, price_source, quality, missing_flag)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+          (project_id, market, currency, as_of, cash_available, cash_frozen, market_value,
+           total_assets, nav, price_source, quality, missing_flag)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         RETURNING *
         """,
         (
-            row["project_id"], row["as_of"], row["cash_available"], row["cash_frozen"],
+            row["project_id"], row["market"], row["currency"], row["as_of"],
+            row["cash_available"], row["cash_frozen"],
             row["market_value"], row["total_assets"], row["nav"], row["price_source"],
             row["quality"], row["missing_flag"],
         ),
@@ -98,9 +111,11 @@ def store(cur, project_id: str, as_of: datetime) -> dict:
     return {**cur.fetchone(), "created": True}
 
 
-def latest(cur, project_id: str) -> Optional[dict]:
+def latest(cur, project_id: str, market: Optional[str] = None) -> Optional[dict]:
+    clause, params = ("", ()) if not market else (" AND market = %s", (market,))
     return ledger._fetchone(
         cur,
-        "SELECT * FROM fin_valuation WHERE project_id = %s ORDER BY as_of DESC LIMIT 1",
-        (project_id,),
+        "SELECT * FROM fin_valuation WHERE project_id = %s" + clause +
+        " ORDER BY as_of DESC LIMIT 1",
+        (project_id, *params),
     )

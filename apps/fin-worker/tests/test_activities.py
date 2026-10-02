@@ -40,7 +40,22 @@ def test_read_calendar_known_trading(monkeypatch):
         "trade_date": "2026-10-09", "is_trading": True, "sessions": [{"open": "09:30"}]}))
     out = activities.read_calendar({"trade_date": "2026-10-09"})
     assert out == {"known": True, "trading": True, "sessions": [{"open": "09:30"}],
-                   "trade_date": "2026-10-09", "note": None}
+                   "trade_date": "2026-10-09", "market": "CN_A", "note": None}
+
+
+def test_read_calendar_uses_the_requested_market(monkeypatch):
+    """港美股日历按 (market, date) 读 —— 请求里带上 market。"""
+    seen = {}
+
+    def h(req):
+        seen["market"] = req.url.params.get("market")
+        return httpx.Response(200, json={"trade_date": "2026-10-09", "is_trading": True,
+                                         "sessions": [{"open": "09:30", "close": "16:00"}]})
+
+    _install(monkeypatch, h)
+    out = activities.read_calendar({"trade_date": "2026-10-09", "market": "US"})
+    assert out["market"] == "US"
+    assert seen["market"] == "US"
 
 
 def test_read_calendar_known_non_trading(monkeypatch):

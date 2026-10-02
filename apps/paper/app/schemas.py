@@ -104,6 +104,8 @@ class FeeModelIn(BaseModel):
 
 class ValuationIn(BaseModel):
     as_of: datetime
+    # N4：估值是**子账户级**的。缺省 None → 取项目 market_scope（A 股项目 = CN_A，行为不变）。
+    market: Optional[Literal["CN_A", "HK", "US"]] = None
 
 
 class ExecutionModelIn(BaseModel):

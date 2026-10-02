@@ -11,7 +11,7 @@
 
 from __future__ import annotations
 
-import re
+import importlib.util
 import sys
 from pathlib import Path
 
@@ -24,16 +24,31 @@ from app.services.fin import schedule  # noqa: E402
 # apps/api/tests/ → apps/ → 仓库根 → apps/fin-worker/app/points.py
 _POINTS_PY = Path(__file__).resolve().parents[2] / "fin-worker" / "app" / "points.py"
 
-_ROW = re.compile(
-    r'Point\(\s*"(?P<key>[^"]+)"\s*,\s*"(?P<at>[^"]+)"\s*,\s*"(?P<kind>[^"]+)"\s*,'
-    r'\s*"(?P<workflow>[^"]+)"\s*,\s*"(?P<cron>[^"]+)"\s*,\s*"(?P<title>[^"]+)"\s*\)')
+
+def _load_points_module():
+    """把 fin-worker 的 `points.py` 当**独立模块**加载（不 import 它所在的包）。
+
+    N4 起 points.py **零外部依赖**（只 `from dataclasses import dataclass`），所以
+    可以安全加载 —— 比按正则抠源码稳得多（N4 改结构时正则当场失效过一次）。
+    """
+    assert _POINTS_PY.exists(), f"读不到权威清单：{_POINTS_PY}"
+    spec = importlib.util.spec_from_file_location("fin_worker_points_under_test", _POINTS_PY)
+    mod = importlib.util.module_from_spec(spec)
+    # 必须先注册进 sys.modules：模块里有 `@dataclass`，dataclasses 会按
+    # `cls.__module__` 反查 `sys.modules` —— 不注册就 NoneType 报错。
+    sys.modules[spec.name] = mod
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def _authoritative() -> list[dict]:
-    assert _POINTS_PY.exists(), f"读不到权威清单：{_POINTS_PY}"
-    text = _POINTS_PY.read_text(encoding="utf-8")
-    rows = [m.groupdict() for m in _ROW.finditer(text)]
-    assert rows, "没有从 points.py 里解析出任何 Point —— 正则或文件结构变了，先修测试"
+    """权威清单里的 **CN_A 六个时点**（本副本只讲 A 股；多市场切换器是 N5 的事）。"""
+    mod = _load_points_module()
+    rows = [
+        {"key": p.key, "at": p.at, "kind": p.kind, "cron": p.cron, "title": p.title}
+        for p in mod.ALL_POINTS if p.market == "CN_A"
+    ]
+    assert rows, "没有从 points.py 里取到 CN_A 时点 —— 文件结构变了，先修测试"
     return rows
 
 

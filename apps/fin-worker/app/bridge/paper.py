@@ -134,15 +134,25 @@ class PaperClient:
     def confirm_t1(self, project_id: str) -> dict:
         return self._json("POST", f"/api/v1/projects/{project_id}/confirm-t1")
 
-    def make_valuation(self, project_id: str, as_of_iso: str) -> dict:
+    def make_valuation(self, project_id: str, as_of_iso: str,
+                       market: Optional[str] = None) -> dict:
         return self._json(
-            "POST", f"/api/v1/projects/{project_id}/valuation", json={"as_of": as_of_iso}
+            "POST", f"/api/v1/projects/{project_id}/valuation",
+            json={"as_of": as_of_iso, "market": market},
         )
 
-    def run_recon(self, project_id: str, as_of_iso: str) -> dict:
+    def run_recon(self, project_id: str, as_of_iso: str,
+                  market: Optional[str] = None) -> dict:
         return self._json(
-            "POST", f"/api/v1/projects/{project_id}/recon", json={"as_of": as_of_iso}
+            "POST", f"/api/v1/projects/{project_id}/recon",
+            json={"as_of": as_of_iso, "market": market},
         )
+
+    # ── 参考数据（调度用）────────────────────────────────────────────────
+    def market_rules(self) -> list[dict]:
+        """三个市场的规则行（时区 / 调度时点 / 币种）。fin-worker 的调度从它读。"""
+        data = self._json("GET", "/api/v1/market-rules")
+        return (data or {}).get("items", [])
 
     # ── 长任务（业务检查点）──────────────────────────────────────────────
     def submit_job(self, *, job_type: str, params: dict, project_id: str,

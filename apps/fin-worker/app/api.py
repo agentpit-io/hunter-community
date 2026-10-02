@@ -22,7 +22,7 @@ from temporalio.exceptions import WorkflowAlreadyStartedError
 from temporalio.service import RPCError
 
 from app import config
-from app.points import BY_KEY, POINTS
+from app.points import ALL_POINTS, BY_KEY as BY_KEYS, resolve_point_key
 
 app = FastAPI(
     title="Hunter · fin-worker（Runtime Bridge + Temporal Workers）",
@@ -53,7 +53,7 @@ def _require_key(request: Request) -> None:
 
 @app.get("/healthz")
 async def healthz() -> dict:
-    """免密钥：只回「进程活着 + 六个时点定义」，不含任何账本数据。"""
+    """免密钥：只回「进程活着 + 各市场时点定义」，不含任何账本数据。"""
     connected = _client is not None
     return {
         "ok": True,
@@ -61,15 +61,17 @@ async def healthz() -> dict:
         "temporal_address": config.temporal_address(),
         "temporal_connected": connected,
         "task_queue": config.temporal_task_queue(),
-        "points": [{"key": p.key, "at": p.at, "workflow": p.workflow, "cron": p.cron} for p in POINTS],
+        "points": [{"key": p.key, "market": p.market, "at": p.at,
+                    "workflow": p.workflow, "cron": p.cron} for p in ALL_POINTS],
     }
 
 
 @app.get("/internal/points")
 async def list_points(request: Request) -> dict:
     _require_key(request)
-    return {"points": [{"key": p.key, "at": p.at, "kind": p.kind,
-                        "workflow": p.workflow, "cron": p.cron, "title": p.title} for p in POINTS]}
+    return {"points": [{"key": p.key, "market": p.market, "at": p.at, "kind": p.kind,
+                        "workflow": p.workflow, "cron": p.cron, "title": p.title}
+                       for p in ALL_POINTS]}
 
 
 @app.post("/internal/trigger/{point_key}")
@@ -81,12 +83,16 @@ async def trigger(point_key: str, request: Request, body: Optional[dict] = None)
     这是「同一件事不重复开跑」的又一层（业务幂等在 Activity 层，这一层在编排层）。
     """
     _require_key(request)
-    if point_key not in BY_KEY:
-        raise HTTPException(404, f"未知时点：{point_key}（可用 {list(BY_KEY)}）")
-    point = BY_KEY[point_key]
+    point = resolve_point_key(point_key)
+    if point is None:
+        raise HTTPException(404, f"未知时点：{point_key}（可用 {sorted(set(BY_KEYS))}）")
     req = dict(body or {})
     trade_date = req.get("trade_date") or _today_shanghai()
     req.setdefault("trade_date", trade_date)
+    # 市场 / 时点写进 args —— 工作流据此按该市场时区切日、按 (market, date) 读日历。
+    req.setdefault("market", point.market)
+    req.setdefault("at", point.at)
+    req.setdefault("point", point.key)
 
     client = await _get_client()
     wf_id = f"fin-{point.key}-{trade_date}"

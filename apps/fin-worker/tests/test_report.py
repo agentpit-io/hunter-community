@@ -146,7 +146,7 @@ def test_report_job_key_is_deterministic():
 def test_close_branch_calls_report_after_close_day():
     from pathlib import Path
     src = (Path(__file__).resolve().parents[1] / "app" / "workflows.py").read_text(encoding="utf-8")
-    close_idx = src.index('point.kind == "close"')
+    close_idx = src.index('kind == "close"')
     close_block = src[close_idx:close_idx + 1200]
     assert "activities.close_day" in close_block
     assert "activities.generate_daily_report" in close_block

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from app import db
+from app import db, ledger
 from app.schemas import CalendarIn, ExecutionModelIn, FeeModelIn, InstrumentIn
 
 router = APIRouter(tags=["reference"])
@@ -117,6 +117,18 @@ def upsert_fee_model(version: str, body: FeeModelIn) -> dict:
              body.market, body.currency, body.stamp_side),
         )
         return cur.fetchone()
+
+
+@router.get("/api/v1/market-rules")
+def list_market_rules() -> dict:
+    """三个市场各一行：时区 / 时段 / **调度时点** / 可卖规则 / 手数 / 价格带模式 / 币种。
+
+    N4 起 fin-worker 的调度从这张表读「每个市场一组时点 + 该市场时区」——
+    fin-worker **没有账本库连接**（`01方案 §5.1`），只能经这个 HTTP 端点读。
+    顺序固定 `CN_A → HK → US`。
+    """
+    with db.cursor() as cur:
+        return {"items": ledger.list_market_rules(cur)}
 
 
 @router.get("/api/v1/fee-models")

@@ -1,45 +1,52 @@
-"""Schedule 定义（六个时点 + 三个 ETL 市场 + 三个市场的标的元数据同步）。"""
+"""Schedule 定义（**每市场一组时点** + 三个 ETL 市场 + 三个市场的标的元数据同步）。"""
 
 from __future__ import annotations
+
+import pytest
 
 from app import schedules
 
 
-def test_six_point_schedules_plus_three_etl_plus_three_instrument():
+def test_three_markets_eighteen_point_schedules_plus_etl_plus_instrument():
     specs = schedules.all_specs()
-    # 6 个时点 + 3 个市场 ETL + 3 个市场的标的元数据同步（M7 起 A 股；N3 加港美股）
-    assert len(specs) == 12
+    # 3 市场 × 6 时点 + 3 个市场 ETL + 3 个市场的标的元数据同步
+    assert len(specs) == 18 + 3 + 3
 
 
-def test_instrument_sync_schedule():
-    specs = {s.schedule_id: s for s in schedules.all_specs()}
-    spec = specs["fin-instrument-sync"]
-    assert spec.workflow == "fin.instrument_sync"
-    assert spec.args["market"] == "cn"
-    # 必须排在 preopen（09:15）之前 —— 开盘时风控要读的涨跌停已经是最新的
-    assert spec.cron.split()[1] == "8"
+def test_point_schedules_have_per_market_timezone():
+    """每个市场的时点 Schedule 用它自己的 IANA 时区名（夏令时自动跟随）。"""
+    by_tz = {s.schedule_id: s.timezone for s in schedules.point_specs()}
+    assert by_tz["fin-point-CN_A-0915"] == "Asia/Shanghai"
+    assert by_tz["fin-point-HK-0930"] == "Asia/Hong_Kong"
+    assert by_tz["fin-point-US-0930"] == "America/New_York"
+
+
+def test_point_schedule_args_carry_market_and_point():
+    specs = {s.schedule_id: s for s in schedules.point_specs()}
+    hk = specs["fin-point-HK-1200"]
+    assert hk.workflow == "fin.point_match_a"
+    assert hk.args["market"] == "HK"
+    assert hk.args["at"] == "12:00"
+    assert hk.args["point"] == "HK-1200"
+    us = specs["fin-point-US-1615"]
+    assert us.workflow == "fin.point_close"
+    assert us.args["market"] == "US"
+
+
+def test_point_schedule_ids_and_workflows_cover_three_markets():
+    specs = schedules.point_specs()
+    ids = [s.schedule_id for s in specs]
+    assert len(ids) == 18 and len(set(ids)) == 18
+    markets = {i.split("-")[2] for i in ids}
+    assert markets == {"CN_A", "HK", "US"}
 
 
 def test_instrument_sync_covers_three_markets():
-    """N3：港美股各一条 —— 以前只有 `market="cn"` 一条（标的同步对非 cn 直接返回空）。"""
     by_market = {s.args["market"]: s for s in schedules.INSTRUMENT_SCHEDULES}
     assert set(by_market) == {"cn", "hk", "us"}
     for spec in by_market.values():
         assert spec.workflow == "fin.instrument_sync"
-    # 三条各自独立（一条失败不影响另一条），且都排在 A 股 preopen 前后
     assert len({s.schedule_id for s in schedules.INSTRUMENT_SCHEDULES}) == 3
-
-
-def test_point_schedule_ids_and_workflows():
-    specs = schedules.point_specs()
-    assert [s.schedule_id for s in specs] == [
-        "fin-point-0915", "fin-point-0930", "fin-point-1130",
-        "fin-point-1300", "fin-point-1455", "fin-point-1530",
-    ]
-    assert [s.workflow for s in specs] == [
-        "fin.point_0915", "fin.point_0930", "fin.point_1130",
-        "fin.point_1300", "fin.point_1455", "fin.point_1530",
-    ]
 
 
 def test_etl_schedules_cover_three_markets():
@@ -57,6 +64,30 @@ def test_every_cron_is_five_fields():
         assert len(s.cron.split()) == 5, s.cron
 
 
+def test_market_rules_drive_the_points():
+    """给一组市场规则（含不同时点），Schedule 就按它建 —— 这是「从表读」的证据。"""
+    rules = [
+        {"market": "CN_A", "timezone": "Asia/Shanghai",
+         "points": ["09:15", "09:30", "11:30", "13:00", "14:55", "15:30"]},
+        {"market": "HK", "timezone": "Asia/Hong_Kong",
+         "points": ["09:20", "09:35", "12:05", "13:05", "15:55", "16:15"]},
+        {"market": "US", "timezone": "America/New_York",
+         "points": ["09:05", "09:30", "12:00", "14:55", "15:55", "16:15"]},
+    ]
+    specs = {s.schedule_id: s for s in schedules.point_specs(rules)}
+    assert "fin-point-HK-0920" in specs
+    assert specs["fin-point-HK-0920"].cron == "20 9 * * 1-5"
+    assert specs["fin-point-HK-0920"].timezone == "Asia/Hong_Kong"
+    assert "fin-point-US-0905" in specs
+
+
+def test_fallback_market_rules_match_seed():
+    rules = {r["market"]: r for r in schedules.fallback_market_rules()}
+    assert rules["CN_A"]["timezone"] == "Asia/Shanghai"
+    assert rules["HK"]["points"][2] == "12:00"
+    assert rules["US"]["timezone"] == "America/New_York"
+
+
 def test_every_spec_builds_a_real_temporal_schedule():
     """真构造一次 SDK 对象。
 
@@ -71,4 +102,5 @@ def test_every_spec_builds_a_real_temporal_schedule():
         assert isinstance(built, Schedule)
         assert built.action.workflow == spec.workflow
         assert built.spec.cron_expressions == [spec.cron]
-        assert built.spec.time_zone_name == "Asia/Shanghai"
+        # 市场 Schedule 用各自时区；ETL / 标的同步没给时区 → 回落默认（上海）
+        assert built.spec.time_zone_name == (spec.timezone or "Asia/Shanghai")

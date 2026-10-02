@@ -38,6 +38,7 @@ from decimal import ROUND_HALF_UP, Decimal
 
 import psycopg2.extras
 from loguru import logger
+from typing import Optional
 
 from app import ledger
 
@@ -103,25 +104,27 @@ def _check(name: str, expected, actual, passed: bool, **extra) -> dict:
     return item
 
 
-def run(cur, project_id: str, as_of) -> dict:
+def run(cur, project_id: str, as_of, market: Optional[str] = None) -> dict:
     project = ledger.get_project(cur, project_id)
     if not project:
         raise LookupError(f"项目不存在：{project_id}")
 
     ensure_schema(cur)
     as_of = ledger.as_dt(as_of)
+    # 对账按**市场子账户**核（缺省取项目 market_scope；A 股项目 = CN_A，行为不变）。
+    market = ledger.resolve_market(project, market)
     checks: list[dict] = []
 
-    # 账户状态**截至 as_of**
-    available, frozen, cutoff = ledger.cash_state_at(cur, project_id, as_of)
+    # 账户状态**截至 as_of**（该子账户）
+    available, frozen, cutoff = ledger.cash_state_at(cur, project_id, as_of, market)
 
     # ── 1 · 现金总额 = 流水金额之和（截至 as_of 的行）─────────────────────
     # **和 `cash_state_at` 用同一个 cutoff**：两处各自写一套过滤条件，
     # 只要有一条边界不一致（比如本金行被一边带上、一边漏掉），这项就会假不平。
     cur.execute(
         "SELECT COALESCE(SUM(amount), 0) AS s FROM fin_cash_ledger "
-        " WHERE project_id = %s AND entry_id <= %s",
-        (project_id, cutoff),
+        " WHERE project_id = %s AND entry_id <= %s AND market = %s",
+        (project_id, cutoff, market),
     )
     ledger_sum = Decimal(str(cur.fetchone()["s"])).quantize(Decimal("0.0001"))
     cash_total = available + frozen
@@ -134,10 +137,10 @@ def run(cur, project_id: str, as_of) -> dict:
         SELECT t.code,
                COALESCE(SUM(CASE WHEN t.side = 'buy' THEN t.qty ELSE -t.qty END), 0) AS qty
           FROM fin_trade t
-         WHERE t.project_id = %s AND t.traded_at <= %s
+         WHERE t.project_id = %s AND t.traded_at <= %s AND t.market = %s
          GROUP BY t.code
         """,
-        (project_id, as_of),
+        (project_id, as_of, market),
     )
     positions = {r["code"]: int(r["qty"]) for r in cur.fetchall() if int(r["qty"]) > 0}
 
@@ -159,9 +162,9 @@ def run(cur, project_id: str, as_of) -> dict:
         recorded = ledger._fetchone(
             cur,
             "SELECT cash_available, cash_frozen, market_value, total_assets "
-            "  FROM fin_valuation WHERE project_id = %s AND as_of <= %s "
+            "  FROM fin_valuation WHERE project_id = %s AND market = %s AND as_of <= %s "
             " ORDER BY as_of DESC LIMIT 1",
-            (project_id, as_of),
+            (project_id, market, as_of),
         )
         derived = (available + frozen + market_value).quantize(Decimal("0.0001"))
         if recorded is not None:
@@ -186,8 +189,9 @@ def run(cur, project_id: str, as_of) -> dict:
     # ── 3 · 买入恒为整手（M-30 第 2 项）──────────────────────────────────
     cur.execute(
         "SELECT trade_id, qty FROM fin_trade "
-        " WHERE project_id = %s AND side = 'buy' AND traded_at <= %s AND qty %% %s <> 0",
-        (project_id, as_of, _LOT),
+        " WHERE project_id = %s AND side = 'buy' AND traded_at <= %s "
+        "   AND qty %% %s <> 0 AND market = %s",
+        (project_id, as_of, _LOT, market),
     )
     bad_lots = cur.fetchall()
     checks.append(_check("buy_lot", "0 笔非整手", f"{len(bad_lots)} 笔非整手", not bad_lots))
@@ -202,10 +206,10 @@ def run(cur, project_id: str, as_of) -> dict:
              WHERE trade_id = t.trade_id
                AND (created_at <= %s OR t.traded_at <= %s)
           ) l ON true
-         WHERE t.project_id = %s AND t.traded_at <= %s
+         WHERE t.project_id = %s AND t.traded_at <= %s AND t.market = %s
          ORDER BY t.traded_at
         """,
-        (as_of, as_of, project_id, as_of),
+        (as_of, as_of, project_id, as_of, market),
     )
     mismatched = []
     for row in cur.fetchall():
@@ -232,9 +236,10 @@ def run(cur, project_id: str, as_of) -> dict:
                    COALESCE(SUM(CASE WHEN t.side = 'buy' THEN t.qty ELSE -t.qty END), 0) AS net
               FROM fin_position p
               LEFT JOIN fin_trade t ON t.project_id = p.project_id AND t.code = p.code
-             WHERE p.project_id = %s GROUP BY p.code, p.qty
+                                    AND t.market = p.market
+             WHERE p.project_id = %s AND p.market = %s GROUP BY p.code, p.qty
             """,
-            (project_id,),
+            (project_id, market),
         )
         pos_bad = [r["code"] for r in cur.fetchall() if int(r["qty"]) != int(r["net"])]
         checks.append(_check("position_ties_trades", "持仓 = 成交净额",
@@ -247,8 +252,9 @@ def run(cur, project_id: str, as_of) -> dict:
 
     # ── 6 · 版本号 = 成交笔数 ────────────────────────────────────────────
     cur.execute(
-        "SELECT COUNT(*) AS n FROM fin_trade WHERE project_id = %s AND traded_at <= %s",
-        (project_id, as_of),
+        "SELECT COUNT(*) AS n FROM fin_trade "
+        " WHERE project_id = %s AND traded_at <= %s AND market = %s",
+        (project_id, as_of, market),
     )
     trades = int(cur.fetchone()["n"])
     if is_now:
@@ -265,10 +271,10 @@ def run(cur, project_id: str, as_of) -> dict:
     cur.execute(
         """
         SELECT COUNT(*) AS n FROM fin_order
-         WHERE project_id = %s AND created_at <= %s
+         WHERE project_id = %s AND created_at <= %s AND market = %s
            AND status IN ('pending','accepted','partially_filled')
         """,
-        (project_id, as_of),
+        (project_id, as_of, market),
     )
     open_orders = int(cur.fetchone()["n"])
     frozen_ok = open_orders > 0 or frozen == 0
@@ -279,7 +285,7 @@ def run(cur, project_id: str, as_of) -> dict:
     # 只在「现在」这一档有精确口径：历史时点的挂单表由 `updated_at` 变过状态，
     # 用当前 `frozen_amount` 回算过去会得出错误结论。
     if is_now:
-        expected_frozen = ledger.open_buy_frozen(cur, project_id)
+        expected_frozen = ledger.open_buy_frozen(cur, project_id, market)
         checks.append(_check("frozen_matches_open", expected_frozen, frozen,
                              expected_frozen == frozen))
     else:

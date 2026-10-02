@@ -254,20 +254,34 @@ def test_账本五表有currency列(conn):
         assert cols[0]["is_nullable"] == "NO", f"{table}.currency 应是 NOT NULL"
 
 
-def test_账本历史行已回填CNY(conn):
-    """五张账本表：有历史行就全须是 CNY、不能有 NULL；空表无行可验，跳过。"""
+def test_账本行币种与市场一致_无NULL(conn):
+    """五张账本表：`currency` **不许为空**，且必须等于该行 `market` 的本币。
+
+    原来的断言是「历史行全须是 CNY」——那是 N1/N2 回填时的口径，当时库里只有
+    A 股。N4 起港美股子账户会真的落 HKD / USD 行（本机已跑出真实成交），
+    「全 CNY」不再成立；**换成更强的口径**：每一行的币种与其市场一致
+    （CN_A→CNY / HK→HKD / US→USD），既保住「回填不留 NULL」，又验到
+    「本币记账、币种与市场一致」这条 N4 出口标准。
+    """
     seen_rows = 0
     for table in LEDGER_TABLES:
         rows = _q(
             conn,
             f"SELECT count(*) AS total, "
             f"count(*) FILTER (WHERE currency IS NULL) AS nulls, "
-            f"count(*) FILTER (WHERE currency = 'CNY') AS cny FROM {table}",
+            f"count(*) FILTER (WHERE market IS NULL) AS null_market, "
+            f"count(*) FILTER (WHERE currency <> "
+            f"  CASE market WHEN 'CN_A' THEN 'CNY' WHEN 'HK' THEN 'HKD' "
+            f"               WHEN 'US' THEN 'USD' ELSE NULL END) AS mismatched "
+            f"FROM {table}",
         )
         r = rows[0]
         assert r["nulls"] == 0, f"{table} 还有 {r['nulls']} 行 currency 为空"
-        assert r["cny"] == r["total"], \
-            f"{table} 有非 CNY 的历史行：total={r['total']} cny={r['cny']}"
+        assert r["null_market"] == 0, f"{table} 还有 {r['null_market']} 行 market 为空"
+        assert r["mismatched"] == 0, (
+            f"{table} 有 {r['mismatched']} 行币种与市场不一致"
+            f"（CN_A→CNY / HK→HKD / US→USD）：total={r['total']}"
+        )
         seen_rows += r["total"]
     if seen_rows == 0:
         pytest.skip("五张账本表都是空的（空库），没有历史行可验回填")

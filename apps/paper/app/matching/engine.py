@@ -66,8 +66,13 @@ def take_snapshot(cur, code: str, *, now: Optional[datetime] = None) -> dict:
 
 # ── ④ 记账 ────────────────────────────────────────────────────────────────
 
-def _book_fill(cur, project, order_id, req, snap, match, fee, amount, source, fee_version) -> str:
-    """成交记账：委托 → 成交（绑快照）→ 现金 → 持仓 → 版本。返回 `trade_id`。"""
+def _book_fill(cur, project, order_id, req, snap, match, fee, amount, source, fee_version,
+               *, market="CN_A", currency="CNY") -> str:
+    """成交记账：委托 → 成交（绑快照）→ 现金 → 持仓 → 版本。返回 `trade_id`。
+
+    **按该市场子账户落账**：成交 / 流水 / 持仓都带 `market` 与 `currency`（本币原值，
+    不做任何跨币种换算）。A 股订单的 `market='CN_A' / currency='CNY'`，与改前逐位一致。
+    """
     project_id = project["project_id"]
     side = req["side"]
     code = req["code"]
@@ -79,15 +84,18 @@ def _book_fill(cur, project, order_id, req, snap, match, fee, amount, source, fe
     ledger.insert_trade(
         cur, trade_id, order_id, project_id, code, side, qty, match.price, amount,
         fee, snap["snapshot_id"], source, fee_version, snap["snapshot_time"],
+        market=market, currency=currency,
     )
     if side == "buy":
         order = ledger.get_order(cur, order_id)
         ledger.settle_buy(cur, project_id, order_id, trade_id, amount, fee,
-                          order["frozen_amount"])
+                          order["frozen_amount"], market=market, currency=currency)
     else:
-        ledger.settle_sell(cur, project_id, order_id, trade_id, amount, fee)
+        ledger.settle_sell(cur, project_id, order_id, trade_id, amount, fee,
+                           market=market, currency=currency)
 
-    ledger.apply_position(cur, project_id, code, side, qty, match.price, snap["snapshot_time"])
+    ledger.apply_position(cur, project_id, code, side, qty, match.price,
+                          snap["snapshot_time"], market=market, currency=currency)
     ledger.bump_version(cur, project_id)
     ledger.lock_params(cur, project_id)
     return trade_id
@@ -121,6 +129,7 @@ def _reject(order_id: str, reason: str, **extra) -> dict:
         "fee": None,
         "pending_reason": None,
         "market": extra.get("market"),
+        "currency": extra.get("currency"),
         # 价格带留痕（N2）：`None` = 这一笔还没走到第 4 条（如快照都拿不到）；
         # `False` = 该市场 `price_limit_mode='none'`，**没做价格带校验**（如实在回执写明）。
         "price_limit_checked": extra.get("price_limit_checked"),
@@ -196,6 +205,15 @@ def execute(cur, req: dict, *, now: Optional[datetime] = None) -> dict:
 
     order_id = ledger.new_id("ord")
 
+    # ── ②-预 市场与币种（**先定市场**：之后每一处账本写入都要按子账户与本币）──
+    # 市场以 `fin_instrument.market` 为准（N1 加的列）；标的缺失时按代码形态兜一层。
+    instrument = ledger.get_instrument(cur, code)
+    market = (instrument or {}).get("market") or market_of(code) or DEFAULT_MARKET
+    market_rule = ledger.get_market_rule(cur, market)
+    # 币种 = 该市场本币（CNY / HKD / USD）。账本内**永不折算**（设计 §3.1 A 方案）。
+    currency = ((market_rule or {}).get("currency")
+                or ledger.MARKET_CURRENCY.get(market) or "CNY")
+
     # ── ① 取快照 ─────────────────────────────────────────────────────────
     try:
         snap = take_snapshot(cur, code, now=now)
@@ -205,8 +223,9 @@ def execute(cur, req: dict, *, now: Optional[datetime] = None) -> dict:
             status="rejected", filled_qty=0, source=source, actor=actor,
             decline_reason=str(exc), intent_ref=req.get("intent_ref"),
             decision_ref=req.get("decision_ref"), valid_until=req.get("valid_until"),
+            market=market, currency=currency,
         )
-        receipt = _reject(order_id, str(exc))
+        receipt = _reject(order_id, str(exc), market=market, currency=currency)
         _remember(cur, key, req_hash, project_id, receipt, order_id)
         return receipt
 
@@ -221,8 +240,10 @@ def execute(cur, req: dict, *, now: Optional[datetime] = None) -> dict:
                 status="rejected", filled_qty=0, source=source, actor=actor,
                 decline_reason=reason, intent_ref=req.get("intent_ref"),
                 decision_ref=req.get("decision_ref"), valid_until=req.get("valid_until"),
+                market=market, currency=currency,
             )
-            receipt = _reject(order_id, reason, **_snapshot_view(snap))
+            receipt = _reject(order_id, reason, market=market, currency=currency,
+                              **_snapshot_view(snap))
             _remember(cur, key, req_hash, project_id, receipt, order_id)
             return receipt
 
@@ -237,12 +258,6 @@ def execute(cur, req: dict, *, now: Optional[datetime] = None) -> dict:
     )
     trial = match(spec, snap, model)
 
-    # ── ② 过规则：六条风控（**按标的所属市场取参数**）──────────────────────
-    instrument = ledger.get_instrument(cur, code)
-    # 市场以 `fin_instrument.market` 为准（N1 加的列）；标的缺失时按代码形态兜一层。
-    market = (instrument or {}).get("market") or market_of(code) or DEFAULT_MARKET
-    market_rule = ledger.get_market_rule(cur, market)
-
     # 港美股**本期只接限价单**（设计文档 §3.4、拍板 §四）：数据源没有盘口
     # （`quote_quality='last_only'`），市价单只能拿最新价加滑点撮合 —— 那不是盘口价。
     # 明确拒绝并留痕，**不拿最新价冒充买一/卖一**。A 股有盘口，市价单照旧。
@@ -254,8 +269,10 @@ def execute(cur, req: dict, *, now: Optional[datetime] = None) -> dict:
             status="rejected", filled_qty=0, source=source, actor=actor,
             decline_reason=reason, intent_ref=req.get("intent_ref"),
             decision_ref=req.get("decision_ref"), valid_until=req.get("valid_until"),
+            market=market, currency=currency,
         )
-        receipt = _reject(order_id, reason, market=market, **_snapshot_view(snap))
+        receipt = _reject(order_id, reason, market=market, currency=currency,
+                          **_snapshot_view(snap))
         receipt["failed_checks"] = ["price_type"]
         _remember(cur, key, req_hash, project_id, receipt, order_id)
         return receipt
@@ -270,9 +287,9 @@ def execute(cur, req: dict, *, now: Optional[datetime] = None) -> dict:
     fee_version = (market_rule or {}).get("fee_model_version")
     fee_model = ledger.get_fee_model(cur, version=fee_version, market=market)
 
-    available, _frozen = ledger.cash_balance(cur, project_id)
+    available, _frozen = ledger.cash_balance(cur, project_id, market)
     position = ledger.get_position(cur, project_id, code) or {"qty": 0, "sellable_qty": 0}
-    committed = ledger.open_sell_committed(cur, project_id, code)
+    committed = ledger.open_sell_committed(cur, project_id, code, market)
 
     # 可卖量按市场规则算：`same_day`（港/美股）用总持仓，`t_plus_n`（A 股）用日切后的可卖量；
     # 再统一扣掉未成交卖单占用的股数（否则同一批股能被两张挂单各卖一次）。
@@ -306,8 +323,9 @@ def execute(cur, req: dict, *, now: Optional[datetime] = None) -> dict:
             status="rejected", filled_qty=0, source=source, actor=actor,
             decline_reason=outcome.decline_reason, intent_ref=req.get("intent_ref"),
             decision_ref=req.get("decision_ref"), valid_until=req.get("valid_until"),
+            market=market, currency=currency,
         )
-        receipt = _reject(order_id, outcome.decline_reason,
+        receipt = _reject(order_id, outcome.decline_reason, market=market, currency=currency,
                           risk=_risk_view(outcome), **_snapshot_view(snap))
         receipt["failed_checks"] = outcome.failed_names
         receipt["market"] = market
@@ -333,18 +351,20 @@ def execute(cur, req: dict, *, now: Optional[datetime] = None) -> dict:
         status="pending", filled_qty=0, source=source, actor=actor,
         decline_reason=None, intent_ref=req.get("intent_ref"),
         decision_ref=req.get("decision_ref"), valid_until=req.get("valid_until"),
-        frozen_amount=frozen_amount,
+        frozen_amount=frozen_amount, market=market, currency=currency,
     )
     # 买入**先冻再结算**：受理即成交与挂单两条路都先把钱搬到冻结，成交时再从冻结里付。
     # 不这么做的话，受理即成交那一路会直接去动一个空的冻结额（`frozen_after` 变负）。
     if side == "buy" and frozen_amount > 0:
-        ledger.freeze_cash(cur, project_id, order_id, frozen_amount, "委托受理冻结")
+        ledger.freeze_cash(cur, project_id, order_id, frozen_amount, "委托受理冻结",
+                           market=market, currency=currency)
 
     # ── ④ 记账 ───────────────────────────────────────────────────────────
     if trial.filled:
         trade_id = _book_fill(cur, project, order_id, req, snap,
                               MatchResult(FILLED, Decimal(str(trial.price)), trial.basis),
-                              fill_fee, fill_amount, source, fee_model["version"])
+                              fill_fee, fill_amount, source, fee_model["version"],
+                              market=market, currency=currency)
         receipt = {
             "order_id": order_id,
             "status": "filled",
@@ -357,6 +377,7 @@ def execute(cur, req: dict, *, now: Optional[datetime] = None) -> dict:
             "pending_reason": None,
             "price_basis": trial.basis,
             "market": market,
+            "currency": currency,
             "price_limit_checked": _price_limit_checked(outcome),
             "risk": _risk_view(outcome),
             **_snapshot_view(snap),
@@ -376,6 +397,7 @@ def execute(cur, req: dict, *, now: Optional[datetime] = None) -> dict:
             "price_basis": trial.basis,
             "frozen_amount": frozen_amount,
             "market": market,
+            "currency": currency,
             "price_limit_checked": _price_limit_checked(outcome),
             "risk": _risk_view(outcome),
             **_snapshot_view(snap),
@@ -433,13 +455,18 @@ def _version_conflict(cur, project, req, key, req_hash, expected) -> dict:
     reason = (f"账户版本冲突：委托基于 version={int(expected)}，当前 version={actual}。"
               "同一账户的并发命令里，后到者被版本校验拦下")
     order_id = ledger.new_id("ord")
+    instrument = ledger.get_instrument(cur, req["code"])
+    vmarket = (instrument or {}).get("market") or market_of(req["code"]) or DEFAULT_MARKET
+    vrule = ledger.get_market_rule(cur, vmarket)
+    vcurrency = ((vrule or {}).get("currency")
+                 or ledger.MARKET_CURRENCY.get(vmarket) or "CNY")
     ledger.insert_order(
         cur, order_id, project_id, req["code"], req["side"], int(req["qty"]),
         req.get("price_type") or "limit", req.get("limit_price"),
         status="rejected", filled_qty=0, source=req.get("source") or "ai",
         actor=req.get("actor") or "system", decline_reason=reason,
         intent_ref=req.get("intent_ref"), decision_ref=req.get("decision_ref"),
-        valid_until=req.get("valid_until"),
+        valid_until=req.get("valid_until"), market=vmarket, currency=vcurrency,
     )
     logger.warning("[paper.matching] 版本冲突 · project={} 期望={} 实际={}",
                    project_id, expected, actual)
@@ -486,11 +513,15 @@ def expire_open_orders(
         ledger.update_order_filled(cur, order["order_id"], "expired", 0,
                                    f"未成交撤单（{reason}），冻结资金已解冻")
         frozen = order.get("frozen_amount") or Decimal("0.0000")
-        ledger.unfreeze_cash(cur, project_id, order["order_id"], frozen, "撤单解冻")
+        # 解冻在**该订单所属子账户**里做（`fin_order.market` / `currency`）。
+        ledger.unfreeze_cash(cur, project_id, order["order_id"], frozen, "撤单解冻",
+                             market=order.get("market") or "CN_A",
+                             currency=order.get("currency") or "CNY")
         expired.append({
             "order_id": order["order_id"],
             "code": order["code"],
             "side": order["side"],
+            "market": order.get("market"),
             "unfrozen": Decimal(str(frozen)),
         })
     return {"expired": len(expired), "orders": expired}
@@ -507,7 +538,9 @@ def cancel_order(cur, project_id: str, order_id: str, memo: str = "人工撤单"
                 "unfrozen": Decimal("0.0000")}
     ledger.update_order_filled(cur, order_id, "cancelled", 0, f"{memo}，冻结资金已解冻")
     frozen = order.get("frozen_amount") or Decimal("0.0000")
-    ledger.unfreeze_cash(cur, project_id, order_id, frozen, "撤单解冻")
+    ledger.unfreeze_cash(cur, project_id, order_id, frozen, "撤单解冻",
+                         market=order.get("market") or "CN_A",
+                         currency=order.get("currency") or "CNY")
     return {"order_id": order_id, "status": "cancelled", "changed": True,
             "unfrozen": Decimal(str(frozen))}
 
@@ -554,12 +587,18 @@ def match_open_orders(cur, project_id: str, *, now: Optional[datetime] = None) -
         qty = int(order["qty"])
         fill_amount = (Decimal(qty) * Decimal(str(result.price))).quantize(Decimal("0.0001"))
         fee = _recompute_fee(order["side"], fill_amount, fee_model)
+        currency = ((market_rule.get("currency")
+                     if isinstance(market_rule, dict) else None)
+                    or fee_model.get("currency")
+                    or ledger.MARKET_CURRENCY.get(market) or "CNY")
         req = {"side": order["side"], "code": order["code"], "qty": qty}
         trade_id = _book_fill(cur, project, order["order_id"], req, snap,
                               MatchResult(FILLED, Decimal(str(result.price)),
                                                   result.basis),
-                              fee, fill_amount, order["source"], fee_model["version"])
+                              fee, fill_amount, order["source"], fee_model["version"],
+                              market=market, currency=currency)
         filled.append({"order_id": order["order_id"], "trade_id": trade_id,
                        "price": Decimal(str(result.price)), "qty": qty,
+                       "market": market,
                        "snapshot_id": snap["snapshot_id"]})
     return {"matched": len(filled), "fills": filled}

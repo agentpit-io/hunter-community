@@ -5,15 +5,20 @@
   · **`price_limit_mode='none'` 不作校验但留痕**（回执 `price_limit_checked=false`）；
   · **同一笔委托在不同市场的可卖数量判定不同**（A 股当日买入不可卖、美股可卖）。
 
-费用模型：港股 / 美股的**生产费率行本期未落数**（N1 决策），所以这里只为 `US` 临时
-种一行**测试用**费率（`version='test-us-fee-v1'`），用完即删（`finally`）——
-绝不留下一个看起来像生产数据的港美股费率行。
+费用模型：**N4 起港美股的生产费率行已落表**（`0034` 的 `fee-hk-v1` / `fee-us-v1`），
+所以下面这些用例不再需要临时种费率行；费用模型缺失那条路径由
+`tests/test_risk_markets.py` 用「无费率行」的代表性输入单独覆盖。
+
+隔离（N4）：账本按**市场子账户**分（`(project_id, market)`）。这里新增两条
+「真下单 → 真成交 → 本币入账」用例，并断言**在 US 子账户买入不动 CN_A 子账户的可用资金**
+（串账反例）。
 """
 
 from __future__ import annotations
 
 import os
 from datetime import date, datetime
+from decimal import Decimal
 
 import pytest
 
@@ -31,7 +36,7 @@ import psycopg2  # noqa: E402
 import psycopg2.extras  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from helpers import install_quote_source, order_body, uniq_date  # noqa: E402
+from helpers import ABSENT_DATE, install_quote_source, order_body, uniq_date  # noqa: E402
 
 from app.main import app  # noqa: E402
 from app.market_time import market_tz  # noqa: E402
@@ -77,27 +82,38 @@ def _seed_calendar(pg, market, trade_date):
     )
 
 
-def _fund(project):
-    assert _post(f"/api/v1/projects/{project}/funding", {})[0] == 200
+def _fund(project, market=None):
+    q = f"?market={market}" if market else ""
+    assert _post(f"/api/v1/projects/{project}/funding{q}", {})[0] == 200
 
 
-def _when(project, market):
+def _cash(project, market=None):
+    q = f"?market={market}" if market else ""
+    r = client.get(f"/api/v1/projects/{project}/cash{q}", headers=H)
+    assert r.status_code == 200
+    return r.json()
+
+
+def _when(project, market, when_day=None):
     """该项目的**独有报价时刻**，落在目标市场的当地盘中（避免撞快照）。
 
     时刻必须用**目标市场的时区**构造（不能用固定 `-04:00`）：美股的 UTC 偏移随夏令时变，
     写死一个偏移会让冬令时的日期落到盘中之外（实测 10:00-04:00 在冬令时 = 09:00 ET）。
+
+    `when_day` 给定一个固定日期（`ABSENT_DATE`）时用它 —— 「日历缺失」用例要一个
+    **别的用例不会种日历**的日期（日历表全库共享、跨用例累积）。
     """
-    d = date.fromisoformat(uniq_date(project))
+    d = date.fromisoformat(when_day or uniq_date(project))
     return datetime(d.year, d.month, d.day, 10, 0, tzinfo=market_tz(market)).isoformat()
 
 
 def test_us_order_traces_market_and_price_limit(pg, project):
     """美股：市场识别为 US、日历按 (US, 当地日) 读到、价格带 `none` 留痕。
 
-    ⚠️ 订单**最终停在第 5 条**：港美股的生产费率行本期未落数（见文件头与 N1 决策），
-    所以 `fin_fee_model` 里没有 US 行 → 费用模型缺失 → 拒绝。这**不是**本阶段要消掉的
-    缺陷，是「不编费率」的诚实结果；`tests/test_risk_markets.py` 用代表性费率模型
-    验证了「有费率行时六条全过」。
+    N4 起港美股的生产费率行已落表（`fee-us-v1`），所以第 5 条**通过**；
+    这里的项目**只给 CN_A 子账户入金**（`_fund(project)` 走项目 `market_scope`），
+    于是这笔美股委托停在**第 6 条（US 子账户没有资金）** —— 恰好证明
+    「美股委托只动 US 子账户，不会花 CN_A 的钱」。
     """
     code = "AAPL"
     when = _when(project, "US")
@@ -105,24 +121,83 @@ def test_us_order_traces_market_and_price_limit(pg, project):
     _seed_calendar(pg, "US", when[:10])
     pg.connection.commit()
     install_quote_source(when=when, price="10.00", prev_close="10.00")
-    _fund(project)
+    _fund(project)   # 只入金 CN_A 子账户
 
     status, receipt = _post("/api/v1/orders", order_body(project, code=code, qty=10, price="10.00"))
     assert status == 200
     assert receipt["market"] == "US"
+    assert receipt["currency"] == "USD"
     assert receipt["price_limit_checked"] is False        # none → 不作校验但留痕
     assert receipt["risk"]["price_limit"]["ok"] is True
     assert receipt["risk"]["price_limit"]["detail"]["note"].startswith("该市场未做价格带校验")
     assert receipt["risk"]["session"]["ok"] is True        # 时段按美东时区判、落在盘中
+    assert receipt["risk"]["fee"]["ok"] is True            # N4：费率行已落表
     assert receipt["status"] == "rejected"
-    assert "fee" in receipt["failed_checks"] and "费用模型" in receipt["decline_reason"]
+    assert receipt["failed_checks"] == ["funds"]           # 只差 US 子账户没钱
     assert "session" not in receipt["failed_checks"]
+
+
+def _fill_in_market(pg, project, code, market, currency, exchange, board, lot_size, qty):
+    """在 `market` 子账户里真买一笔，返回回执。"""
+    when = _when(project, market)
+    _seed_instrument(pg, code, market, currency, exchange, board, lot_size)
+    _seed_calendar(pg, market, when[:10])
+    pg.connection.commit()
+    install_quote_source(when=when, price="10.00", prev_close="10.00")
+    _fund(project, "CN_A")
+    _fund(project, market)
+    status, receipt = _post("/api/v1/orders",
+                            order_body(project, code=code, qty=qty, price="10.00"))
+    assert status == 200, receipt
+    return receipt
+
+
+def test_us_fill_is_usd_and_does_not_touch_cn_a_subaccount(pg, project):
+    """**串账反例（N4）**：美股子账户买入 → 只动 US 子账户的可用资金，CN_A 一分不变。"""
+    # 先给 CN_A 子账户入金（幂等），**再**读基准 —— 否则读到的是入金前的 0，
+    # 而 `_fill_in_market` 里的入金会让它变成 10000，看起来像「串账」。
+    _fund(project, "CN_A")
+    cn_before = _cash(project, "CN_A")["available"]
+    receipt = _fill_in_market(pg, project, "AAPL", "US", "USD", "NASDAQ", "us_main", 1, 10)
+    assert receipt["status"] == "filled"
+    assert receipt["currency"] == "USD"
+
+    cn_after = _cash(project, "CN_A")["available"]
+    us_after = _cash(project, "US")["available"]
+    assert str(cn_after) == str(cn_before), "US 子账户买入不该动 CN_A 子账户的可用资金"
+    # 金额是字符串（JSON），必须按**数值**比 —— '9899.99' < '10000' 按字符串比是 False。
+    assert Decimal(us_after) < Decimal(cn_after)   # US 子账户扣了成交额 + 费用
+
+    # 成交 / 流水 / 持仓都带本币与市场
+    cur = pg.connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT market, currency, amount FROM fin_trade WHERE project_id = %s", (project,))
+    trades = cur.fetchall()
+    assert trades and all(t["market"] == "US" and t["currency"] == "USD" for t in trades)
+    cur.execute("SELECT market, currency FROM fin_position WHERE project_id = %s", (project,))
+    pos = cur.fetchall()
+    assert pos and all(p["market"] == "US" and p["currency"] == "USD" for p in pos)
+
+
+def test_hk_fill_is_hkd_and_does_not_touch_cn_a_subaccount(pg, project):
+    """**串账反例（N4）**：港股子账户买入 → 只动 HK 子账户的可用资金，CN_A 一分不变。"""
+    _fund(project, "CN_A")   # 幂等；先入金再读基准（见上一条用例的说明）
+    cn_before = _cash(project, "CN_A")["available"]
+    receipt = _fill_in_market(pg, project, "00700", "HK", "HKD", "HKEX", "hk_main", 100, 100)
+    assert receipt["status"] == "filled"
+    assert receipt["currency"] == "HKD"
+
+    assert str(_cash(project, "CN_A")["available"]) == str(cn_before)
+    assert Decimal(_cash(project, "HK")["available"]) < Decimal(cn_before)
+
+    cur = pg.connection.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT market, currency FROM fin_trade WHERE project_id = %s", (project,))
+    assert all(t["market"] == "HK" and t["currency"] == "HKD" for t in cur.fetchall())
 
 
 def test_hk_calendar_missing_rejects(pg, project):
     """**专项**：港股没有该日日历行 → 拒绝，原因写明「没有 HK 该日的交易日历」。"""
     code = "00700"
-    when = _when(project, "HK")
+    when = _when(project, "HK", when_day=ABSENT_DATE)   # 池子外的固定日期（见 A 股那条）
     # 故意**不**种 (HK, 该日) 的日历行
     _seed_instrument(pg, code, "HK", "HKD", "HKEX", "hk_main", 100)
     pg.connection.commit()
@@ -139,7 +214,7 @@ def test_hk_calendar_missing_rejects(pg, project):
 def test_cn_a_calendar_missing_rejects(pg, project):
     """同一条判据对 A 股一样：没有该日日历行 → 拒绝（不退化成一至五即交易日）。"""
     code = "600123"
-    day = uniq_date(project, salt=7)
+    day = ABSENT_DATE        # 用池子外的固定日期：日历表跨用例累积，随机日期会撞
     _seed_instrument(pg, code, "CN_A", "CNY", "SH", "main", 100)   # 不种日历
     pg.connection.commit()
     install_quote_source(when=f"{day}T10:00:00+08:00", price="10.00", prev_close="10.00")

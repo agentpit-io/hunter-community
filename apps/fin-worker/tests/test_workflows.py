@@ -34,8 +34,10 @@ def _wf_name(cls) -> str:
 def test_all_workflows_registered():
     names = {_wf_name(c) for c in workflows.ALL_WORKFLOWS}
     assert names == {
-        "fin.point_0915", "fin.point_0930", "fin.point_1130",
-        "fin.point_1300", "fin.point_1455", "fin.point_1530",
+        # N4：六个时点按**角色**分类型（市场经 Schedule 的 args 传入）
+        "fin.point_preopen", "fin.point_decide",
+        "fin.point_match_a", "fin.point_match_b", "fin.point_match_c",
+        "fin.point_close",
         "fin.market_etl",
         # M7：标的元数据同步（涨跌停 / ST）
         "fin.instrument_sync",
@@ -44,8 +46,20 @@ def test_all_workflows_registered():
 
 def test_every_point_has_a_registered_workflow():
     registered = {_wf_name(c) for c in workflows.ALL_WORKFLOWS}
-    for p in points.POINTS:
+    for p in points.ALL_POINTS:
         assert p.workflow in registered
+
+
+def test_projects_for_market_filters_by_market_scope():
+    items = [
+        {"project_id": "a", "market_scope": "CN_A"},
+        {"project_id": "b", "market_scope": "HK"},
+        {"project_id": "c", "market_scope": "US"},
+        {"project_id": "d"},   # 缺列 → 按 A 股
+    ]
+    assert [p["project_id"] for p in workflows.projects_for_market(items, "HK")] == ["b"]
+    assert [p["project_id"] for p in workflows.projects_for_market(items, "US")] == ["c"]
+    assert [p["project_id"] for p in workflows.projects_for_market(items, "CN_A")] == ["a", "d"]
 
 
 def test_activity_list_covers_workflow_calls():
@@ -53,6 +67,8 @@ def test_activity_list_covers_workflow_calls():
 
     names = {fn.__name__ for fn in activity_list()}
     assert {
+        # N4：市场当地时钟（沙箱里算不出时区，见 activities.market_clock）
+        "market_clock",
         "sync_calendar", "read_calendar", "list_active_projects",
         "begin_point_job", "write_checkpoint", "finish_point_job", "fail_point_job",
         "confirm_t1", "build_decision", "submit_decision",

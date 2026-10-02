@@ -52,9 +52,19 @@ def http_port() -> int:
 
 
 # ── 一期固定示例策略（管道跑通优先，策略做强是后面的事，`08 §二`）────────
-def sample_code() -> str:
-    # 默认 601398（工商银行）：低价 + 高流动性，三个档位（1 万 / 10 万 / 100 万）
-    # 的示例单都买得起，管道能在任何档位跑通。这是**固定示例**，不是选股结论。
+def sample_code(market: str = "CN_A") -> str:
+    """固定示例策略的标的，**按市场各一个**（N4：市场是一等参数）。
+
+    · `CN_A` 默认 601398（工商银行）：低价 + 高流动性，三个档位（1 万 / 10 万 / 100 万）
+      的示例单都买得起，管道能在任何档位跑通；env `FIN_SAMPLE_CODE`（一期口径，逐字不变）。
+    · `HK` / `US` 默认 00700 / AAPL：**示例标的**（各市场一只高流动性票），
+      不是选股结论 —— 港美股时点只在有对应市场子账户的项目上跑。
+    """
+    key = (market or "CN_A").strip().upper()
+    if key in ("HK",):
+        return (os.getenv("FIN_SAMPLE_CODE_HK") or "00700").strip()
+    if key in ("US",):
+        return (os.getenv("FIN_SAMPLE_CODE_US") or "AAPL").strip()
     return (os.getenv("FIN_SAMPLE_CODE") or "601398").strip()
 
 

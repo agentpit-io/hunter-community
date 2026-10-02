@@ -9,16 +9,27 @@ M3 起**快照由服务端取**（`POST /api/v1/orders` 里没有 `snapshot` 字
 from __future__ import annotations
 
 import os
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from app.snapshot.source import Quote, set_source
 
-CST = timezone(timedelta(hours=8))
+# **真实时区，不是固定 +08**：中国 1986–1991 年实行过夏令时（当地 +09:00），
+# 而本文件给用例派的报价日期池是 1990–2022（`_BASE_DAY` / `_DAY_SPAN`）——
+# 固定 `+08:00` 会让 1990 / 1991 年 4~9 月的「盘中时刻」实际落到当地 15:xx，
+# 被交易时段校验拒掉（症状：随机某几条用例莫名 `rejected`，N3 起就有的非幂等）。
+CST = ZoneInfo("Asia/Shanghai")
 
 # 默认时刻：2026-10-02（周五）10:00 上海时间，落在上午交易时段内。
 DEFAULT_AT = "2026-10-02T10:00:00+08:00"
+
+# 一个**永远不会被 `uniq_date` 派到**的日期，专给「日历缺失 → 拒绝」这类用例用。
+# `uniq_date` 的池子是 1990-01-01 起 12000 天（约 33 年，到 2022-11），这个日期在池子之前；
+# 而 `fin_market_calendar` 是全库共享、跨用例累积的 —— 用随机日期时，别的用例
+# 可能刚好给同一天种过日历行，那几条用例就会从「拒绝」变成「成交」（N3 起就有的非幂等）。
+ABSENT_DATE = "1971-06-15"   # 周二（1971 年中国没有夏令时，当地就是 +08:00）
 
 
 def at(text: str) -> datetime:
@@ -191,9 +202,14 @@ def uniq_when(project_id: str, salt: int = 0) -> str:
     而快照表是**全局**的、只追加的。两个用例如果用同一个 (代码, 秒)，
     后一个会命中 `ON CONFLICT DO NOTHING` 拿到前一个的价格 —— 测试之间就串了。
     从 project_id（随机 uuid）派生，跨进程、跨轮次都不会撞。
+
+    时区用 `CST`（真实 `Asia/Shanghai`，**不是固定 +08**）拼：`clock` 是**上海当地
+    墙上时刻**，1990 / 1991 夏令时那几个月当地偏移是 +09:00，写死 +08 会让这个
+    「盘中时刻」实际变成 15:xx 而被时段校验拒掉（见文件头 `CST` 的注释）。
     """
     day, clock = _moment(project_id, salt)
-    return f"{day.isoformat()}T{clock}+08:00"
+    hh, mm, ss = (int(x) for x in clock.split(":"))
+    return datetime(day.year, day.month, day.day, hh, mm, ss, tzinfo=CST).isoformat()
 
 
 def prime_quote(pg, project_id: str, *, salt: int = 1, when: Optional[str] = None, **kw):

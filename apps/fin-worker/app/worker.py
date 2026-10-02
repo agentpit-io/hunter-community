@@ -19,6 +19,7 @@ from app.workflows import ALL_WORKFLOWS
 def activity_list() -> list:
     return [
         activities.sync_calendar,
+        activities.market_clock,
         activities.read_calendar,
         activities.list_active_projects,
         activities.begin_point_job,

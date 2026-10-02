@@ -32,15 +32,35 @@ from app.bridge.contracts import StrategyDecision
 from app.bridge.hunter_api import ApiError, HunterApiClient
 from app.bridge.idem import order_key, point_job_key, report_job_key
 from app.bridge.paper import PaperClient
+from app.channels import CAL_MARKET
+from app.market_time import canonical_market
 from app.strategy.sample import build_decision as build_sample_decision
 
 # A 股交易日按上海时间切。用 IANA 时区名（不是固定偏移）—— 镜像装 tzdata（N2）。
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
-# 交易日历的默认时段（A 股：上午 / 下午各一段）。这不是「编」——
-# `fin_market_calendar.sessions` 就是给撮合判时段用的，A 股的时段是公开常识，
-# 且逐条与 `paper/risk/session.py` 的口径一致。
+# 各市场的常设时段（本地时刻）。这不是「编」——
+# `fin_market_calendar.sessions` 就是给撮合判时段用的，时段是交易所公开口径
+# （A 股 09:30-11:30/13:00-15:00、港股 09:30-12:00/13:00-16:00、美股 09:30-16:00），
+# 与 `fin_market_rule.sessions` 的种子逐项一致；同步时优先用市场规则行里的那一份。
 A_SESSIONS = [{"open": "09:30", "close": "11:30"}, {"open": "13:00", "close": "15:00"}]
+DEFAULT_SESSIONS: dict[str, list[dict[str, str]]] = {
+    "CN_A": A_SESSIONS,
+    "HK": [{"open": "09:30", "close": "12:00"}, {"open": "13:00", "close": "16:00"}],
+    "US": [{"open": "09:30", "close": "16:00"}],
+}
+
+
+def _market_sessions(market: str) -> list[dict[str, str]]:
+    """该市场的常设时段。优先 `fin_market_rule.sessions`（经 HTTP 读），取不到用兜底。"""
+    fallback = DEFAULT_SESSIONS.get(market, A_SESSIONS)
+    try:
+        for row in PaperClient().market_rules():
+            if row.get("market") == market and row.get("sessions"):
+                return list(row["sessions"])
+    except Exception as exc:  # noqa: BLE001 —— 读不到就用兜底，不阻断日历同步
+        logger.warning("[calendar] 读市场规则时段失败（用兜底 {}）：{}", market, exc)
+    return fallback
 
 
 def _parse_iso(value: str) -> datetime:
@@ -89,14 +109,18 @@ def sync_calendar(req: dict[str, Any]) -> dict[str, Any]:
     center = date.fromisoformat(req["trade_date"])
     window_start = center - timedelta(days=int(req.get("lookback_days", 5)))
     window_end = center + timedelta(days=int(req.get("lookahead_days", 12)))
-    market = req.get("market", "a")
+    # 市场可能是本仓三值（CN_A/HK/US）或旧写法（a/cn）—— 统一归一。
+    market = canonical_market(req.get("market", "CN_A"))
+    # 交易日历端点的 market 参数是旧写法（A 股用 'a'，港美股 'hk'/'us'）—— 集中转换。
+    sessions = _market_sessions(market)
 
     api = HunterApiClient()
     try:
-        days = api.trading_days(market, window_start.isoformat(), window_end.isoformat())
+        days = api.trading_days(CAL_MARKET[market], window_start.isoformat(),
+                                window_end.isoformat())
     except ApiError as exc:
         logger.warning("[calendar] 交易日历拉取失败 · 不当交易日处理：{}", exc)
-        return {"ok": False, "error": str(exc),
+        return {"ok": False, "error": str(exc), "market": market,
                 "window": [window_start.isoformat(), window_end.isoformat()]}
 
     trading = set(days)
@@ -108,40 +132,68 @@ def sync_calendar(req: dict[str, Any]) -> dict[str, Any]:
         paper.upsert_calendar(
             cursor.isoformat(),
             is_trading=is_trading,
-            sessions=A_SESSIONS if is_trading else [],
+            sessions=sessions if is_trading else [],
             note=("akshare 交易日历" if is_trading
                   else "非交易日（不在 akshare A 股交易日历中）"),
+            market=market,
         )
         written += 1
         cursor += timedelta(days=1)
-    logger.info("[calendar] 同步 {} 天（{} ~ {}），其中交易日 {} 天",
-                written, window_start, window_end, len(trading))
-    return {"ok": True, "written": written, "trading_days": len(trading),
+    logger.info("[calendar] 同步 {} 天（{} ~ {}）· market={} · 交易日 {} 天",
+                written, window_start, window_end, market, len(trading))
+    return {"ok": True, "market": market, "written": written, "trading_days": len(trading),
             "window": [window_start.isoformat(), window_end.isoformat()]}
 
 
 @activity.defn
+def market_clock(req: dict[str, Any]) -> dict[str, Any]:
+    """按市场时区给出「当地交易日 + 当地时刻」。**在工作流里算不出来，只能在这里算。**
+
+    ⚠️ 为什么是 Activity 而不是工作流内的纯函数（2026-10-03 踩的坑）：
+    Temporal 的工作流沙箱会把模块级的 `ZoneInfo` 实例包成 `_RestrictedProxy`，
+    `astimezone()` 直接抛 `tzinfo argument must be None or of a tzinfo subclass`。
+    **在调用点现建 `ZoneInfo` 也一样被包**（试过，见 workflows 模块头）。
+    Activity 跑在沙箱外，是这里唯一能拿到真 `ZoneInfo` 的地方；结果进事件历史，
+    replay 时读的是历史里那份，确定性不受影响。
+
+    时区名一律走 `market_time.MARKET_TZ`（IANA 名，夏令时自动跟随），
+    **不写死 ±N 偏移**（M7 的 12 小时根因）。
+    """
+    from app.market_time import MARKET_TZ
+
+    market = canonical_market(req.get("market", "CN_A"))
+    tz = ZoneInfo(MARKET_TZ[market])
+    now = datetime.now(tz)
+    return {"market": market, "trade_date": now.date().isoformat(), "now": now.isoformat()}
+
+
+@activity.defn
 def read_calendar(req: dict[str, Any]) -> dict[str, Any]:
-    """读某一天的交易日历。**三种结果**，缺哪一种是哪一种：
+    """读**某市场某一天**的交易日历。**三种结果**，缺哪一种是哪一种：
 
     | 返回 | 含义 | 工作流怎么办 |
     |---|---|---|
     | `known=True, trading=True` | 交易日 | 继续 |
     | `known=True, trading=False` | 非交易日（日历上明写） | 跳过，不触发 |
     | `known=False` | **没有这一天的日历** | 跳过 + **告警**（不许默认当交易日） |
+
+    日历按 `(market, trade_date)` 读（0029 起主键就是这两列）；`market` 缺省 `CN_A`
+    保持旧调用方行为 —— **港美股必须显式传市场**（拿 A 股日历冒充就是编数据）。
     """
     trade_date = req["trade_date"]
-    row = PaperClient().get_calendar(trade_date)
+    market = canonical_market(req.get("market", "CN_A"))
+    row = PaperClient().get_calendar(trade_date, market=market)
     if row is None:
-        logger.warning("[calendar] {} 没有交易日历 —— 按「未知」处理，**不触发交易**。"
-                       "先跑 preopen 时点的日历同步，或检查 akshare 是否可用。", trade_date)
+        logger.warning("[calendar] {}/{} 没有交易日历 —— 按「未知」处理，**不触发**。"
+                       "先跑该市场 preopen 时点的日历同步。", market, trade_date)
         return {"known": False, "trading": False, "sessions": [], "trade_date": trade_date,
-                "note": "交易日历缺失：未知 ≠ 交易日"}
+                "market": market, "note": "交易日历缺失：未知 ≠ 交易日"}
     return {
         "known": True,
         "trading": bool(row.get("is_trading")),
         "sessions": row.get("sessions") or [],
         "trade_date": trade_date,
+        "market": market,
         "note": row.get("note"),
     }
 
@@ -281,13 +333,16 @@ def build_decision(req: dict[str, Any]) -> dict[str, Any]:
     strategy_key = active.get("key") or config.sample_strategy_key()
     strategy_version = str(active.get("version") or config.sample_strategy_version())
 
+    # 市场：该时点所属市场（N4 起市场是一等参数）。示例标的按市场取。
+    market = canonical_market(req.get("market") or project.get("market_scope") or "CN_A")
+
     decision_dict = build_sample_decision(
         project=project,
         param=param,
         trade_date=req["trade_date"],
         point=req["point"],
         now=_parse_iso(req["now"]),
-        code=req.get("code") or config.sample_code(),
+        code=req.get("code") or config.sample_code(market),
         strategy_key=strategy_key,
         strategy_version=strategy_version,
         ttl_seconds=config.contract_timeout_seconds(),
@@ -348,10 +403,12 @@ def close_day(req: dict[str, Any]) -> dict[str, Any]:
     """
     project_id = req["project_id"]
     at_iso = req["now"]
+    # 收盘三件事都按**该市场子账户**做（缺省取项目 market_scope，A 股行为不变）。
+    market = req.get("market")
     paper = PaperClient()
     expired = paper.expire_open(project_id, at_iso, reason="close")
-    valuation = paper.make_valuation(project_id, at_iso)
-    recon = paper.run_recon(project_id, at_iso)
+    valuation = paper.make_valuation(project_id, at_iso, market=market)
+    recon = paper.run_recon(project_id, at_iso, market=market)
     return {"expired": expired, "valuation": valuation, "recon": recon}
 
 
