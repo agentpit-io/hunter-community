@@ -596,8 +596,14 @@ def collect(conn, project_id: str, trade_date: str) -> dict:
         if not project:
             raise LookupError(f"项目不存在：{project_id}")
 
+        # ⚠️ 这里必须**把 build_facts 用到的每一列都选出来**。M6 发现：原来只选了
+        # `as_of/nav/total_assets/quality/missing_flag`，而 `build_facts` 还要读
+        # `cash_available` / `cash_frozen` / `market_value` —— 于是报告里的「可用资金」
+        # 「冻结资金」「持仓市值」三项**恒为 `—`**（`valuation.get()` 拿到 None，
+        # 按「算不出就空」写成 None，不报错、不告警）。报告页与总览页同屏对照时一眼可见。
         cur.execute(
-            "SELECT as_of, nav, total_assets, quality, missing_flag FROM fin_valuation "
+            "SELECT as_of, nav, total_assets, cash_available, cash_frozen, market_value, "
+            "quality, missing_flag FROM fin_valuation "
             "WHERE project_id = %s ORDER BY as_of ASC", (project_id,))
         all_series = [dict(r) for r in cur.fetchall()]
 

@@ -39,12 +39,17 @@ export async function finFetch<T>(path: string, init?: RequestInit): Promise<T> 
   }
   if (!r.ok) {
     let detail = ''
+    let raw: any = null
     try {
       const j = await r.json()
+      raw = j?.detail
       detail = typeof j?.detail === 'string' ? j.detail : (j?.detail?.message || '')
     } catch { /* 非 JSON 错误体（nginx 502 等） */ }
-    const err = new Error(detail || `请求失败（HTTP ${r.status}）`) as Error & { status?: number }
+    const err = new Error(detail || `请求失败（HTTP ${r.status}）`) as Error & { status?: number; detail?: any }
     err.status = r.status
+    // 对象型 detail（例如风险档位的 409「放宽了哪几条」）原样带上，
+    // 调用方要显示二次确认框时得有全部字段，不能只剩一句 message。
+    err.detail = raw
     throw err
   }
   return r.json() as Promise<T>
