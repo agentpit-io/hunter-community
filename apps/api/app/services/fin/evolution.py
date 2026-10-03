@@ -968,6 +968,44 @@ def get_proposal(*, proposal_id: str, conn=None) -> dict:
             conn.close()
 
 
+def list_events(*, project_id: str, user_id: Optional[str] = None, limit: int = 200,
+                conn=None) -> list[dict]:
+    """按时间**倒序**列出某项目的状态事件链（R9 界面用）。**只读，不改任何状态。**
+
+    归属有两种来源，缺一不可：
+
+    1. `proposal_id` 指向本项目的提案（LEFT JOIN `fin_evolution_proposal`）；
+    2. **闸门拒绝的事件**（`rejected_by_gate`）—— 红线 8 / 白名单 / 证据不合规拒绝的提案
+       **从来没入库**（`fin_evolution_event.proposal_id` 故意不加外键，就是为了能记下
+       「从未存在的提案」）。这些事件的 `payload.project_id` 是唯一的归属线索。
+
+    所以过滤条件是这两者取或 —— 只按 JOIN 查会**漏掉所有被闸门拦下的拒绝事件**，
+    而那正是「被拒的提案为什么被拒」要回答的东西。
+    """
+    own = conn is None
+    conn = conn or get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            _owned_project(cur, project_id, user_id)
+            cur.execute(
+                """
+                SELECT e.*
+                  FROM fin_evolution_event e
+                  LEFT JOIN fin_evolution_proposal p ON p.proposal_id = e.proposal_id
+                 WHERE p.project_id = %s OR (e.payload->>'project_id') = %s
+                 ORDER BY e.created_at DESC, e.event_id DESC
+                 LIMIT %s
+                """,
+                (project_id, project_id, max(1, min(int(limit), 1000))),
+            )
+            rows = [dict(r) for r in cur.fetchall()]
+        conn.rollback()      # 只读
+    finally:
+        if own:
+            conn.close()
+    return [_jsonable(r) for r in rows]
+
+
 def verify_chain(proposal_id: str, *, conn=None) -> dict:
     """逐条重算事件哈希，验证哈希链完整。返回 `{ok, count, broken}`。
 

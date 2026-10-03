@@ -354,3 +354,121 @@ async def list_reinject(request: Request, proposal_id: str = Query(...)):
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
     return {"items": evolution_svc.reinject_pending(proposal_id=proposal_id)}
+
+
+# ════════════════════════════════════════════════════════════════════════
+# R9 · 成长页要的三块（**只读**）+ 两个人工动作的 JWT 通道
+# ════════════════════════════════════════════════════════════════════════
+#
+# ⚠️ **本段是 R9 唯一的后端新增，理由与边界都写在这里**（`plan/R9.md` §三）：
+#
+#   · 只读三块（events / metrics / 经验 filters 在 `fin_memory.py`）—— 纯读，无副作用，
+#     只是把 R6–R8 已经落好的表 / 已经算好的指标**亮出来**（界面不许自己算）。
+#   · 两个人工动作（apply / rollback）与回灌重试：R8 **已经跑通**这些服务函数，
+#     但只开了**内网口令通道**（`X-Hunter-Internal-Key`）；浏览器拿不到那把口令，
+#     所以这里补一条 **JWT 孪生通道**。它**不含任何业务判断** —— 五条放行闸门、CAS、
+#     版本链核验、停单、写失败经验全在 `services/fin/evolution.py` 与 `control.py`；
+#     本段只做两件事：(a) 校验提案归属（跨用户 → 404），(b) **由服务端**从登录身份
+#     派生 `actor`（请求体里没有 actor 字段 —— 同 R6「不采信写入方」）。
+#     没有这条路，成长页上的按钮就只能是假入口（红线 6），与 §三.6 直接冲突。
+
+def _owned_proposal(proposal_id: str, uid: str) -> str:
+    """校验提案属于当前用户的项目；返回 `project_id`。跨用户 / 不存在一律 **404**。"""
+    try:
+        project_id = evolution_svc.get_proposal(proposal_id=proposal_id)["project_id"]
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    try:
+        evolution_svc.list_proposals(project_id=project_id, user_id=uid, limit=1)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return project_id
+
+
+@router.get("/v1/fin/evolution/events")
+async def list_events(
+    request: Request,
+    project_id: str = Query(...),
+    limit: int = Query(200, ge=1, le=1000),
+):
+    """状态事件链（倒序），**含被闸门拒绝的事件**（`rejected_by_gate`）—— R9 界面用。
+
+    权威是事件表（`fin_evolution_event`）；`proposal.status` 只是它的投影。
+    """
+    uid = _uid(request)
+    try:
+        items = evolution_svc.list_events(project_id=project_id, user_id=uid, limit=limit)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return {"items": items}
+
+
+@router.get("/v1/fin/evolution/metrics")
+async def get_metrics(request: Request, proposal_id: str = Query(...)):
+    """两臂（候选 vs 现行）的组合口径对照 —— **R7 已算好，这里只是读出来**。
+
+    样本不足 / 缺估值一律照实返回 `null` 与 `comparable_samples`，界面据此显示
+    `inconclusive`，**不许显示成 0**（红线 11）。
+    """
+    uid = _uid(request)
+    _owned_proposal(proposal_id, uid)
+    try:
+        return evolution_svc.shadow_metrics(validation_id=proposal_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+class ApplyUserIn(BaseModel):
+    """JWT 通道的生效入参。**没有 `actor` 字段** —— 由服务端从登录身份派生。"""
+
+    proposal_id: str
+    expected_base_config_hash: str
+    confirm: bool = False
+    market: Optional[str] = None
+
+
+class RollbackUserIn(BaseModel):
+    """JWT 通道的回滚入参。`actor` 同样由服务端派生。"""
+
+    proposal_id: str
+    reason: str
+    expected_current_config_hash: Optional[str] = None
+
+
+@router.post("/v1/fin/evolution/apply")
+async def apply_proposal_user(body: ApplyUserIn, request: Request):
+    """**人工确认后把提案应用到模拟盘**（JWT 通道）—— 逐字复用 R8 的服务函数。
+
+    `confirm` 必须显式为真（本方案不做自动生效，`FIN_AUTO_APPLY` 恒 0）。
+    """
+    uid = _uid(request)
+    _owned_proposal(body.proposal_id, uid)
+    out = _apply_errors(lambda: evolution_svc.apply_proposal(
+        proposal_id=body.proposal_id,
+        expected_base_config_hash=body.expected_base_config_hash,
+        actor=f"user:{uid}", confirm=body.confirm, market=body.market))
+    logger.info("[fin.evolution] apply(jwt) user={} id={} {} → {}",
+                uid, out.get("proposal_id"), out.get("from_key"), out.get("to_key"))
+    return out
+
+
+@router.post("/v1/fin/evolution/rollback")
+async def rollback_proposal_user(body: RollbackUserIn, request: Request):
+    """**回到上一个已验证版本**（JWT 通道）—— 版本链核验 / 停单 / 写失败经验全在服务层。"""
+    uid = _uid(request)
+    _owned_proposal(body.proposal_id, uid)
+    out = _apply_errors(lambda: evolution_svc.rollback_proposal(
+        proposal_id=body.proposal_id, reason=body.reason, actor=f"user:{uid}",
+        expected_current_config_hash=body.expected_current_config_hash))
+    logger.warning("[fin.evolution] rollback(jwt) user={} id={} {} → {}",
+                   uid, out.get("proposal_id"), out.get("from_key"), out.get("to_key"))
+    return out
+
+
+@router.post("/v1/fin/evolution/reinject/retry")
+async def retry_reinject_user(body: ReinjectIn, request: Request):
+    """重试「回滚了但没学到」的回灌任务（JWT 通道）—— 成长页「回灌待完成」的重试入口。"""
+    uid = _uid(request)
+    if body.proposal_id:
+        _owned_proposal(body.proposal_id, uid)
+    return _apply_errors(lambda: evolution_svc.retry_reinject(proposal_id=body.proposal_id))

@@ -131,6 +131,23 @@ MEMORY_LAYERS = ("episodic", "semantic", "procedural", "strategy")
 # 支持 / 推翻 / 中性。`refute`（失败经验）是自进化的燃料，必须保留。
 POLARITIES = ("support", "refute", "neutral")
 
+# ── 枚举的中文名（`R9` · 成长页筛选下拉用）──────────────────────────────────
+# 唯一的用途是「界面显示」，**不参与任何判定**（判定读的是上面那些 key）。
+# 放在服务端而不是前端：成长页要求「筛选值全部来自后端、前端不写死任何枚举」——
+# 枚举的定义在服务端（上面那几行），它的显示名就该跟它待在一起，否则就是同一件事
+# 写在两处（`CLAUDE.md` 的「同一件事写在多处」那条）。
+KIND_LABELS = {"fact": "事实", "hypothesis": "假设", "verified": "验证结论"}
+STATUS_LABELS = {"待验证": "待验证", "已确认": "已确认", "已推翻": "已推翻"}
+MARKET_LABELS = {"CN_A": "A 股", "HK": "港股", "US": "美股"}
+SOURCE_LABELS = {"ai": "AI 自主", "human_mixed": "人机混合"}
+MEMORY_LAYER_LABELS = {
+    "episodic": "事件记忆", "semantic": "语义记忆",
+    "procedural": "行为记忆", "strategy": "策略记忆",
+}
+POLARITY_LABELS = {"support": "支持", "refute": "失败经验（推翻）", "neutral": "中性"}
+# regime 的显示名：与 `regime.LABELS`（明确 regime）+ `unknown` 对齐，改一处必须改另一处。
+REGIME_LABELS = {"bull": "牛市", "bear": "熊市", "range": "震荡", "unknown": "未知"}
+
 # 有对应表、可以「验在不在」的引用（规则 3）。`external` **故意不在**这里 —— 见模块文档。
 # `trade` 也不在这张表里：它除了「验在不在」还要把 `source` 读回来（人机归因，见 `_verify_refs`）。
 REF_TABLE_SQL = {
@@ -1071,3 +1088,84 @@ def get_snapshot(*, memory_snapshot_id: str, user_id: Optional[str] = None,
     finally:
         if own:
             conn.close()
+
+
+# ════════════════════════════════════════════════════════════════════════
+# 六 · 筛选下拉的取值（R9 · 成长页）· **只读**
+# ════════════════════════════════════════════════════════════════════════
+#
+# 成长页要求「筛选值全部来自后端、前端不写死任何枚举」（`plan/R9.md` §二.1）。
+# 所以这里把「这个项目里有哪些可用的筛选值」做成一个只读接口的取值来源：
+#   · 闭集维度（kind / status）**列全部取值**（含计数 0 的）—— 界面上「状态只有三种」
+#     这句话才有一个可被机器验证的来源（前端不许自己拼这三种）；
+#   · 开放维度（market / regime / polarity / memory_layer / symbols）**只列数据里出现过的**，
+#     换项目后选项自然跟着变（空出来的维度不占位置）。
+#
+# 计数口径与 `query()` 的硬过滤**逐字一致**：`exposure_scope='searchable'`
+#   AND `holdout_tainted=false`（防评估泄露，零开关），另加 `as_of <= now()`。
+# **这不是一条新的读取路径** —— 它只做聚合，返回的是「有哪些值」，不返回任何经验正文；
+# 经验正文的唯一读入口仍然是 `query()`。
+
+def _opt(value: str, label: str, count: int) -> dict:
+    return {"value": value, "label": label, "count": int(count)}
+
+
+def filter_options(*, project_id: str, user_id: Optional[str] = None, conn=None) -> dict:
+    """某个项目下**可用的筛选取值**（含计数）。JWT 通道按项目归属校验（跨用户 → `LookupError`）。"""
+    own = conn is None
+    conn = conn or get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            _owned_project(cur, project_id, user_id)      # 规则 4（权限 / 跨用户 404）
+            cur.execute(
+                "SELECT kind, status, market, polarity, memory_layer, symbols, regime_tags "
+                "FROM fin_experience "
+                "WHERE project_id = %s AND exposure_scope = 'searchable' "
+                "  AND holdout_tainted = false AND as_of <= now()",
+                (project_id,),
+            )
+            rows = [dict(r) for r in cur.fetchall()]
+        conn.rollback()      # 只读
+    finally:
+        if own:
+            conn.close()
+
+    def tally(field: str, flat: bool = False) -> dict[str, int]:
+        out: dict[str, int] = {}
+        for r in rows:
+            v = r.get(field)
+            if v is None:
+                continue
+            if flat:
+                for x in v:
+                    out[str(x)] = out.get(str(x), 0) + 1
+            else:
+                out[str(v)] = out.get(str(v), 0) + 1
+        return out
+
+    kind_c, status_c = tally("kind"), tally("status")
+    market_c, polarity_c, layer_c = tally("market"), tally("polarity"), tally("memory_layer")
+    regime_c = tally("regime_tags", flat=True)
+    symbol_c = tally("symbols", flat=True)
+
+    ordered = lambda present: {k: present[k] for k in sorted(present)}  # noqa: E731
+    return {
+        "project_id": project_id,
+        # 闭集：全部取值（含 0）——「只有三种状态」的机器可验来源
+        "kinds": [_opt(k, KIND_LABELS.get(k, k), kind_c.get(k, 0)) for k in KINDS],
+        "statuses": [_opt(s, STATUS_LABELS.get(s, s), status_c.get(s, 0)) for s in STATUSES],
+        # 开放集：只列数据里出现过的，按固定顺序排（market 用 MARKETS 的顺序，其余字典序）
+        "markets": [_opt(m, MARKET_LABELS.get(m, m), market_c[m])
+                    for m in MARKETS if m in market_c],
+        "regimes": [_opt(g, REGIME_LABELS.get(g, g), regime_c[g])
+                    for g in list(REGIME_LABELS) if g in regime_c],
+        "polarities": [_opt(p, POLARITY_LABELS.get(p, p), polarity_c[p])
+                       for p in POLARITIES if p in polarity_c],
+        "memory_layers": [_opt(l, MEMORY_LAYER_LABELS.get(l, l), layer_c[l])
+                          for l in MEMORY_LAYERS if l in layer_c],
+        "symbols": [_opt(s, s, symbol_c[s]) for s in ordered(symbol_c)],
+        # 计数为 0 的闭集取值也返回，界面据此**照实显示「这条筛不出东西」**，
+        # 而不是悄悄不给这个选项（那会让用户以为系统里根本没有这种状态）。
+        "counted_rows": len(rows),
+    }
+

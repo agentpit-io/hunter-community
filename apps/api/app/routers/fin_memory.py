@@ -235,6 +235,20 @@ async def list_experiences(
         raise HTTPException(404, str(exc)) from exc
 
 
+@router.get("/v1/fin/memory/filters")
+async def list_filter_options(request: Request, project_id: str = Query(...)):
+    """成长页筛选下拉的取值（**全部来自后端**，前端不写死任何枚举）—— `R9`。
+
+    只做聚合：返回「这个项目里有哪些可用的筛选值 + 各自计数」，**不返回任何经验正文**
+    （正文的唯一读入口仍是 `/v1/fin/memory/experiences`）。计数口径与它逐字一致。
+    """
+    uid = _uid(request)
+    try:
+        return memory_svc.filter_options(project_id=project_id, user_id=uid)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
 @router.get("/v1/fin/memory/snapshots/{memory_snapshot_id}")
 async def get_snapshot(memory_snapshot_id: str, request: Request):
     """回放与审计：**按 id 取那份冻结的集合，不重跑查询**（防未来函数）。"""
