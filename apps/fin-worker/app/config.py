@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import os
 
+from loguru import logger
+
 
 # ── Temporal ──────────────────────────────────────────────────────────────
 def temporal_address() -> str:
@@ -100,3 +102,37 @@ def contract_timeout_seconds() -> int:
         return int(os.getenv("FIN_INTENT_TTL_SECONDS") or "1800")
     except ValueError:
         return 1800
+
+
+# ── 复核（复盘）回路（R3 · Q4 已拍板）─────────────────────────────────────
+# 触发时点 = 该市场**时段末点** + 这个延迟。**延迟可配**（拍板的就是「可配」）——
+# 所以具体分钟数不许硬编码进调度代码；这里只提供默认值。
+DEFAULT_REVIEW_DELAY_MINUTES = 30
+
+
+def review_delay_minutes() -> int:
+    """复核工作流的触发延迟（分钟）。**默认 30**（Q4 拍板值）。
+
+    读不到 / 非数字 / 负数 → 用默认 30，并**在日志里写明「用了默认」**
+    （不静默、不猜别的数）。「配置写错」不该变成「保护悄悄变了」——
+    与 `SCREEN_SCAN_GAP_S` 那条同一个口径（那边缺值一律按 5，不按 0）。
+
+    异常值**不报错退出**：调度是每晚的例行环节，一个拼错的 env 不该让整个 worker 起不来；
+    但必须留痕，所以每次读到就用 `logger.warning` 打一行。
+    """
+    raw = (os.getenv("FIN_REVIEW_DELAY_MINUTES") or "").strip()
+    if not raw:
+        logger.info("[config] FIN_REVIEW_DELAY_MINUTES 未设置，复核延迟用默认 {} 分钟",
+                    DEFAULT_REVIEW_DELAY_MINUTES)
+        return DEFAULT_REVIEW_DELAY_MINUTES
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("[config] FIN_REVIEW_DELAY_MINUTES={!r} 不是整数，复核延迟用默认 {} 分钟",
+                       raw, DEFAULT_REVIEW_DELAY_MINUTES)
+        return DEFAULT_REVIEW_DELAY_MINUTES
+    if value < 0:
+        logger.warning("[config] FIN_REVIEW_DELAY_MINUTES={} 为负数，复核延迟用默认 {} 分钟",
+                       value, DEFAULT_REVIEW_DELAY_MINUTES)
+        return DEFAULT_REVIEW_DELAY_MINUTES
+    return value

@@ -34,7 +34,7 @@ from app.bridge.idem import order_key, point_job_key, report_job_key
 from app.bridge.paper import PaperClient, PaperError
 from app.channels import CAL_MARKET
 from app.market_time import canonical_market
-from app.strategy.sample import SampleNoBudget
+from app.strategy.sample import SampleMemoryBlocked, SampleNoBudget
 from app.strategy.sample import build_decision as build_sample_decision
 
 # A 股交易日按上海时间切。用 IANA 时区名（不是固定偏移）—— 镜像装 tzdata（N2）。
@@ -434,7 +434,18 @@ def build_decision(req: dict[str, Any]) -> dict[str, Any]:
             reference_price=reference_price,
             lot_size=lot_size,
             available_cash=available_cash,
+            # R3 · 决策前冻结的经验集（工作流传进来）。策略据它做**只收紧**的拦截。
+            memory=req.get("memory"),
         )
+    except SampleMemoryBlocked as exc:
+        # 冻结经验集里有命中本标的的已验证结论 —— 本时点不出委托（R3 · §4.3）。
+        # 形状与「总开关关闭」「买不起」一致，但**多带两样留痕**：依据的 experience_id
+        # 与当时冻结的 memory_snapshot_id（工作流把它们写进 checkpoint）。
+        logger.info("[decide] {} {} 经验闸门命中，本时点不出委托：{}", project_id, market, exc)
+        return {"halted": True, "project_id": project_id, "reason": str(exc),
+                "decision": None, "idempotency_key": None, "command": None,
+                "memory": {"memory_snapshot_id": exc.memory_snapshot_id,
+                           "blocked_by": exc.blocked}}
     except SampleNoBudget as exc:
         # 买不起 / 算不出 —— 本时点**不出委托**（不是错误）。形状与「总开关关闭」一致，
         # 工作流据此走 halted 分支并如实记原因（`_run_for_project` 的 decide 分支）。
@@ -652,3 +663,132 @@ def trigger_market_etl(req: dict[str, Any]) -> dict[str, Any]:
     result = api.run_market_etl(market, limit=req.get("limit"), bars=req.get("bars"))
     logger.info("[etl] market={} 触发完成：{}", market, result)
     return {"market": market, "result": result}
+
+
+# ── R3 · 决策上下文注入经验集（`freeze_memory`）────────────────────────────
+#
+# **只能读 `memory.query` 的结果**（§一.5 的不变量）：这里一行 SQL 都没有，
+# 也读不到 `fin_experience`（守护测试盯着）。时间过滤（`as_of`）也是**服务端**的事，
+# 这里只把「决策那一刻」传下去 —— 于是这份冻结集合里不会有事后来形成的经验。
+
+@activity.defn
+def freeze_memory(req: dict[str, Any]) -> dict[str, Any]:
+    """决策前冻结经验集：`POST /internal/fin/memory/query {freeze: true, for_decision: true}`。
+
+    `as_of` 取**决策那一刻**（工作流传的 `now`）—— 这是回放基准：用同一个
+    `memory_snapshot_id` 重放，读到的**永远**是那一刻已形成的经验，
+    后来新增 / 改可见性都不进去。
+
+    ⚠️ **失败即失败（fail-closed）**：读不到经验集就不做这项决策，让 Temporal 重试。
+    反过来（读不到就跳过经验闸门照常下单）正是「只收紧不放松」要防的事 ——
+    一个读不到的故障不该变成一次没有刹车下的单。
+    """
+    out = HunterApiClient().memory_query(
+        req["project_id"], market=req.get("market"),
+        for_decision=True, freeze=True, purpose=req.get("purpose") or "decision",
+        trade_date=req.get("trade_date"), point=req.get("point"), as_of=req.get("now"),
+    )
+    items = out.get("items") or []
+    logger.info("[memory] 冻结经验集 project={} market={} → {} 条 · snapshot={}",
+                req.get("project_id"), req.get("market"), len(items),
+                out.get("memory_snapshot_id"))
+    return out
+
+
+# ── R3 · 复核（复盘）回路的三个活动 ────────────────────────────────────────
+
+@activity.defn
+def review_collect(req: dict[str, Any]) -> dict[str, Any]:
+    """**只读**：取当日 `fin_report`（含 `self_review` 三问）+ `fin_report_fact` + 当日 `fin_trade`。
+
+    fin-worker 不碰账本库 —— 这三样都经 api 的 `/internal/fin/review/collect` 拿。
+    """
+    out = HunterApiClient().review_collect(
+        req["project_id"], req["trade_date"], req.get("market"))
+    logger.info("[review] collect project={} date={} market={} → report={} facts={} trades={}",
+                req.get("project_id"), req.get("trade_date"), req.get("market"),
+                out.get("report") is not None, len(out.get("facts") or []),
+                len(out.get("trades") or []))
+    return out
+
+
+@activity.defn
+def review_propose(req: dict[str, Any]) -> dict[str, Any]:
+    """调模型产出**候选**经验（只写文字，数字走 `fact` 引用；回读校验不过即作废）。
+
+    **本活动不写任何经验** —— 写是下一个活动的事（`review_append`），
+    这样「写经验只有一个入口」在复核这条链路上也成立。
+    """
+    out = HunterApiClient().review_propose(
+        req["project_id"], req["trade_date"], req.get("market"))
+    logger.info("[review] propose project={} date={} → {} 条候选 · fallback={}（{}）· 作废 {}",
+                req.get("project_id"), req.get("trade_date"),
+                len(out.get("candidates") or []), out.get("used_fallback"),
+                out.get("reason"), len(out.get("rejected") or []))
+    return out
+
+
+def _candidate_key(cand: dict[str, Any]) -> tuple[str, frozenset]:
+    """候选 / 已存在经验的业务身份：`(statement, {(evidence_kind, ref_id)})`。
+
+    没有 id 可用（经验 id 是服务端生成的随机段），所以用**内容**当键 ——
+    这正是「同一个候选重复提交」要判等的东西。
+    """
+    return (
+        str(cand.get("statement") or "").strip(),
+        frozenset((str(e.get("evidence_kind") or ""), str(e.get("ref_id") or ""))
+                  for e in cand.get("evidence") or [] if isinstance(e, dict)),
+    )
+
+
+@activity.defn
+def review_append(req: dict[str, Any]) -> dict[str, Any]:
+    """把候选经验经 **Memory Service 唯一写入口**写进去（`/internal/fin/memory/evidence`）。
+
+    **幂等**：Activity 是 at-least-once，重试不能写第二遍。经验 id 由服务端生成，
+    所以这里先用 `memory.query` 把该项目已有的经验读回来，按
+    `(statement, 证据集合)` 建一张已存在表，**已存在的候选直接跳过**。
+    读不回来 → **抛错让 Temporal 重试**，不硬写（硬写就等于放弃幂等）。
+
+    返回 `{written: [...], skipped: [...], used_fallback, reason}`：写了哪几条、
+    跳了哪几条、模型那一步是不是降级了 —— 都进 Temporal 历史与检查点。
+
+    ⚠️ `review_collect` 与 `review_propose` 都是**只读**的，所以重放它们没有代价；
+    只有这个活动有副作用，幂等也只需要在这里守住。
+    """
+    project_id = req["project_id"]
+    market = req.get("market")
+    candidates = [c for c in (req.get("candidates") or []) if isinstance(c, dict)]
+    api = HunterApiClient()
+
+    existing: set[tuple[str, frozenset]] = set()
+    seen = api.memory_query(project_id, market=market)   # 失败即抛 → Temporal 重试
+    for item in seen.get("items") or []:
+        existing.add(_candidate_key(item))
+
+    written: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    for cand in candidates:
+        key = _candidate_key(cand)
+        if key in existing:
+            skipped.append({"statement": cand.get("statement"), "reason": "already_appended"})
+            continue
+        out = api.memory_append(
+            project_id=project_id, kind=cand.get("kind"),
+            statement=cand.get("statement"), evidence=cand.get("evidence") or [],
+            market=market, applicability=cand.get("applicability"),
+            invalidation_condition=cand.get("invalidation_condition"),
+            as_of=req.get("as_of"),
+        )
+        row = out.get("experience") or {}
+        existing.add(key)
+        written.append({
+            "experience_id": row.get("experience_id"),
+            "kind": row.get("kind"), "status": row.get("status"),
+            "source": row.get("source"), "statement": row.get("statement"),
+        })
+    logger.info("[review] append project={} date={} → 写入 {} · 跳过 {}（已是同一条）",
+                project_id, req.get("trade_date"), len(written), len(skipped))
+    return {"written": written, "skipped": skipped,
+            "used_fallback": bool(req.get("used_fallback")),
+            "fallback_reason": req.get("fallback_reason")}

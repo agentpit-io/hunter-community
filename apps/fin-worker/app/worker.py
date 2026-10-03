@@ -34,6 +34,13 @@ def activity_list() -> list:
         activities.generate_daily_report,
         activities.trigger_market_etl,
         activities.sync_instruments,
+        # R3 · 决策上下文注入 + 复核回路。**必须登记在这里** —— 这是一条显式清单
+        # （`workflows.py:_exec` 用的就是这些函数对象），漏登记 = 工作流拉起时
+        # 报「Activity 未注册」，而且失败只出现在 `WorkflowTaskFailed` 事件里。
+        activities.freeze_memory,
+        activities.review_collect,
+        activities.review_propose,
+        activities.review_append,
     ]
 
 

@@ -36,6 +36,7 @@ from zoneinfo import ZoneInfo
 
 from app.bridge.contracts import CONTRACT_VERSION
 from app.bridge.idem import sample_decision_id
+from app.strategy import memory_gate
 
 # 档位 → 示例手数。三档资金（1 万 / 10 万 / 100 万）下都能买得起示例标的（A 股口径）。
 SAMPLE_LOTS: dict[str, int] = {"play": 100, "manage": 1000, "operate": 10000}
@@ -58,6 +59,23 @@ class SampleNoBudget(RuntimeError):
     不是错误（同「总开关关闭」那样是一种如实的不作为）：A 股小额档买不起一手
     `00700`（每手 100 股 × 421 HKD ≈ 42,120 HKD）是真实约束，不该编一个数量硬下单。
     """
+
+
+class SampleMemoryBlocked(SampleNoBudget):
+    """冻结经验集里有一条**命中本标的**的已验证结论 —— 本时点不出委托。
+
+    R3 · `plan/R3.md` §一.4：这是本轮经验对决策的**唯一**作用，且**只收紧不放松** ——
+    它只可能让系统更少下单。判据（规范化标的精确匹配）见 `app/strategy/memory_gate.py`。
+
+    与 `SampleNoBudget` 同级：同一种「如实记不下单」的形态（工作流走 halted 分支）。
+    多带两样东西供 checkpoint 留痕：依据的 `experience_id` 与 `memory_snapshot_id`。
+    """
+
+    def __init__(self, message: str, *, memory_snapshot_id: Optional[str] = None,
+                 blocked: Optional[dict] = None):
+        super().__init__(message)
+        self.memory_snapshot_id = memory_snapshot_id
+        self.blocked = blocked or {}
 
 
 def _lot_for(tier: str) -> int:
@@ -103,6 +121,7 @@ def build_decision(
     reference_price: Any = None,
     lot_size: Any = None,
     available_cash: Any = None,
+    memory: Any = None,
 ) -> dict[str, Any]:
     """产出一份 `StrategyDecision`（dict 形状，便于跨 Temporal 边界传递）。
 
@@ -111,7 +130,23 @@ def build_decision(
 
     价型与数量**按市场**（见模块头）：`market_order_supported=False` 的市场出限价单，
     数量按可用资金买得起的整手数定；买不起一手抛 `SampleNoBudget`（调用方如实记「没出单」）。
+
+    `memory` 是**决策前冻结的那份经验集**（`{memory_snapshot_id, items}`）—— 见下面那道闸门。
     """
+    # ── 经验闸门（R3 · §4.3）：**只收紧、不放松** ─────────────────────────
+    # 冻结经验集里若含「精确命中本标的」的已验证结论 → 本时点**不出委托**。
+    # 排在最前：这是安全方向，宁可因为一条经验不下单，也不要在下了单之后才发现。
+    # 判据是**规范化标的的精确匹配**，不是文本包含（`memory_gate` 有真值表与理由）。
+    blocked = memory_gate.blocking_experience(
+        (memory or {}).get("items"), market=market, code=code)
+    if blocked is not None:
+        raise SampleMemoryBlocked(
+            f"冻结经验集里有一条命中 {memory_gate.normalize_symbol(market, code)} 的已验证结论"
+            f"（{blocked.get('experience_id')}）：本时点不产生委托",
+            memory_snapshot_id=(memory or {}).get("memory_snapshot_id"),
+            blocked=blocked,
+        )
+
     tier = str(project.get("tier") or "")
     cap = _lot_for(tier)
     # 有效期：`now + ttl`，**保持 `now` 自带的时区**（调度路径下 `now` 是市场当地的
@@ -164,6 +199,12 @@ def build_decision(
             "price_type": price_type,
         },
         "valid_until": valid_until.isoformat(),
+        # R3 · 决策上下文里的经验集（冻结时那一版）。**只带 id 与命中的条目**，
+        # 内容与内容哈希的真值在 `fin_memory_snapshot`（服务端），不在这里抄一份。
+        "memory": {
+            "memory_snapshot_id": (memory or {}).get("memory_snapshot_id"),
+            "experience_ids": [i.get("experience_id") for i in (memory or {}).get("items") or []],
+        },
     }
     if limit_price is not None:
         decision["intent"]["limit_price"] = limit_price

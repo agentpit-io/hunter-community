@@ -25,7 +25,7 @@ from loguru import logger
 
 from app import config
 from app.market_time import MARKET_TZ
-from app.points import DEFAULT_POINTS, Point, points_for
+from app.points import DEFAULT_POINTS, Point, cron_of, points_for
 
 
 @dataclass(frozen=True)
@@ -68,9 +68,17 @@ INSTRUMENT_SCHEDULES: tuple[ScheduleSpecDef, ...] = (
 
 
 def fallback_market_rules() -> list[dict]:
-    """离线 / DB 读不到时的三组市场规则（时区 + 时点），与 `0030` 的种子逐项一致。"""
+    """离线 / DB 读不到时的三组市场规则（时区 + 时点 + 时段），与 `0030` 的种子逐项一致。
+
+    `sessions` 也一并给出：复核 Schedule 要用**时段末点**（R3）。时段常量只有一份
+    （`activities.DEFAULT_SESSIONS`，与日历同步共用）—— 这里**不另抄一张表**，
+    延迟 import 它即可（`activities` 会拉 httpx，没必要在模块加载期就拉）。
+    """
+    from app.activities import DEFAULT_SESSIONS
+
     return [
-        {"market": m, "timezone": MARKET_TZ[m], "points": list(DEFAULT_POINTS[m])}
+        {"market": m, "timezone": MARKET_TZ[m], "points": list(DEFAULT_POINTS[m]),
+         "sessions": [dict(s) for s in DEFAULT_SESSIONS[m]]}
         for m in ("CN_A", "HK", "US")
     ]
 
@@ -96,8 +104,61 @@ def point_specs(market_rules: Optional[list[dict]] = None) -> list[ScheduleSpecD
     return specs
 
 
+def _session_close(sessions: list[dict]) -> str:
+    """该市场时段里**最晚的一个收盘时刻**（`HH:MM`）。
+
+    香港有收市竞价那一段（`16:00-16:10`），最晚收盘是 `16:10` 而不是 `16:00` ——
+    复核要排在**真的收完**之后。取 `max` 而不是「最后一段」，两种写法这里同值，
+    但 `max` 对「时段乱序」也成立。
+    """
+    closes = [str(s.get("close")) for s in sessions or [] if s.get("close")]
+    return max(closes) if closes else "15:00"
+
+
+def _hhmm_plus(at: str, minutes: int) -> str:
+    """`HH:MM` + N 分钟（跨零点回绕）。**具体分钟数来自配置**，这里只是算术。"""
+    hh, mm = (int(x) for x in at.split(":"))
+    total = (hh * 60 + mm + int(minutes)) % (24 * 60)
+    return f"{total // 60:02d}:{total % 60:02d}"
+
+
+def review_specs(market_rules: Optional[list[dict]] = None) -> list[ScheduleSpecDef]:
+    """每个市场一条**收盘后复核** Schedule（R3 · Q4 已拍板）。
+
+    时点 = 该市场 **`fin_market_rule.sessions` 的时段末点** + `FIN_REVIEW_DELAY_MINUTES`
+    （默认 `30`，**可配**）。延迟从 `config.review_delay_minutes()` 读 ——
+    **不把具体分钟数硬编码进代码**（拍板的就是「可配」，硬编码等于把拍板废掉）。
+
+    **现有 6 个 point 时点一个都不改**（`point_specs` 一字未动）—— 复核是**新加**的一条，
+    不是把某个时点挪走。id 形如 `fin-review-HK`，与 `fin-point-HK-0930` 一眼可分。
+
+    Schedule 是**全局的、与项目数无关**（同 `二期迭代完善 §4.3`）：工作流内层对
+    「该市场所有进行中的项目」各复盘一次。
+    """
+    delay = config.review_delay_minutes()
+    specs: list[ScheduleSpecDef] = []
+    for rule in _rules_by_market(market_rules):
+        market = rule["market"]
+        tz = rule.get("timezone") or MARKET_TZ.get(market)
+        sessions = list(rule.get("sessions") or [])
+        if not sessions:                      # DB 行没有 sessions 列（老形状）→ 用兜底那一份
+            sessions = next((r.get("sessions") or [] for r in fallback_market_rules()
+                             if r.get("market") == market), [])
+        at = _hhmm_plus(_session_close(sessions), delay)
+        specs.append(ScheduleSpecDef(
+            schedule_id=f"fin-review-{market}",
+            workflow="fin.review",
+            cron=cron_of(at),
+            args={"market": market, "at": at, "point": f"{market}-review"},
+            title=f"{market} · 收盘后复核（时段末点 + {delay} 分钟）",
+            timezone=tz,
+        ))
+    return specs
+
+
 def all_specs(market_rules: Optional[list[dict]] = None) -> list[ScheduleSpecDef]:
-    return point_specs(market_rules) + list(ETL_SCHEDULES) + list(INSTRUMENT_SCHEDULES)
+    return (point_specs(market_rules) + list(ETL_SCHEDULES) + list(INSTRUMENT_SCHEDULES)
+            + review_specs(market_rules))
 
 
 def build_schedule(spec: ScheduleSpecDef):

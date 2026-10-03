@@ -62,6 +62,18 @@
   所以按某市场查询时返回「该市场结论 + 跨市场结论」（`market = %s OR market IS NULL`），
   不传 `market` 则返回全部。这一条是本模块对 schema 注释的忠实读法，写在测试里。
 
+## R3 加的两件（`plan/R3.md` §一.3b / §一.1）
+
+- **冻结带内容哈希（§3b）**：`query(freeze=True)` 写快照时，把每条经验的**内容指纹**
+  （`kind|status|statement|applicability|valid_until|superseded_by`）与一个 `aggregate_hash`
+  一并写进 `fin_memory_snapshot.query_filter`。**不新增列、不新增迁移**（`query_filter` 本就是 JSONB）。
+  口径是契约，写在 `CONTENT_HASH_VERSION` 旁边；回放时 `get_snapshot` 会算一遍此刻的指纹，
+  在 `content_drift` 里点出「哪些条被改过可见性」—— 这是「只冻 id 名单」验不出来的那件事。
+- **`human_mixed` 由证据真值判定（§4.1）**：内网通道写经验时，若**每条证据都是人工成交**
+  （`fin_trade.source ∈ {human, human_confirmed}`），服务端记 `source='human_mixed'`；否则记 `ai`。
+  复核工作流没有 JWT，人工成交的「人味」只能这样落到服务端判定里（见 `resolve_source`）。
+  **没有新增第三个工具名** —— 仍然是 `memory.query` / `memory.append_evidence` 两个。
+
 ## 权限：谁可以碰这三张表
 
 api 连接用的是库属主身份（见 `0041` 文件头那三条理由），能力来自**连接身份**。
@@ -74,6 +86,7 @@ fin-worker **不碰这三张表**：它经 `HunterApiClient` 走内网口令调�
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import uuid
@@ -96,9 +109,9 @@ EVIDENCE_KINDS = ("trade", "report", "fact", "snapshot", "external")
 PURPOSES = ("decision", "review", "holdout")
 MARKETS = ("CN_A", "HK", "US")
 
-# 有对应表、可以「验在不在」的四类引用（规则 3）。`external` **故意不在**这里 —— 见模块文档。
+# 有对应表、可以「验在不在」的引用（规则 3）。`external` **故意不在**这里 —— 见模块文档。
+# `trade` 也不在这张表里：它除了「验在不在」还要把 `source` 读回来（人机归因，见 `_verify_refs`）。
 REF_TABLE_SQL = {
-    "trade": "SELECT 1 FROM fin_trade WHERE trade_id = %s",
     "report": "SELECT 1 FROM fin_report WHERE report_id = %s",
     "fact": "SELECT 1 FROM fin_report_fact WHERE report_id || ':' || metric_key = %s",
     "snapshot": "SELECT 1 FROM fin_snapshot WHERE snapshot_id = %s",
@@ -106,6 +119,18 @@ REF_TABLE_SQL = {
 
 # 调用方通道 → 强制 source / created_by（规则 7）。**入参里传什么都没用**。
 CALLER_SOURCE = {"internal": "ai", "jwt": "human_mixed"}
+
+# `fin_trade.source` 的三个取值里，后两个是**人工**成交（`0023:230` 的 CHECK）。
+HUMAN_TRADE_SOURCES = ("human", "human_confirmed")
+
+# ── 内容指纹（R3 §3b）· **这是契约，不是实现细节** ──────────────────────────
+# 冻结快照的 `query_filter.content_hashes` / `aggregate_hash` 由下面三个函数算出。
+# 口径：sha256( kind \x1f status \x1f statement \x1f applicability \x1f valid_until \x1f superseded_by )，
+#       NULL 一律写空串；`aggregate_hash` = sha256(按 experience_id 升序的 "<id>=<hash>\n" 拼接)。
+# **换口径 = 换版本**：必须改 CONTENT_HASH_VERSION（不许静默改），口径本身写在 R3 成果文档里。
+CONTENT_HASH_VERSION = "1"
+_HASH_SEP = "\x1f"            # 单元分隔符 —— 正常文本里不会出现，比 "|" 稳
+_HASH_FIELDS = ("kind", "status", "statement", "applicability", "valid_until", "superseded_by")
 
 # 规则 6：statement 里出现阿拉伯数字（半角或全角）即拒。
 _ARABIC_DIGIT_RE = re.compile(r"[0-9０-９]")
@@ -296,10 +321,71 @@ def validate_append(
     }
 
 
+def resolve_source(caller: str, evidence: list[dict],
+                   trade_sources: dict[str, str]) -> tuple[str, str]:
+    """服务端决定 `source` / `created_by`（规则 7）。**入参里没有 source 这个位置。**
+
+    | 情形 | source | created_by |
+    |---|---|---|
+    | 内网口令（fin-worker），普通结论 | `ai` | `ai` |
+    | 内网口令，**证据全部是人工成交** | `human_mixed` | `human:trade` |
+    | JWT（真人） | `human_mixed` | `user:<uuid>` |
+
+    第二行是 **R3 新增**（`plan/R3.md` §一.1「AI 与人分开」）：复核工作流没有 JWT，
+    而人工成交的「人味」是一条可以**由服务端从证据真值判定**的事实 ——
+    调用方伪造不了，它只能引用库里真实存在的 `fin_trade` 行，而那一行的
+    `source` 是 paper 写下的。所以「服务端说了算」这条没有被削弱，
+    只是判据从「谁在调」多了「证据是谁的交易」。
+
+    `evidence` 非空且**每一条**都是人工成交才算 —— 只要掺了一条 AI 证据或报告证据，
+    就退回 `ai`（保守：宁可把人工经验记成 AI 的，也不把 AI 经验记成人的）。
+    """
+    if caller == "jwt":
+        return CALLER_SOURCE["jwt"], "user"          # created_by 由调用点补 uuid
+    if evidence and all(ev["evidence_kind"] == "trade"
+                        and trade_sources.get(ev["ref_id"]) in HUMAN_TRADE_SOURCES
+                        for ev in evidence):
+        return "human_mixed", "human:trade"
+    return CALLER_SOURCE["internal"], "ai"
+
+
+# ── 内容指纹（口径见模块顶部的常量注释；**契约**，换口径要改版本号）──────────
+
+def _hash_field(row: dict, name: str) -> str:
+    value = row.get(name)
+    if value is None:
+        return ""
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    return str(value)
+
+
+def content_hash(row: dict) -> str:
+    """一条经验的内容指纹（`kind|status|statement|applicability|valid_until|superseded_by`）。
+
+    这六个字段是**可见性会波及的那些**：`status` 从「待验证」变「已确认」、
+    `valid_until` 到期、`superseded_by` 指过去、正文被改写 —— 都会让它变。
+    只冻 id 名单是看不出来的，所以冻结时一并冻这个。
+    """
+    raw = _HASH_SEP.join(_hash_field(row, f) for f in _HASH_FIELDS)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def content_hashes(rows: list[dict]) -> dict[str, str]:
+    """按 `experience_id` 升序的 `{id: hash}`（顺序固定 → aggregate 可复现）。"""
+    return {r["experience_id"]: content_hash(r)
+            for r in sorted(rows, key=lambda r: r["experience_id"])}
+
+
+def aggregate_hash(hashes: dict[str, str]) -> str:
+    """把 `{id: hash}` 压成一个值：sha256(按 id 升序的 `"<id>=<hash>\\n"` 拼接)。"""
+    joined = "".join(f"{k}={v}\n" for k, v in sorted(hashes.items()))
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()
+
+
 # ════════════════════════════════════════════════════════════════════════
 # 二 · JSON 化（Decimal → float，datetime → ISO 字符串，同 store.py 口径）
 # ════════════════════════════════════════════════════════════════════════
-
 def _jsonable(value: Any) -> Any:
     if isinstance(value, Decimal):
         return float(value)
@@ -341,17 +427,33 @@ def _owned_project(cur, project_id: str, user_id: Optional[str]) -> dict:
     return dict(row)
 
 
-def _verify_refs(cur, evidence: list[dict]) -> None:
-    """规则 3：逐条验引用真实存在（防「编一个引用」）。"""
+def _verify_refs(cur, evidence: list[dict]) -> dict[str, str]:
+    """规则 3：逐条验引用真实存在（防「编一个引用」）。
+
+    顺带把**交易证据的人机归因**读回来（`fin_trade.source`）—— 服务端据此决定这条经验
+    记 `ai` 还是 `human_mixed`（`resolve_source`）。调用方伪造不了这一条：它只能引用
+    **库里真实存在**的成交行，而那一行的 `source` 是 paper 写下的。
+
+    返回 `{trade_id: source}`（只含 `trade` 类型的证据行）。
+    """
+    trade_sources: dict[str, str] = {}
     for ev in evidence:
-        sql = REF_TABLE_SQL.get(ev["evidence_kind"])
+        kind = ev["evidence_kind"]
+        if kind == "trade":
+            cur.execute("SELECT source FROM fin_trade WHERE trade_id = %s", (ev["ref_id"],))
+            row = cur.fetchone()
+            if row is None:
+                raise MemoryValidationError(f"证据引用不存在：trade {ev['ref_id']}")
+            trade_sources[ev["ref_id"]] = str(row["source"])
+            continue
+        sql = REF_TABLE_SQL.get(kind)
         if sql is None:      # 不可达（validate_append 已拦 external）—— 保险起见
             raise MemoryValidationError(
-                f"证据类型 {ev['evidence_kind']!r} 无法在库内校验，拒绝")
+                f"证据类型 {kind!r} 无法在库内校验，拒绝")
         cur.execute(sql, (ev["ref_id"],))
         if cur.fetchone() is None:
-            raise MemoryValidationError(
-                f"证据引用不存在：{ev['evidence_kind']} {ev['ref_id']}")
+            raise MemoryValidationError(f"证据引用不存在：{kind} {ev['ref_id']}")
+    return trade_sources
 
 
 def append_evidence(
@@ -386,8 +488,6 @@ def append_evidence(
     """
     if caller not in CALLER_SOURCE:
         raise MemoryValidationError(f"未知调用方通道：{caller!r}")
-    source = CALLER_SOURCE[caller]
-    created_by = "ai" if caller == "internal" else f"user:{user_id}"
     if caller == "jwt" and not user_id:
         raise MemoryValidationError("JWT 通道缺少用户身份")
 
@@ -415,7 +515,11 @@ def append_evidence(
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             _owned_project(cur, project_id, user_id)          # 规则 4（归属；跨用户 404）
-            _verify_refs(cur, fields["evidence"])             # 规则 3
+            trade_sources = _verify_refs(cur, fields["evidence"])   # 规则 3（顺带读回交易归因）
+            # 规则 7：`source` 由服务端定 —— 判据含「证据是不是全为人工成交」（见 resolve_source）。
+            source, created_by = resolve_source(caller, fields["evidence"], trade_sources)
+            if caller == "jwt":
+                created_by = f"user:{user_id}"
 
             superseded_row = None
             if fields["supersedes"]:
@@ -614,6 +718,17 @@ def query(
             snap_id = None
             if freeze:
                 snap_id = _new_id("msnap_")
+                # R3 §3b：冻结**必须带内容哈希/版本** —— 只冻 id 名单有个洞：
+                # 同一个 id 名单在两天后可能已经「不是那一批内容」（status 变已确认、
+                # valid_until 到期、superseded_by 指过去）。指纹一起冻进去，重放时
+                # 才验得出「后来改变过可见性」。
+                hashes = content_hashes(rows)
+                filters = {
+                    "for_decision": bool(for_decision),
+                    "as_of_basis": as_of_basis,
+                    "market": market, "kind": kind, "status": status,
+                    "exposure_scope": "searchable",   # 冻结的永远是搜索路径
+                }
                 cur.execute(
                     """
                     INSERT INTO fin_memory_snapshot (
@@ -623,10 +738,13 @@ def query(
                     """,
                     (snap_id, project_id, market, trade_date, point, purpose, ids,
                      psycopg2.extras.Json({
-                         "for_decision": bool(for_decision),
-                         "as_of_basis": as_of_basis,
-                         "kind": kind, "status": status,
-                         "exposure_scope": "searchable",   # 冻结的永远是搜索路径
+                         # `filters` 是 §3b 要求的嵌套形态；同一组键**同时平铺**在顶层，
+                         # 是为了兼容 R2 已发布的读法（快照的 JSONB 是自描述的，多一组键无害）。
+                         "filters": filters,
+                         **filters,
+                         "content_hash_version": CONTENT_HASH_VERSION,
+                         "content_hashes": hashes,
+                         "aggregate_hash": aggregate_hash(hashes),
                      })),
                 )
                 # 规则 3 末句：形成的经验记下「形成于哪一版快照」（只回填过去的）
@@ -681,6 +799,32 @@ def _item(row: dict, evidence: list[dict], now: datetime) -> dict:
 # 五 · 快照回放：按 id 取冻结集合，**不重跑查询**
 # ════════════════════════════════════════════════════════════════════════
 
+def _content_drift(query_filter: dict, rows: list[dict]) -> dict:
+    """冻结时的内容指纹 vs 此刻的内容指纹（R3 §3b 的可执行证明）。
+
+    `frozen_aggregate_hash` 是**当时冻进去**的那个值，永远不变；
+    `current_aggregate_hash` 是拿此刻的行重算的；两者不等 **或** 有 id 缺失
+    ⇒ `match=false`，`drifted` / `missing` 点出具体是哪几条。
+
+    老快照（R2 冻的，`query_filter` 里没有 `content_hashes`）→ `hashes_frozen=false`，
+    **不假装它匹配**（那时确实没冻指纹）。
+    """
+    frozen = dict(query_filter.get("content_hashes") or {})
+    current = content_hashes(rows)
+    drifted = sorted(k for k in frozen if k in current and current[k] != frozen[k])
+    missing = sorted(set(frozen) - set(current))
+    frozen_agg = query_filter.get("aggregate_hash")
+    cur_agg = aggregate_hash(current) if current else None
+    return {
+        "content_hash_version": query_filter.get("content_hash_version"),
+        "hashes_frozen": bool(frozen),
+        "frozen_aggregate_hash": frozen_agg,
+        "current_aggregate_hash": cur_agg,
+        "drifted": drifted,
+        "missing": missing,
+        "match": bool(frozen) and not drifted and not missing and cur_agg == frozen_agg,
+    }
+
 def get_snapshot(*, memory_snapshot_id: str, user_id: Optional[str] = None,
                  conn=None) -> dict:
     """取一份冻结快照（回放与审计用）。
@@ -705,6 +849,7 @@ def get_snapshot(*, memory_snapshot_id: str, user_id: Optional[str] = None,
 
             ids = list(snap.get("experience_ids") or [])
             items = []
+            by_id: dict[str, dict] = {}
             if ids:
                 cur.execute(
                     "SELECT * FROM fin_experience WHERE experience_id = ANY(%s)", (ids,))
@@ -722,6 +867,12 @@ def get_snapshot(*, memory_snapshot_id: str, user_id: Optional[str] = None,
                 now = datetime.now(timezone.utc)
                 # 按冻结时的先后还原，不按 as_of 排（回放的是那一版集合）
                 items = [_item(by_id[i], ev_map.get(i, []), now) for i in ids if i in by_id]
+            # R3 §3b：把「冻结时的内容指纹」与「此刻的内容指纹」摆在一起 ——
+            # 后来改过可见性（status / valid_until / superseded_by / 正文）时，
+            # `frozen_aggregate_hash` **不变**（它就是当时冻的那个），而 `drifted`
+            # 会点出被改动的 id。这就是「只存 id 名单」看不出来的那件事。
+            drift = _content_drift(dict(snap.get("query_filter") or {}),
+                                   [by_id[i] for i in ids if i in by_id])
         conn.rollback()      # 只读
         return {
             "memory_snapshot_id": snap["memory_snapshot_id"],
@@ -732,6 +883,7 @@ def get_snapshot(*, memory_snapshot_id: str, user_id: Optional[str] = None,
             "purpose": snap["purpose"],
             "experience_ids": ids,
             "query_filter": _jsonable(snap.get("query_filter")),
+            "content_drift": drift,
             "created_at": _jsonable(snap.get("created_at")),
             "items": items,
         }

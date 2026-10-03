@@ -358,6 +358,10 @@ services:
       FIN_SAMPLE_STRATEGY_VERSION: ${FIN_SAMPLE_STRATEGY_VERSION:-1.0}
       FIN_INTENT_TTL_SECONDS: ${FIN_INTENT_TTL_SECONDS:-1800}
       FIN_SCHEDULES_ENABLED: ${FIN_SCHEDULES_ENABLED:-1}
+      # R3 · 收盘后复核（复盘）工作流 `fin.review` 的触发延迟（分钟）：
+      # 时点 = 该市场**时段末点** + 这个值。**可配**（Q4 拍板，默认 30）——
+      # 读不到 / 非数字 / 负数一律回落 30，并在日志里写明「用了默认」。
+      FIN_REVIEW_DELAY_MINUTES: ${FIN_REVIEW_DELAY_MINUTES:-30}
     ports:
       # 内部 HTTP（给 api 触发用）。只绑本机，不对外。
       - "127.0.0.1:${FIN_WORKER_HOST_PORT:-8300}:8300"

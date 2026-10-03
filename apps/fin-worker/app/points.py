@@ -62,7 +62,12 @@ class Point:
     title: str
 
 
-def _cron_of(at: str) -> str:
+def cron_of(at: str) -> str:
+    """`HH:MM` → Temporal 的 5 段 cron（周 1-5 = 周一到周五）。
+
+    公开名字（不是 `_cron_of`）：复核 Schedule（`schedules.review_specs`）也要把
+    「时段末点 + 延迟」这个时刻翻成 cron —— 一处口径，两处调用，不另抄一份。
+    """
     hh, mm = at.split(":")
     return f"{int(mm)} {int(hh)} * * 1-5"
 
@@ -80,7 +85,7 @@ def points_for(market: str, times: list[str]) -> tuple[Point, ...]:
             key=f"{market}-{at.replace(':', '')}",
             market=market, at=at, kind=kind, role=role,
             workflow=f"fin.point_{role}",
-            cron=_cron_of(at),
+            cron=cron_of(at),
             title=_TITLES[role],
         ))
     return tuple(out)

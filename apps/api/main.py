@@ -441,6 +441,10 @@ app.include_router(fin_data_router.router, prefix="/api")
 from app.routers import fin_memory as fin_memory_router
 app.include_router(fin_memory_router.router, prefix="/api")
 
+# R3：复核（复盘）回路 · 内网口令，只读 / 产出候选（写经验仍走 fin_memory 的唯一入口）。
+from app.routers import fin_review as fin_review_router
+app.include_router(fin_review_router.router, prefix="/api")
+
 @app.get("/api/health")
 async def health():
     # hunter_api_key 字段让 docker healthcheck 和运维一眼看出 SaaS 功能可不可用

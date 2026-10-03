@@ -189,25 +189,44 @@ async def _run_for_project(kind, point_key, at, market, project, trade_date, now
                            "positions_made_sellable": out["confirm_t1"].get("positions_made_sellable")},
         })
     elif kind == "decide":
+        # ⓪ R3 · **决策前先冻结经验集**（只读 Activity，走 `memory.query(freeze=true)`）。
+        #    结果（`memory_snapshot_id` + 命中的 items）进 Temporal 历史 —— 重放读的是
+        #    历史里那份，所以「这笔决定当时看到的是哪一版经验」逐字节可复现（§10.3）。
+        #    ⚠️ fail-closed：读不到经验集就让这一步失败重试，**不放过**这道闸门。
+        mem = await _exec(activities.freeze_memory, {
+            "project_id": project_id, "market": market, "trade_date": trade_date,
+            "point": point_key, "now": now_iso, "purpose": "decision",
+        })
+        out["memory_snapshot_id"] = mem.get("memory_snapshot_id")
         # ① 出决定（只读 Activity）。结果进 Temporal 历史 —— 重试时读的是历史里那份。
         built = await _exec(activities.build_decision, {
             "project_id": project_id, "trade_date": trade_date, "point": point_key,
             "now": now_iso, "code": req.get("code"), "market": market,
+            "memory": mem,
         })
         if built.get("halted"):
-            # ── M6 · 总开关关闭：**这一步就到头，不提交任何委托** ──────────
+            # ── M6 · 总开关关闭 / R3 · 经验闸门 / 买不起：**这一步就到头，不提交任何委托** ──
+            # 三种「如实记不下单」共用这一条路径；R3 多带两样留痕：依据的经验 id 与当时的快照 id。
             out["halted"] = True
             out["reason"] = built.get("reason")
+            out["memory"] = built.get("memory")
             await _exec(activities.write_checkpoint, {
                 "job_id": job_id,
                 "checkpoint": {"point": point_key, "phase": "halted",
-                               "reason": built.get("reason")},
+                               "reason": built.get("reason"),
+                               "memory_snapshot_id": mem.get("memory_snapshot_id"),
+                               "memory_blocked_by": (built.get("memory") or {}).get("blocked_by")},
             })
             out["finish"] = await _exec(activities.finish_point_job, {
                 "job_id": job_id,
                 "result_ref": f"point:{point_key}:{trade_date}:{project_id}:halted",
+                # 收尾这一步**覆盖** `fin_job.checkpoint`（只留最后一次），所以依据也带上 ——
+                # 事后翻 `fin_job.checkpoint` 一处就能看到「为什么没下单、依据哪一条经验」。
                 "checkpoint": {"point": point_key, "trade_date": trade_date,
-                               "phase": "done", "halted": True},
+                               "phase": "done", "halted": True,
+                               "reason": built.get("reason"),
+                               "memory_snapshot_id": mem.get("memory_snapshot_id"),
+                               "memory_blocked_by": (built.get("memory") or {}).get("blocked_by")},
             })
             return out
         out["decision"] = built["decision"]
@@ -224,7 +243,11 @@ async def _run_for_project(kind, point_key, at, market, project, trade_date, now
             "checkpoint": {"point": point_key, "phase": "ordered",
                            "order_status": submitted.get("order_status"),
                            "trade_id": submitted.get("trade_id"),
-                           "idempotency_key": built["idempotency_key"]},
+                           "idempotency_key": built["idempotency_key"],
+                           # R3 · §10.3「决策上下文补齐 memory_snapshot_id」—— 不新增表，
+                           # 就落在 `fin_job.checkpoint` 里（出单与不出单都写）。
+                           "memory_snapshot_id": mem.get("memory_snapshot_id"),
+                           "memory_experience_count": len(mem.get("items") or [])},
         })
     elif kind == "match":
         out["match_open"] = await _exec(activities.match_open_orders, {
@@ -302,6 +325,115 @@ POINT_WORKFLOWS = (
 )
 
 
+# ── 复核（复盘）回路（R3 · `plan/R3.md` §一.1）──────────────────────────────
+# 收盘后（各市场**时段末点 + 可配延迟**，见 `schedules.review_specs`）跑一次：
+#
+#   ① `review_collect`（只读）→ ② `review_propose`（模型只写文字 + 回读校验）
+#   → ③ `review_append`（经 Memory Service 唯一写入口落库）
+#
+# 三步是**三个 Activity**（不是一个大活动）：只读的两步重放没有代价，
+# 有副作用的只有第三步，幂等也只需要在那里守（`activities.review_append`）。
+#
+# **工作流里读经验 = 只能读 `memory.query` 的结果**（§一.5 的不变量）：
+# 这里一行 SQL 都没有、也不 import 任何数据库驱动（`test_no_ledger_access.py` 盯着）。
+#
+# 它是**全局的、与项目数无关**的 Schedule（同 `二期迭代完善 §4.3` 口径）：
+# 一次触发对**该市场所有进行中的项目**各复盘一次，某项目没数据就跳过它。
+REVIEW_TIMEOUT = timedelta(minutes=5)
+
+
+async def _review_for_project(project: dict, market: str, trade_date: str,
+                              now_iso: str) -> dict:
+    """一个项目的一次复盘。没有可复盘的当日数据（无成交且无报告）→ 如实跳过。"""
+    project_id = project["project_id"]
+    out: dict = {"project_id": project_id, "market": market, "trade_date": trade_date}
+
+    collected = await _exec(activities.review_collect, {
+        "project_id": project_id, "trade_date": trade_date, "market": market,
+    })
+    out["has_report"] = collected.get("report") is not None
+    out["trade_count"] = len(collected.get("trades") or [])
+    out["fact_count"] = len(collected.get("facts") or [])
+    if not out["trade_count"] and not out["has_report"]:
+        # 既没有成交也没有报告 —— **不硬写一条空经验**（「空的比假的好」）。
+        out["skipped"] = "no_data"
+        workflow.logger.info("[review] {} 无当日数据，跳过", project_id)
+        return out
+
+    proposed = await _exec(activities.review_propose, {
+        "project_id": project_id, "trade_date": trade_date, "market": market,
+    }, timeout=REVIEW_TIMEOUT)
+    out["candidates"] = len(proposed.get("candidates") or [])
+    out["used_fallback"] = bool(proposed.get("used_fallback"))
+    out["fallback_reason"] = proposed.get("reason")
+    out["rejected"] = proposed.get("rejected") or []
+
+    appended = await _exec(activities.review_append, {
+        "project_id": project_id, "trade_date": trade_date, "market": market,
+        "candidates": proposed.get("candidates") or [],
+        # 经验的 `as_of` = 复盘那一刻（这条认知是这时形成的）——
+        # 于是它进不了比它更早冻结的决策快照（时间边界由服务端执行）。
+        "as_of": now_iso,
+        "used_fallback": proposed.get("used_fallback"),
+        "fallback_reason": proposed.get("reason"),
+    })
+    out["written"] = appended.get("written") or []
+    out["skipped_existing"] = appended.get("skipped") or []
+    return out
+
+
+@workflow.defn(name="fin.review")
+class ReviewWorkflow:
+    """收盘后复核工作流（第四段 R3 · 方案 §8 的复盘回路）。
+
+    **市场经 Schedule 的 `args` 传进来**（同六个时点角色，见模块头）：
+    每个市场一条 Schedule（`fin-review-<market>`），时点 = 该市场时段末点 + 可配延迟。
+    某市场非交易日 / 日历缺失 → 空跑并记明原因，**其他市场照常**。
+    """
+
+    @workflow.run
+    async def run(self, req: dict | None = None) -> dict:
+        req = req or {}
+        market = canonical(req.get("market") or "CN_A")
+        if req.get("trade_date") and req.get("now"):
+            trade_date, now_iso = req["trade_date"], req["now"]
+        else:
+            clock = await _market_clock(market)
+            trade_date = req.get("trade_date") or clock["trade_date"]
+            now_iso = req.get("now") or clock["now"]
+        summary: dict = {"market": market, "trade_date": trade_date,
+                         "point": req.get("point") or "review", "kind": "review"}
+
+        cal = await _exec(activities.read_calendar, {"trade_date": trade_date, "market": market})
+        summary["calendar"] = cal
+        action, why = gating.gate(cal)
+        if action == gating.SKIP_UNKNOWN:
+            summary["status"] = action
+            summary["warning"] = f"{market} {trade_date} {why}"
+            workflow.logger.warning(summary["warning"])
+            return summary
+        if action == gating.SKIP_NON_TRADING:
+            summary["status"] = action
+            summary["note"] = f"{market} {trade_date} 非交易日（{why}），未复核"
+            workflow.logger.info(summary["note"])
+            return summary
+
+        projects = await _exec(activities.list_active_projects, {})
+        projects = projects_for_market(projects, market)
+        only = req.get("project_id")
+        if only:
+            projects = filter_projects(projects, only)
+            summary["filtered_project"] = only
+        summary["projects"] = []
+        for project in projects:
+            summary["projects"].append(
+                await _review_for_project(project, market, trade_date, now_iso)
+            )
+        summary["status"] = "ok"
+        summary["active_projects"] = len(projects)
+        return summary
+
+
 # ── K 线 ETL 触发（「谁决定什么时候拉数据」）────────────────────────────────
 @workflow.defn(name="fin.market_etl")
 class MarketEtlWorkflow:
@@ -360,4 +492,5 @@ class InstrumentSyncWorkflow:
         )
 
 
-ALL_WORKFLOWS = POINT_WORKFLOWS + (MarketEtlWorkflow, InstrumentSyncWorkflow)
+ALL_WORKFLOWS = POINT_WORKFLOWS + (MarketEtlWorkflow, InstrumentSyncWorkflow,
+                                   ReviewWorkflow)

@@ -41,6 +41,8 @@ def test_all_workflows_registered():
         "fin.market_etl",
         # M7：标的元数据同步（涨跌停 / ST）
         "fin.instrument_sync",
+        # R3：收盘后复核（复盘）回路
+        "fin.review",
     }
 
 
@@ -76,6 +78,8 @@ def test_activity_list_covers_workflow_calls():
         "generate_daily_report",
         # M7：标的元数据同步
         "sync_instruments",
+        # R3：决策上下文注入 + 复核回路（四个新活动）
+        "freeze_memory", "review_collect", "review_propose", "review_append",
     } == names
 
 

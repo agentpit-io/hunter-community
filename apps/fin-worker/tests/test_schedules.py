@@ -9,8 +9,8 @@ from app import schedules
 
 def test_three_markets_eighteen_point_schedules_plus_etl_plus_instrument():
     specs = schedules.all_specs()
-    # 3 市场 × 6 时点 + 3 个市场 ETL + 3 个市场的标的元数据同步
-    assert len(specs) == 18 + 3 + 3
+    # 3 市场 × 6 时点 + 3 个市场 ETL + 3 个市场的标的元数据同步 + 3 个市场的收盘后复核（R3）
+    assert len(specs) == 18 + 3 + 3 + 3
 
 
 def test_point_schedules_have_per_market_timezone():

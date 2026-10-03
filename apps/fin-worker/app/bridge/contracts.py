@@ -90,6 +90,11 @@ class StrategyDecision:
     intent: Intent
     valid_until: str  # ISO8601（带时区）
     data_snapshot: dict[str, Any] = field(default_factory=dict)
+    # R3 · 决策前冻结的那份经验集（`memory.query(freeze=True)` 的结果）。
+    # 形状 `{"memory_snapshot_id": "msnap_...", "experience_ids": [...]}` ——
+    # **id 与内容哈希都在快照里**（`fin_memory_snapshot.query_filter`），这里只带 id，
+    # 好让 `fin_order.intent_ref` 记得住「这笔委托是站在哪一版经验上做的决定」。
+    memory: dict[str, Any] = field(default_factory=dict)
     contract_version: str = CONTRACT_VERSION
 
     # ── 构造 ──────────────────────────────────────────────────────────────
@@ -124,6 +129,9 @@ class StrategyDecision:
         snapshot = raw.get("data_snapshot") or {}
         if not isinstance(snapshot, dict):
             raise ContractError("data_snapshot 必须是对象")
+        memory = raw.get("memory") or {}
+        if not isinstance(memory, dict):
+            raise ContractError("memory 必须是对象（决策前冻结的经验集）")
         return cls(
             decision_id=decision_id,
             strategy_key=strategy_key,
@@ -132,6 +140,7 @@ class StrategyDecision:
             intent=Intent.from_dict(raw.get("intent")),
             valid_until=valid_until,
             data_snapshot=snapshot,
+            memory=memory,
             contract_version=cv,
         )
 
@@ -147,6 +156,7 @@ class StrategyDecision:
             "strategy_version": self.strategy_version,
             "account_version": self.account_version,
             "data_snapshot": self.data_snapshot,
+            "memory": self.memory,
             "intent": {
                 "code": self.intent.code,
                 "side": self.intent.side,
@@ -191,6 +201,8 @@ class StrategyDecision:
                 "strategy_version": self.strategy_version,
                 "contract_version": self.contract_version,
                 "data_snapshot": self.data_snapshot,
+                # R3 · 这笔委托站在哪一版经验上做的决定（没有经验集时为空对象）。
+                "memory": self.memory,
             },
         }
         if self.intent.limit_price is not None:

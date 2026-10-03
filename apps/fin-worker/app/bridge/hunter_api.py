@@ -116,3 +116,82 @@ class HunterApiClient:
         if resp.status_code >= 400:
             raise ApiError(resp.status_code, resp.text)
         return resp.json()
+
+    # ── R3 · 统一经验系统（Memory Service 的唯一入口，经内网口令）──────────────
+    def memory_query(self, project_id: str, *, market: Optional[str] = None,
+                     for_decision: bool = False, freeze: bool = False,
+                     purpose: str = "decision", trade_date: Optional[str] = None,
+                     point: Optional[str] = None,
+                     as_of: Optional[str] = None) -> dict[str, Any]:
+        """读经验（**唯一读入口**）。`freeze=True` 时顺带冻结，返回 `memory_snapshot_id`。
+
+        过滤**一律在服务端**：这里没有 `include_holdout` / `debug` 之类的口子，
+        `holdout_only` / 跨项目 / 基准时刻之后形成的经验都读不到 ——
+        「不实现就不可能被误开」。
+
+        `as_of` 是**回放基准**：决策路径传决策那一刻（`now`），
+        于是这份冻结集合里不会有「事后才形成的经验」。
+        """
+        resp = self._request(
+            "POST", "/api/internal/fin/memory/query",
+            json={"project_id": project_id, "market": market,
+                  "for_decision": bool(for_decision), "freeze": bool(freeze),
+                  "purpose": purpose, "trade_date": trade_date, "point": point,
+                  "as_of": as_of},
+        )
+        if resp.status_code >= 400:
+            raise ApiError(resp.status_code, resp.text)
+        return resp.json()
+
+    def memory_append(self, *, project_id: str, kind: str, statement: str,
+                      evidence: list[dict[str, Any]], market: Optional[str] = None,
+                      applicability: Optional[str] = None,
+                      invalidation_condition: Optional[str] = None,
+                      method: Optional[str] = None, sample_size: Optional[int] = None,
+                      as_of: Optional[str] = None) -> dict[str, Any]:
+        """写经验（**唯一写入口**）。`source` 由服务端按证据真值 / 调用方决定，这里传不了。
+
+        八条硬校验都在服务端（`statement` 含阿拉伯数字、证据至少一行、引用必须真实存在…）。
+        任一不过回 **400**，本方法抛 `ApiError` —— **不吞**（吞掉就等于让一条编出来的经验静默入库）。
+        """
+        body: dict[str, Any] = {
+            "project_id": project_id, "kind": kind, "statement": statement,
+            "evidence": evidence,
+        }
+        for key, value in (("market", market), ("applicability", applicability),
+                           ("invalidation_condition", invalidation_condition),
+                           ("method", method), ("sample_size", sample_size),
+                           ("as_of", as_of)):
+            if value is not None:
+                body[key] = value
+        resp = self._request("POST", "/api/internal/fin/memory/evidence", json=body)
+        if resp.status_code >= 400:
+            raise ApiError(resp.status_code, resp.text)
+        return resp.json()
+
+    # ── R3 · 复核（复盘）回路 ────────────────────────────────────────────────
+    def review_collect(self, project_id: str, trade_date: str,
+                       market: Optional[str] = None) -> dict[str, Any]:
+        """取当日报告（含 `self_review`）+ 事实行 + 成交。**只读。**"""
+        resp = self._request(
+            "POST", "/api/internal/fin/review/collect",
+            json={"project_id": project_id, "trade_date": trade_date, "market": market},
+        )
+        if resp.status_code >= 400:
+            raise ApiError(resp.status_code, resp.text)
+        return resp.json()
+
+    def review_propose(self, project_id: str, trade_date: str,
+                       market: Optional[str] = None) -> dict[str, Any]:
+        """产出候选经验（模型只写文字 + 回读校验）。**不写库** —— 写走 `memory_append`。
+
+        api 侧要调模型，可能几十秒到几分钟 —— 单独放宽这次请求的超时。
+        """
+        resp = self._request(
+            "POST", "/api/internal/fin/review/propose",
+            json={"project_id": project_id, "trade_date": trade_date, "market": market},
+            timeout=300.0,
+        )
+        if resp.status_code >= 400:
+            raise ApiError(resp.status_code, resp.text)
+        return resp.json()
