@@ -75,13 +75,28 @@ def filter_projects(projects: list[dict], only: str | None) -> list[dict]:
 
 
 def projects_for_market(projects: list[dict], market: str) -> list[dict]:
-    """只保留**属于这个市场**的项目（`market_scope == market`）。
+    """只保留**选中集合包含该市场**的项目（P2 · 方案 §4.1）。
 
-    子账户 = `(project_id, market)`；一个市场子账户只由该市场的时点驱动
-    （A 股项目只在 A 股时点跑，港美股同理）。`MULTI` 项目的多市场驱动需要
-    多市场策略，示例策略只做 A 股，故不在这里跑（N5 起再说）—— 如实记录，不猜。
+    判据是 `fin_project_market` 那一组市场（paper 的 `list_projects` 带出的 `markets`），
+    **不是** `market_scope == market`（那表达不了 {港股,美股} 这种子集，而且 `MULTI`
+    在三个市场都不匹配 = 空转）。「自由组合」要的就是：选了几个市场，就在那几个市场的
+    时点各驱动一次 —— `MULTI`（集合含三个）因此**三个市场各自跑一次**，不再空转。
+
+    **向后兼容**：`markets` 缺失（老 paper 响应）时退回单值语义（`market_scope`），
+    A 股单市场项目的行为逐字节不变。`markets` 为空列表 = 「没声明过市场」→ 不驱动
+    任何市场（**不回落** `market_scope` —— 回落就会把「没声明」当成 A 股）。
     """
-    return [p for p in projects if (p.get("market_scope") or "CN_A") == market]
+    out = []
+    for p in projects:
+        mk = p.get("markets")                       # P2：paper 带出的集合
+        if mk is None:                              # 兼容：老响应只有 market_scope
+            mk = [p.get("market_scope") or "CN_A"]
+        # paper 的 `markets` 是 `fin_project_market` 的行（对象：market/currency/…），
+        # 这里取 `market` 那一列；同时容忍纯字符串（老调用方 / 测试夹手）。
+        codes = [m.get("market") if isinstance(m, dict) else m for m in mk]
+        if market in codes:
+            out.append(p)
+    return out
 
 
 # 市场当地时间（交易日按**该市场时区**切）在**工作流里算不出来** —— 见
@@ -165,7 +180,9 @@ async def _run_for_project(kind, point_key, at, market, project, trade_date, now
     out["job_id"] = job_id
 
     if kind == "preopen":
-        out["confirm_t1"] = await _exec(activities.confirm_t1, {"project_id": project_id})
+        out["confirm_t1"] = await _exec(activities.confirm_t1, {
+            "project_id": project_id, "market": market,
+        })
         await _exec(activities.write_checkpoint, {
             "job_id": job_id,
             "checkpoint": {"point": point_key, "phase": "t1_confirmed",
@@ -210,7 +227,9 @@ async def _run_for_project(kind, point_key, at, market, project, trade_date, now
                            "idempotency_key": built["idempotency_key"]},
         })
     elif kind == "match":
-        out["match_open"] = await _exec(activities.match_open_orders, {"project_id": project_id})
+        out["match_open"] = await _exec(activities.match_open_orders, {
+            "project_id": project_id, "market": market,
+        })
     elif kind == "close":
         out["close"] = await _exec(activities.close_day, {
             "project_id": project_id, "now": now_iso, "market": market,

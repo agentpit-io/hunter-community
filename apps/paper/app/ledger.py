@@ -693,21 +693,24 @@ def lock_params(cur, project_id) -> None:
     )
 
 
-def confirm_t1(cur, project_id: str, trade_date=None) -> int:
+def confirm_t1(cur, project_id: str, trade_date=None, market: Optional[str] = None) -> int:
     """把某日之前买入的持仓转为可卖（T+1 的日切）。返回受影响行数。
 
     挂单占用的股数不在这里处理：占用是**算出来的**（`open_sell_committed`），
     风控在判「可卖量」时现场减掉。日切只负责「昨天的买入今天能卖了」。
     何时调用（每个交易日开盘前）由 M4 的时点工作流决定。
+
+    **按市场**（P2）：多市场项目在**每个市场的 preopen** 各调一次，如果不限定市场，
+    晚开的市场（如美股 13:15 UTC）会把早开市场（如 A 股）当天的买入一并转成可卖 ——
+    那是 **T+1 被绕过**。`market` 给了就只动那个子账户；不给（单市场项目）行为逐字不变。
     """
-    cur.execute(
-        """
-        UPDATE fin_position
-           SET sellable_qty = qty, updated_at = now()
-         WHERE project_id = %s AND sellable_qty < qty
-        """,
-        (project_id,),
-    )
+    sql = ("UPDATE fin_position SET sellable_qty = qty, updated_at = now() "
+           " WHERE project_id = %s AND sellable_qty < qty")
+    params: list = [project_id]
+    if market is not None:
+        sql += " AND market = %s"
+        params.append(market)
+    cur.execute(sql, tuple(params))
     return cur.rowcount
 
 

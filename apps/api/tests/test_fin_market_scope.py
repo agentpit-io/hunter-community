@@ -809,3 +809,51 @@ def test_追加市场写入变更日志(p1_uid):
     finally:
         c.close()
     assert row == (["CN_A"], ["CN_A", "HK"])
+
+
+# ════════════════════════════════════════════════════════════════════════
+# P2 · 0037：市价单能力落到市场规则表（`market_order_supported`）
+#
+# 防的静默错：列没加上（paper 读不到 → 退回旧口径，HK/US 市价单行为的真值
+# 就还散在代码里）、CN_A 没置 true（A 股市价单被误拒 = A 股回归）、
+# 迁移不可重复执行（部署卡住）。
+# ════════════════════════════════════════════════════════════════════════
+P2_MIGRATION = "0037_market_order_supported.sql"
+
+
+def test_0037迁移文件齐备():
+    path = MIGRATIONS_DIR / P2_MIGRATION
+    assert path.is_file(), f"缺迁移文件 {path}"
+    assert path.stat().st_size > 0
+
+
+def test_0037列存在且非空默认false(conn):
+    r = _q(
+        conn,
+        "SELECT is_nullable, data_type, column_default FROM information_schema.columns "
+        "WHERE table_schema='public' AND table_name='fin_market_rule' "
+        "  AND column_name='market_order_supported'",
+    )
+    assert r, "fin_market_rule 没有 market_order_supported 列（0037 没生效）"
+    assert r[0]["is_nullable"] == "NO"
+    assert r[0]["data_type"] == "boolean"
+    assert "false" in (r[0]["column_default"] or "").lower()
+
+
+def test_0037只有CN_A支持市价单(conn):
+    """与拍板 §四逐项一致：CN_A=true（有盘口）、HK/US=false（只接限价单）。"""
+    rows = {r["market"]: r["market_order_supported"] for r in _q(
+        conn, "SELECT market, market_order_supported FROM fin_market_rule")}
+    assert rows.get("CN_A") is True, "CN_A 必须支持市价单（沿用一期，不得回归）"
+    assert rows.get("HK") is False, "HK 只接限价单（拍板 §四）"
+    assert rows.get("US") is False, "US 只接限价单（拍板 §四）"
+
+
+def test_0037连跑两遍不报错(conn):
+    sql = (MIGRATIONS_DIR / P2_MIGRATION).read_text(encoding="utf-8")
+    for _round in (1, 2):
+        with conn.cursor() as cur:
+            cur.execute(sql)
+    # 第二遍之后 CN_A 仍是 true（UPDATE 幂等，不会翻回去）
+    r = _q(conn, "SELECT market_order_supported FROM fin_market_rule WHERE market='CN_A'")
+    assert r[0]["market_order_supported"] is True

@@ -152,6 +152,20 @@ def _price_limit_checked(outcome) -> Optional[bool]:
     return bool(r.detail.get("price_limit_checked", r.ok))
 
 
+def _market_order_supported(market_rule: Optional[dict], market: str) -> bool:
+    """该市场是否支持市价单（参数来自 `fin_market_rule.market_order_supported`，0037）。
+
+    列缺失（迁移 0037 之前的库）→ 退回旧口径「只有 A 股支持市价单」，
+    这样**老库上的行为与改动前逐字节一致**（A 股照旧、HK/US 照旧拒绝）。
+    """
+    if not market_rule:
+        return False
+    flag = market_rule.get("market_order_supported")
+    if flag is None:
+        return market == "CN_A"
+    return bool(flag)
+
+
 def _snapshot_view(snap: Optional[dict]) -> dict:
     if not snap:
         return {"snapshot_id": None, "snapshot_time": None,
@@ -258,12 +272,15 @@ def execute(cur, req: dict, *, now: Optional[datetime] = None) -> dict:
     )
     trial = match(spec, snap, model)
 
-    # 港美股**本期只接限价单**（设计文档 §3.4、拍板 §四）：数据源没有盘口
-    # （`quote_quality='last_only'`），市价单只能拿最新价加滑点撮合 —— 那不是盘口价。
-    # 明确拒绝并留痕，**不拿最新价冒充买一/卖一**。A 股有盘口，市价单照旧。
-    if price_type == "market" and market != "CN_A":
+    # 市价单能力**按市场取表**（`fin_market_rule.market_order_supported`，0037 落列）——
+    # 不是散在这里的 `market != "CN_A"`（P2 任务书 §一.4：按 A 股写死的要参数化）。
+    # HK / US 本期只接限价单（拍板 §四）：数据源没有盘口（`quote_quality='last_only'`），
+    # 市价单只能拿最新价加滑点撮合 —— 那不是盘口价。明确拒绝并留痕，
+    # **不拿最新价冒充买一/卖一**。A 股有盘口，市价单照旧。
+    if price_type == "market" and not _market_order_supported(market_rule, market):
         reason = (f"{market} 没有盘口数据，本期只接限价单"
-                  "（市价单按最新价撮合会失真）；请改用限价委托")
+                  "（fin_market_rule.market_order_supported=false，市价单按最新价撮合会失真）；"
+                  "请改用限价委托")
         ledger.insert_order(
             cur, order_id, project_id, code, side, qty, price_type, req.get("limit_price"),
             status="rejected", filled_qty=0, source=source, actor=actor,
@@ -495,6 +512,7 @@ def _version_conflict(cur, project, req, key, req_hash, expected) -> dict:
 
 def expire_open_orders(
     cur, project_id: str, at: datetime, *, reason: str = "close",
+    market: Optional[str] = None,
 ) -> dict:
     """撤掉未成交的挂单并**解冻**。
 
@@ -502,9 +520,13 @@ def expire_open_orders(
     `reason='validity'`—— 只撤已经越过 `valid_until` 的。
 
     解冻按 `fin_order.frozen_amount` 原样退回，不重算 —— 受理时冻了多少就退多少。
+
+    **按市场**（P2）：多市场项目在**每个市场的收盘**各撤各的子账户 —— 不限定市场的话，
+    先收盘的市场（港股 16:15）会把后开盘市场（美股）当天还没到收盘的挂单一起撤掉。
+    `market` 不给（单市场项目）行为逐字不变。
     """
     ledger.lock_project(cur, project_id)
-    orders = ledger.list_open_orders(cur, project_id)
+    orders = ledger.list_open_orders(cur, project_id, market=market)
     expired: list[dict] = []
     for order in orders:
         if reason == "validity":
@@ -547,16 +569,20 @@ def cancel_order(cur, project_id: str, order_id: str, memo: str = "人工撤单"
 
 # ── 挂单再撮合 ────────────────────────────────────────────────────────────
 
-def match_open_orders(cur, project_id: str, *, now: Optional[datetime] = None) -> dict:
+def match_open_orders(cur, project_id: str, *, now: Optional[datetime] = None,
+                      market: Optional[str] = None) -> dict:
     """拿新快照再撮一遍挂单（M4 的时点工作流按时刻调它）。
 
     不再跑六条风控：受理时已经跑过，而且
       · 买入的钱冻着（`used ≤ frozen_amount` 由「成交价 ≤ 限价」保证）；
       · 卖出的股由 `open_sell_committed` 占着，别的挂单抢不走。
     这两条让「再撮合」是安全的：它只可能把一张已经通过风控的单变成成交。
+
+    **按市场**（P2）：只撮该子账户的挂单 —— 否则 A 股的挂单会在美股时点拿一张
+    隔夜的 A 股快照撮合（价格是旧的）。`market` 不给（单市场项目）行为逐字不变。
     """
     ledger.lock_project(cur, project_id)
-    orders = ledger.list_open_orders(cur, project_id)
+    orders = ledger.list_open_orders(cur, project_id, market=market)
     model = load_execution_model(cur)
     if model is None:
         raise ValueError("账本里没有执行模型（fin_execution_model 为空），拒绝撮合")

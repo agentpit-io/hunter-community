@@ -101,3 +101,55 @@ def test_filter_projects_keeps_only_the_named_one():
     assert workflows.filter_projects(items, "") == items
     assert workflows.filter_projects(items, "b") == [{"project_id": "b"}]
     assert workflows.filter_projects(items, "zzz") == []
+
+
+# ── P2 · 过滤改成「选中集合包含该市场」────────────────────────────────────
+
+def test_projects_for_market_uses_market_set():
+    """`markets` 在场时按**集合包含**判（不是 market_scope 精确匹配）。"""
+    items = [
+        {"project_id": "hk", "markets": [{"market": "HK"}]},
+        {"project_id": "hk_us", "markets": [{"market": "HK"}, {"market": "US"}]},
+        {"project_id": "us", "markets": [{"market": "US"}]},
+    ]
+    assert [p["project_id"] for p in workflows.projects_for_market(items, "HK")] == ["hk", "hk_us"]
+    assert [p["project_id"] for p in workflows.projects_for_market(items, "US")] == ["hk_us", "us"]
+    assert workflows.projects_for_market(items, "CN_A") == []
+
+
+def test_projects_for_market_multi_drives_all_three_markets():
+    """`MULTI`（集合含三个市场）在**三个市场各驱动一次** —— 不再空转。
+
+    老口径 `market_scope == market` 下 `market_scope='MULTI'` 三个市场都不匹配，
+    多市场项目等于空转（P2 方案 §一·缺口 3）。
+    """
+    items = [{"project_id": "m", "markets": [
+        {"market": "CN_A"}, {"market": "HK"}, {"market": "US"}]}]
+    for m in ("CN_A", "HK", "US"):
+        assert [p["project_id"] for p in workflows.projects_for_market(items, m)] == ["m"]
+
+
+def test_projects_for_market_accepts_bare_market_codes():
+    """容忍 `markets` 是纯字符串（老响应 / 手写夹具）。"""
+    items = [{"project_id": "x", "markets": ["HK", "US"]}]
+    assert [p["project_id"] for p in workflows.projects_for_market(items, "HK")] == ["x"]
+    assert workflows.projects_for_market(items, "CN_A") == []
+
+
+def test_projects_for_market_empty_set_is_not_cn_a():
+    """`markets: []` = 「没声明过市场」→ 不驱动任何市场（**不回落** market_scope）。"""
+    items = [{"project_id": "n", "markets": [], "market_scope": "CN_A"}]
+    assert workflows.projects_for_market(items, "CN_A") == []
+
+
+def test_projects_for_market_backward_compatible_without_markets():
+    """`markets` 缺失（老 paper 响应）→ 退回单值 `market_scope` 语义，逐字节不变。"""
+    items = [
+        {"project_id": "a", "market_scope": "CN_A"},
+        {"project_id": "b", "market_scope": "HK"},
+        {"project_id": "m", "market_scope": "MULTI"},
+    ]
+    assert [p["project_id"] for p in workflows.projects_for_market(items, "HK")] == ["b"]
+    assert [p["project_id"] for p in workflows.projects_for_market(items, "CN_A")] == ["a"]
+    # MULTI 在兼容路径下仍不匹配任何市场（老数据的语义）
+    assert workflows.projects_for_market(items, "US") == []

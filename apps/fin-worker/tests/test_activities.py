@@ -277,3 +277,116 @@ def test_begin_point_job_submits_then_marks_running(monkeypatch):
     assert ("POST", "/api/v1/jobs") in paths
     assert ("POST", "/api/v1/jobs/job_1/running") in paths
     assert ("POST", "/api/v1/jobs/job_1/checkpoint") in paths
+
+
+# ── P2 · 按市场出价型：只接限价单的市场（港美股） ────────────────────────────
+
+_MARKET_RULES = [
+    {"market": "CN_A", "currency": "CNY", "market_order_supported": True},
+    {"market": "HK", "currency": "HKD", "market_order_supported": False},
+    {"market": "US", "currency": "USD", "market_order_supported": False},
+]
+
+
+def _hk_handler(seen=None):
+    def h(req):
+        p = req.url.path
+        if p == "/api/v1/projects/prj_hk":
+            assert req.url.params.get("market") == "HK"     # 必须带 market
+            return httpx.Response(200, json={
+                "project": {"project_id": "prj_hk", "tier": "manage", "version": 0,
+                            "market_scope": "HK"},
+                "param": {"max_position_pct": "0.25", "max_positions": 4},
+                "cash": {"available": "100000.0000", "frozen": "0.0000"},
+                "positions": [], "market": "HK", "currency": "HKD",
+            })
+        if p == "/api/v1/market-rules":
+            return httpx.Response(200, json={"items": _MARKET_RULES})
+        if p == "/api/v1/instruments/00700":
+            return httpx.Response(200, json={"code": "00700", "lot_size": 100, "market": "HK"})
+        if p == "/api/internal/fin/quote/00700":
+            return httpx.Response(200, json={"code": "00700", "market": "HK",
+                                             "last_price": "421.2", "prev_close": "431",
+                                             "event_time": "2026-10-02T16:08:10+08:00"})
+        raise AssertionError(f"{req.method} {p}")
+
+    return h
+
+
+def test_build_decision_hk_emits_limit_order_at_real_quote(monkeypatch):
+    """港美股（`market_order_supported=false`）→ **限价单**，限价 = 行情源真实报价。
+
+    这就是「调度路径不给 code 也能出单」的关键一步：老代码出市价单，被 paper
+    「港美股只接限价单」拒掉（HK 一笔都成交不了）。
+    """
+    _install(monkeypatch, _hk_handler())
+    built = activities.build_decision({"project_id": "prj_hk", "trade_date": "2026-10-02",
+                                       "point": "HK-0930", "market": "HK",
+                                       "now": "2026-10-02T16:08:10+08:00"})
+    body = built["command"]
+    assert body["code"] == "00700"
+    assert body["price_type"] == "limit"
+    assert body["limit_price"] == "421.2"
+    assert body["qty"] == 200                    # 100000 × 0.995 ÷ (421.2 × 100) → 2 手
+
+
+def test_build_decision_hk_without_budget_halts(monkeypatch):
+    """可用资金买不起一手 → **halted**（不出委托，也不报错）。"""
+
+    def h(req):
+        if req.url.path == "/api/v1/projects/prj_hk":
+            return httpx.Response(200, json={
+                "project": {"project_id": "prj_hk", "tier": "play", "version": 0},
+                "param": None, "cash": {"available": "10000.0000", "frozen": "0.0000"},
+                "positions": [], "market": "HK"})
+        return _hk_handler()(req)
+
+    _install(monkeypatch, h)
+    built = activities.build_decision({"project_id": "prj_hk", "trade_date": "2026-10-02",
+                                       "point": "HK-0930", "market": "HK",
+                                       "now": "2026-10-02T16:08:10+08:00"})
+    assert built["halted"] is True
+    assert "买不起" in built["reason"]
+    assert built["command"] is None
+
+
+def test_build_decision_multi_without_market_raises(monkeypatch):
+    """`MULTI` 项目不传 market → paper 回 400 → 翻成 ValueError（**不猜 A 股**）。
+
+    P1 遗留：老代码 `project["market_scope"] or "CN_A"` 会得到字面量 "MULTI"，
+    `canonical_market` 抛 UnknownMarket。
+    """
+    import pytest as _pytest
+
+    def h(req):
+        if req.url.path == "/api/v1/projects/prj_multi":
+            return httpx.Response(400, json={"detail": "该项目有多个市场，请指定 market"})
+        raise AssertionError(req.url.path)
+
+    _install(monkeypatch, h)
+    with _pytest.raises(ValueError, match="多市场"):
+        activities.build_decision({"project_id": "prj_multi", "trade_date": "2026-10-09",
+                                   "point": "0930",
+                                   "now": "2026-10-09T09:30:00+08:00"})
+
+
+def test_build_decision_cn_a_still_market_order(monkeypatch):
+    """A 股不得回归：价型仍是 market、数量仍是档位固定手数、只读项目不读行情。"""
+    seen = []
+
+    def h(req):
+        seen.append(req.url.path)
+        if req.url.path == "/api/v1/projects/prj_1":
+            return _project_response(version=0)
+        if req.url.path == "/api/v1/market-rules":
+            return httpx.Response(200, json={"items": _MARKET_RULES})
+        raise AssertionError(req.url.path)
+
+    _install(monkeypatch, h)
+    built = activities.build_decision({"project_id": "prj_1", "trade_date": "2026-10-09",
+                                       "point": "0930", "market": "CN_A",
+                                       "now": "2026-10-09T09:30:00+08:00"})
+    assert built["command"]["price_type"] == "market"
+    assert built["command"]["qty"] == 100
+    # A 股**不读行情**（不取参考价、不取每手）
+    assert not any("/quote/" in p or "/instruments/" in p for p in seen)

@@ -35,16 +35,29 @@ def list_projects(status: str = "active", limit: int = 500) -> dict:
     """按状态列项目。**M4 的时点工作流靠它找「今天要为哪些项目干活」**。
 
     `status` 只认 `active` / `closed`（其它值一律当 `active`，不做花式过滤）。
+
+    **P2 起每一项带 `markets`**（`fin_project_market` 的行，固定顺序 CN_A→HK→US）——
+    这是「哪些市场该驱动这个项目」的**唯一真值**（`market_scope` 只是派生摘要，
+    `MULTI` 表达不了 {港股,美股} 这种子集）。没有市场行的项目返回 `[]`，
+    **不回落 `market_scope`** —— 那是「没声明过市场」，不是「A 股」。
     """
     want = status if status in ("active", "closed") else "active"
     with db.cursor() as cur:
         cur.execute(
             """
-            SELECT project_id, user_id, tier, status, initial_capital, currency,
-                   market_scope, version, run_mode, opened_at, closed_at, close_reason
-              FROM fin_project
-             WHERE status = %s
-             ORDER BY opened_at DESC
+            SELECT p.project_id, p.user_id, p.tier, p.status, p.initial_capital, p.currency,
+                   p.market_scope, p.version, p.run_mode, p.opened_at, p.closed_at, p.close_reason,
+                   COALESCE(
+                     (SELECT json_agg(json_build_object(
+                                'market', pm.market, 'currency', pm.currency,
+                                'initial_capital', pm.initial_capital, 'opened_at', pm.opened_at)
+                              ORDER BY array_position(ARRAY['CN_A','HK','US']::text[], pm.market))
+                        FROM fin_project_market pm
+                       WHERE pm.project_id = p.project_id),
+                     '[]'::json) AS markets
+              FROM fin_project p
+             WHERE p.status = %s
+             ORDER BY p.opened_at DESC
              LIMIT %s
             """,
             (want, limit),
@@ -53,15 +66,18 @@ def list_projects(status: str = "active", limit: int = 500) -> dict:
 
 
 @router.post("/api/v1/projects/{project_id}/confirm-t1")
-def confirm_t1(project_id: str) -> dict:
+def confirm_t1(project_id: str, market: str | None = None) -> dict:
     """T+1 日切：把买入的持仓转为可卖。**每个交易日开盘前**由时点工作流调用。
 
     排在 `preopen`（09:15）：那时没有挂单（昨天的已在昨天收盘撤掉），
     日切不会影响任何在途占用（`M3 报告 · 遗留 5`）。
+
+    **`market` 可选但多市场项目必填**（P2，同其余账本端点）：`MULTI` 项目不传会被
+    400 挡下（而不是静默落到 A 股），传了就只日切该市场子账户（见 `ledger.confirm_t1`）。
     """
     with db.cursor(commit=True) as cur:
-        _require_project(cur, project_id)
-        changed = ledger.confirm_t1(cur, project_id)
+        _require_project(cur, project_id, market)
+        changed = ledger.confirm_t1(cur, project_id, market=market)
     return {"project_id": project_id, "positions_made_sellable": changed}
 
 

@@ -161,3 +161,39 @@ def test_单市场项目不传market_行为不变(single_project):
 def test_MULTI项目不传market的报错文案(multi_project):
     r = client.get(f"/api/v1/projects/{multi_project}/cash", headers=H)
     assert r.json()["detail"] == "该项目有多个市场，请指定 market"
+
+
+# ════════════════════════════════════════════════════════════════════════
+# P2 · 订单管理端点也按市场（多市场项目不传 market 一律 400）
+#
+# 由来：MULTI 项目从 P2 起会被**每个市场的时点各驱动一次**。原来 `confirm-t1` /
+# `match-open` / `expire` 不收 `market`：
+#   · `confirm-t1` 对 MULTI 项目直接 400（preopen 整条工作流失败，实测）；
+#   · `match-open` / `expire` 会跨市场撮合 / 撤单（拿别市场的隔夜快照撮 A 股挂单）。
+# ════════════════════════════════════════════════════════════════════════
+
+def test_订单管理端点_MULTI不传market_400(multi_project):
+    r = client.post(f"/api/v1/projects/{multi_project}/confirm-t1", headers=H)
+    assert r.status_code == 400, r.text
+    assert "请指定 market" in r.json()["detail"]
+    r = client.post(f"/api/v1/projects/{multi_project}/orders/match-open", headers=H)
+    assert r.status_code == 400, r.text
+    r = client.post(f"/api/v1/projects/{multi_project}/orders/expire", headers=H,
+                    json={"at": "2026-10-02T15:00:00+08:00", "reason": "close"})
+    assert r.status_code == 400, r.text
+
+
+def test_订单管理端点_MULTI传了market_正常(multi_project):
+    r = client.post(f"/api/v1/projects/{multi_project}/confirm-t1?market=HK", headers=H)
+    assert r.status_code == 200, r.text
+    assert r.json()["positions_made_sellable"] == 0
+    r = client.post(f"/api/v1/projects/{multi_project}/orders/match-open?market=HK", headers=H)
+    assert r.status_code == 200, r.text
+    assert r.json()["matched"] == 0
+
+
+def test_订单管理端点_未知市场_400(multi_project):
+    r = client.post(f"/api/v1/projects/{multi_project}/orders/match-open?market=XX",
+                    headers=H)
+    assert r.status_code == 400, r.text
+    assert "未知市场" in r.json()["detail"]

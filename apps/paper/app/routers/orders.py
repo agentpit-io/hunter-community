@@ -26,6 +26,25 @@ from app.schemas import CancelIn, ExpireIn, OrderIn
 router = APIRouter(tags=["orders"])
 
 
+def _require_project(cur, project_id: str, market: str | None = None) -> dict:
+    """项目必须在；`MULTI` 项目必须有显式 `market`（否则 400，**不许落到 A 股**）。
+
+    与 `routers/projects.py:_require_project` 同口径（两个模块各留一份，不跨路由 import）。
+    另外**不认未知市场名** —— 静默当 A 股就是拿 A 股顶替港美股。
+    单市场项目不传 `market` 行为逐字不变。
+    """
+    project = ledger.get_project(cur, project_id)
+    if not project:
+        raise HTTPException(404, f"项目不存在：{project_id}")
+    try:
+        ledger.require_market(project, market)
+    except ledger.MarketRequired as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if market is not None and market not in ledger.MARKET_CURRENCY:
+        raise HTTPException(400, f"未知市场：{market}（只认 CN_A / HK / US）")
+    return project
+
+
 @router.post("/api/v1/orders")
 def place_order(body: OrderIn) -> dict:
     try:
@@ -51,24 +70,25 @@ def cancel_order(order_id: str, body: Optional[CancelIn] = None) -> dict:
 
 
 @router.post("/api/v1/projects/{project_id}/orders/expire")
-def expire_orders(project_id: str, body: ExpireIn) -> dict:
+def expire_orders(project_id: str, body: ExpireIn, market: str | None = None) -> dict:
     """收盘未成交 → 撤单（`expired`）并**解冻**。
 
     `reason='close'`：撤当日全部挂单 —— 这是 `05 §3.2` M-12 第③步的最后一段。
     `reason='validity'`：只撤越过 `valid_until` 的（「过期不补单」）。
+
+    **按市场**（P2）：多市场项目在每个市场收盘各撤各的，不互相牵连（见 `engine`）。
     """
     with db.cursor(commit=True) as cur:
-        if not ledger.get_project(cur, project_id):
-            raise HTTPException(404, f"项目不存在：{project_id}")
-        return engine.expire_open_orders(cur, project_id, body.at, reason=body.reason)
+        _require_project(cur, project_id, market)
+        return engine.expire_open_orders(cur, project_id, body.at, reason=body.reason,
+                                         market=market)
 
 
 @router.post("/api/v1/projects/{project_id}/orders/match-open")
-def match_open(project_id: str) -> dict:
+def match_open(project_id: str, market: str | None = None) -> dict:
     try:
         with db.cursor(commit=True) as cur:
-            if not ledger.get_project(cur, project_id):
-                raise HTTPException(404, f"项目不存在：{project_id}")
-            return engine.match_open_orders(cur, project_id)
+            _require_project(cur, project_id, market)
+            return engine.match_open_orders(cur, project_id, market=market)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

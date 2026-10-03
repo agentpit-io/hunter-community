@@ -31,9 +31,10 @@ from app import config
 from app.bridge.contracts import StrategyDecision
 from app.bridge.hunter_api import ApiError, HunterApiClient
 from app.bridge.idem import order_key, point_job_key, report_job_key
-from app.bridge.paper import PaperClient
+from app.bridge.paper import PaperClient, PaperError
 from app.channels import CAL_MARKET
 from app.market_time import canonical_market
+from app.strategy.sample import SampleNoBudget
 from app.strategy.sample import build_decision as build_sample_decision
 
 # A 股交易日按上海时间切。用 IANA 时区名（不是固定偏移）—— 镜像装 tzdata（N2）。
@@ -85,6 +86,46 @@ def _active_strategy(param: Optional[dict[str, Any]]) -> Optional[dict[str, Any]
         if isinstance(item, dict) and item.get("active"):
             return item
     return items[0] if isinstance(items[0], dict) else None
+
+
+def _resolve_market(market_arg: Optional[str], view: dict, project: dict,
+                    project_id: str) -> str:
+    """该时点要驱动哪个子账户。
+
+    优先级：**请求带的 `market`**（调度路径恒定有）→ paper 项目视图解析出的单市场
+    （`view["market"]`，单市场项目）→ 项目 `market_scope`（老响应兼容）。
+    **`MULTI` 一律拒绝** —— 那是「有多个市场」，拿它当市场名就是拿 A 股顶替港美股。
+    """
+    scope = project.get("market_scope")
+    raw = market_arg or view.get("market") or scope
+    if raw is None:
+        # 响应里没有任何市场信息（老 paper / 老 fixtures）：沿用一期缺省。
+        raw = "CN_A"
+    if str(raw).strip().upper() == "MULTI":
+        raise ValueError(
+            f"项目 {project_id} 是多市场（market_scope=MULTI），无法从项目本身定市场——"
+            "请显式传 market（调度路径由时点带进来）"
+        )
+    return canonical_market(raw)
+
+
+def _market_order_supported(paper: PaperClient, market: str) -> bool:
+    """该市场是否支持市价单（`fin_market_rule.market_order_supported`，0037）。
+
+    读不到规则行 / 列缺失 → 退回旧口径「只有 A 股支持市价单」，与 `matching/engine.py`
+    的同名判定**同一条规则**（那边判拒绝，这边判出什么价型）。示例策略按它决定
+    出市价单还是限价单 —— 这就是「按市场参数化」，不是写死 `market == "CN_A"`。
+    """
+    try:
+        rows = paper.market_rules()
+    except Exception as exc:  # noqa: BLE001 —— 读不到就按最保守口径（只有 A 股有盘口）
+        logger.warning("[decide] 读市场规则失败，市价单能力按旧口径：{}", exc)
+        rows = []
+    rule = next((r for r in rows if r.get("market") == market), None)
+    if not rule:
+        return market == "CN_A"
+    flag = rule.get("market_order_supported")
+    return market == "CN_A" if flag is None else bool(flag)
 
 
 def _heartbeat(details: dict[str, Any]) -> None:
@@ -274,8 +315,10 @@ def confirm_t1(req: dict[str, Any]) -> dict[str, Any]:
     """T+1 日切：把昨天买进的持仓转为可卖（`M3 报告 · 遗留 5/6` 交给 M4 的那件事）。
 
     排在 `preopen`，因为那时**没有挂单**（昨天的已在昨天收盘撤掉、今天的还没下）。
+    `market` 一路带下去 —— 多市场项目在**每个市场的 preopen** 各日切各的子账户
+    （P2：不这样的话晚开的市场会把早开市场当天的买入也转成可卖，绕过 T+1）。
     """
-    return PaperClient().confirm_t1(req["project_id"])
+    return PaperClient().confirm_t1(req["project_id"], market=req.get("market"))
 
 
 @activity.defn
@@ -310,7 +353,18 @@ def build_decision(req: dict[str, Any]) -> dict[str, Any]:
     """
     project_id = req["project_id"]
     paper = PaperClient()
-    view = paper.get_project(project_id)
+    # 市场**先定**（P2）：多市场（`MULTI`）项目调账本接口必须显式带 `market`
+    # （P1 起 paper 不再静默落到 A 股）。调度路径由时点把 `market` 带进来。
+    market_arg = (req.get("market") or "").strip() or None
+    try:
+        view = paper.get_project(project_id, market=market_arg)
+    except PaperError as exc:
+        if market_arg is None and exc.status == 400:
+            raise ValueError(
+                f"无法确定项目 {project_id} 的子账户：请求没带 market 且项目是多市场"
+                "（paper 回 400）—— 调度路径由时点带 market，不在这里猜"
+            ) from exc
+        raise
     if not view or not view.get("project"):
         raise LookupError(f"项目不存在或不可读：{project_id}")
     project = view["project"]
@@ -334,19 +388,52 @@ def build_decision(req: dict[str, Any]) -> dict[str, Any]:
     strategy_version = str(active.get("version") or config.sample_strategy_version())
 
     # 市场：该时点所属市场（N4 起市场是一等参数）。示例标的按市场取。
-    market = canonical_market(req.get("market") or project.get("market_scope") or "CN_A")
+    # **`MULTI` 不许被当成市场**（P1 遗留：老代码 `or project["market_scope"]` 会得到
+    # 字面量 "MULTI" → `canonical_market` 抛 UnknownMarket）。这里显式拒绝。
+    market = _resolve_market(market_arg, view, project, project_id)
 
-    decision_dict = build_sample_decision(
-        project=project,
-        param=param,
-        trade_date=req["trade_date"],
-        point=req["point"],
-        now=_parse_iso(req["now"]),
-        code=req.get("code") or config.sample_code(market),
-        strategy_key=strategy_key,
-        strategy_version=strategy_version,
-        ttl_seconds=config.contract_timeout_seconds(),
-    )
+    code = req.get("code") or config.sample_code(market)
+    # 市价单能力**按市场取表**（`fin_market_rule.market_order_supported`，0037）。
+    mos = _market_order_supported(paper, market)
+    reference_price: Optional[str] = None
+    lot_size: Any = None
+    available_cash: Any = None
+    if not mos:
+        # 只接限价单的市场（港美股）—— 限价单必须带价、按每手定量，三者都是**真实输入**：
+        #   · 参考价 = 行情源的当前报价（api 内部只读端点，不落库）；
+        #   · 每手   = `fin_instrument.lot_size`（账本里的标的元数据）；
+        #   · 可用资金 = 该市场子账户余额（paper 的项目视图）。
+        # 拿不到任一 → 不出委托（`SampleNoBudget` / 缺元数据由 paper 风控拒），不猜数字。
+        inst = paper.get_instrument(code)
+        if inst is not None:
+            lot_size = inst.get("lot_size")
+        quote = HunterApiClient().quote(code)
+        reference_price = (quote or {}).get("last_price")
+        available_cash = (view.get("cash") or {}).get("available")
+
+    try:
+        decision_dict = build_sample_decision(
+            project=project,
+            param=param,
+            trade_date=req["trade_date"],
+            point=req["point"],
+            now=_parse_iso(req["now"]),
+            code=code,
+            strategy_key=strategy_key,
+            strategy_version=strategy_version,
+            ttl_seconds=config.contract_timeout_seconds(),
+            market=market,
+            market_order_supported=mos,
+            reference_price=reference_price,
+            lot_size=lot_size,
+            available_cash=available_cash,
+        )
+    except SampleNoBudget as exc:
+        # 买不起 / 算不出 —— 本时点**不出委托**（不是错误）。形状与「总开关关闭」一致，
+        # 工作流据此走 halted 分支并如实记原因（`_run_for_project` 的 decide 分支）。
+        logger.info("[decide] {} {} 本时点不出委托：{}", project_id, market, exc)
+        return {"halted": True, "project_id": project_id, "reason": str(exc),
+                "decision": None, "idempotency_key": None, "command": None}
     decision = StrategyDecision.from_dict(decision_dict)
     key = order_key(project_id, req["trade_date"], req["point"], decision.decision_id)
     body = decision.to_paper_command(project_id=project_id, idempotency_key=key)
@@ -391,8 +478,11 @@ def submit_decision(req: dict[str, Any]) -> dict[str, Any]:
 
 @activity.defn
 def match_open_orders(req: dict[str, Any]) -> dict[str, Any]:
-    """拿新快照再撮一遍挂单（`11:30 / 13:00 / 14:55` 三个时点）。"""
-    return PaperClient().match_open(req["project_id"])
+    """拿新快照再撮一遍挂单（`11:30 / 13:00 / 14:55` 三个时点）。
+
+    **按该市场子账户**（P2）：只撮本市场的挂单，不拿别市场的隔夜快照撮合。
+    """
+    return PaperClient().match_open(req["project_id"], market=req.get("market"))
 
 
 @activity.defn
@@ -406,7 +496,7 @@ def close_day(req: dict[str, Any]) -> dict[str, Any]:
     # 收盘三件事都按**该市场子账户**做（缺省取项目 market_scope，A 股行为不变）。
     market = req.get("market")
     paper = PaperClient()
-    expired = paper.expire_open(project_id, at_iso, reason="close")
+    expired = paper.expire_open(project_id, at_iso, reason="close", market=market)
     valuation = paper.make_valuation(project_id, at_iso, market=market)
     recon = paper.run_recon(project_id, at_iso, market=market)
     return {"expired": expired, "valuation": valuation, "recon": recon}

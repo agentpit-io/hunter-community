@@ -74,14 +74,34 @@ class PaperClient:
 
     # ── 项目（读）────────────────────────────────────────────────────────
     def list_projects(self, status: str = "active") -> list[dict]:
+        """每个项目带 `markets`（`fin_project_market` 的行，P2）—— 逐项透传，不重排。
+
+        工作流侧 `workflows.projects_for_market` 读的就是这个字段（「选中集合包含
+        该市场」），所以这里**原样带回**、不做裁剪；老响应没有该键时上游按
+        `None` 兼容（退回单值 `market_scope` 语义）。
+        """
         data = self._json("GET", "/api/v1/projects", params={"status": status})
         return (data or {}).get("items", [])
 
-    def get_project(self, project_id: str) -> Optional[dict]:
+    def get_project(self, project_id: str, market: Optional[str] = None) -> Optional[dict]:
+        """项目 + 账本视图。`market` 必须传 —— `MULTI` 项目不传会被 paper 回 400
+        （「该项目有多个市场，请指定 market」，P1 起不再静默落到 A 股）。
+
+        单市场项目传不传都一样（paper 按项目 `market_scope` 兜底）。
+        """
+        params = {"market": market} if market else None
         data = self._json(
-            "GET", f"/api/v1/projects/{project_id}", allow=(404,)
+            "GET", f"/api/v1/projects/{project_id}", params=params, allow=(404,)
         )
         return data
+
+    def get_instrument(self, code: str) -> Optional[dict]:
+        """标的元数据（`fin_instrument` 的一行：`lot_size` / `market` / 涨跌幅…）。
+
+        账本里没有这一行 → `None`（paper 回 404）。示例策略据此拿**每手股数**
+        给港美股定量 —— 拿不到就不出委托，不猜一个手数。
+        """
+        return self._json("GET", f"/api/v1/instruments/{code}", allow=(404,))
 
     # ── 交易日历 ─────────────────────────────────────────────────────────
     def get_calendar(self, trade_date: str, market: str = "CN_A") -> Optional[dict]:
@@ -115,13 +135,18 @@ class PaperClient:
     def place_order(self, body: dict[str, Any]) -> dict:
         return self._json("POST", "/api/v1/orders", json=body)
 
-    def match_open(self, project_id: str) -> dict:
-        return self._json("POST", f"/api/v1/projects/{project_id}/orders/match-open")
+    def match_open(self, project_id: str, market: Optional[str] = None) -> dict:
+        params = {"market": market} if market else None
+        return self._json("POST", f"/api/v1/projects/{project_id}/orders/match-open",
+                          params=params)
 
-    def expire_open(self, project_id: str, at_iso: str, reason: str = "close") -> dict:
+    def expire_open(self, project_id: str, at_iso: str, reason: str = "close",
+                    market: Optional[str] = None) -> dict:
+        params = {"market": market} if market else None
         return self._json(
             "POST",
             f"/api/v1/projects/{project_id}/orders/expire",
+            params=params,
             json={"at": at_iso, "reason": reason},
         )
 
@@ -131,8 +156,10 @@ class PaperClient:
         )
 
     # ── 日切 / 估值 / 对账 ────────────────────────────────────────────────
-    def confirm_t1(self, project_id: str) -> dict:
-        return self._json("POST", f"/api/v1/projects/{project_id}/confirm-t1")
+    def confirm_t1(self, project_id: str, market: Optional[str] = None) -> dict:
+        """T+1 日切。`market` 对多市场项目**必填**（否则 paper 回 400）—— 见接口注释。"""
+        params = {"market": market} if market else None
+        return self._json("POST", f"/api/v1/projects/{project_id}/confirm-t1", params=params)
 
     def make_valuation(self, project_id: str, as_of_iso: str,
                        market: Optional[str] = None) -> dict:

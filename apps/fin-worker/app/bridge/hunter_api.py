@@ -86,6 +86,23 @@ class HunterApiClient:
             raise ApiError(resp.status_code, resp.text)
         return resp.json()
 
+    def quote(self, code: str) -> Optional[dict[str, Any]]:
+        """当前报价（统一行情结构：`last_price` / `prev_close` / `event_time` / `quote_quality`…）。
+
+        **只读**（api 侧 `GET /internal/fin/quote/{code}` 不落库）。P2 用它给
+        「只接限价单的市场」取一个**真实**的参考价 —— 限价单必须带价，而港美股不许
+        用市价单（拍板 §四），所以这个价只能来自行情源，**不编数字**。
+
+        `None` = 这一只此刻没有报价（api 回 404，正常的「没有」）——
+        调用方据此**不出委托**，不拿上一次的价顶替。
+        """
+        resp = self._request("GET", f"/api/internal/fin/quote/{code}")
+        if resp.status_code == 404:
+            return None
+        if resp.status_code >= 400:
+            raise ApiError(resp.status_code, resp.text)
+        return resp.json()
+
     def generate_report(self, project_id: str, trade_date: str) -> dict[str, Any]:
         """触发每日报告生成（M5）。
 

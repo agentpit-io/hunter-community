@@ -22,6 +22,7 @@ from __future__ import annotations
 import os
 from datetime import datetime
 
+import psycopg2.extras
 import pytest
 
 os.environ.setdefault("HUNTER_INTERNAL_KEY", "test-internal-key")
@@ -189,4 +190,68 @@ def test_date_only_quote_cannot_fill(pg, project):
     assert "没有可用快照" in receipt["decline_reason"]
     assert receipt["snapshot_id"] is None
     assert _trades(pg, project) == 0
+    pg.connection.rollback()
+
+
+# ── P2 · 市价单能力是**按市场取表**（不是写死 market != "CN_A"）────────────────
+
+def test_market_order_policy_is_parameterized_by_rule(pg, project):
+    """把 US 的 `market_order_supported` 置 true → 市价单**就能成交**。
+
+    这条是「按市场参数化」的反证：政策读的是 `fin_market_rule` 那一列，
+    **不是**代码里写死的 `market != "CN_A"`。改表 → 行为跟着变。
+    （生产上 HK/US 是 false，见 `0037`；这里只验证参数真的在起作用。）
+    """
+    code = "ZZP2"
+    when = _when(project, "US", salt=7)
+    _seed_instrument(pg, code, "US", "USD", "NASDAQ", "us_main", 1)
+    pg.execute(
+        "INSERT INTO fin_market_calendar (market, trade_date, is_trading, sessions, calendar_source) "
+        "VALUES ('US', %s, true, %s, 'p2-test') ON CONFLICT (market, trade_date) DO NOTHING",
+        (when[:10], psycopg2.extras.Json([{"open": "09:30", "close": "16:00"}])),
+    )
+    pg.execute("UPDATE fin_market_rule SET market_order_supported = true WHERE market = 'US'")
+    pg.connection.commit()
+    install_quote_source(when=when, price="10.00", prev_close="10.00",
+                         bid1="9.99", ask1="10.01", market="US")
+    assert _post(f"/api/v1/projects/{project}/funding?market=US", {})[0] == 200
+    try:
+        status, receipt = _post("/api/v1/orders",
+                                order_body(project, code=code, qty=10, price_type="market"))
+        assert status == 200
+        assert receipt["status"] == "filled", receipt.get("decline_reason")
+        assert receipt["market"] == "US"
+        assert receipt["price_basis"] == "ask1_price+slippage"
+    finally:
+        # 还原并**提交**（本用例之外 HK/US 仍是「只接限价单」）。
+        # 必须 commit —— 只 rollback 会把这条还原一起撤销，下一轮跑就带上脏状态。
+        pg.execute("UPDATE fin_market_rule SET market_order_supported = false WHERE market = 'US'")
+        pg.connection.commit()
+
+
+def test_list_projects_carries_market_set(pg, project):
+    """`GET /api/v1/projects` 每项带 `markets`（`fin_project_market` 的行）。
+
+    工作流靠它判「这个市场该不该驱动这个项目」—— 这是那个集合的唯一真值。
+    """
+    pg.execute(
+        "INSERT INTO fin_project_market (project_id, market, initial_capital, currency) "
+        "VALUES (%s, 'HK', 100000, 'HKD') ON CONFLICT DO NOTHING",
+        (project,),
+    )
+    pg.connection.commit()
+    r = client.get("/api/v1/projects", headers=H)
+    assert r.status_code == 200
+    item = next(i for i in r.json()["items"] if i["project_id"] == project)
+    assert [m["market"] for m in item["markets"]] == ["HK"]
+    assert item["markets"][0]["currency"] == "HKD"
+    assert float(item["markets"][0]["initial_capital"]) == 100000.0
+    pg.connection.rollback()
+
+
+def test_list_projects_without_market_rows_returns_empty(pg, project):
+    """没有市场行的项目 → `markets: []`（**不回落** `market_scope` —— 那是没声明过）。"""
+    r = client.get("/api/v1/projects", headers=H)
+    item = next(i for i in r.json()["items"] if i["project_id"] == project)
+    assert item["markets"] == []
     pg.connection.rollback()
