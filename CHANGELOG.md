@@ -3,11 +3,13 @@
 All notable changes to HunterCode · Community Edition follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.5.2] - 2026-10-03
 
-> **A 股全天交易日历进迁移（`0039`）+ 更正 `0038` 文件头那条说反了的 ⚠️。**
-> 只动 `db/migrations/`，**不含代码改动**；但 `db/migrations/` 是打进 `api` 镜像的，
-> 所以要等下一次 `api` 镜像构建才生效（届时 api 启动时自动执行）。
+> **补丁版本 · 交易日历进迁移（`0039` A 股全天 + `0040` 港美股全天）+ 补上港股时段的第三份副本。**
+> 动到 **`api` / `fin-worker` 两个镜像**（`db/migrations/*.sql` 是打进 `api` 镜像的，
+> 容器启动时自动执行；`MARKET_SESSIONS` 也在 `api`；`0039` 发布时 `api` 镜像还没跟上）。
+> 升级：`.env` 的 **`HUNTER_VERSION` 与 `FIN_TAG` 都改 `1.5.2`**，
+> 再 `docker compose pull && docker compose up -d`。
 
 ### ✨ 新增 · Added
 
@@ -21,16 +23,45 @@ and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   —— `migrate.py:apply_one` 已把每个迁移文件包在独立事务里，文件内再写事务边界会破坏那个承诺。
   已在演示站用「事务内清空 CN_A → 跑本文件 → 查数 → `ROLLBACK`」验过：**365 / 242 / 123**，
   国庆口径正确（09-30 交易日、10-01~10-07 休市、10-08 恢复），`sessions` 取自规则表。
-  ⚠️ **港美股不在本次范围内** —— 它们的全天日历仍只存在于现有库里，从零建的库这两个市场依旧「日历缺失」。
+  ⚠️ 本条目初稿写「港美股不在本次范围内」—— **同一天已由下面的 `0040` 补掉**。
+- **迁移 `0040_hk_us_market_calendar.sql`：幂等写入港股 / 美股 2026 全年交易日历
+  （各 365 行 · **港股 247 个交易日 / 美股 251 个**）。** 补掉 `0039` 留下的港美股缺口 ——
+  在此之前从迁移建起来的库 `fin_market_calendar` 的 HK / US **一段数据都没有**，
+  「只选港股」这类单市场项目在新部署上一直读不到日历。
+  · 假期清单来源：**交易所官方页**的结构化数据（港股 HKEX `HKEX-Calendar` 页内
+  `var DataSource` 的 `holidayIcon == "HongKongPublicHolidays"`；美股 NYSE `hours-calendars`
+  页的 `Holiday | 2026 | 2027 | 2028` 三列表），取数用仓内自己的解析函数
+  `market_calendar.parse_hkex_calendar` / `parse_nyse_calendar` —— **不是凭记忆写的**；
+  并与同模块 `MANUAL_SEED` 人工兜底种子**差集为空**、与演示站现网数据**逐条一致**。
+  · 港股 17 天休市（其中 3 天落在周六）· 美股 10 天（全在工作日；07-04 是周六，官方给 07-03 补休）。
+  港股 `2026-02-16` / `12-24` / `12-31` 是**半日市**（上午照常交易），按拍板 §3.1 第 4 条
+  算作交易日、写完整时段。
+  · `note` / `calendar_source` / `sessions` 与 `scripts/seed_hk_us_calendar.py` 的产出
+  **逐字节一致**（`sessions` 现取 `fin_market_rule`，故港股含 `16:00–16:10` 收市竞价）。
+  · 已在演示站用「事务内清空 HK/US 2026 → 跑本文件 → 与现网逐字段比对 → `ROLLBACK`」验过：
+  行数 **365/365**、交易日 **247/251**，与现网相比 **`is_trading` 差异 0 行**；
+  另有 236 行 `sessions` 与 18 行 `note` 的差异，正是本文件**顺带修掉的**两处旧数据问题
+  （见下面「修复」两条）。`ROLLBACK` 后线上数据核对仍为 HK 365 / US 365，未改动生产。
 
 ### 🐞 修复 · Fixed
 
+- **港股时段的第三份副本没跟上（`apps/api/app/services/fin/market_calendar.py:MARKET_SESSIONS`）。**
+  `v1.5.1` 把港股收市竞价 `16:00–16:10` 补进了 `fin_market_rule.sessions`（迁移 `0034`）
+  与 `fin-worker` 的 `DEFAULT_SESSIONS["HK"]`，**漏了这一份** —— 而它正是
+  `scripts/seed_hk_us_calendar.py` 种日历时写进 `fin_market_calendar.sessions` 的取值；
+  `paper` / `api` 又是**日历行优先**（`risk/session.py:resolve_sessions`、`markets.py`），
+  于是种出来的港股交易日只带两段时段，`16:00–16:10` 的成交仍被判「不在交易时段」。
+  演示站实测（2026-10-03）：**HK 2026 的 247 个交易日里，236 行的 `sessions` 只有两段**
+  （三段的 11 行是 `v1.5.1` 当时就地重跑同步的那个窗口）。三份副本现已逐字一致。
 - **更正 `0038_fee_model_cn_a.sql` 文件头那条 ⚠️ 说明（该文件本身不改）。**
   它写「已有部署不会自动执行这个文件 —— `db/migrations` 只在数据卷第一次初始化时跑」，**与事实相反**：
   那是 `docker-entrypoint-initdb.d` 时代的旧行为；自 `apps/api/app/migrate.py` 上线后，
   **api 每次启动都按 `schema_migrations` 账本增量执行 `db/migrations/*.sql`**。
   演示站实测：api 容器 `2026-10-03T04:23:24Z` 启动，`0038` 于 `04:23:27Z` 落账（+3 秒），即自动执行。
   迁移文件一经发布不可变（改动会触发 checksum drift 告警），故更正写在本节与 `[1.5.1]` 条目里。
+- **`.env.example` 里钉的镜像版本停在 `1.4.0`**（`HUNTER_VERSION` / `FIN_TAG`）—— `1.5.0` 起
+  的发版就再没跟过。照这份模板抄 `.env` 的新部署会一直拉 `1.4.0` 的镜像、拿不到后面三个版本的
+  迁移与修复。已改 `1.5.2`。
 
 ## [1.5.1] - 2026-10-03
 
@@ -43,7 +74,7 @@ and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 > → **此条作废（2026-10-03 更正）**：`db/migrations/*.sql` 由 api 启动时的迁移器
 > （`apps/api/app/migrate.py`）**按 `schema_migrations` 账本增量执行**，并非「只在数据卷首次初始化时跑」。
 > 演示站实测：api 容器 `04:23:24Z` 启动，`0038` 于 `04:23:27Z` 落账（+3 秒），**自动执行、无需手工补**。
-> 详见 `[Unreleased]` 一节。
+> 详见 `[1.5.2]` 一节。
 
 ### 🐞 修复 · Fixed
 
