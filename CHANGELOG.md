@@ -3,6 +3,159 @@
 All notable changes to HunterCode · Community Edition follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-10-04
+
+> **次要版本 · 统一经验与迭代（记忆系统 + 受控自进化闭环）。**
+> 让系统「学到的」这一层从一格都没有，建成**可存、可查、可冻结、防泄露**的一层，
+> 并让它**真的改变行为**：经验 → 提案 → 独立影子验证 → **人工确认**生效 → 紧急线自动回滚
+>（回滚本身产出一条有证据的失败经验）。**全程人工确认、没有实盘订单出口。**
+>
+> 五个数据库迁移，由 `api` 启动时按 `schema_migrations` 账本**增量自动执行**，
+> 一律只做加法（`CREATE TABLE IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS`）、
+> 可重复执行、**不改任何历史行**、文件内不带 `BEGIN;`/`COMMIT;`：
+> `0041_memory_core.sql`（经验三表）· `0042_memory_layer.sql`（记忆层九列）·
+> `0043_evolution_loop.sql`（演化四表 + 不可变触发器）· `0044_shadow_refs_jsonb.sql`（影子两列改 `jsonb`）·
+> `0045_evolution_apply.sql`（生效事件 + 回灌重试队列）。
+>
+> 动到 **`api` / `fin-worker` / `web` / `paper` 四个镜像**：
+> `api`（Memory 服务 + 提案 / 生效 / 回滚 + 迁移 + regime 判定器）·
+> `fin-worker`（`fin.review` 复核工作流 + `fin.shadow` 影子工作流 + 每市场 Schedule）·
+> `web`（成长页经验库与提案验证界面）· `paper`（影子臂路径 `app/shadow.py`）。
+> `llm-shim` / `opencode` 代码未动，但版本号随发版一起走。
+>
+> 升级：`.env` 的 **`HUNTER_VERSION` 与 `FIN_TAG` 两个旋钮一起改 `1.6.0`**，再
+> `docker compose --profile fin pull && docker compose --profile fin up -d`。
+> 逐步清单见 `docs/开发文档/R10-上线与个人本地交付.md`（含**回滚一步**）。
+>
+> ⚠️ **升级前先备份**：`pg_dump -Fc` 记下路径 / 大小 / `sha256` / PG 版本 / `schema_migrations` 行数。
+> 本次迁移只加表加列，但记忆层是可审计数据；备份与恢复演练的做法随本版交付（`docs/开发文档/R4`）。
+
+### ✨ 新增 · Added
+
+- **迁移 `0041_memory_core.sql`：经验三表。** `fin_experience`（经验条目 · `kind ∈ {fact,hypothesis,verified}`
+  × `status ∈ {待验证,已确认,已推翻}` **分两列**）+ `fin_experience_evidence`（证据行 · 每条经验至少一行 ·
+  `UNIQUE(experience_id, evidence_kind, ref_id)`）+ `fin_memory_snapshot`（`msnap_` 前缀的冻结快照 ·
+  回放**按 id 取、不重查**）。四道 `CHECK` 硬约束（`hypothesis` ⇒ `待验证`、`verified` ⇒ 必填 `method`/`sample_size`、
+  `exposure_scope` 枚举、`kind`/`status`/`source`/`market` 枚举）。**与既有的行情快照表 `fin_snapshot` 不撞名**
+  （主键分别是 `memory_snapshot_id` / `snapshot_id`）。**这三张表刻意不给 `fin_paper_rw` 任何授权** ——
+  「唯一入口」最硬的收口就是账本角色连 `SELECT` 都没有。
+- **唯一的 Memory Service 与两个工具名。** `apps/api/app/services/fin/memory.py` 是**全仓唯一**碰
+  经验三表的模块；对外只有 `memory.append_evidence`（唯一写入口）与 `memory.query`
+  （唯一读入口，`freeze=True` 时顺带冻结 —— **冻结不是第三个工具**）。双通道路由：
+  内网口令（`X-Hunter-Internal-Key`，给 `fin-worker`）+ JWT（给前端）。**过滤全在服务端**：
+  `statement` 含阿拉伯数字 → 400（数字一律走 `evidence_kind='fact'` 引用）、证据至少一行、
+  `ref_id` 必须真实存在、`holdout_tainted` 传染、`source` 由服务端按通道判定（**入参里强传被忽略**）。
+- **复核工作流 `fin.review`（Temporal）+ 决策注入 `memory_snapshot_id`。** 各市场**收盘后 + `FIN_REVIEW_DELAY_MINUTES`**
+  触发（可配，改值不动代码）：读当日账本 → 模型**只写解释文字**、所有数值来自账本真值 → 经唯一写入口落成经验。
+  决策链路在出单前 `freeze_memory` 冻结经验集，命中标的的**负向 `verified`** 结论 ⇒ 该标的 `halted`，
+  `memory_snapshot_id` 与命中条目写进 `fin_job.checkpoint`。**没读到经验集时 fail-closed**（抛错重试，不放过闸门）。
+- **regime 判定器（`services/fin/regime.py`）。** 输出**固定四元组** `{label, rule_version, source_snapshot_id, as_of}`；
+  阈值随**规则版本**固定（`regime-v1`，改阈值 = 新增版本键）；**行情缺失 / 窗口不足一律 `unknown`**；
+  `unknown` 是独立取值，**不与明确 regime 混成同组**得出可交易结论。本部署没有基准行情源 ⇒ 恒 `unknown` ⇒
+  **继续复盘、停止策略提案**（不拿一只持仓股冒充大盘，也不给复盘路径引入会超时 / 触 WAF 的外网依赖）。
+- **标的市场规范化（`services/fin/symbols.py`）。** `normalize('HK','00700') = 'HK:00700'` ·
+  `normalize('US','0700') = 'US:0700'`，**两者不相等** —— 拦单与提案都按结构化 `symbols` 列**精确匹配**，
+  不再从 `applicability` 自由文本做包含匹配。
+- **迁移 `0042_memory_layer.sql`：记忆层九列（只加列、不回填）。** `memory_layer`（闭集
+  `episodic/semantic/procedural/strategy`）· `polarity`（`support/refute/neutral`）· `symbols` · `strategy_keys` ·
+  `regime_tags` · `regime_source` · `importance` · `last_validated_at` · `duplicate_of` + 三个 GIN 索引 + 一个组合索引。
+  **存量行一律保持 `NULL`**，不凭文本猜标的或市场状态；`importance` 只影响展示排序、**不参与统计加权**。
+- **迁移 `0043_evolution_loop.sql`：受控自进化四表。** `fin_evolution_proposal`（提案 · `status` 只是**可重建投影**）+
+  **`fin_evolution_plan`（冻结计划 · 写后不可改）** + `fin_evolution_shadow_event`（影子事件 · 追加）+
+  `fin_evolution_event`（状态事件 · 追加 · **审计权威**）。不可变性由**数据库触发器**（`BEFORE UPDATE OR DELETE`）
+  保证，另有**事件哈希链**兜底发现被绕过的篡改。红线的数据库层兜底：
+  `CHECK (target <> 'risk' OR direction <> 'loosen')` —— **AI 提不了放宽风控的案**。
+- **白名单提案 + 机器算 diff。** `target` / `direction` / 两个配置哈希 / `param_diff` **全部服务端算**，
+  请求体里根本没有这些字段（「不采信写入方」）。提案只许改**白名单参数**（类型 / 取值范围 / 单次最大变化 / 基线版本），
+  证据必须来自**同一份冻结快照**（同项目、同时间边界、非 holdout，`refute` 失败经验同样可引用）。
+  **一次失败不得事后改 plan 再判通过 —— 改口径 = 新建提案。**
+- **影子验证：候选臂独立模拟记账 + 两臂同条件（`apps/paper/app/shadow.py` + `fin.shadow` 工作流）。**
+  候选臂与现行臂**同一行情快照、同一初始现金 / 仓位、同一费率 / 滑点 / 停牌 / 撮合假设**；
+  样本按「**两臂均有可比机会的交易日 / 事件**」计（不把「候选有交易、现行没交易」的笔数直接相减）。
+  **影子臂零订单出口**：用 `DecisionRecorder` / `OrderExecutor` 接口隔离，集成测试断言候选流程**从未调用执行端**，
+  影子成交**一笔都不进 `fin_trade` / `fin_order`**。迁移 `0044` 把影子两列的持仓 / 估值快照改成 `jsonb`
+  （估值口径 `total_assets = 现金 + 冻结 + Σ(股数×价)`、`nav = total_assets / 初始本金`，**缺价不出估值**）；
+  唯一键 `(validation_id, arm, trade_date, point, symbol)` 保证**重试 / 重启不重复记账**。
+  **窗口未结束绝不通过**；样本不足 / 行情缺口 / 未完成持仓一律 `inconclusive`（**不结论是合法终局**）。
+- **人工确认生效 + 紧急回滚（迁移 `0045`）。** 成长页点「应用到模拟盘」→ API **CAS 校验**当前 `base_config_hash`
+  未变（基线一动，旧提案作废）→ 走 `control.py` 的**唯一参数写入口**在**一个事务里**
+  注册候选版本 + 写 `fin_param_change_log` + 切 active key（**绝不出现「配置已改而日志缺失」**）。
+  观察期**继续按同一份冻结计划**算；**全系统唯一自动改配置的触发点**是已冻结的 `rollback_line`（默认回撤 −10%）——
+  触发即回滚到**上一个已验证版本**（从版本链核验，不只信字符串）并**停掉该项目模拟下单**；其余不达标只告警、等人工。
+  回滚**一并落三样**：`rolled_back` 事件 + 配置日志 + **一条有证据的失败经验**（`polarity='refute'`）；
+  第三样写不进去时**不吞** —— 落一行重试队列任务，界面常驻「回灌待完成」+ 重试入口。
+- **四个运行开关落在 API 服务端（`services/fin/switches.py` · 读点唯一）+ 只读接口 `GET /v1/fin/runtime`。**
+  不是前端隐藏按钮：`FIN_MEMORY_ENABLED=0` ⇒ `memory.query` 返回空集合、`memory.append_evidence` **HTTP 503**；
+  `FIN_EVOLUTION_MODE=paper` 的五个前置依赖（模拟账本 / 市场日历 / 行情快照 / 策略决策器 / 验证调度）
+  **缺一即降级 `observe` 并在页面显示原因**（**绝不用历史成交顶替影子结果**）；两个硬开关非 0 ⇒ 服务端 503。
+  非法值一律回落安全默认值并 `logger.warning` 留痕。
+- **成长页（`apps/web/app/finance/growth/page.tsx`）：经验库 + 提案与验证。** 六块：①②③ 三块**如实标「本版未做」
+  并写明为什么**（不返回整页占位），④ 经验库（列表 + 六维筛选 + **人机混合写入表单**：前端拦阿拉伯数字 +
+  必选证据引用）、⑤ 四条底线（纯文案）、⑥ **提案与验证**（运行模式横幅 · 完整 `param_diff` · 冻结计划卡含 `plan_hash` ·
+  两臂对照 · 事件链含被闸门拒绝的事件 · 两个人工按钮 · 「回灌待完成」状态位）。
+  **界面一个字都不自己算**：净值 / 回撤 / 换手 / 成本 / 样本数全部原样展示，算不出一律 `—`；
+  空态**全文不出现任何阿拉伯数字**（机器断言）。帮助页补了相关 FAQ（含「保底测试集为什么搜不到」）。
+
+### ⚙️ 新增环境变量 · Added env vars
+
+| 变量 | 代码默认 | 建议值 | 含义 |
+|---|---|---|---|
+| `FIN_MEMORY_ENABLED` | `0`（fail-safe） | **`1`** | `0` ⇒ `memory.query` 回空集、`append_evidence` **503**。P1 验收后设 1 |
+| `FIN_EVOLUTION_MODE` | `off` | **`observe`** | `off` / `observe` / `paper`；本地首次启用选 `observe`；`paper` 依赖缺一即降级 |
+| `FIN_AUTO_APPLY` | `0` | **`0`** | **恒为 0**：本方案不做自动生效，生效一律人工确认 |
+| `FIN_LIVE_ORDER_ENABLED` | `0` | **`0`** | **恒为 0**：本项目没有实盘订单出口 |
+| `FIN_REVIEW_DELAY_MINUTES` | `30` | `30` | 复核时点 = 该市场**时段末点 + 这个值**；非法值回落 30 并留痕 |
+
+（前四个也透传给 `fin-worker`，但 worker **不读** —— 读点只有 api 的 `switches.py`；
+执行侧要知道**生效**模式去问 `GET /api/v1/fin/runtime`。）
+
+### ⚠️ 与上游文档 / 新方案稿不同 · 需要知道的四点
+
+1. **经验库另建 `fin_experience` 三表，`user_memory` 一行不动。** 上游 `08 §78-79` / `09 :541` 假设
+   「二期起复用 `user_memory` 当经验库」，本版**相反**：用户偏好（`user_memory`）与投资论点 / 证据 / 结论
+   （`fin_experience*`）**互不读写**，后者只被 `services/fin/memory.py` 与 `routers/fin_memory.py` 引用
+   （有 `grep` 守护测试盯着）。
+2. **防评估泄露是「零开关」，不是「默认关闭的开关」。** 服务端**永远**
+   `WHERE exposure_scope='searchable' AND holdout_tainted=false`，**不实现**任何 `include_holdout` / `debug` /
+   `admin` 之类能放开的参数 —— **不实现就不可能被误开**（穷举入参也查不到 holdout 那条）。
+3. **影子验证用的是独立模拟记账，`fin_trade` 不含候选收益。** `fin_trade` 只记真实 / 现行策略成交，
+   推不出**未执行候选策略**的收益；候选臂的成绩只进 `fin_evolution_shadow_event`，
+   且**影子臂没有任何订单出口**。
+4. **`FIN_AUTO_APPLY` 恒为 0，生效一律人工确认。** 个人本地首版只人工确认模拟盘；
+   放行依据含风控、成本与样本质量，不只是单一收益阈值。**回滚也不自动放宽风控** ——
+   策略切换 ≠ 可放宽风控（`target='risk'` 的提案不走生效路径）。
+
+### 🐞 修复 · Fixed
+
+- **`stop_loss_pct` 正负号口径不一致 —— 任何向导开出来的真实项目都提不出提案。**
+  `R6` 的白名单把 `stop_loss_pct` 写成了**正号**范围 `[0.005, 0.5]`（`tighter_when='smaller'`），
+  而档位模板（`apps/api/app/services/fin/tiers.py`）与向导写进 `fin_param.stop_loss_pct` 的是**负数**
+  （`-0.04` / `-0.03`，与另两条熔断线 `daily_loss_halt_pct` / `account_drawdown_halt_pct` 同口径）。
+  `normalize_candidate` 会校验候选配置的**每一个键**，于是候选里带着 `stop_loss_pct=-0.04`
+  一进门就被范围检查拒掉 —— 实测本机库 **1294 / 1312** 个项目的这个值都是 `-0.04 ~ -0.03`，
+  **只有 `R9` 当时为跑通演示手工归一成 `+0.03` 的那 1 个例外**。
+  现改为**负号口径** `[-0.5, -0.005]` + `tighter_when='larger'`（越接近 0 = 越早离场 = 越紧），
+  与两条熔断线的写法**逐字同源**。按 `R6` 自己的规矩「改白名单任何一项 = 换版本键」，
+  `ALGO_VERSION` 由 `evolution-algo-v1` 升 **`evolution-algo-v2`**
+  （旧提案仍指 `v1`，永不被新口径重新解释）。**不需要数据迁移** —— 存量行立刻可提案。
+  回归用例 `test_stop_loss_pct_uses_fin_param_sign_convention` 直接拿档位默认值
+  `-0.04` / `-0.03` 断言通过，正号与越界值仍被拒。R6/R7/R8 的既有白名单 / 影子 / 生效用例
+  跟着改成负号口径（共 12 处），**只改数据不改断言逻辑**。
+  > 这一处是 `R9` 成果文档 §六-1 记下的「跨阶段缺陷」，`R10` 出口验收时实测复现并修掉。
+
+### 🧪 测试 · Tests
+
+- `apps/api`：R1–R9 逐阶段只增不减（无库 519 → **688** passed，真库 651 → **855** passed）·
+  `apps/fin-worker`：135 → **204** passed · `apps/paper`：264 passed（新增影子隔离 7 条）。
+  新增守护测试：`test_fin_memory_guard.py`（经验三表唯一入口）· `test_fin_evolution_guard.py`（演化四表）·
+  `test_fin_switches_guard.py`（`FIN_*` 读点唯一）· `test_no_ledger_access.py`（`fin-worker` 不碰账本 / 经验表）。
+- 真浏览器实测脚本 `scripts/r9_browser_check.mjs`：五阶段 **43 / 43** 断言，`pageErrors 0` / `consoleErrors 0`。
+- 十二个必测场景（后来写入经验不进入旧快照 / 被推翻与 holdout 不进入提案 / 同标的不同市场不误匹配 /
+  regime 缺失停止提案 / 两臂同行情时间戳 / 缺报价停牌未平仓返回不确定 / 验证窗口结束前绝不通过 /
+  改计划必须产生新提案 / 并发人工改策略时 CAS 阻止旧提案生效 / 风险放宽在 API·数据库约束·端到端三处均被阻止 /
+  重启后不重复影子成交 / 回滚后配置·日志·失败经验可互相追溯）在演示站逐条验收，
+  证据见 `docs/开发文档/R10-上线与个人本地交付.md`。
+
 ## [1.5.2] - 2026-10-03
 
 > **补丁版本 · 交易日历进迁移（`0039` A 股全天 + `0040` 港美股全天）+ 补上港股时段的第三份副本。**
