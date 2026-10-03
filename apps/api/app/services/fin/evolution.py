@@ -98,12 +98,14 @@ DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://hunter:hunter@localhost:5
 # **改白名单任何一项 = 换版本**（新增一个键，旧提案指着老版本，永不被新口径重新解释）。
 ALGO_VERSION = "evolution-algo-v1"
 
-# `fin_evolution_event.kind` 闭集 —— 与 `0043` 的 CHECK **逐字一致**，改一处必须改另一处。
-# `failed` 是 `R7` 加的（迁移 `0044`）：验证**跑出来不达标**是独立语义，
+# `fin_evolution_event.kind` 闭集 —— 与 `0043`（+`0044`/`0045`）的 CHECK **逐字一致**，
+# 改一处必须改另一处。`failed` 是 `R7` 加的（迁移 `0044`）：验证**跑出来不达标**是独立语义，
 # 与 `rejected`（提案被驳回）分开；`proposal.status` 仍投影到 `rejected`（状态列没有 failed）。
+# `alert` 是 `R8` 加的（迁移 `0045`）：观察期「普通性能不达标」的**告警** —— 它既不驳回提案、
+# 也不回滚，所以**不改变**投影状态（`STATUS_OF_KIND['alert'] = 'applied'`）。
 EVENT_KINDS = (
     "created", "validating", "passed", "rejected", "applied",
-    "rolled_back", "inconclusive", "rejected_by_gate", "failed",
+    "rolled_back", "inconclusive", "rejected_by_gate", "failed", "alert",
 )
 TARGETS = ("strategy", "risk")
 DIRECTIONS = ("tighten", "loosen", "mixed")
@@ -120,6 +122,7 @@ STATUS_OF_KIND = {
     "inconclusive": "inconclusive",
     "rejected_by_gate": "rejected",
     "failed": "rejected",      # 验证不达标 → 提案被驳回（状态列无 failed）
+    "alert": "applied",        # 观察期告警：不改变投影状态（仍处生效 / 观察态）
 }
 
 
@@ -545,25 +548,26 @@ def _owned_project(cur, project_id: str, user_id: Optional[str]) -> dict:
     return dict(row)
 
 
-def read_config(cur, project_id: str) -> dict[str, Any]:
-    """读项目的**可调配置**（白名单字段 → 数值）的规范快照。
+# `fin_param` 行里**构成本配置**的那些列（供 `config_from_row` / `read_config` /
+# `control.activate_candidate` 共用一份列清单 —— 三处各写一遍必然漂）。
+CONFIG_COLUMNS = (
+    "max_position_pct", "daily_loss_halt_pct", "account_drawdown_halt_pct",
+    "stop_loss_pct", "take_profit_pct", "hold_days_max", "strategies",
+)
+
+
+def config_from_row(row: Any) -> dict[str, Any]:
+    """**纯函数**：`fin_param` 行（dict）→ 可调配置（白名单字段 → 数值）。
 
     配置 = `fin_param` 里**白名单覆盖到的**那些字段：三个风控字段 + 顶层策略字段
     （`stop_loss_pct` / `take_profit_pct` / `hold_days_max`）+ 各 `strategies[].params` 里
     白名单命中的参数（键 `strategies.<key>.params.<name>`）。
+
+    ⚠️ **只有这一份实现**。`read_config` 与 `control.activate_candidate`（CAS 要同一口径的
+    哈希）都调它 —— 两处各写一遍会让「提案算的哈希」与「生效时算的哈希」在字段口径上悄悄
+    分叉，表现是**永远 CAS 失败**且不报原因。
     """
-    cur.execute(
-        """
-        SELECT max_position_pct, daily_loss_halt_pct, account_drawdown_halt_pct,
-               stop_loss_pct, take_profit_pct, hold_days_max, strategies
-          FROM fin_param WHERE project_id = %s
-        """,
-        (project_id,),
-    )
-    row = cur.fetchone()
-    if not row:
-        raise LookupError("项目参数不存在（fin_param）")
-    row = dict(row)
+    row = dict(row or {})
     cfg: dict[str, Any] = {}
     for field in (*_RISK_FIELDS, *_STRATEGY_FIELDS):
         value = row.get(field)
@@ -580,6 +584,18 @@ def read_config(cur, project_id: str) -> dict[str, Any]:
             if name in _STRATEGY_FIELDS and value is not None:
                 cfg[f"strategies.{key}.params.{name}"] = _json_num(value)
     return cfg
+
+
+def read_config(cur, project_id: str) -> dict[str, Any]:
+    """读项目的**可调配置**（白名单字段 → 数值）的规范快照。见 `config_from_row`。"""
+    cur.execute(
+        "SELECT " + ", ".join(CONFIG_COLUMNS) + " FROM fin_param WHERE project_id = %s",
+        (project_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        raise LookupError("项目参数不存在（fin_param）")
+    return config_from_row(row)
 
 
 def _load_evidence(project_id: str, evidence_refs: list[str],
@@ -906,11 +922,19 @@ def list_proposals(*, project_id: str, user_id: Optional[str] = None,
                 cur.execute(
                     "SELECT * FROM fin_evolution_plan WHERE proposal_id = ANY(%s)", (ids,))
                 plans = {r["proposal_id"]: dict(r) for r in cur.fetchall()}
+            # R8 · 「回灌待完成」状态位（R9 界面要显示它）—— 有 pending 回灌任务即为真。
+            pending_reinject: set[str] = set()
+            if ids:
+                cur.execute(
+                    "SELECT DISTINCT proposal_id FROM fin_evolution_reinject_task "
+                    " WHERE proposal_id = ANY(%s) AND status = 'pending'", (ids,))
+                pending_reinject = {r["proposal_id"] for r in cur.fetchall()}
         conn.rollback()      # 只读
         out = []
         for p in proposals:
             item = _jsonable(p)
             item["plan"] = _jsonable(plans.get(p["proposal_id"]))
+            item["reinject_pending"] = p["proposal_id"] in pending_reinject
             out.append(item)
         return out
     finally:
@@ -931,9 +955,13 @@ def get_proposal(*, proposal_id: str, conn=None) -> dict:
                 raise LookupError("提案不存在")
             cur.execute("SELECT * FROM fin_evolution_plan WHERE proposal_id = %s", (proposal_id,))
             plan = cur.fetchone()
+            cur.execute("SELECT count(*) AS n FROM fin_evolution_reinject_task "
+                        " WHERE proposal_id = %s AND status = 'pending'", (proposal_id,))
+            pending = int((cur.fetchone() or {}).get("n") or 0)
         conn.rollback()
         item = _jsonable(dict(row))
         item["plan"] = _jsonable(dict(plan)) if plan else None
+        item["reinject_pending"] = pending > 0
         return item
     finally:
         if own:
@@ -1601,3 +1629,616 @@ def shadow_summary(*, proposal_id: str, conn=None) -> dict[str, Any]:
         if own:
             conn.close()
     return {"proposal": _jsonable(prop), "metrics": metrics}
+
+
+# ════════════════════════════════════════════════════════════════════════
+# 九 · 生效 / 观察 / 回滚 / 回灌（R8 · `plan/R8.md` §一.2–4）
+# ════════════════════════════════════════════════════════════════════════
+#
+# 这是**全系统唯一会自主改 `fin_param` 的地方**（`记忆系统追加规则.md` §五 第 7、9 条）。
+# 三条纪律，改这一段之前先读：
+#
+#   1. **生效只人工确认**（`03 §7.5`）：不做自动生效（`FIN_AUTO_APPLY` 恒 0）；接口必须带
+#      `confirm` 显式标志；放行依据**不止**一个收益阈值（passed 事件 / 计划未过期 /
+#      样本足够 / 不触及风控上限 / 成本滑点模型一致）。
+#   2. **参数只能经唯一写入口**：真正改 `fin_param` 的是 `control.activate_candidate` /
+#      `control.restore_base_config`（四步同事务）。本模块**一行都不直改** `fin_param`
+#      （`test_fin_evolution_apply.py` 的 grep 守护盯着）。
+#   3. **回滚只回到「上一个已验证版本」**（红线 9）：目标 key 从
+#      `fin_evolution_event(kind='applied')` 的 `from_key` 取，**再校验**它在
+#      `fin_param.strategies` 里真的存在、且当前 active 就是那次生效的 `to_key`；
+#      核验不过 → **拒绝回滚并告警**（不许只信 `base_strategy_key` 字符串，不许猜）。
+
+# 影子期用的成本 / 滑点模型（与 `apps/paper` 的实现一致）。生效前复核「成本/滑点模型与影子期
+# 一致」靠这张白名单 —— 若代码里的模型版本变了而 plan 仍冻结在老版本，影子结果就不再可比。
+SUPPORTED_COST_MODELS = ("fee-model-v1",)
+SUPPORTED_SLIPPAGE_MODELS = ("slippage-v1",)
+
+ALERT_KIND = "fin.evolution.alert"          # 告警种类（写进 `fin_alert_log.kind`，宿主投递）
+
+
+class EvolutionRollbackRefused(EvolutionError):
+    """回滚目标核验不过（版本链对不上 / 目标已不在 `strategies[]`）—— 路由 → **409**。
+
+    与闸门拒绝区分：这不是「提案不合规」，是「回滚这一动作本身不敢做」。仍会**告警**。
+    """
+
+
+def _control():
+    """晚导入 `control`（唯一参数写入口）。避开 `control → evolution`（哈希）的模块级循环。"""
+    from app.services.fin import control as control_svc
+    return control_svc
+
+
+def _latest_event(cur, proposal_id: str, kind: Optional[str] = None) -> Optional[dict]:
+    """某提案最后一条事件（可按 kind 过滤）。没有 → `None`。"""
+    if kind:
+        cur.execute(
+            "SELECT * FROM fin_evolution_event WHERE proposal_id = %s AND kind = %s "
+            "ORDER BY created_at DESC, event_id DESC LIMIT 1", (proposal_id, kind))
+    else:
+        cur.execute(
+            "SELECT * FROM fin_evolution_event WHERE proposal_id = %s "
+            "ORDER BY created_at DESC, event_id DESC LIMIT 1", (proposal_id,))
+    row = cur.fetchone()
+    return dict(row) if row else None
+
+
+def _applied_payload(cur, proposal_id: str) -> Optional[dict]:
+    """最近一次 `applied` 事件里的 payload（回滚的锚点：from_key / base_config / 哈希）。"""
+    ev = _latest_event(cur, proposal_id, "applied")
+    return dict(ev.get("payload") or {}) if ev else None
+
+
+def _comparable_sample_count(cur, validation_id: str) -> int:
+    """影子可比样本数（两臂均出决策的 `(trade_date, point, symbol)`）—— 与 `shadow_metrics` 同口径。"""
+    cur.execute("SELECT arm, trade_date, point, symbol, signal FROM fin_evolution_shadow_event "
+                " WHERE validation_id = %s", (validation_id,))
+    return len(_comparable_sample_keys([dict(r) for r in cur.fetchall()]))
+
+
+def _candidate_key(base_key: str, proposal_id: str) -> str:
+    """候选版本的**新 key**（`<基线 key>#<提案号尾>`）—— 一眼看出它从哪来、属于哪条提案。"""
+    tail = str(proposal_id or "").replace("evp_", "")[:10] or "cand"
+    return f"{base_key or 'strategy'}#{tail}"
+
+
+def _write_alert(cur, *, project_id: str, kind: str, subject: str, body: str) -> bool:
+    """写一条告警到 `fin_alert_log`（宿主的 `scripts/fin_recon_alert.sh` 读 `sent_at IS NULL` 投递）。
+
+    **不直接调 notify-qq**：投递是宿主的事（与 `paper/recon.py` 同一条链路）；服务端只落记录，
+    这样测试不会真发邮件、离线环境也不会因为发不出去而失败。表不存在 / 写失败只记日志，
+    **不让它把回滚本身带崩**。
+    """
+    try:
+        cur.execute(
+            """
+            INSERT INTO fin_alert_log (kind, ref_id, channel, project_id, subject, body)
+            SELECT %s, NULL, 'notify-qq', %s, %s, %s
+             WHERE NOT EXISTS (
+               SELECT 1 FROM fin_alert_log
+                WHERE kind = %s AND project_id = %s AND sent_at IS NULL AND subject = %s)
+            """,
+            (kind, project_id, subject, body, kind, project_id, subject))
+        return cur.rowcount == 1
+    except Exception as exc:                                    # noqa: BLE001
+        logger.warning("[fin.evolution] 写告警失败（不影响主流程）：{}", exc)
+        return False
+
+
+# ── 放行闸门（`plan/R8.md` §一.2）──────────────────────────────────────────
+
+def _apply_gate_reason(cur, prop: dict, plan: dict, proposal_id: str,
+                       expected_base_config_hash: str) -> Optional[str]:
+    """生效前**必须**复核的五条（任一不满足 → 返回原因字符串，调用方拒绝并记 `rejected_by_gate`）。
+
+    1. 该提案有 `passed` 事件（**只有 passed 才算验证通过** —— `inconclusive` 不算，红线 10）；
+    2. 计划未过期（= 基线没被改动：当前配置哈希仍等于提案的 `base_config_hash`；
+       CAS 会在 `activate_candidate` 里以 `FOR UPDATE` 再核一次）；
+    3. 影子可比样本 ≥ 冻结计划的 `min_comparable_sample`（红线 11）；
+    4. **不触及任何风控上限** —— 本路径只生效 `target='strategy'` 的提案；风控改动一律走
+       `apply_risk_tier` 人工棘轮（红线 8/9：策略切换 ≠ 可放宽风控）；
+    5. 成本 / 滑点模型与影子期一致（都在白名单里）。
+    """
+    if not _latest_event(cur, proposal_id, "passed"):
+        return ("提案没有 passed 事件 —— 只有验证通过的提案才能生效；"
+                "inconclusive（不结论）与 failed（不达标）都不是通过（红线 10）")
+    if str(expected_base_config_hash or "") != str(prop.get("base_config_hash") or ""):
+        return (f"expected_base_config_hash {expected_base_config_hash!r} 与提案记录的 "
+                f"base_config_hash {prop.get('base_config_hash')!r} 不一致")
+    if str(prop.get("target")) != "strategy":
+        return ("本生效路径不触及任何风控上限：target='risk' 的提案不走这里"
+                "（风控只经 apply_risk_tier 人工棘轮，策略切换 ≠ 可放宽风控）")
+    current = read_config(cur, prop["project_id"])
+    if hash_config(current) != str(prop.get("base_config_hash") or ""):
+        return ("计划已过期：基线配置已被改动（当前配置哈希与提案的 base_config_hash 不符）"
+                "—— 旧提案不得生效")
+    min_sample = int(plan.get("min_comparable_sample") or 0)
+    n = _comparable_sample_count(cur, proposal_id)
+    if n < min_sample:
+        return f"影子可比样本 {n} < 冻结计划的最小可比样本 {min_sample}（红线 11）"
+    if (str(plan.get("cost_model")) not in SUPPORTED_COST_MODELS
+            or str(plan.get("slippage_model")) not in SUPPORTED_SLIPPAGE_MODELS):
+        return (f"成本/滑点模型与影子期不一致：plan 记的是 "
+                f"cost={plan.get('cost_model')!r} slippage={plan.get('slippage_model')!r}，"
+                f"当前支持 cost∈{SUPPORTED_COST_MODELS} slippage∈{SUPPORTED_SLIPPAGE_MODELS}")
+    return None
+
+
+def _gate_reject(cur, proposal_id: str, project_id: str, reason: str, actor: str,
+                 stage: str) -> None:
+    """追加一条 `rejected_by_gate` 事件（放行闸门拒绝时谁试过都要留痕）。"""
+    _append_event(cur, proposal_id, "rejected_by_gate",
+                  {"reason": reason, "project_id": project_id, "stage": stage},
+                  actor=actor)
+
+
+# ── 生效（人工确认）────────────────────────────────────────────────────────
+
+def apply_proposal(*, proposal_id: str, expected_base_config_hash: Any, actor: Any,
+                   confirm: bool = False, market: Any = None,
+                   conn=None) -> dict[str, Any]:
+    """**人工确认后把提案应用到模拟盘**（`03 §4-D` / §7.5）。
+
+    不做自动生效：`FIN_AUTO_APPLY` 必须为 0，`confirm` 必须显式为真。放行五条见
+    `_apply_gate_reason`；任一不过 → 追加 `rejected_by_gate` 并抛 `EvolutionGateError`（→400）。
+
+    通过与生效**写在同一笔事务里**：`control.activate_candidate` 做完
+    「CAS → 注册候选版本 → 写 change_log → 切 active」四步后，`within_txn` 回调在同一事务内
+    追加 `kind='applied'` 事件（payload 记 `from_key`/`to_key`/两个哈希/`plan_hash`/两侧完整配置）
+    —— 这是回滚要找的锚点。本模块**不碰** `fin_param`（唯一写入口在 `control`）。
+    """
+    if not switches.evolution_enabled():
+        raise EvolutionDisabledError("进化未启用（FIN_EVOLUTION_MODE=off）：本部署当前不接受生效")
+    switches.assert_hard_ok()                                    # FIN_AUTO_APPLY 必须为 0
+    if not confirm:
+        raise EvolutionValidationError(
+            "必须显式人工确认（confirm=true）才生效 —— 本方案不做自动生效（FIN_AUTO_APPLY 恒 0）")
+
+    proposal_id = str(proposal_id or "").strip()
+    if not proposal_id:
+        raise EvolutionValidationError("proposal_id 不能为空")
+    actor = str(actor or "").strip() or "human"
+    market = (str(market).strip() or None) if market else None
+
+    own = conn is None
+    conn = conn or get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            try:
+                prop = get_proposal_inner(cur, proposal_id)
+            except LookupError:
+                conn.rollback()
+                raise
+            plan = dict(prop.get("plan") or {})
+            project_id = prop["project_id"]
+
+            reason = _apply_gate_reason(cur, prop, plan, proposal_id,
+                                        str(expected_base_config_hash or ""))
+            if reason:
+                _gate_reject(cur, proposal_id, project_id, reason, actor, "apply")
+                conn.commit()
+                logger.info("[fin.evolution] 生效遭闸门拒绝 pid={} reason={}", proposal_id, reason)
+                raise EvolutionGateError(reason)
+
+            base_config = read_config(cur, project_id)
+            candidate_config = _shadow_apply_diff(base_config, prop.get("param_diff"))
+            base_hash = str(prop["base_config_hash"])
+            cand_hash = str(prop["candidate_config_hash"])
+            plan_hash = plan.get("plan_hash")
+            cur.execute("SELECT strategies FROM fin_param WHERE project_id = %s", (project_id,))
+            active = _control().active_strategy(
+                {"strategies": (cur.fetchone() or {}).get("strategies") or []}) or {}
+            base_key = str(active.get("key") or "").strip()
+            new_key = _candidate_key(base_key, proposal_id)
+        conn.rollback()                                          # 结束只读事务
+
+        def _emit(cur, receipt):
+            _append_event(cur, proposal_id, "applied", {
+                "from_key": receipt["from_key"], "to_key": receipt["to_key"],
+                "base_config_hash": base_hash, "candidate_config_hash": cand_hash,
+                "plan_hash": plan_hash,
+                # 回滚要用的锚点：两侧完整配置 + 生效后行哈希（CAS 用）
+                "base_config": base_config, "candidate_config": candidate_config,
+                "active_config_hash": receipt["active_config_hash"],
+                "market": market, "applied_by": actor,
+            }, actor=actor)
+
+        receipt = _control().activate_candidate(
+            conn, project_id, candidate_config=candidate_config,
+            expected_base_config_hash=base_hash, new_key=new_key, actor=actor,
+            within_txn=_emit)
+        logger.info("[fin.evolution] 生效 pid={} {} → {} (by {})",
+                    proposal_id, receipt["from_key"], receipt["to_key"], actor)
+        return {"ok": True, "proposal_id": proposal_id, "project_id": project_id,
+                **{k: receipt[k] for k in ("from_key", "to_key", "base_config_hash",
+                                           "candidate_config_hash", "active_config_hash")},
+                "changed_fields": receipt["changed_fields"], "market": market}
+    finally:
+        if own:
+            conn.close()
+
+
+# ── 观察（按原 plan 计算）──────────────────────────────────────────────────
+
+def _live_equity(cur, project_id: str, market: str, since) -> list[tuple[Any, float]]:
+    """生效之后的**实盘（模拟盘）净值序列** `[(as_of, nav)]`（读 `fin_valuation`）。
+
+    这是「观察期继续按原 plan 计算」的数据来源：生效后候选臂就是现行臂，影子已结束，
+    只能看**真实账本的净值**。缺失（还没估值）→ 空列表（不编）。
+    """
+    cur.execute(
+        "SELECT as_of, nav FROM fin_valuation WHERE project_id = %s AND market = %s "
+        " AND as_of >= %s ORDER BY as_of", (project_id, market, since))
+    out = []
+    for r in cur.fetchall():
+        nav = r["nav"]
+        if nav is None:
+            continue
+        out.append((r["as_of"], float(Decimal(str(nav)))))
+    return out
+
+
+def _drawdown_and_return(points: list[tuple[Any, float]]) -> dict[str, Any]:
+    """净值序列 → `{max_drawdown, net_return, points}`（点不足两个 → 都 `None`，不编）。"""
+    if len(points) < 2:
+        return {"max_drawdown": None, "net_return": None, "points": len(points)}
+    peak = points[0][1]
+    worst = 0.0
+    for _t, nav in points:
+        peak = max(peak, nav)
+        if peak > 0:
+            worst = min(worst, nav / peak - 1.0)
+    first = points[0][1]
+    net = (points[-1][1] / first - 1.0) if first else None
+    return {"max_drawdown": worst, "net_return": net, "points": len(points)}
+
+
+def observe_applied(*, proposal_id: str, as_of: Optional[str] = None, market: Any = None,
+                    actor: str = "fin-worker", conn=None) -> dict[str, Any]:
+    """观察一次已生效的提案：按**原冻结计划**算实盘净值表现。
+
+    - **普通性能不达标 → 告警**（写 `fin_alert_log` + 追加 `alert` 事件），**配置一动不动**，
+      等人确认回退；
+    - **唯一自动回滚的条件**：实盘最大回撤 **≤ 冻结的 `rollback_line`**（风险紧急线）。
+
+    返回 `{observed, action, window, live, rollback_line, fail_line}`（只读字段，供 R9 展示）。
+    """
+    own = conn is None
+    conn = conn or get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            prop = get_proposal_inner(cur, proposal_id)
+            last = _latest_event(cur, proposal_id)
+            last_kind = str((last or {}).get("kind") or "")
+            if last_kind not in ("applied", "alert"):
+                conn.rollback()
+                return {"observed": False, "proposal_id": proposal_id,
+                        "reason": f"提案当前不是已生效态（最后事件 {last_kind or '无'}）"}
+            ap = _latest_event(cur, proposal_id, "applied")
+            payload = dict(ap.get("payload") or {})
+            plan = dict(prop.get("plan") or {})
+            project_id = prop["project_id"]
+            market_v = (str(market).strip() if market else "") \
+                or str(payload.get("market") or "") or None
+            if not market_v:
+                cur.execute("SELECT market_scope FROM fin_project WHERE project_id = %s",
+                            (project_id,))
+                market_v = (cur.fetchone() or {}).get("market_scope") or "CN_A"
+            window_start = payload.get("applied_at") or ap.get("created_at")
+            window_days = int(plan.get("window_days") or 0)
+            elapsed = _trading_days_between(cur, market_v, str(window_start), str(as_of)) \
+                if as_of else None
+            live = _drawdown_and_return(_live_equity(cur, project_id, market_v, window_start))
+            rollback_dd = _as_float((plan.get("rollback_line") or {}).get("max_drawdown_pct"))
+            early_dd = _as_float((plan.get("early_stop_condition") or {}).get("max_drawdown_pct"))
+            fail_line = _as_float(plan.get("fail_line"))
+            window = {"start": str(window_start), "window_days": window_days,
+                      "elapsed_trading_days": elapsed,
+                      "ended": bool(as_of and elapsed is not None and elapsed >= window_days),
+                      "market": market_v, "as_of": as_of}
+        conn.rollback()
+
+        dd = live["max_drawdown"]
+        # ① 唯一的自动回滚条件：触发冻结的 rollback_line（风险紧急线）
+        if dd is not None and rollback_dd is not None and dd <= rollback_dd:
+            rb = rollback_proposal(proposal_id=proposal_id,
+                                   reason=f"触发风险紧急线：实盘最大回撤 {dd:.4%} ≤ 冻结的 "
+                                          f"rollback_line {rollback_dd:.4%}",
+                                   actor=actor, conn=None)
+            return {"observed": True, "action": "rolled_back", "proposal_id": proposal_id,
+                    "window": window, "live": live, "rollback_line": rollback_dd,
+                    "fail_line": fail_line, "rollback": rb}
+        # ② 普通不达标 / 触及提前停止线 → 只告警，不自动回退
+        alert = None
+        if dd is not None and early_dd is not None and dd <= early_dd:
+            alert = (f"实盘最大回撤 {dd:.4%} 已触及冻结的提前停止线 {early_dd:.4%}")
+        elif window["ended"] and live["net_return"] is not None and fail_line is not None \
+                and live["net_return"] <= fail_line:
+            alert = (f"观察期结束但实盘净收益 {live['net_return']:+.4%} ≤ 冻结的失败线 "
+                     f"{fail_line:+.4%}")
+        if alert:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                _append_event(cur, proposal_id, "alert",
+                              {"reason": alert, "project_id": project_id, "window": window,
+                               "live": live, "rollback_line": rollback_dd, "fail_line": fail_line},
+                              actor=actor)
+                _write_alert(cur, project_id=project_id, kind=ALERT_KIND,
+                             subject="[智能炒股·进化] 生效策略观察期不达标（未自动回退）",
+                             body=f"提案 {proposal_id}：{alert}<br>配置**未变**，等待人工确认是否回退。")
+            conn.commit()
+            logger.info("[fin.evolution] 观察告警 pid={} {}", proposal_id, alert)
+            return {"observed": True, "action": "alert", "proposal_id": proposal_id,
+                    "reason": alert, "window": window, "live": live,
+                    "rollback_line": rollback_dd, "fail_line": fail_line}
+        return {"observed": True, "action": "none", "proposal_id": proposal_id,
+                "window": window, "live": live, "rollback_line": rollback_dd,
+                "fail_line": fail_line}
+    finally:
+        if own:
+            conn.close()
+
+
+# ── 紧急回滚（系统唯一自主改 fin_param 的场合）──────────────────────────────
+
+def rollback_proposal(*, proposal_id: str, reason: Any, actor: Any,
+                      expected_current_config_hash: Any = None,
+                      conn=None) -> dict[str, Any]:
+    """**回到上一个已验证版本**（红线 9）。触发时**立即停止该项目的模拟下单**。
+
+    回滚目标取自**版本链**：`fin_evolution_event(kind='applied')` 的 `from_key`；
+    再校验它在 `fin_param.strategies` 里真的存在、且当前 active 正是那次生效的 `to_key`；
+    核验不过 → 追加 `alert` 事件 + 告警 + 抛 `EvolutionRollbackRefused`（→409），**不猜**。
+
+    回滚一并写入三样（`plan/R8.md` §一.4）：
+      1. `kind='rolled_back'` 事件（与配置改动同事务）；
+      2. `fin_param_change_log` 行（由 `control.restore_base_config` 写，同事务）；
+      3. **一条有证据的失败经验**（`polarity='refute'`，经 `memory.append_evidence`）。
+         **写入失败不许吞** —— 落进 `fin_evolution_reinject_task`（`pending`），
+         只读接口据此报「回灌待完成」。
+    """
+    if not switches.evolution_enabled():
+        raise EvolutionDisabledError("进化未启用（FIN_EVOLUTION_MODE=off）：本部署当前不接受回滚")
+    proposal_id = str(proposal_id or "").strip()
+    if not proposal_id:
+        raise EvolutionValidationError("proposal_id 不能为空")
+    actor = str(actor or "").strip() or "system"
+    reason = str(reason or "").strip() or "manual"
+
+    own = conn is None
+    conn = conn or get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            prop = get_proposal_inner(cur, proposal_id)
+            project_id = prop["project_id"]
+            payload = _applied_payload(cur, proposal_id)
+            if not payload:
+                conn.rollback()
+                raise EvolutionGateError("该提案没有 applied 事件 —— 没有可回滚的生效版本")
+            from_key = str(payload.get("from_key") or "").strip()
+            to_key = str(payload.get("to_key") or "").strip()
+            base_config = dict(payload.get("base_config") or {})
+            target_hash = str(expected_current_config_hash
+                              or payload.get("active_config_hash") or "")
+            cur.execute("SELECT strategies FROM fin_param WHERE project_id = %s", (project_id,))
+            items = [i for i in ((cur.fetchone() or {}).get("strategies") or [])
+                     if isinstance(i, dict)]
+            keys = [str(i.get("key") or "").strip() for i in items]
+            cur_key = str((_control().active_strategy({"strategies": items}) or {}).get("key") or "")
+
+            problem = None
+            if not from_key:
+                problem = "applied 事件没记 from_key —— 版本链不完整，拒绝回滚"
+            elif from_key not in keys:
+                problem = (f"回滚目标 {from_key!r} 已不在 fin_param.strategies 里"
+                           f"（现有 {', '.join(k or '?' for k in keys)}）—— 拒绝回滚并告警")
+            elif to_key and cur_key != to_key:
+                problem = (f"当前 active 是 {cur_key!r}，不是那次生效的 to_key {to_key!r}"
+                           "（版本链对不上）—— 拒绝回滚并告警")
+            if problem:
+                _append_event(cur, proposal_id, "alert",
+                              {"reason": f"回滚核验失败：{problem}", "project_id": project_id,
+                               "stage": "rollback_verify"},
+                              actor=actor)
+                _write_alert(cur, project_id=project_id, kind=ALERT_KIND,
+                             subject="[智能炒股·进化] 回滚核验失败（拒绝回滚）",
+                             body=f"提案 {proposal_id}：{problem}")
+                conn.commit()
+                logger.warning("[fin.evolution] 回滚核验失败 pid={} {}", proposal_id, problem)
+                raise EvolutionRollbackRefused(problem)
+        conn.rollback()
+
+        def _emit(cur, receipt):
+            _append_event(cur, proposal_id, "rolled_back", {
+                "from_key": receipt["from_key"], "to_key": receipt["to_key"],
+                "reason": reason, "restored_fields": receipt["restored_fields"],
+                "halted": receipt["halted"], "base_config_hash": payload.get("base_config_hash"),
+                "plan_hash": payload.get("plan_hash"), "rolled_back_by": actor,
+            }, actor=actor)
+
+        receipt = _control().restore_base_config(
+            conn, project_id, target_key=from_key, base_config=base_config,
+            expected_current_config_hash=target_hash, actor=actor, reason=reason,
+            halt=True, within_txn=_emit)
+        conn.rollback()
+    finally:
+        if own:
+            conn.close()
+
+    # ③ 失败经验回灌（配置事务已提交，单独一笔）
+    reinject = queue_rollback_experience(
+        proposal_id=proposal_id, project_id=project_id,
+        reason=f"{reason}（回滚 {receipt['from_key']} → {receipt['to_key']}）",
+        plan_hash=payload.get("plan_hash"))
+    logger.warning("[fin.evolution] 已回滚 pid={} {} → {}（回灌 {}）",
+                   proposal_id, receipt["from_key"], receipt["to_key"],
+                   reinject.get("status"))
+    return {"ok": True, "proposal_id": proposal_id, "project_id": project_id,
+            "from_key": receipt["from_key"], "to_key": receipt["to_key"],
+            "reason": reason, "restored_fields": receipt["restored_fields"],
+            "halted": receipt["halted"], "active_config_hash": receipt["active_config_hash"],
+            "reinject": reinject}
+
+
+# ── 回灌（失败经验）与重试队列 ──────────────────────────────────────────────
+
+def _rollback_experience(*, cur, project_id: str, reason: str, proposal_id: str,
+                         plan_hash: Any) -> dict[str, Any]:
+    """构造回滚失败经验的 `append_evidence` 入参（**数字只进证据，不进 statement**）。
+
+    证据 = 本项目**账本真值**（`fin_trade` 行，最多 5 条）。没有成交 → 证据为空，
+    `append_evidence` 会拒（「经验必须带证据」）→ 任务留在队列里（「回灌待完成」是真话）。
+    """
+    cur.execute("SELECT trade_id FROM fin_trade WHERE project_id = %s "
+                " ORDER BY traded_at DESC LIMIT 5", (project_id,))
+    evidence = [{"evidence_kind": "trade", "ref_id": r["trade_id"]} for r in cur.fetchall()]
+    n_trades = len(evidence)
+    return {
+        "project_id": project_id,
+        "kind": "verified",
+        "statement": "被自动回滚的策略变更在观察期触及了风险紧急线，该变更方向不再采用",
+        "method": "影子验证与观察期净值",
+        "sample_size": max(n_trades, 1),
+        "polarity": "refute",
+        "importance": 0.9,        # 0~1（memory 校验）；回滚教训置前展示
+        "evidence": evidence,
+        "applicability": f"提案 {proposal_id} · plan {plan_hash or '无'} · 触发原因：{reason}",
+        "invalidation_condition": "风险紧急线口径或影子 / 账本口径变更时需重新评估",
+    }
+
+
+def queue_rollback_experience(*, proposal_id: str, project_id: str, reason: str,
+                              plan_hash: Any = None, conn=None) -> dict[str, Any]:
+    """把「回滚要写的失败经验」落进重试队列并**立即尝试一次**。
+
+    返回 `{task_id, status, error, attempts}`。`done` = 已真的写进经验库；
+    `pending` = 回灌待完成（经验没写成，任务还在队列里）。
+    """
+    own = conn is None
+    conn = conn or get_conn()
+    task_id = _new_id("evri_")
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            payload = _rollback_experience(cur=cur, project_id=project_id, reason=reason,
+                                           proposal_id=proposal_id, plan_hash=plan_hash)
+            cur.execute(
+                "INSERT INTO fin_evolution_reinject_task "
+                " (task_id, proposal_id, project_id, reason, payload, status) "
+                " VALUES (%s, %s, %s, %s, %s, 'pending')",
+                (task_id, proposal_id, project_id, reason,
+                 psycopg2.extras.Json(_jsonable(payload))))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        if own:
+            conn.close()
+    # 立即尝试一次（失败 → 保持 pending，由 retry 入口继续）
+    outcome = _reinject_one(task_id=task_id)
+    return {"task_id": task_id, **outcome}
+
+
+def _reinject_one(*, task_id: str, conn=None) -> dict[str, Any]:
+    """尝试把一条回灌任务写进经验库（唯一写入口 `memory.append_evidence`）。"""
+    own = conn is None
+    read_conn = conn or get_conn()
+    try:
+        with read_conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT * FROM fin_evolution_reinject_task WHERE task_id = %s", (task_id,))
+            row = cur.fetchone()
+            if not row:
+                raise LookupError(f"回灌任务不存在：{task_id}")
+            task = dict(row)
+            if task["status"] == "done":
+                read_conn.rollback()
+                return {"status": "done", "attempts": task["attempts"], "error": None}
+            payload = dict(task["payload"] or {})
+        read_conn.rollback()
+    finally:
+        if own:
+            read_conn.close()
+
+    error = None
+    try:
+        memory_svc.append_evidence(
+            caller="internal",
+            project_id=payload["project_id"],
+            kind=payload["kind"],
+            statement=payload["statement"],
+            evidence=payload["evidence"],
+            method=payload.get("method"),
+            sample_size=payload.get("sample_size"),
+            polarity=payload.get("polarity"),
+            importance=payload.get("importance"),
+            applicability=payload.get("applicability"),
+            invalidation_condition=payload.get("invalidation_condition"),
+        )
+    except Exception as exc:                                    # noqa: BLE001
+        error = f"{type(exc).__name__}: {exc}"
+
+    write_conn = conn or get_conn()
+    try:
+        with write_conn.cursor() as cur:
+            if error is None:
+                cur.execute("UPDATE fin_evolution_reinject_task "
+                            "SET status='done', attempts=attempts+1, last_error=NULL, "
+                            "    updated_at=now() WHERE task_id=%s", (task_id,))
+            else:
+                cur.execute("UPDATE fin_evolution_reinject_task "
+                            "SET attempts=attempts+1, last_error=%s, updated_at=now() "
+                            "WHERE task_id=%s", (error, task_id))
+        write_conn.commit()
+    except Exception:
+        write_conn.rollback()
+        raise
+    finally:
+        if own:
+            write_conn.close()
+    if error:
+        logger.warning("[fin.evolution] 回灌失败（保持待完成）task={} {}", task_id, error)
+        return {"status": "pending", "attempts": None, "error": error}
+    return {"status": "done", "attempts": None, "error": None}
+
+
+def reinject_pending(*, proposal_id: Optional[str] = None, conn=None) -> list[dict[str, Any]]:
+    """还没回灌成功的任务（只读接口据此报「回灌待完成」）。"""
+    clause, params = "", []
+    if proposal_id:
+        clause, params = " AND proposal_id = %s", [proposal_id]
+    own = conn is None
+    conn = conn or get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT task_id, proposal_id, project_id, reason, status, attempts, "
+                        "last_error, created_at FROM fin_evolution_reinject_task "
+                        "WHERE status = 'pending'" + clause + " ORDER BY created_at", params)
+            rows = [dict(r) for r in cur.fetchall()]
+        conn.rollback()
+    finally:
+        if own:
+            conn.close()
+    return [_jsonable(r) for r in rows]
+
+
+def retry_reinject(*, proposal_id: Optional[str] = None, conn=None) -> dict[str, Any]:
+    """重试回灌队列里 `pending` 的任务。返回 `{tried, done, pending}`（幂等：`done` 不再动）。"""
+    own = conn is None
+    conn = conn or get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            clause, params = "", []
+            if proposal_id:
+                clause, params = " AND proposal_id = %s", [proposal_id]
+            cur.execute("SELECT task_id FROM fin_evolution_reinject_task "
+                        "WHERE status = 'pending'" + clause + " ORDER BY created_at", params)
+            ids = [r["task_id"] for r in cur.fetchall()]
+        conn.rollback()
+    finally:
+        if own:
+            conn.close()
+    done = 0
+    for tid in ids:
+        if _reinject_one(task_id=tid)["status"] == "done":
+            done += 1
+    return {"tried": len(ids), "done": done, "pending": len(ids) - done}

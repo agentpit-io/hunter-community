@@ -248,3 +248,109 @@ def _project_of(proposal_id: str) -> str:
         return evolution_svc.get_proposal(proposal_id=proposal_id)["project_id"]
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
+
+
+# ════════════════════════════════════════════════════════════════════════
+# R8 · 生效 / 观察 / 回滚 / 回灌（内网口令通道；调用方 = fin-worker / 守控台）
+# ════════════════════════════════════════════════════════════════════════
+#
+# 与 R6/R7 一样：路由**不做任何闸门判断**（五条放行闸门、CAS、版本链核验全在
+# `services/fin/evolution.py` + `services/fin/control.py`）。路由只负责判通道 + 翻 HTTP 码。
+
+
+class ApplyIn(BaseModel):
+    """生效入参。`confirm` **必须显式为真** —— 本方案不做自动生效（`FIN_AUTO_APPLY` 恒 0）。"""
+
+    proposal_id: str
+    expected_base_config_hash: str
+    actor: str
+    confirm: bool = False
+    market: Optional[str] = None
+
+
+class ObserveIn(BaseModel):
+    proposal_id: str
+    as_of: Optional[str] = None
+    market: Optional[str] = None
+
+
+class RollbackIn(BaseModel):
+    proposal_id: str
+    reason: str
+    actor: str
+    expected_current_config_hash: Optional[str] = None
+
+
+class ReinjectIn(BaseModel):
+    proposal_id: Optional[str] = None
+
+
+def _apply_errors(fn):
+    """把服务层异常翻成 HTTP 码（口径与 R6 各端点一致，多两条 R8 的分支）。"""
+    from app.services.fin import switches as switches_svc
+    try:
+        return fn()
+    except switches_svc.SwitchConfigError as exc:                    # 硬开关违规
+        raise HTTPException(503, str(exc)) from exc
+    except evolution_svc.EvolutionDisabledError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except evolution_svc.EvolutionRollbackRefused as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except evolution_svc.EvolutionConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except evolution_svc.EvolutionGateError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except evolution_svc.EvolutionValidationError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/internal/fin/evolution/apply")
+async def apply_proposal(body: ApplyIn, request: Request):
+    """**人工确认后把提案应用到模拟盘**（CAS 切换 + 注册候选版本 + 写日志 + 追加 applied 事件）。"""
+    _auth_internal(request)
+    out = _apply_errors(lambda: evolution_svc.apply_proposal(
+        proposal_id=body.proposal_id, expected_base_config_hash=body.expected_base_config_hash,
+        actor=body.actor, confirm=body.confirm, market=body.market))
+    logger.info("[fin.evolution] apply id={} {} → {}",
+                out.get("proposal_id"), out.get("from_key"), out.get("to_key"))
+    return out
+
+
+@router.post("/internal/fin/evolution/observe")
+async def observe_applied(body: ObserveIn, request: Request):
+    """观察一次已生效的提案：**只有冻结的 rollback_line 会自动回滚**，其余只告警。"""
+    _auth_internal(request)
+    return _apply_errors(lambda: evolution_svc.observe_applied(
+        proposal_id=body.proposal_id, as_of=body.as_of, market=body.market))
+
+
+@router.post("/internal/fin/evolution/rollback")
+async def rollback_proposal(body: RollbackIn, request: Request):
+    """**回到上一个已验证版本**（版本链核验 + 停模拟下单 + 写失败经验）。"""
+    _auth_internal(request)
+    out = _apply_errors(lambda: evolution_svc.rollback_proposal(
+        proposal_id=body.proposal_id, reason=body.reason, actor=body.actor,
+        expected_current_config_hash=body.expected_current_config_hash))
+    logger.warning("[fin.evolution] rollback id={} {} → {}",
+                   out.get("proposal_id"), out.get("from_key"), out.get("to_key"))
+    return out
+
+
+@router.post("/internal/fin/evolution/reinject/retry")
+async def retry_reinject(body: ReinjectIn, request: Request):
+    """重试回灌队列里的 `pending` 任务（「回滚了但没学到」的补救入口）。"""
+    _auth_internal(request)
+    return _apply_errors(lambda: evolution_svc.retry_reinject(proposal_id=body.proposal_id))
+
+
+@router.get("/v1/fin/evolution/reinject")
+async def list_reinject(request: Request, proposal_id: str = Query(...)):
+    """列出某提案**还没回灌成功**的失败经验任务（R9 界面据此显示「回灌待完成」）。"""
+    uid = _uid(request)
+    try:
+        evolution_svc.list_proposals(project_id=_project_of(proposal_id), user_id=uid, limit=1)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return {"items": evolution_svc.reinject_pending(proposal_id=proposal_id)}
