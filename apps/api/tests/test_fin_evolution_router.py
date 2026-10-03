@@ -145,7 +145,7 @@ def env():
                 "INSERT INTO fin_param (project_id, stop_loss_pct, take_profit_pct, hold_days_max, "
                 "  max_positions, max_position_pct, min_order_amount, daily_max_new, daily_max_orders, "
                 "  daily_loss_halt_pct, account_drawdown_halt_pct, strategies) "
-                "VALUES (%s, 0.08, 0.20, 5, 5, 0.20, 1000, 5, 10, -0.03, -0.08, %s)",
+                "VALUES (%s, -0.08, 0.20, 5, 5, 0.20, 1000, 5, 10, -0.03, -0.08, %s)",
                 (pid, psycopg2.extras.Json([
                     {"key": "vb", "name": "量价突破", "version": "v1",
                      "params": {"vol_mult": 2.0, "confirm_days": 1}},
@@ -212,8 +212,8 @@ def _proposal_body(env, **over):
         "project_id": env["pid"],
         "evidence_refs": [env["exp_support"], env["exp_refute"]],
         "evidence_snapshot_id": env["review_snap"],
-        "candidate_config": {**base, "stop_loss_pct": 0.05},
-        "param_diff": E.config_diff(base, {**base, "stop_loss_pct": 0.05}),
+        "candidate_config": {**base, "stop_loss_pct": -0.05},
+        "param_diff": E.config_diff(base, {**base, "stop_loss_pct": -0.05}),
         "target": "strategy",
         "regime_tags": ["bull"],
         "rationale": "止损收紧，减少单笔回撤（依据两条经验）",
@@ -264,7 +264,7 @@ def test_happy_path_writes_proposal_plan_and_created_event(env):
     assert r.status_code == 200, r.text
     out = r.json()["proposal"]
     assert out["target"] == "strategy" and out["direction"] == "tighten"
-    assert out["param_diff"] == [{"field": "stop_loss_pct", "old": 0.08, "new": 0.05}]
+    assert out["param_diff"] == [{"field": "stop_loss_pct", "old": -0.08, "new": -0.05}]
 
     conn = _conn()
     try:
@@ -341,7 +341,7 @@ def test_param_outside_whitelist_rejected(env):
 
 def test_param_step_over_limit_rejected(env):
     base = _base_and_cur(env["pid"])
-    cand = {**base, "stop_loss_pct": 0.20}               # 0.08 → 0.20，远超 max_step 0.05
+    cand = {**base, "stop_loss_pct": -0.20}              # -0.08 → -0.20，远超 max_step 0.05
     body = _proposal_body(env, candidate_config=cand,
                           param_diff=E.config_diff(base, cand))
     r = _post(body)
@@ -409,10 +409,10 @@ def test_missing_snapshot_rejected(env):
 
 def test_tampered_param_diff_rejected(env):
     base = _base_and_cur(env["pid"])
-    cand = {**base, "stop_loss_pct": 0.05}
-    # 写入方谎报 old：真实基线是 0.08，它说 0.02
+    cand = {**base, "stop_loss_pct": -0.05}
+    # 写入方谎报 old：真实基线是 -0.08，它说 -0.02
     body = _proposal_body(env, candidate_config=cand,
-                          param_diff=[{"field": "stop_loss_pct", "old": 0.02, "new": 0.05}])
+                          param_diff=[{"field": "stop_loss_pct", "old": -0.02, "new": -0.05}])
     r = _post(body)
     assert r.status_code == 400, r.text
     assert "不一致" in r.text or "篡改" in r.text

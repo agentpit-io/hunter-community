@@ -111,7 +111,7 @@ def env():
                 "INSERT INTO fin_param (project_id, stop_loss_pct, take_profit_pct, hold_days_max, "
                 "  max_positions, max_position_pct, min_order_amount, daily_max_new, daily_max_orders, "
                 "  daily_loss_halt_pct, account_drawdown_halt_pct, strategies) "
-                "VALUES (%s, 0.08, 0.20, 5, 5, 0.20, 1000, 5, 10, -0.03, -0.08, %s)",
+                "VALUES (%s, -0.08, 0.20, 5, 5, 0.20, 1000, 5, 10, -0.03, -0.08, %s)",
                 (pid, psycopg2.extras.Json([
                     {"key": "vb", "name": "量价突破", "version": "v1",
                      "params": {"vol_mult": 2.0, "confirm_days": 1}}])))
@@ -122,7 +122,7 @@ def env():
                 "VALUES (%s, %s, %s, 'b', 'c', %s, %s, 'r7', 'evolution-algo-v1', 'strategy', "
                 "  'tighten', 'validating', 'r7 shadow test', 'test')",
                 (eid, pid, ["exp_dummy"], psycopg2.extras.Json([{"field": "stop_loss_pct",
-                                                                 "old": 0.08, "new": 0.05}]),
+                                                                 "old": -0.08, "new": -0.05}]),
                  ["bull"]))
             # 2031 年那段假日历（远离其它用例的日期池，避免交叉污染）
             _seed_calendar(cur, date(2031, 1, 1), 40)
@@ -284,8 +284,8 @@ def test_valuation_ref_is_recomputable(env):
 def test_shadow_prepare_gives_both_arms_same_initial_state(env):
     _put_plan(env)
     prep = E.shadow_prepare(proposal_id=env["eid"], market=_MARKET)
-    assert prep["base_config"]["stop_loss_pct"] == 0.08
-    assert prep["candidate_config"]["stop_loss_pct"] == 0.05     # base + 服务端 diff
+    assert prep["base_config"]["stop_loss_pct"] == -0.08
+    assert prep["candidate_config"]["stop_loss_pct"] == -0.05     # base + 服务端 diff
     assert prep["states"]["incumbent"] == prep["states"]["candidate"]  # 同初始现金 / 空仓
     assert prep["states"]["incumbent"]["cash_available"] == 100000
 

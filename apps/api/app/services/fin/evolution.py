@@ -96,7 +96,15 @@ DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://hunter:hunter@localhost:5
 # ── 版本键 ───────────────────────────────────────────────────────────────
 # 提案算法版本：白名单（参数集 + 方向语义 + 取值范围 + 单次最大变化）的版本。
 # **改白名单任何一项 = 换版本**（新增一个键，旧提案指着老版本，永不被新口径重新解释）。
-ALGO_VERSION = "evolution-algo-v1"
+#
+# v2（2026-10-04 · R10 出口验收）：`stop_loss_pct` 的取值范围 / 方向语义**改正为负号口径**
+#   （`[-0.5, -0.005]` · `tighter_when='larger'`），与 `fin_param` 的实际存量数据
+#   （1294/1312 个项目的 `stop_loss_pct = -0.04 ~ -0.03`）和其它两条熔断线**同口径**。
+#   v1 写的是**正号**范围 `[0.005, 0.5]`，与档位模板（`tiers.py`）和向导写进
+#   `fin_param.stop_loss_pct` 的**负数**对不上 —— 于是**任何向导开出来的真实项目都提不出提案**
+#   （候选配置里带着 `stop_loss_pct=-0.04`，一进门就被范围检查拒掉）。这是跨阶段缺陷，
+#   在 R10 的演示站验收里实测复现并修掉。旧提案仍指 `evolution-algo-v1`，不被新口径重新解释。
+ALGO_VERSION = "evolution-algo-v2"
 
 # `fin_evolution_event.kind` 闭集 —— 与 `0043`（+`0044`/`0045`）的 CHECK **逐字一致**，
 # 改一处必须改另一处。`failed` 是 `R7` 加的（迁移 `0044`）：验证**跑出来不达标**是独立语义，
@@ -160,9 +168,9 @@ _RISK_FIELDS: dict[str, dict[str, Any]] = {
 # `strategies[].params` 里（外层字段键形如 `strategies.<key>.params.<name>`）。
 _STRATEGY_FIELDS: dict[str, dict[str, Any]] = {
     "stop_loss_pct": {
-        "type": "ratio", "min": 0.005, "max": 0.5, "max_step": 0.05,
-        "tighter_when": "smaller", "baseline_version": "strategy-fields-v1",
-        "note": "止损幅度；越小 = 越早离场 = 越紧",
+        "type": "ratio", "min": -0.5, "max": -0.005, "max_step": 0.05,
+        "tighter_when": "larger", "baseline_version": "strategy-fields-v1",
+        "note": "止损线（**负数**，与 fin_param / 另两条熔断线同口径）；越接近 0 = 越早离场 = 越紧",
     },
     "take_profit_pct": {
         "type": "ratio", "min": 0.005, "max": 5.0, "max_step": 0.5,

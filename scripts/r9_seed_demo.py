@@ -144,8 +144,10 @@ def main():
         conn.rollback()
         conn.close()
     print("  base:", base)
-    # 白名单里的 stop_loss_pct 取正号口径 [0.005,0.5]，而本项目库里是负号口径 ——
-    # 改它会被闸门（正确地）拒掉。这里改两个口径一致的白名单字段。
+    # 这里改 `hold_days_max` / `take_profit_pct` 两个白名单字段。
+    # （历史注释已作废：R6 初版白名单曾把 `stop_loss_pct` 写成正号范围 `[0.005,0.5]`，
+    #  与 `fin_param` 的负号口径对不上；R10 已把它改正为负号 `[-0.5,-0.005]`，
+    #  `stop_loss_pct` 现在也能提案了 —— 见 `evolution.ALGO_VERSION` 的 v2 说明。）
     hd = int(base["hold_days_max"])
     new_hd = 1 if hd > 1 else hd + 1
     cand1 = {**base, "hold_days_max": new_hd}

@@ -72,17 +72,17 @@ def test_canon_num_forms_are_equal():
 
 
 def test_hash_config_is_deterministic_and_key_order_free():
-    a = E.hash_config({"max_position_pct": 0.2, "stop_loss_pct": 0.08})
-    b = E.hash_config({"stop_loss_pct": 0.08, "max_position_pct": 0.20})
+    a = E.hash_config({"max_position_pct": 0.2, "stop_loss_pct": -0.08})
+    b = E.hash_config({"stop_loss_pct": -0.08, "max_position_pct": 0.20})
     assert a == b
     assert E.hash_config({"max_position_pct": 0.2}) != a
 
 
 def test_config_diff_only_lists_changed_fields_sorted():
-    base = {"max_position_pct": 0.20, "stop_loss_pct": 0.08, "hold_days_max": 5}
-    cand = {"max_position_pct": 0.20, "stop_loss_pct": 0.05, "hold_days_max": 5}
+    base = {"max_position_pct": 0.20, "stop_loss_pct": -0.08, "hold_days_max": 5}
+    cand = {"max_position_pct": 0.20, "stop_loss_pct": -0.05, "hold_days_max": 5}
     assert E.config_diff(base, cand) == [
-        {"field": "stop_loss_pct", "old": 0.08, "new": 0.05}]
+        {"field": "stop_loss_pct", "old": -0.08, "new": -0.05}]
     assert E.config_diff(base, base) == []
 
 
@@ -131,16 +131,31 @@ def test_norm_diff_map_rejects_bad_shapes():
 # ── 方向判定 ────────────────────────────────────────────────────────────
 
 def test_direction_strategy_uses_whitelist_semantics():
-    base = {"stop_loss_pct": 0.08, "vol_mult": 2.0}
-    # 止损幅度变小 = 更紧
-    assert E.compute_direction("strategy", base, {"stop_loss_pct": 0.05, "vol_mult": 2.0},
+    # `stop_loss_pct` 是**负数**口径（与 fin_param 存量数据一致）：
+    # -0.08 → -0.05 = 止损线向 0 靠近 = 更早离场 = **更紧**。
+    base = {"stop_loss_pct": -0.08, "vol_mult": 2.0}
+    assert E.compute_direction("strategy", base, {"stop_loss_pct": -0.05, "vol_mult": 2.0},
                                ["stop_loss_pct"]) == "tighten"
     # 量能门槛变大 = 更紧
-    assert E.compute_direction("strategy", base, {"stop_loss_pct": 0.08, "vol_mult": 3.0},
+    assert E.compute_direction("strategy", base, {"stop_loss_pct": -0.08, "vol_mult": 3.0},
                                ["vol_mult"]) == "tighten"
-    # 一个放松、一个收紧 → mixed
-    assert E.compute_direction("strategy", base, {"stop_loss_pct": 0.10, "vol_mult": 2.0},
+    # -0.08 → -0.10 = 止损线离 0 更远 = 更晚离场 = 放松
+    assert E.compute_direction("strategy", base, {"stop_loss_pct": -0.10, "vol_mult": 2.0},
                                ["stop_loss_pct"]) == "loosen"
+
+
+def test_stop_loss_pct_uses_fin_param_sign_convention():
+    """跨阶段缺陷回归（R10）：档位模板（`tiers.py`）写进 `fin_param.stop_loss_pct` 的是**负数**
+    （`-0.04` / `-0.03`），白名单必须接受它 —— 否则**任何向导开出来的真实项目都提不出提案**。"""
+    assert E.normalize_candidate({"stop_loss_pct": -0.04}) == {"stop_loss_pct": -0.04}
+    assert E.normalize_candidate({"stop_loss_pct": -0.03}) == {"stop_loss_pct": -0.03}
+    # 正号（R6 初版口径）与越界值仍被拒
+    with pytest.raises(E.EvolutionGateError):
+        E.normalize_candidate({"stop_loss_pct": 0.04})
+    with pytest.raises(E.EvolutionGateError):
+        E.normalize_candidate({"stop_loss_pct": -0.001})            # 太接近 0
+    with pytest.raises(E.EvolutionGateError):
+        E.normalize_candidate({"stop_loss_pct": -0.8})              # 超出下界
 
 
 def test_direction_risk_uses_risk_compare_negative_is_tighter():

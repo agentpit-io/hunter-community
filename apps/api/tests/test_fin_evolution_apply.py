@@ -94,7 +94,7 @@ IK = {"X-Hunter-Internal-Key": INTERNAL_KEY}
 
 BASE_STRATEGY = {"key": "vb", "name": "量价突破", "version": "v1",
                  "params": {"vol_mult": 2.0, "confirm_days": 1}}
-BASE_PARAM = dict(stop_loss_pct=0.08, take_profit_pct=0.20, hold_days_max=5,
+BASE_PARAM = dict(stop_loss_pct=-0.08, take_profit_pct=0.20, hold_days_max=5,
                   max_position_pct=0.20, daily_loss_halt_pct=-0.03,
                   account_drawdown_halt_pct=-0.08)
 
@@ -206,7 +206,7 @@ def _base_config(pid):
 def _propose(env, *, mutate=None, target="strategy", plan_overrides=None, rationale="止损收紧"):
     """走唯一入口 `E.propose` 建一条提案。`mutate(base) -> dict` 给出候选完整配置。"""
     base = _base_config(env["pid"])
-    cand = mutate(base) if mutate else {**base, "stop_loss_pct": 0.05}
+    cand = mutate(base) if mutate else {**base, "stop_loss_pct": -0.05}
     return E.propose(
         project_id=env["pid"], evidence_refs=[env["exp"]],
         evidence_snapshot_id=env["review_snap"], candidate_config=cand,
@@ -353,7 +353,7 @@ def test_apply_happy_path_registers_version_and_switches(env):
     assert [l["field"] for l in _logs(env["pid"], "active_strategy")] == ["active_strategy"]
     assert _logs(env["pid"], f"strategies.{out['to_key']}")
     sl = _logs(env["pid"], "stop_loss_pct")
-    assert sl and abs(float(sl[-1]["old_value"]) - 0.08) < 1e-9 and abs(float(sl[-1]["new_value"]) - 0.05) < 1e-9
+    assert sl and abs(float(sl[-1]["old_value"]) - (-0.08)) < 1e-9 and abs(float(sl[-1]["new_value"]) - (-0.05)) < 1e-9
     # ④ fin_evolution_event 有 applied
     assert any(e["kind"] == "applied" for e in _events(env["pid"]))
 
@@ -380,7 +380,7 @@ def test_cas_rejects_stale_base_hash(env):
     conn = _conn()
     try:
         with pytest.raises(C.CasMismatchError):
-            C.activate_candidate(conn, env["pid"], candidate_config={**base, "stop_loss_pct": 0.05},
+            C.activate_candidate(conn, env["pid"], candidate_config={**base, "stop_loss_pct": -0.05},
                                  expected_base_config_hash=stale, new_key="vb#stale", actor="t")
     finally:
         conn.close()
@@ -400,7 +400,7 @@ def test_apply_rejected_after_concurrent_manual_change(env):
     conn = _conn()
     try:
         with conn.cursor() as cur:
-            cur.execute("UPDATE fin_param SET stop_loss_pct = 0.06 WHERE project_id = %s", (env["pid"],))
+            cur.execute("UPDATE fin_param SET stop_loss_pct = -0.06 WHERE project_id = %s", (env["pid"],))
         conn.commit()
     finally:
         conn.close()
