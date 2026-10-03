@@ -475,6 +475,12 @@ app.include_router(fin_review_router.router, prefix="/api")
 from app.routers import fin_runtime as fin_runtime_router
 app.include_router(fin_runtime_router.router, prefix="/api")
 
+# R6：受控自进化 · 提案层 · 内网口令提交（写）/ JWT 列出（读，供 R9 界面）。
+# 闸门（白名单 / 证据 / param_diff / 方向 · 红线 8 / regime）全在
+# services/fin/evolution.py（唯一入口）；这里只判通道与翻错误码。
+from app.routers import fin_evolution as fin_evolution_router
+app.include_router(fin_evolution_router.router, prefix="/api")
+
 @app.get("/api/health")
 async def health():
     # hunter_api_key 字段让 docker healthcheck 和运维一眼看出 SaaS 功能可不可用

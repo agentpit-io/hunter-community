@@ -107,6 +107,16 @@ def evolution_mode_requested() -> str:
     return "off"
 
 
+def evolution_enabled() -> bool:
+    """进化能力是否开启（`FIN_EVOLUTION_MODE != 'off'`）。
+
+    `R6` 的提案层用这一个判据（**别在 `evolution.py` 里另写 `mode != 'off'`** ——
+    开关只在这里读，见模块顶部的铁律）。`observe` / `paper` 都允许提案；
+    只不过 `paper` 的依赖缺一会先被降级成 `observe`（`runtime_state`）。
+    """
+    return evolution_mode_requested() != "off"
+
+
 def auto_apply() -> bool:
     """是否允许自动生效。本方案恒为 `False`（`FIN_AUTO_APPLY` 只允许 `0`）。
 
