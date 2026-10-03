@@ -160,3 +160,78 @@ def test_holdout_tainted_normalized_to_bool():
                             evidence=[{"evidence_kind": "report", "ref_id": "rpt_x",
                                        "holdout_tainted": 1}])
     assert out["evidence"][0]["holdout_tainted"] is True
+
+
+# ── R5（0042）· 结构化标签列的校验 ────────────────────────────────────────
+
+def test_new_columns_default_to_none():
+    """九个新列都不传 → 全 None（**不猜、不回填**）。"""
+    out = M.validate_append(kind="fact", statement="缩量后追高胜率下降", evidence=EV)
+    for key in ("memory_layer", "polarity", "symbols", "strategy_keys", "regime_tags",
+                "regime_source", "importance", "last_validated_at", "duplicate_of"):
+        assert out[key] is None, key
+
+
+def test_memory_layer_closed_set():
+    ok = M.validate_append(kind="verified", statement="缩量后追高胜率下降", evidence=EV,
+                           method="backtest", sample_size=30, memory_layer="semantic")
+    assert ok["memory_layer"] == "semantic"
+    for bad in ("freeform", "Episodic", "short-term"):   # 自由文本 / 大小写不符 / 拼错
+        with pytest.raises(M.MemoryValidationError):
+            M.validate_append(kind="fact", statement="缩量后追高胜率下降",
+                              evidence=EV, memory_layer=bad)
+
+
+def test_polarity_closed_set():
+    for good in ("support", "refute", "neutral"):
+        out = M.validate_append(kind="fact", statement="缩量后追高胜率下降",
+                                evidence=EV, polarity=good)
+        assert out["polarity"] == good
+    with pytest.raises(M.MemoryValidationError):
+        M.validate_append(kind="fact", statement="缩量后追高胜率下降",
+                          evidence=EV, polarity="negative")
+
+
+def test_symbols_must_be_normalized():
+    out = M.validate_append(kind="fact", statement="缩量后追高胜率下降", evidence=EV,
+                            symbols=["US:0700", "HK:00700", "HK:00700"])   # 去重
+    assert out["symbols"] == ["HK:00700", "US:0700"]
+    # 裸代码 / 空元素 / 非字符串 → 拒（回到「文本匹配」就是撞车的根源）
+    for bad in (["0700"], [""], [123], "HK:00700"):
+        with pytest.raises(M.MemoryValidationError):
+            M.validate_append(kind="fact", statement="缩量后追高胜率下降",
+                              evidence=EV, symbols=bad)
+
+
+def test_strategy_memory_requires_keys_and_verified():
+    """规则 9：`memory_layer='strategy'` ⇒ 有 strategy_keys 且 kind='verified'。"""
+    out = M.validate_append(kind="verified", statement="缩量后追高胜率下降", evidence=EV,
+                            method="backtest", sample_size=30, memory_layer="strategy",
+                            strategy_keys=["sample-fixed@1.0", "sample-fixed@1.1"])
+    assert out["strategy_keys"] == ["sample-fixed@1.0", "sample-fixed@1.1"]
+    with pytest.raises(M.MemoryValidationError):        # 缺 strategy_keys
+        M.validate_append(kind="verified", statement="缩量后追高胜率下降", evidence=EV,
+                          method="backtest", sample_size=30, memory_layer="strategy")
+    with pytest.raises(M.MemoryValidationError):        # 不是 verified
+        M.validate_append(kind="fact", statement="缩量后追高胜率下降", evidence=EV,
+                          memory_layer="strategy", strategy_keys=["k@1"])
+
+
+def test_regime_tags_and_source():
+    out = M.validate_append(kind="fact", statement="缩量后追高胜率下降", evidence=EV,
+                            regime_tags=["unknown"], regime_source="regime-v1")
+    assert out["regime_tags"] == ["unknown"]
+    assert out["regime_source"] == "regime-v1"
+    with pytest.raises(M.MemoryValidationError):
+        M.validate_append(kind="fact", statement="缩量后追高胜率下降",
+                          evidence=EV, regime_tags=[""])
+
+
+def test_importance_range():
+    out = M.validate_append(kind="fact", statement="缩量后追高胜率下降",
+                            evidence=EV, importance=0.75)
+    assert out["importance"] == 0.75
+    for bad in (-0.1, 1.1, True):              # 越界 / 布尔
+        with pytest.raises(M.MemoryValidationError):
+            M.validate_append(kind="fact", statement="缩量后追高胜率下降",
+                              evidence=EV, importance=bad)

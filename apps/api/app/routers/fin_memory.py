@@ -93,6 +93,16 @@ class EvidenceIn(BaseModel):
     valid_until: Optional[str] = None
     memory_snapshot_id: Optional[str] = None
     supersedes: Optional[str] = None
+    # ── R5（`0042`）结构化标签。校验在服务层（唯一入口），这一层只搬运 ──
+    memory_layer: Optional[str] = None
+    polarity: Optional[str] = None
+    symbols: Optional[list[str]] = None
+    strategy_keys: Optional[list[str]] = None
+    regime_tags: Optional[list[str]] = None
+    regime_source: Optional[str] = None
+    importance: Optional[float] = None
+    last_validated_at: Optional[str] = None
+    duplicate_of: Optional[str] = None
     # 以下两个被服务端忽略（保留在模型里，专为把「传了也没用」测出来）
     source: Optional[str] = None
     exposure_scope: Optional[str] = None
@@ -139,6 +149,15 @@ def _append_kwargs(body: EvidenceIn, caller: str, user_id: Optional[str]) -> dic
         valid_until=body.valid_until,
         memory_snapshot_id=body.memory_snapshot_id,
         supersedes=body.supersedes,
+        memory_layer=body.memory_layer,
+        polarity=body.polarity,
+        symbols=body.symbols,
+        strategy_keys=body.strategy_keys,
+        regime_tags=body.regime_tags,
+        regime_source=body.regime_source,
+        importance=body.importance,
+        last_validated_at=body.last_validated_at,
+        duplicate_of=body.duplicate_of,
         # body.source / body.exposure_scope 到此为止 —— 服务层根本不接这两个参数
     )
 

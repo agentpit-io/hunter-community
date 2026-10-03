@@ -1,106 +1,112 @@
-"""经验消费点 · **规范化标的的精确匹配**（第四段 R3 · `plan/R3.md` §一.4）。
+"""经验消费点 · **规范化标的的精确匹配**（第四段 `R3` 建，`R5` 改口径读 `symbols` 列）。
 
-R3 这一轮经验对决策的作用**只有一条，且是安全方向**：
+经验对决策的作用**只有一条，且是安全方向**：
 
-> 冻结经验集里若含「命中本次标的」的负向结论 → 本轮该标的 `halted`，走「如实记不下单」的路径。
+> 冻结经验集里若含「**命中本次标的的负向结论**」→ 本轮该标的 `halted`，
+> 走「如实记不下单」的路径。
 
 它**只可能让系统更少下单**，不可能凭空多下单 —— 所以即便经验有误，也不会放大风险。
-（「经验命中就加仓 / 加数量」这类正向放大，本轮**绝不做**。）
+（「经验命中就加仓 / 加数量」这类正向放大，本模块**绝不做**。）
 
-## 判据 = 规范化标的的**精确匹配**，不是文本包含
+## ⚠️ R5 改了什么（`plan/R5.md` §一.3）
 
-`03 §4-A` 点名：「**不许**对 `applicability` 自由文本做**包含**匹配」。缘由是一句话：
-包含匹配的下场是 **`US:0700` 把 `HK:00700` 拦掉**（两串裸 `0700` 撞车），
-而误拦会让系统在本该下单时不下单，**且没人看得出原因**（checkpoint 里只有一条别的市场的经验）。
+`R5` 之前（`R3`）：判据是「`applicability` 自由文本里**精确写出**了这个标的」。
+`R5` 之后（现行）：**读经验条目的 `symbols` 列**（`0042` 加的 `TEXT[]`，
+元素是规范化标的 `<MARKET>:<CODE>`），**不再对 `applicability` 做任何匹配**。
 
-所以口径写死成两步（`spec` 逐字）：
+为什么必须改：文本匹配只能做到「精确写出才对」，而「精确」这件事本该由**列**保证，
+不该由「写自由文本的人恰巧写对了」保证。`03 §4-A` 点名：**不得从 `applicability`
+文本做包含匹配**；`symbols` 这一列存在的全部理由就是让 `HK:00700` 与 `US:0700`
+**判为不同标的**（裸 `0700` 撞车是包含匹配的经典事故）。
 
-1. 把本次标的规范化成 **`<market>:<code>`** —— 市场取自项目 / 决策上下文，代码去空格转大写。
-   例：`HK` + `00700` → `HK:00700`。
-2. 把 `applicability` **按非字母数字字符切词**，逐词规范化后与之**全等比较**。
+### 旧行（`symbols IS NULL`）不再拦 —— 这是**有意的**，不是回归
 
-第 2 步的「逐词」在本实现里是一串**连续**的词：`signature("HK:00700") = ("HK", "00700")`，
-在 `applicability` 的切词序列里找**连续子序列**（`("HK","00700")` 两词紧邻）。
-这样写有三个好处，每一条都对着真值表：
+`0042` 明文规定 **旧行一律保持 `NULL`、不凭文本猜标的**。于是「迁移前写的经验」
+（只有 `applicability`、没有 `symbols`）在新口径下**不再拦单**。这是两件事的**必然**取舍：
+要么保留文本匹配（那就没真的改成读列），要么旧行不拦（那就等于少拦几条）。
+任务书选了后者（`R5.md` §一.1 三条硬约束 + `03 §4-A`）。**回归不是「旧行为原样」，
+而是「负向经验命中 → `halted` 这件事仍然成立」** —— 用一条带 `symbols` 的新经验复现
+（见 `apps/fin-worker/tests/test_memory_gate.py` 与 `R5` 成果文档）。
 
-| `applicability` 原文 | 本次标的 | 命中？ | 为什么 |
-|---|---|---|---|
-| `HK:00700 追高后回撤` | `HK:00700` | ✅ | 切词 `["HK","00700","追","高",…]` 里 `HK`,`00700` 连续且全等 |
-| `US:0700 同类形态` | `HK:00700` | ❌ | 连续子序列是 `("US","0700")`，市场不同 —— 这正是「规范化」要解决的问题 |
-| `放量后 0700 回落` | `HK:00700` | ❌ | 只有 `00700` 一个词，凑不出两词的签名（**裸代码不是标的声明**） |
+## 判据（三条 + 一条负向，全部成立才算拦）
 
-`CN_A` 这类带下划线的市场码天然被切词分开（`CN_A:601398` → `("CN","A","601398")`），
-所以用连续子序列而不是两词对，两个市场的写法共用一套代码。
+1. `kind == 'verified'` —— 真做过验证的结论，不是假设；
+2. `status == '已确认'` —— 没被推翻、也不是待验证；
+3. `symbols` 列**精确包含**规范化后的本次标的（字符串全等，不是包含、不是模糊）；
+4. **负向**（`polarity`）：显式 `support` / `neutral` 不拦；`refute` **以及 `NULL`
+   （旧行未回填，未知）**一律拦 —— **fail-closed**：拿不准它是不是负向时按负向处理，
+   宁可少下一单（同 `R3`「只收紧不放松」的方向）。
 
-## 宁可保守（漏拦），也不模糊匹配
+「只收紧不放松」在这里读作：**从「任何已验证结论都拦」收紧到「负向才拦」，
+但把「未知」也当负向拦** —— 净效果是「拦住的不比原来少（旧行照拦），新写的正向结论才放行」。
 
-写法不同的同一只票（`港股 00700` → 切词是 `("港","股","00700")`，市场词是中文）**判不命中**。
-这是**有意的**：加中文市场别名表就是把「精确」重新变成「模糊」——
-而且经验写 `applicability` 的是我们自己（复核工作流）与真人（成长页），
-都该写规范化形态。真要放宽，等 `R5` 的 `symbols` 列落地后**改读那一列**（见正文 §交接）。
+## `normalize_symbol` 必须与 api 侧一致
 
-## ⚠️ 下一阶段交接（`R5` 必读）
+规范化口径的真值在 `apps/api/app/services/fin/symbols.py`（写 `symbols` 列的地方）。
+fin-worker 与 api 是两个独立应用（各自 venv、各自 `sys.path`），**没法 import**，
+所以这里保留一份**最小镜像**。改任一处必须同时改另一处 —— 两边不一致的表现是
+**明明写进去的标的不被拦**（字符串差一个字符就不相等），且**不报错**。
 
-`symbols` 这一列**本轮还没有**（`0042_memory_layer.sql` 在 `R5` 才加）。所以本轮只能对
-`applicability` 做上面的规范化匹配。**等 `R5` 加了 `symbols` 之后，这里的判定要改成读
-`symbols` 列**（那时不再依赖自由文本）—— 本模块就是那个改动点，别在别处另写一份。
+```python
+# api：      symbols.normalize('HK', ' aapl ')          -> 'HK:AAPL'
+# fin-worker： memory_gate.normalize_symbol('HK', ' aapl ') -> 'HK:AAPL'   # 必须相等
+```
 """
 
 from __future__ import annotations
 
-import re
 from typing import Any, Optional
 
-# 切词：**非字母数字**都算分隔符（中文字、空格、`:` `-` `/` `_` `.` 全是）。
-_NON_ALNUM = re.compile(r"[^0-9A-Za-z]+")
+# 本仓统一的市场三值（与 `symbols.MARKETS` / `memory.MARKETS` 同源）。
+_MARKET_ALIASES = {
+    "A": "CN_A", "CN": "CN_A", "CN-A": "CN_A", "CHA": "CN_A", "CN_A": "CN_A",
+    "HK": "HK", "HKG": "HK",
+    "US": "US", "USA": "US",
+}
+# 交易所后缀（`fin_trade.code` 里 `AAPL` 与 `AAPL.US` 两种形态都出现过）。
+_EXCHANGE_SUFFIXES = (".US", ".HK", ".SH", ".SZ", ".BJ")
+
+# 显式「不是负向」的取值 —— 只有这两个不拦；`refute` 与 `None`（未知）都拦。
+_NON_BLOCKING_POLARITIES = ("support", "neutral")
+
+
+def normalize_market(market: Any) -> str:
+    """市场写法 → `CN_A` / `HK` / `US`；认不出 → 原样大写（**不抛**，见 `normalize_symbol`）。"""
+    key = str(market or "").strip().upper().replace(" ", "")
+    return _MARKET_ALIASES.get(key, key)
 
 
 def normalize_symbol(market: Any, code: Any) -> str:
-    """把「市场 + 代码」规范化成 `<MARKET>:<CODE>`（去空格、转大写）。
+    """把「市场 + 代码」规范化成 `<MARKET>:<CODE>`（去空格、转大写、去交易所后缀）。
 
-    市场取**决策上下文里的规范三值**（`CN_A` / `HK` / `US`），不在这里翻译别名 ——
-    `_resolve_market` 已经把它归一到那三个值，这里再猜一次就是第二套口径。
+    **与 `apps/api/app/services/fin/symbols.normalize` 逐字对齐**（见模块文档末节）。
+    代码为空 → 返回 `""`（调用方据此判「算不出标的」，不是编一个 `HK:`）。
+    **不做零填充、不剥前导零** —— `US:0700` 里那个 `0` 是身份的一部分。
     """
-    return f"{str(market or '').strip().upper()}:{str(code or '').strip().upper()}"
+    text = str(code or "").strip().upper()
+    for suffix in _EXCHANGE_SUFFIXES:
+        if text.endswith(suffix) and len(text) > len(suffix):
+            text = text[: -len(suffix)]
+            break
+    text = text.replace(" ", "")
+    if not text:
+        return ""
+    return f"{normalize_market(market)}:{text}"
 
 
-def symbol_signature(symbol: Any) -> tuple[str, ...]:
-    """规范化标的 → 切词后的词序列（全大写）。`HK:00700` → `("HK","00700")`。"""
-    return tuple(w.upper() for w in _NON_ALNUM.split(str(symbol or "")) if w)
-
-
-def applicability_hits(applicability: Any, target_symbol: Any) -> bool:
-    """`applicability` 里**有没有精确写出**这个标的（不是包含、不是模糊）。
-
-    判据：`applicability` 的切词序列里存在**连续的一段**与 `signature(target)` 全等。
-    空目标 / 空 `applicability` / 单串裸代码 → 一律不命中（保守）。
-    """
-    sig = symbol_signature(target_symbol)
-    if not sig or not str(target_symbol or "").strip():
-        return False
-    words = [w.upper() for w in _NON_ALNUM.split(str(applicability or "")) if w]
-    n = len(sig)
-    if n == 0 or len(words) < n:
-        return False
-    for i in range(len(words) - n + 1):
-        if tuple(words[i:i + n]) == sig:
-            return True
-    return False
+def _symbols_of(item: dict) -> set[str]:
+    """这条经验的 `symbols` 列（`TEXT[]`）→ 集合。空 / 缺失 / 形状不对 → 空集合。"""
+    raw = item.get("symbols")
+    if not isinstance(raw, (list, tuple)):
+        return set()
+    return {str(s).strip() for s in raw if str(s or "").strip()}
 
 
 def is_blocking(item: dict, *, market: Any, code: Any) -> bool:
-    """这条冻结经验是否**拦本次标的**。
+    """这条冻结经验是否**拦本次标的**（判据见模块文档，四条同时成立）。
 
-    三条同时成立才算（`plan/R3.md` §一.4 的字面判据）：
-
-    1. `kind == 'verified'` —— 真做过验证的结论，不是假设；
-    2. `status == '已确认'` —— 没被推翻、也不是待验证；
-    3. `applicability` **精确命中**本次标的（`applicability_hits`）。
-
-    ⚠️ **「负向」这一层本轮判不出来**：区分正负的 `polarity` 列在 `0042`（`R5`）才加。
-    本轮按任务书的字面判据执行 —— 结论是**只收紧**（任何关于该标的的已验证结论都会拦），
-    方向安全。`R5` 拿到 `polarity` 之后应在这里加上 `polarity='refute'`（或等价物），
-    并回来更新本模块与成果文档（这条交接写在 `R3` 成果文档「下一阶段交接」里）。
+    ⚠️ `symbols` 是 `R5` 之后唯一的标的来源。**不再看 `applicability`** ——
+    那是 `R3` 的过渡做法，`R5` 已按 `03 §4-A` 换成读列。
     """
     if not isinstance(item, dict):
         return False
@@ -108,7 +114,15 @@ def is_blocking(item: dict, *, market: Any, code: Any) -> bool:
         return False
     if str(item.get("status") or "") != "已确认":
         return False
-    return applicability_hits(item.get("applicability"), normalize_symbol(market, code))
+    # 负向层（fail-closed）：只有显式 support / neutral 放行；refute 与「未知(NULL)」都拦。
+    polarity = item.get("polarity")
+    polarity = None if polarity in (None, "") else str(polarity).strip()
+    if polarity in _NON_BLOCKING_POLARITIES:
+        return False
+    target = normalize_symbol(market, code)
+    if not target:
+        return False
+    return target in _symbols_of(item)
 
 
 def blocking_experience(items: Any, *, market: Any, code: Any) -> Optional[dict]:
@@ -122,6 +136,9 @@ def blocking_experience(items: Any, *, market: Any, code: Any) -> Optional[dict]
             return {
                 "experience_id": item.get("experience_id"),
                 "statement": item.get("statement"),
+                # 命中依据：**读的是列**（`R5` 起）。留 `applicability` 只为给人看上下文。
+                "symbols": list(item.get("symbols") or []),
+                "polarity": item.get("polarity"),
                 "applicability": item.get("applicability"),
                 "kind": item.get("kind"),
                 "status": item.get("status"),

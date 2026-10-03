@@ -102,9 +102,11 @@ def _memory(*items, snap="msnap_test"):
     return {"memory_snapshot_id": snap, "items": list(items)}
 
 
-def _negative(app="HK:00700"):
+def _negative(symbols=("HK:00700",), *, polarity="refute"):
+    """一条负向经验。**`R5` 起命中依据是 `symbols` 列**（不再看 `applicability`）。"""
     return {"experience_id": "exp_neg1", "kind": "verified", "status": "已确认",
-            "statement": "追高后回撤概率显著上升", "applicability": app}
+            "statement": "追高后回撤概率显著上升", "symbols": list(symbols),
+            "polarity": polarity, "applicability": "港股 · 缩量整理后追高"}
 
 
 def test_memory_hit_halts_the_symbol():
@@ -117,8 +119,14 @@ def test_memory_hit_halts_the_symbol():
 
 
 def test_memory_of_another_market_does_not_halt():
-    """`US:0700` 拦不掉 `HK:00700` —— 规范化标的精确匹配（不是文本包含）。"""
-    d = _build(memory=_memory(_negative("US:0700")))
+    """`US:0700` 拦不掉 `HK:00700` —— 规范化标的全等（不是文本包含）。"""
+    d = _build(memory=_memory(_negative(("US:0700",))))
+    assert StrategyDecision.from_dict(d).intent.code == "00700"
+
+
+def test_support_experience_does_not_halt():
+    """`R5` 的负向层：显式 `support` 不拦（只有 `refute` 与未知的 `NULL` 才拦）。"""
+    d = _build(memory=_memory(_negative(polarity="support")))
     assert StrategyDecision.from_dict(d).intent.code == "00700"
 
 
@@ -136,7 +144,7 @@ def test_no_memory_still_orders():
 # ── ③ memory 进契约与命令留痕 ─────────────────────────────────────────────
 
 def test_decision_carries_memory_into_contract_and_command():
-    d = StrategyDecision.from_dict(_build(memory=_memory(_negative("US:0700"))))
+    d = StrategyDecision.from_dict(_build(memory=_memory(_negative(("US:0700",)))))
     assert d.memory["memory_snapshot_id"] == "msnap_test"
     assert d.memory["experience_ids"] == ["exp_neg1"]
     cmd = d.to_paper_command(project_id="prj_1", idempotency_key="k")

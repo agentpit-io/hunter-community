@@ -74,6 +74,18 @@
   复核工作流没有 JWT，人工成交的「人味」只能这样落到服务端判定里（见 `resolve_source`）。
   **没有新增第三个工具名** —— 仍然是 `memory.query` / `memory.append_evidence` 两个。
 
+## R5（`0042`）加的三件（`plan/R5.md` §一）
+
+- **九个结构化列**：`memory_layer` / `polarity` / `symbols` / `strategy_keys` /
+  `regime_tags` / `regime_source` / `importance` / `last_validated_at` / `duplicate_of`。
+  **旧行一律 NULL，不回填、不凭文本猜**（迁移侧见 `0042` 文件头）。
+  `memory.query` 的返回体（`_item`）带上它们，消费方（`memory_gate` / `R6` 聚合）
+  从此读列，不再读 `applicability` 自由文本。
+- **规则 9**（`01 §8.3`）：`memory_layer='strategy'` ⇒ 必须有 `strategy_keys`
+  且 `kind='verified'` —— 策略记忆是「以后该怎么买卖」，猜一条进来会让进化按想象改参数。
+- **`importance` 只影响展示排序，不参与统计加权**（`03 §4-A`）——
+  `R6` 的提案聚合**不许**按它加权。这条写在这里，是因为将来加聚合的人一定会先看这个模块。
+
 ## 权限：谁可以碰这三张表
 
 api 连接用的是库属主身份（见 `0041` 文件头那三条理由），能力来自**连接身份**。
@@ -98,6 +110,7 @@ import psycopg2
 import psycopg2.extras
 
 from app.services.fin import switches
+from app.services.fin import symbols as symbols_svc
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://hunter:hunter@localhost:5432/hunter")
 
@@ -110,6 +123,13 @@ SOURCES = ("ai", "human_mixed")
 EVIDENCE_KINDS = ("trade", "report", "fact", "snapshot", "external")
 PURPOSES = ("decision", "review", "holdout")
 MARKETS = ("CN_A", "HK", "US")
+
+# ── R5（`0042`）新列的闭集 —— 与迁移里的 CHECK **逐字一致**，改一处必须改另一处 ──
+# `memory_layer` 取 `02` 的「多层记忆」一节（Episodic / Semantic / Procedural）
+# 外加 `strategy`（策略记忆）。**闭集**，不许自由文本 —— 自由文本无法确定性聚合。
+MEMORY_LAYERS = ("episodic", "semantic", "procedural", "strategy")
+# 支持 / 推翻 / 中性。`refute`（失败经验）是自进化的燃料，必须保留。
+POLARITIES = ("support", "refute", "neutral")
 
 # 有对应表、可以「验在不在」的引用（规则 3）。`external` **故意不在**这里 —— 见模块文档。
 # `trade` 也不在这张表里：它除了「验在不在」还要把 `source` 读回来（人机归因，见 `_verify_refs`）。
@@ -206,6 +226,45 @@ def _clean_num(value: Any, *, field: str) -> Optional[float]:
     return num
 
 
+def _clean_str_list(value: Any, *, field: str) -> Optional[list[str]]:
+    """一个字符串数组入参 → **去重排序**的列表；空 / 未给 → `None`。
+
+    排序是为了确定性：同一批值无论输入顺序如何，落到列里都是同一个数组
+    （`GROUP BY` 要的是同一个集合只有一个形态）。元素必须是字符串。
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, (str, bytes)) or not isinstance(value, (list, tuple, set)):
+        raise MemoryValidationError(f"{field} 应是字符串数组，收到 {type(value).__name__}")
+    out: set[str] = set()
+    for item in value:
+        if not isinstance(item, str):
+            raise MemoryValidationError(f"{field} 的元素应是字符串，收到 {type(item).__name__}")
+        text = item.strip()
+        if not text:
+            raise MemoryValidationError(f"{field} 的元素不能为空")
+        out.add(text)
+    return sorted(out)
+
+
+def _clean_symbols(value: Any) -> Optional[list[str]]:
+    """`symbols` 入参 → **规范化形态**的去重排序列表（`<MARKET>:<CODE>`）。
+
+    服务端**再校验一次形态**：写入口径在 `services/fin/symbols.py`，但入参可能来自
+    前端 / 工作流，绕过那一步直接塞一个裸代码（`0700`）就会让 `HK:00700` 与 `US:0700`
+    重新撞车 —— 那正是这一列要消灭的东西。形状不对 → 400，不静默改写。
+    """
+    items = _clean_str_list(value, field="symbols")
+    if items is None:
+        return None
+    for sym in items:
+        if not symbols_svc.is_symbol(sym):
+            raise MemoryValidationError(
+                f"symbols 元素 {sym!r} 不是规范化标的形态（应形如 HK:00700 / US:0700 / CN_A:601398）"
+                "—— 规范化走 services/fin/symbols.normalize，别直接塞裸代码")
+    return items
+
+
 def validate_append(
     *,
     kind: Any,
@@ -218,6 +277,15 @@ def validate_append(
     confidence: Any = None,
     uncertainty: Any = None,
     supersedes: Any = None,
+    memory_layer: Any = None,
+    polarity: Any = None,
+    symbols: Any = None,
+    strategy_keys: Any = None,
+    regime_tags: Any = None,
+    regime_source: Any = None,
+    importance: Any = None,
+    last_validated_at: Any = None,
+    duplicate_of: Any = None,
 ) -> dict:
     """`append_evidence` 的**纯校验**（规则 1/2/5/6 + 枚举 + 取值范围），不碰库。
 
@@ -318,6 +386,37 @@ def validate_append(
 
     supersedes = None if supersedes in (None, "") else str(supersedes).strip()
 
+    # ── R5（`0042`）新增列 ────────────────────────────────────────────
+    memory_layer = None if memory_layer in (None, "") else str(memory_layer).strip()
+    if memory_layer is not None and memory_layer not in MEMORY_LAYERS:
+        raise MemoryValidationError(
+            f"memory_layer 必须是 {', '.join(MEMORY_LAYERS)} 之一或留空，收到 {memory_layer!r}")
+    polarity = None if polarity in (None, "") else str(polarity).strip()
+    if polarity is not None and polarity not in POLARITIES:
+        raise MemoryValidationError(
+            f"polarity 必须是 {', '.join(POLARITIES)} 之一或留空，收到 {polarity!r}")
+
+    symbols_v = _clean_symbols(symbols)
+    strategy_keys_v = _clean_str_list(strategy_keys, field="strategy_keys")
+    regime_tags_v = _clean_str_list(regime_tags, field="regime_tags")
+    regime_source = None if regime_source in (None, "") else str(regime_source).strip()
+
+    importance_v = _clean_num(importance, field="importance")
+    if importance_v is not None and not (0.0 <= importance_v <= 1.0):
+        raise MemoryValidationError(f"importance 应在 0~1 之间，收到 {importance_v}")
+    last_validated_dt = _parse_dt(last_validated_at, field="last_validated_at")
+    duplicate_of = None if duplicate_of in (None, "") else str(duplicate_of).strip()
+
+    # 规则 9（`01 §8.3`）：策略记忆必须来自真值 —— 有稳定版本键、且是验证结论。
+    # 「策略记忆」是「以后该怎么买卖」，猜一条进来会让进化基于想象改参数（那是自进化的头号死法）。
+    if memory_layer == "strategy":
+        if not strategy_keys_v:
+            raise MemoryValidationError(
+                "memory_layer='strategy' 必须提供 strategy_keys（稳定版本键，不是显示名）")
+        if kind != "verified":
+            raise MemoryValidationError(
+                "memory_layer='strategy' 的 kind 必须是 'verified'（策略记忆要来自回测 / 实盘真值）")
+
     return {
         "kind": kind,
         "statement": statement,
@@ -329,6 +428,15 @@ def validate_append(
         "uncertainty": uncertainty_v,
         "evidence": cleaned,
         "supersedes": supersedes,
+        "memory_layer": memory_layer,
+        "polarity": polarity,
+        "symbols": symbols_v,
+        "strategy_keys": strategy_keys_v,
+        "regime_tags": regime_tags_v,
+        "regime_source": regime_source,
+        "importance": importance_v,
+        "last_validated_at": last_validated_dt,
+        "duplicate_of": duplicate_of,
     }
 
 
@@ -488,6 +596,15 @@ def append_evidence(
     valid_until: Any = None,
     memory_snapshot_id: Optional[str] = None,
     supersedes: Any = None,
+    memory_layer: Any = None,
+    polarity: Any = None,
+    symbols: Any = None,
+    strategy_keys: Any = None,
+    regime_tags: Any = None,
+    regime_source: Any = None,
+    importance: Any = None,
+    last_validated_at: Any = None,
+    duplicate_of: Any = None,
     conn=None,
 ) -> dict:
     """**唯一写入口**。八条硬校验（见模块文档），任一不过 → `MemoryValidationError`（→400）。
@@ -512,7 +629,12 @@ def append_evidence(
     fields = validate_append(kind=kind, statement=statement, evidence=evidence,
                              market=market, status=status, method=method,
                              sample_size=sample_size, confidence=confidence,
-                             uncertainty=uncertainty, supersedes=supersedes)
+                             uncertainty=uncertainty, supersedes=supersedes,
+                             memory_layer=memory_layer, polarity=polarity,
+                             symbols=symbols, strategy_keys=strategy_keys,
+                             regime_tags=regime_tags, regime_source=regime_source,
+                             importance=importance, last_validated_at=last_validated_at,
+                             duplicate_of=duplicate_of)
 
     as_of_dt = _parse_dt(as_of, field="as_of")
     if as_of_dt is None:
@@ -555,6 +677,19 @@ def append_evidence(
                     raise MemoryValidationError(
                         f"该经验已被 {superseded_row['superseded_by']} 推翻，不能再次推翻")
 
+            # 判重指向（`duplicate_of`）：与 `supersedes` 同一道校验 —— 引用必须真实存在、
+            # 且同一项目。**不删**（追加不删，与 `superseded_by` 同精神）。
+            if fields["duplicate_of"]:
+                cur.execute(
+                    "SELECT project_id FROM fin_experience WHERE experience_id = %s",
+                    (fields["duplicate_of"],))
+                dup_row = cur.fetchone()
+                if not dup_row:
+                    raise MemoryValidationError(
+                        f"判重指向的经验不存在：{fields['duplicate_of']}")
+                if dup_row["project_id"] != project_id:
+                    raise MemoryValidationError("只能指向同一项目下的经验")
+
             cur.execute(
                 """
                 INSERT INTO fin_experience (
@@ -563,14 +698,18 @@ def append_evidence(
                   method, sample_size, uncertainty, confidence,
                   as_of, valid_from, valid_until,
                   exposure_scope, holdout_tainted,
-                  memory_snapshot_id, created_by
+                  memory_snapshot_id, created_by,
+                  memory_layer, polarity, symbols, strategy_keys,
+                  regime_tags, regime_source, importance, last_validated_at, duplicate_of
                 ) VALUES (
                   %s, %s, %s, %s, %s, %s, %s,
                   %s, %s,
                   %s, %s, %s, %s,
                   %s, %s, %s,
                   %s, %s,
-                  %s, %s
+                  %s, %s,
+                  %s, %s, %s, %s,
+                  %s, %s, %s, %s, %s
                 )
                 """,
                 (
@@ -582,6 +721,9 @@ def append_evidence(
                     as_of_dt, valid_from_dt, valid_until_dt,
                     exposure_scope, tainted,
                     memory_snapshot_id, created_by,
+                    fields["memory_layer"], fields["polarity"], fields["symbols"],
+                    fields["strategy_keys"], fields["regime_tags"], fields["regime_source"],
+                    fields["importance"], fields["last_validated_at"], fields["duplicate_of"],
                 ),
             )
 
@@ -816,6 +958,17 @@ def _item(row: dict, evidence: list[dict], now: datetime) -> dict:
         "valid_until": _jsonable(valid_until),
         "source": row["source"],
         "superseded_by": row.get("superseded_by"),
+        # ── R5（`0042`）结构化标签：消费方（`memory_gate` / `R6` 聚合）读的是这些列，
+        # 不再从 `applicability` 自由文本里猜。旧行为 NULL（**不回填**，见 `0042` 文件头）。
+        "memory_layer": row.get("memory_layer"),
+        "polarity": row.get("polarity"),
+        "symbols": row.get("symbols"),
+        "strategy_keys": row.get("strategy_keys"),
+        "regime_tags": row.get("regime_tags"),
+        "regime_source": row.get("regime_source"),
+        "importance": _jsonable(row.get("importance")),
+        "last_validated_at": _jsonable(row.get("last_validated_at")),
+        "duplicate_of": row.get("duplicate_of"),
         "evidence_count": len(evidence),
         "evidence": evidence,
         # 派生标志，不是状态值（方案 §1.4：状态只有三种）

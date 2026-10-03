@@ -529,3 +529,92 @@ def test_invalid_market_400(env):
     r = _post_internal_evidence(env, market="JP")
     assert r.status_code == 400
     assert "market" in r.json()["detail"]
+
+
+# ════════════════════════════════════════════════════════════════════════
+# R5（0042）· 结构化标签列 —— 经唯一入口写、经唯一读入口读回
+# ════════════════════════════════════════════════════════════════════════
+
+def test_r5_columns_roundtrip(env):
+    """九个新列经唯一写入口落库、经唯一读入口读回 —— 一个都不丢。"""
+    r = _post_internal_evidence(
+        env, kind="verified", method="全样本回测", sample_size=30,
+        statement="港股缩量整理后追高的回撤概率显著上升",
+        market="HK",
+        memory_layer="semantic", polarity="refute",
+        symbols=["HK:00700", "HK:00701"], strategy_keys=["vcp-swing@1.2"],
+        regime_tags=["unknown"], regime_source="regime-v1", importance=0.75,
+        last_validated_at="2026-10-01T16:30:00+08:00",
+    )
+    assert r.status_code == 200, r.text
+    got = _post_internal_query(env, market="HK").json()["items"][0]
+    assert got["memory_layer"] == "semantic"
+    assert got["polarity"] == "refute"
+    assert got["symbols"] == ["HK:00700", "HK:00701"]      # 排序后的数组
+    assert got["strategy_keys"] == ["vcp-swing@1.2"]
+    assert got["regime_tags"] == ["unknown"]
+    assert got["regime_source"] == "regime-v1"
+    assert got["importance"] == 0.75
+    assert got["last_validated_at"].startswith("2026-10-01")
+    assert got["duplicate_of"] is None
+
+
+def test_r5_symbols_are_market_scoped(env):
+    """`HK:00700` 与 `US:0700` 是不同的标的 —— 查询没有跨市场污染。"""
+    _post_internal_evidence(env, statement="港股标的的负向结论", market="HK",
+                            polarity="refute", symbols=["HK:00700"])
+    _post_internal_evidence(env, statement="美股标的的负向结论", market="US",
+                            polarity="refute", symbols=["US:0700"])
+    hk = _post_internal_query(env, market="HK").json()["items"]
+    all_syms = [s for it in hk for s in (it["symbols"] or [])]
+    assert "HK:00700" in all_syms
+    assert "US:0700" not in all_syms
+
+
+def test_r5_bad_symbol_shape_400(env):
+    r = _post_internal_evidence(env, symbols=["0700"])       # 裸代码
+    assert r.status_code == 400
+    assert "symbols" in r.json()["detail"]
+
+
+def test_r5_bad_memory_layer_400(env):
+    r = _post_internal_evidence(env, memory_layer="freeform")
+    assert r.status_code == 400
+    assert "memory_layer" in r.json()["detail"]
+
+
+def test_r5_strategy_memory_needs_keys_and_verified_400(env):
+    r = _post_internal_evidence(env, memory_layer="strategy")     # 缺 keys
+    assert r.status_code == 400
+    assert "strategy_keys" in r.json()["detail"]
+
+
+def test_r5_duplicate_of_must_exist_400(env):
+    r = _post_internal_evidence(env, duplicate_of="exp_does_not_exist")
+    assert r.status_code == 400
+    assert "判重" in r.json()["detail"]
+
+
+def test_r5_duplicate_of_points_without_deleting(env):
+    """判重指向：原条目**不删**，两条都在（与 `superseded_by` 同精神）。"""
+    first = _post_internal_evidence(env, statement="可能是重复的一条").json()["experience"]
+    r = _post_internal_evidence(env, statement="与上一条重复的一条",
+                                duplicate_of=first["experience_id"])
+    assert r.status_code == 200, r.text
+    assert r.json()["experience"]["duplicate_of"] == first["experience_id"]
+    ids = [it["experience_id"] for it in _post_internal_query(env).json()["items"]]
+    assert first["experience_id"] in ids and r.json()["experience"]["experience_id"] in ids
+
+
+def test_r5_negative_experience_is_readable_for_blocking(env):
+    """R3 回归的**上游**：一条 `refute` + `symbols` 的经验能被查询读回，
+    且 `kind='verified'` + `status='已确认'`（`memory_gate` 拦单的三条依据就在这里）。"""
+    _post_internal_evidence(env, kind="verified", method="全样本回测", sample_size=12,
+                            statement="该标的缩量整理后追高的回撤概率显著上升",
+                            market="CN_A", polarity="refute", symbols=["CN_A:601398"])
+    frozen = _post_internal_query(env, market="CN_A", for_decision=True, freeze=True).json()
+    item = frozen["items"][0]
+    assert item["kind"] == "verified" and item["status"] == "已确认"
+    assert item["polarity"] == "refute"
+    assert "CN_A:601398" in item["symbols"]
+    assert frozen["memory_snapshot_id"].startswith("msnap_")

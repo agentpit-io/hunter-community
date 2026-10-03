@@ -246,3 +246,39 @@ def test_propose_no_data_no_candidates():
     out = asyncio.run(review_svc.propose(_collected(facts=False, trades=False,
                                                     report=False), analyzer=boom))
     assert out["used_fallback"] is True and out["candidates"] == []
+
+
+# ── R5 · 候选经验的结构化标签（确定性，不打给模型）───────────────────────
+
+def _regime(label="unknown", version="regime-v1"):
+    return {"label": label, "rule_version": version,
+            "source_snapshot_id": None, "as_of": "2026-10-03T16:30:00+08:00"}
+
+
+def test_tag_candidates_attaches_symbols_and_regime():
+    cands = [{"statement": "a", "kind": "fact"}, {"statement": "b", "kind": "fact"}]
+    out = review_svc.tag_candidates(cands, symbols=["HK:00700"], regime_out=_regime())
+    assert out[0]["symbols"] == ["HK:00700"]
+    assert out[0]["regime_tags"] == ["unknown"]
+    assert out[0]["regime_source"] == "regime-v1"
+    # 不改原对象（返回的是副本）
+    assert "symbols" not in cands[0]
+
+
+def test_tag_candidates_writes_unknown_verbatim():
+    """取不到行情时**照写** `["unknown"]`（不是跳过）—— 聚合侧据此分开。"""
+    out = review_svc.tag_candidates([{"statement": "a"}], symbols=None, regime_out=_regime())
+    assert out[0]["regime_tags"] == ["unknown"]
+    assert out[0]["symbols"] is None
+
+
+def test_tag_candidates_carries_real_regime():
+    out = review_svc.tag_candidates([{"statement": "a"}], symbols=[],
+                                    regime_out=_regime(label="bull"))
+    assert out[0]["regime_tags"] == ["bull"]
+
+
+def test_tag_candidates_skips_garbage_entries():
+    out = review_svc.tag_candidates([None, "x", {"statement": "ok"}], symbols=[],
+                                    regime_out=_regime())
+    assert len(out) == 1 and out[0]["statement"] == "ok"

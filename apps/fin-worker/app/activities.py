@@ -779,6 +779,14 @@ def review_append(req: dict[str, Any]) -> dict[str, Any]:
             market=market, applicability=cand.get("applicability"),
             invalidation_condition=cand.get("invalidation_condition"),
             as_of=req.get("as_of"),
+            # R5 · 复核在 propose 一步打好的结构化标签（`symbols` / regime），
+            # 原样经唯一写入口落库 —— 本活动**不重新计算**（判定口径只有一份，在 api 侧）。
+            memory_layer=cand.get("memory_layer"),
+            polarity=cand.get("polarity"),
+            symbols=cand.get("symbols"),
+            strategy_keys=cand.get("strategy_keys"),
+            regime_tags=cand.get("regime_tags"),
+            regime_source=cand.get("regime_source"),
         )
         row = out.get("experience") or {}
         existing.add(key)

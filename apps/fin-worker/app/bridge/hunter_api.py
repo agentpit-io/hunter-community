@@ -148,11 +148,20 @@ class HunterApiClient:
                       applicability: Optional[str] = None,
                       invalidation_condition: Optional[str] = None,
                       method: Optional[str] = None, sample_size: Optional[int] = None,
-                      as_of: Optional[str] = None) -> dict[str, Any]:
+                      as_of: Optional[str] = None,
+                      memory_layer: Optional[str] = None,
+                      polarity: Optional[str] = None,
+                      symbols: Optional[list[str]] = None,
+                      strategy_keys: Optional[list[str]] = None,
+                      regime_tags: Optional[list[str]] = None,
+                      regime_source: Optional[str] = None) -> dict[str, Any]:
         """写经验（**唯一写入口**）。`source` 由服务端按证据真值 / 调用方决定，这里传不了。
 
         八条硬校验都在服务端（`statement` 含阿拉伯数字、证据至少一行、引用必须真实存在…）。
         任一不过回 **400**，本方法抛 `ApiError` —— **不吞**（吞掉就等于让一条编出来的经验静默入库）。
+
+        R5 起可带结构化标签（`symbols` / `regime_tags` / `regime_source` / `polarity` /
+        `memory_layer` / `strategy_keys`）—— 形状与闭集由服务端校验，这一层只搬运。
         """
         body: dict[str, Any] = {
             "project_id": project_id, "kind": kind, "statement": statement,
@@ -161,7 +170,10 @@ class HunterApiClient:
         for key, value in (("market", market), ("applicability", applicability),
                            ("invalidation_condition", invalidation_condition),
                            ("method", method), ("sample_size", sample_size),
-                           ("as_of", as_of)):
+                           ("as_of", as_of),
+                           ("memory_layer", memory_layer), ("polarity", polarity),
+                           ("symbols", symbols), ("strategy_keys", strategy_keys),
+                           ("regime_tags", regime_tags), ("regime_source", regime_source)):
             if value is not None:
                 body[key] = value
         resp = self._request("POST", "/api/internal/fin/memory/evidence", json=body)

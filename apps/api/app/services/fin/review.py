@@ -40,7 +40,9 @@ import psycopg2.extras
 from loguru import logger
 
 from app.services.fin import memory as memory_svc
+from app.services.fin import regime as regime_svc
 from app.services.fin import report as report_svc
+from app.services.fin import symbols as symbols_svc
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://hunter:hunter@localhost:5432/hunter")
 
@@ -417,14 +419,62 @@ async def _analyze_with_llm(collected: dict) -> list[dict]:
 # 四 · 编排：一次复核（collect → propose）
 # ════════════════════════════════════════════════════════════════════════
 
+def tag_candidates(candidates: Any, *, symbols: Optional[list[str]],
+                   regime_out: dict) -> list[dict]:
+    """给候选经验打上**确定性**的结构化标签（纯函数，可在单测里直接喂数据测）。
+
+    · `symbols` —— 规范化标的（`services/fin/symbols.py` 的写入口径）；
+    · `regime_tags` / `regime_source` —— 市场状态标签与它的规则版本键。
+
+    **不回填、不猜**：`symbols=None` 就写 `None`（旧行 / 无成交时本就没有标的）；
+    regime 取不到行情时 `tags_for` 给 `["unknown"]`（**照写**，不是跳过）——
+    聚合侧据此把「没判定」与明确 regime 分开。
+    """
+    tags = regime_svc.tags_for(regime_out)
+    source = regime_out.get("rule_version") if isinstance(regime_out, dict) else None
+    out: list[dict] = []
+    for cand in candidates or []:
+        if not isinstance(cand, dict):
+            continue
+        tagged = dict(cand)
+        tagged["symbols"] = symbols
+        tagged["regime_tags"] = tags
+        tagged["regime_source"] = source
+        out.append(tagged)
+    return out
+
+
 async def run_review(project_id: str, trade_date: str, *, market: Optional[str] = None,
-                     conn=None, analyzer: Optional[Callable] = None) -> dict:
-    """一次复核的**只读**部分：收集 + 产出候选。**不写经验**（写走 Memory Service 唯一入口）。"""
+                     conn=None, analyzer: Optional[Callable] = None,
+                     regime_provider: Optional[Callable] = None) -> dict:
+    """一次复核的**只读**部分：收集 + 产出候选 + 打标签。**不写经验**（写走 Memory Service 唯一入口）。
+
+    R5：在产出候选这一步顺带做两件**确定性**的事，结果挂在每条候选上，
+    由 `review_append` 经唯一写入口落库（本层仍然一行不写）：
+
+    · `symbols` —— 本次复盘涉及的标的，**规范化**成 `<MARKET>:<CODE>`（`symbols.py`）；
+    · `regime_tags` / `regime_source` —— 本市场的 regime（`regime.py` 判定器的四元组）。
+      取不到行情就是 `["unknown"]`（**照写**，不是跳过）—— 聚合侧据此把「没判定」
+      与明确 regime 分开（`R6` 的纪律，见 `R5` 成果文档交接）。
+    """
     own = conn is None
     conn = conn or get_conn()
     try:
         collected = collect(conn, project_id, trade_date, market)
         proposed = await propose(collected, analyzer=analyzer)
+
+        # 标的规范化：本次复盘标的（成交代码）。市场认不出 / 代码为空时跳过那一条，
+        # **不编**一个（`normalize_many` 的语义）。
+        symbols = symbols_svc.normalize_many(
+            (market, code) for code in (collected.get("codes") or [])) or None
+
+        # 市场状态：判定器现在是「本部署没有基准行情源 → unknown」的形态，
+        # 但仍然**如实打标签**（不跳过），并且 `regime_source` 记规则版本键。
+        regime_out = regime_svc.detect_for_market(
+            market=market, conn=conn, provider=regime_provider)
+
+        tagged = tag_candidates(proposed.get("candidates"), symbols=symbols,
+                                regime_out=regime_out)
         return {
             "project_id": project_id,
             "trade_date": trade_date,
@@ -432,7 +482,9 @@ async def run_review(project_id: str, trade_date: str, *, market: Optional[str] 
             "has_report": collected.get("report") is not None,
             "trade_count": len(collected.get("trades") or []),
             "fact_count": len(collected.get("facts") or []),
-            **proposed,
+            "regime": regime_out,
+            **{k: v for k, v in proposed.items() if k != "candidates"},
+            "candidates": tagged,
         }
     finally:
         if own:
