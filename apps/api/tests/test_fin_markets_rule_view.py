@@ -298,3 +298,47 @@ def test_HTTP_account带market_accounts(project):
     assert body["market_accounts"][1]["currency"] == "HKD"
     # 既有字段还在
     assert "constraints" in body and "markets" in body and body["project"]["tier"] == "manage"
+
+
+def test_A股费用卡片用的是A股费率行_不拿别的市场冒充(project):
+    """A 股「费用」卡片必须引 `fee-cn-a-v1`，**不许拿别的市场的费率行顶**。
+
+    2026-10-03 演示站实测：`fin_fee_model` 缺 `CN_A` 行时，`_fee_model` 原来的
+    「回落最新一行」取到字典序最大的 `fee-us-v1`，把美股费率
+    （佣金万1 / 印花税 — / 过户费万0.2）当成 A 股费率渲染了出来 —— 用户看到的
+    是**编的** A 股费率。现在列在、缺行 → 返回 None（降级成「费率行尚未配置」），
+    绝不再跨市场回落。这条把「来源行」与「文案里的数字」一起钉死。
+    """
+    cli = _client_for_uid(project["uid"])
+    items = {m["market"]: m for m in cli.get("/api/v1/fin/markets").json()["markets"]}
+    fee = next(c for c in items["CN_A"]["constraints"] if c["key"] == "fee")
+    assert fee.get("source") == "fin_fee_model:fee-cn-a-v1", fee
+    # A 股费率的形状：佣金万2.5、最低 5 元、印花税千0.5 —— 不是美股那套
+    assert "万分之 2.5" in fee["text"], fee["text"]
+    assert "印花税 —" not in fee["text"], fee["text"]
+
+
+def test_缺该市场费率行时返回None而不是别的市场的行(project):
+    """**列在、行缺** → `_fee_model` 返回 `None`，绝不回落取别的市场的行。
+
+    这才是 2026-10-03 演示站那个缺陷的直接复现：删掉 A 股费率行后，旧代码的
+    `ORDER BY version DESC LIMIT 1` 会取到字典序最大的 `fee-us-v1`，把它当 A 股费率。
+    现在必须返回 None（`constraints` 于是渲染「费率行尚未配置」的降级文案）。
+    """
+    from app.services.fin import views
+
+    conn = psycopg2.connect(os.environ["TEST_DATABASE_URL"])
+    conn.autocommit = False
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM fin_fee_model WHERE market = 'CN_A'")
+        with conn.cursor() as cur:
+            assert views._fee_model(cur, "CN_A") is None, "缺行时不许回落取别的市场"
+            fee = next(c for c in views.constraints(cur, "CN_A") if c["key"] == "fee")
+            assert fee["source"] is None, fee
+            assert "尚未配置" in fee["text"], fee["text"]
+            # 美股费率（佣金万1 / 过户费万0.2）一个字都不许出现
+            assert "万分之 1" not in fee["text"] and "万分之 0.2" not in fee["text"], fee["text"]
+    finally:
+        conn.rollback()          # 别把测试库改脏（其它用例还要用这一行）
+        conn.close()

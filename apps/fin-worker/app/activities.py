@@ -47,7 +47,14 @@ SHANGHAI = ZoneInfo("Asia/Shanghai")
 A_SESSIONS = [{"open": "09:30", "close": "11:30"}, {"open": "13:00", "close": "15:00"}]
 DEFAULT_SESSIONS: dict[str, list[dict[str, str]]] = {
     "CN_A": A_SESSIONS,
-    "HK": [{"open": "09:30", "close": "12:00"}, {"open": "13:00", "close": "16:00"}],
+    # HK **必须和 `fin_market_rule.sessions` 逐字一致**（含 16:00–16:10 收市竞价）。
+    # 2026-10-03 演示站实测：兜底少了收市竞价那一段，凡是「读市场规则失败 → 走兜底」
+    # 那一次同步写出来的日历，16:00–16:10 的报价（港股收市竞价那根 tick，实测
+    # `00700` 的 `event_time` 就是 16:08:10）会被判「不在交易时段」→ 委托永远拒。
+    # 两份时段是**同一个事实**，改一处必须改另一处（`db/migrations/0030`/`0034` 喂
+    # `fin_market_rule`）。
+    "HK": [{"open": "09:30", "close": "12:00"}, {"open": "13:00", "close": "16:00"},
+           {"open": "16:00", "close": "16:10"}],
     "US": [{"open": "09:30", "close": "16:00"}],
 }
 

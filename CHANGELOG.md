@@ -3,6 +3,35 @@
 All notable changes to HunterCode · Community Edition follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2026-10-03
+
+> **补丁版本 · 演示站上线验收（P4）就地修的三处**。只有一个数据库迁移
+> （`0038`，幂等补一行 A 股费率；api 启动时自动执行），动到 **`api` / `fin-worker` 两个镜像**。
+> 升级：`.env` 的 **`HUNTER_VERSION` 与 `FIN_TAG` 都改 `1.5.1`**，再
+> `docker compose pull api fin-worker && docker compose up -d api fin-worker`。
+> ⚠️ **已有部署不会自动执行 `db/migrations/0038`**（那个目录只在数据卷首次初始化时跑）——
+> 演示站等历史库请用 `0038` 里那段 `INSERT ... ON CONFLICT DO NOTHING` 手工补一次。
+
+### 🐞 修复 · Fixed
+
+- **A 股「费用」卡片显示的是美股费率**（2026-10-03 演示站实测）。`views._fee_model`
+  在按市场取费率行失败时会**无条件回落**「`ORDER BY version DESC LIMIT 1`」，取到字典序
+  最大的 `fee-us-v1`，把美股费率（佣金万1 / 印花税 — / 过户费万0.2）当成 A 股费率渲染了出来。
+  现在**只有老库（没有 `market` 列）才回落**；列在、行缺 → 返回 `None`，卡片降级成
+  「该市场的费率行尚未配置」而**不显示任何数字**（「空的比假的好」）。
+  同时补迁移 `0038_fee_model_cn_a.sql` 幂等地写入一期的 `fee-cn-a-v1`（此前全仓没有任何
+  迁移写它，`0029` 假定它已存在、`0034` 只补了 HK/US —— 从迁移建起来的库因此只有两行）。
+- **港股「收市竞价」时段在兜底里缺失**（同日实测）。`fin-worker` 的
+  `DEFAULT_SESSIONS["HK"]` 少了 `16:00–16:10`，而 `fin_market_rule.sessions` 有它 ——
+  两份时段是同一个事实、却漂了。凡是「读市场规则失败 → 走兜底」那一次日历同步写出来的行，
+  都会把收市竞价那根 tick（实测 `00700` 的 `event_time` 就是 `16:08:10`）判成
+  「不在交易时段」→ 该市场当天**一笔都成不了交**。两处已对齐。
+
+### 🧪 测试 · Tests
+
+- `apps/api/tests/test_fin_markets_rule_view.py` +2：A 股费用卡片必须引 `fee-cn-a-v1`
+  且文案是 A 股费率形状；**删掉该行后 `_fee_model` 返回 `None`**（直接复现上面那个缺陷）。
+
 ## [1.5.0] - 2026-10-03
 
 > **次要版本 · 开户时自选市场，自动化按选中的市场跑（三期出口）**。有数据库迁移

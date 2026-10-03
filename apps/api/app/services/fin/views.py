@@ -86,22 +86,45 @@ def _rate_text(value) -> str:
     return f"万分之 {d * 10000:.4g}"
 
 
-def _fee_model(cur, market: str = "CN_A") -> Optional[dict]:
-    # 按市场取该市场的费率行（二期起 fin_fee_model 带 market 维；老库没这列时回落最新一行）。
-    cur.execute(
-        """
-        SELECT version, market, commission_pct, commission_min, stamp_tax_pct, transfer_fee_pct
-          FROM fin_fee_model WHERE market = %s ORDER BY version DESC LIMIT 1
-        """, (market,))
-    row = cur.fetchone()
-    if row is None:
+_FEE_MARKET_COL: Optional[bool] = None
+
+
+def _has_fee_market_column(cur) -> bool:
+    """`fin_fee_model` 有没有 `market` 列（二期起才有）。每进程只探一次。"""
+    global _FEE_MARKET_COL
+    if _FEE_MARKET_COL is None:
         cur.execute(
             """
-            SELECT version, commission_pct, commission_min, stamp_tax_pct, transfer_fee_pct
-              FROM fin_fee_model ORDER BY version DESC LIMIT 1
+            SELECT 1 FROM information_schema.columns
+             WHERE table_name = 'fin_fee_model' AND column_name = 'market'
             """)
-        row = cur.fetchone()
-    return dash._d(row)
+        _FEE_MARKET_COL = cur.fetchone() is not None
+    return _FEE_MARKET_COL
+
+
+def _fee_model(cur, market: str = "CN_A") -> Optional[dict]:
+    """按市场取该市场的费率行。
+
+    **回落只在「老库没有 `market` 列」时发生**（二期前的 schema 只有一行费率）。
+    列在、但该市场没有行 → 返回 `None`，**不拿别的市场的费率冒充**。
+
+    这条不修的话：某市场缺费率行时，`ORDER BY version DESC LIMIT 1` 会取到**字典序
+    最大**的那个市场的行（`fee-us-v1` > `fee-hk-v1`），把它当成该市场的费率渲染出来。
+    2026-10-03 演示站实测：A 股费用卡片显示的是美股费率（`fee-us-v1`）。「空的比假的好」。
+    """
+    if _has_fee_market_column(cur):
+        cur.execute(
+            """
+            SELECT version, market, commission_pct, commission_min, stamp_tax_pct, transfer_fee_pct
+              FROM fin_fee_model WHERE market = %s ORDER BY version DESC LIMIT 1
+            """, (market,))
+        return dash._d(cur.fetchone())
+    cur.execute(
+        """
+        SELECT version, commission_pct, commission_min, stamp_tax_pct, transfer_fee_pct
+          FROM fin_fee_model ORDER BY version DESC LIMIT 1
+        """)
+    return dash._d(cur.fetchone())
 
 
 def constraints(cur, market: str = "CN_A") -> list[dict]:
@@ -121,6 +144,10 @@ def constraints(cur, market: str = "CN_A") -> list[dict]:
                 stamp=_rate_text(fm["stamp_tax_pct"]) if fm["stamp_tax_pct"] else "—",
                 transfer=_rate_text(fm["transfer_fee_pct"]),
             )
+        elif item["key"] == "fee":
+            # 该市场的费率行没配置 —— **不显示任何数字**（留 `{commission}` 占位符或
+            # 拿别的市场的费率顶上，都是在编）。文案明说缺什么。
+            text = f"该市场的费率行尚未配置（`fin_fee_model` 缺 `{market}` 行），本卡片不显示费率数字。"
         out.append({"key": item["key"], "title": item["title"], "text": text,
                     "source": f"fin_fee_model:{fm['version']}" if (item["key"] == "fee" and fm) else None})
     return out
