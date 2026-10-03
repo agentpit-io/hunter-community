@@ -208,12 +208,36 @@ def list_market_rules(cur) -> list[dict]:
 MARKET_CURRENCY: dict[str, str] = {"CN_A": "CNY", "HK": "HKD", "US": "USD"}
 
 
+class MarketRequired(Exception):
+    """`MULTI` 项目的账本调用没带 `market` —— 定位不到唯一的子账户。
+
+    旧行为是**静默兜底成 `CN_A`** —— 那是拿 A 股顶替港美股（红线：不许拿 A 股规则
+    顶替港美股）。现在改成报错，由路由层翻成 **400**；单市场项目不受影响。
+    """
+
+
+def require_market(project: Optional[dict], market: Optional[str] = None) -> None:
+    """`MULTI` 项目必须有显式 `market`，否则抛 `MarketRequired`。
+
+    `market` 给了就放行（值本身是否合法由 `resolve_market` 归一）；
+    没给而项目 `market_scope='MULTI'` → 报错。这是**唯一**的判据 ——
+    `resolve_market` 与路由层都调它，不各写一份。
+    """
+    if market:
+        return
+    if (project or {}).get("market_scope") == "MULTI":
+        raise MarketRequired("该项目有多个市场，请指定 market")
+
+
 def resolve_market(project: Optional[dict], market: Optional[str] = None) -> str:
     """把「调用方给的市场 / 项目 market_scope」归一成一个**合法市场三值**。
 
-    项目 `market_scope` 可能是 `MULTI`（二期多市场）—— 那不是单个子账户，
-    缺省时落到 `CN_A`（一期语义），需要港美股子账户时必须显式传 `market`。
+    ⚠️ 项目 `market_scope='MULTI'` 时**必须显式传 `market`** —— `MULTI` 不是单个
+    子账户，缺省时**没有**唯一答案。旧代码在这里兜底成 `CN_A`（拿 A 股顶替港美股），
+    现在改成抛 `MarketRequired`（路由层 → 400）。单市场项目（`CN_A`/`HK`/`US`）
+    行为逐字节不变。
     """
+    require_market(project, market)
     m = market or (project or {}).get("market_scope")
     return m if m in MARKET_CURRENCY else "CN_A"
 

@@ -93,6 +93,9 @@ def uid():
     conn = psycopg2.connect(TEST_DATABASE_URL)
     try:
         with conn.cursor() as cur:
+            # P1 起 fin_project_market 也引用项目（市场集合），先删它
+            cur.execute("DELETE FROM fin_project_market WHERE project_id IN "
+                        "(SELECT project_id FROM fin_project WHERE user_id = %s)", (u,))
             # M-16 起 fin_param_change_log 也会引用项目（关停留痕），先删它
             cur.execute("DELETE FROM fin_param_change_log WHERE project_id IN "
                         "(SELECT project_id FROM fin_project WHERE user_id = %s)", (u,))

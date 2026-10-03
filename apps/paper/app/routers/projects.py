@@ -14,10 +14,19 @@ from app.schemas import ValuationIn
 router = APIRouter(tags=["ledger"])
 
 
-def _require_project(cur, project_id: str) -> dict:
+def _require_project(cur, project_id: str, market: str | None = None) -> dict:
+    """项目必须在；**`MULTI` 项目还必须有显式 `market`**（否则 400，不许落到 A 股）。
+
+    这条校验放在这里（每个端点都先调它），所以「账本接口不传 market」的行为
+    在**所有**读 / 写端点上一致 —— 不是只在某一个接口上挡一下。
+    """
     project = ledger.get_project(cur, project_id)
     if not project:
         raise HTTPException(404, f"项目不存在：{project_id}")
+    try:
+        ledger.require_market(project, market)
+    except ledger.MarketRequired as exc:
+        raise HTTPException(400, str(exc)) from exc
     return project
 
 
@@ -59,7 +68,7 @@ def confirm_t1(project_id: str) -> dict:
 @router.get("/api/v1/projects/{project_id}")
 def get_project(project_id: str, market: str | None = None) -> dict:
     with db.cursor() as cur:
-        project = _require_project(cur, project_id)
+        project = _require_project(cur, project_id, market)
         mk = ledger.resolve_market(project, market)
         available, frozen = ledger.cash_balance(cur, project_id, market)
         positions = ledger.list_positions(cur, project_id, market)
@@ -82,28 +91,28 @@ def fund(project_id: str, market: str | None = None) -> dict:
     （A 股项目 = `CN_A`，行为与一期逐字一致）。
     """
     with db.cursor(commit=True) as cur:
-        _require_project(cur, project_id)
+        _require_project(cur, project_id, market)
         return ledger.seed_funding(cur, project_id, market)
 
 
 @router.get("/api/v1/projects/{project_id}/orders")
 def orders(project_id: str, limit: int = 200, market: str | None = None) -> dict:
     with db.cursor() as cur:
-        _require_project(cur, project_id)
+        _require_project(cur, project_id, market)
         return {"items": ledger.list_orders(cur, project_id, limit, market)}
 
 
 @router.get("/api/v1/projects/{project_id}/trades")
 def trades(project_id: str, limit: int = 200, market: str | None = None) -> dict:
     with db.cursor() as cur:
-        _require_project(cur, project_id)
+        _require_project(cur, project_id, market)
         return {"items": ledger.list_trades(cur, project_id, limit, market)}
 
 
 @router.get("/api/v1/projects/{project_id}/cash")
 def cash(project_id: str, limit: int = 200, market: str | None = None) -> dict:
     with db.cursor() as cur:
-        _require_project(cur, project_id)
+        _require_project(cur, project_id, market)
         available, frozen = ledger.cash_balance(cur, project_id, market)
         return {
             "available": available,
@@ -116,7 +125,7 @@ def cash(project_id: str, limit: int = 200, market: str | None = None) -> dict:
 @router.get("/api/v1/projects/{project_id}/positions")
 def positions(project_id: str, market: str | None = None) -> dict:
     with db.cursor() as cur:
-        _require_project(cur, project_id)
+        _require_project(cur, project_id, market)
         return {"items": ledger.list_positions(cur, project_id, market)}
 
 
@@ -124,7 +133,7 @@ def positions(project_id: str, market: str | None = None) -> dict:
 def make_valuation(project_id: str, body: ValuationIn) -> dict:
     try:
         with db.cursor(commit=True) as cur:
-            _require_project(cur, project_id)
+            _require_project(cur, project_id, body.market)
             return valuation.store(cur, project_id, body.as_of, body.market)
     except valuation.MissingPrice as exc:
         # 缺价就不出估值，点名是哪几只（不许拿成本价顶替市值）。
@@ -134,7 +143,7 @@ def make_valuation(project_id: str, body: ValuationIn) -> dict:
 @router.get("/api/v1/projects/{project_id}/valuation/latest")
 def latest_valuation(project_id: str, market: str | None = None) -> dict:
     with db.cursor() as cur:
-        _require_project(cur, project_id)
+        _require_project(cur, project_id, market)
         row = valuation.latest(cur, project_id, market)
         available, frozen = ledger.cash_balance(cur, project_id, market)
     if not row:
@@ -145,7 +154,7 @@ def latest_valuation(project_id: str, market: str | None = None) -> dict:
 @router.post("/api/v1/projects/{project_id}/recon")
 def run_recon(project_id: str, body: ValuationIn) -> dict:
     with db.cursor(commit=True) as cur:
-        _require_project(cur, project_id)
+        _require_project(cur, project_id, body.market)
         return recon.run(cur, project_id, body.as_of, body.market)
 
 

@@ -12,8 +12,10 @@
 
 from __future__ import annotations
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
+from fastapi.responses import JSONResponse
 
+from app import ledger
 from app.jsonresp import LedgerJSONResponse
 from app.routers import data_ops, health, jobs, orders, projects, reference, snapshots
 from app.security import LiveFieldGuard, require_internal_key
@@ -40,3 +42,13 @@ app.include_router(reference.router)
 app.include_router(snapshots.router)
 app.include_router(jobs.router)
 app.include_router(data_ops.router)
+
+
+@app.exception_handler(ledger.MarketRequired)
+async def _market_required(_request: Request, exc: ledger.MarketRequired) -> JSONResponse:
+    """兜底：`MULTI` 项目没带 `market` → **400**，不是 500。
+
+    路由层 `_require_project` 已经先挡了一道；这一道是为了任何**没走那条路**的
+    调用点也不会把「定位不到子账户」变成 500，更不会退回成 `CN_A`。
+    """
+    return JSONResponse(status_code=400, content={"detail": str(exc)})

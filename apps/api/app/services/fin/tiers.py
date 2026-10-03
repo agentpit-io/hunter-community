@@ -21,6 +21,25 @@ from typing import Any
 # 三档顺序固定：① 个人玩玩 → ② 个人资产管理 → ③ 资产运营
 TIER_ORDER = ("play", "manage", "operate")
 
+# ── 市场（P1）─────────────────────────────────────────────────────────────
+# 三个市场的**固定顺序**：开户 / 追加市场落库、查询响应数组、档位模板
+# `markets_supported` 一律用它 —— 同一集合只有一种存法（方案 §3.1）。
+MARKET_ORDER = ("CN_A", "HK", "US")
+
+# 市场 → 本币（ISO 4217，事实）。与 `apps/paper/app/ledger.py:MARKET_CURRENCY`
+# 同口径；本表是 api 侧的权威，账本侧那份服务于 paper 进程。
+MARKET_CURRENCY = {"CN_A": "CNY", "HK": "HKD", "US": "USD"}
+
+# 市场 → 板块能力。⚠️ **这是产品策略，不是实测数据 —— 不许编**（方案 §3.5 待确认项 Q1）。
+# 本轮按「最小可用」：每个市场**只开放主板**，其余一律 `false`，界面标「本版未开放」。
+# 要开放哪些板块由用户拍板后再改这一处。
+_BOARD_FLAGS_BY_MARKET: dict[str, dict[str, bool]] = {
+    "CN_A": {"main": True, "chinext": False, "star": False, "bse": False,
+             "st": False, "sub_new": False},
+    "HK": {"hk_main": True, "hk_gem": False},
+    "US": {"us_main": True, "us_other": False},
+}
+
 TIER_LABEL = {
     "play": "个人玩玩",
     "manage": "个人资产管理",
@@ -140,6 +159,26 @@ def _strategies(tier: str) -> list[dict[str, Any]]:
     return out
 
 
+def markets_supported() -> list[str]:
+    """本轮支持的市场（固定顺序）。开户入参与查询响应都以此为准。"""
+    return list(MARKET_ORDER)
+
+
+def _per_market() -> dict[str, dict[str, Any]]:
+    """按市场的能力表（币种 + 板块能力）。**与档位无关**（方案 §3.5）。
+
+    返回结构固定按 `MARKET_ORDER` 排 —— 前端只认它出「选市场」那一步的参数，
+    不再自己拼三个市场。
+    """
+    return {
+        m: {
+            "currency": MARKET_CURRENCY[m],
+            "board_flags": dict(_BOARD_FLAGS_BY_MARKET[m]),
+        }
+        for m in MARKET_ORDER
+    }
+
+
 def build_template(tier: str) -> dict[str, Any]:
     """把档位展开成一份**完整**的开户模板（不含 project_id 等运行时字段）。
 
@@ -171,6 +210,11 @@ def build_template(tier: str) -> dict[str, Any]:
         "board_flags": _board_flags(tier),
         "sector_prefs": [],                 # 默认不限行业（03 §4.2）
         "strategies": _strategies(tier),
+        # ── P1 · 按市场的本金口径与板块能力（方案 §3.5）────────────────────
+        # `initial_capital` 仍是 **CNY 口径的档位值**（老读法不动）；每市场各一份是
+        # 「同一数字、各用本币」，落在 `fin_project_market.initial_capital` + `currency`。
+        "markets_supported": markets_supported(),
+        "per_market": _per_market(),
     }
 
 
