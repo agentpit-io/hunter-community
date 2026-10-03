@@ -136,3 +136,32 @@ def review_delay_minutes() -> int:
                        value, DEFAULT_REVIEW_DELAY_MINUTES)
         return DEFAULT_REVIEW_DELAY_MINUTES
     return value
+
+
+# ── 影子验证（R7 · `plan/R7.md` §一.3）─────────────────────────────────────
+# `fin-shadow-<market>` 的触发时点 = 该市场**时段末点** + 复核延迟 + 这个影子延迟
+# （排在 `fin-review-<market>` 之后，不抢它的时点）。**可配** —— 所以具体分钟数
+# 不许硬编码进调度代码，这里只给默认值。
+DEFAULT_SHADOW_DELAY_MINUTES = 15
+
+
+def shadow_delay_minutes() -> int:
+    """影子验证相对「时段末点 + 复核延迟」再往后推多少分钟。**默认 15**。
+
+    读不到 / 非数字 / 负数 → 用默认 15，并**在日志里写明用了默认**
+    （与 `review_delay_minutes` 同一口径：配置写错不该让保护悄悄变）。
+    """
+    raw = (os.getenv("FIN_SHADOW_DELAY_MINUTES") or "").strip()
+    if not raw:
+        return DEFAULT_SHADOW_DELAY_MINUTES
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("[config] FIN_SHADOW_DELAY_MINUTES={!r} 不是整数，影子延迟用默认 {} 分钟",
+                       raw, DEFAULT_SHADOW_DELAY_MINUTES)
+        return DEFAULT_SHADOW_DELAY_MINUTES
+    if value < 0:
+        logger.warning("[config] FIN_SHADOW_DELAY_MINUTES={} 为负数，影子延迟用默认 {} 分钟",
+                       value, DEFAULT_SHADOW_DELAY_MINUTES)
+        return DEFAULT_SHADOW_DELAY_MINUTES
+    return value

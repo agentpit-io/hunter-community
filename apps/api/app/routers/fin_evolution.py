@@ -128,3 +128,123 @@ async def list_proposals(
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
     return {"items": items}
+
+
+# ════════════════════════════════════════════════════════════════════════
+# R7 · 影子层（内网口令通道；调用方 = `fin.shadow` 工作流的活动）
+# ════════════════════════════════════════════════════════════════════════
+#
+# 三个端点对应工作流的三步：**准备 → 记账 → 判定**。全部只调
+# `services/fin/evolution.py`（唯一服务模块）—— 路由层不写任何表名 / SQL。
+
+
+class ProposalsIn(BaseModel):
+    project_id: str
+    limit: int = 200
+
+
+class ShadowPrepareIn(BaseModel):
+    proposal_id: str
+    market: Optional[str] = None
+
+
+class ShadowRecordIn(BaseModel):
+    records: list[dict]
+
+
+class ShadowEvaluateIn(BaseModel):
+    proposal_id: str
+    market: str
+    trade_date: str
+
+
+class ValidateIn(BaseModel):
+    proposal_id: str
+    market: str
+    trade_date: str
+
+
+@router.post("/internal/fin/evolution/proposals")
+async def list_proposals_internal(body: ProposalsIn, request: Request):
+    """内网通道列出某项目下的提案（含冻结计划）。`fin.shadow` 工作流据此挑待验证的。"""
+    _auth_internal(request)
+    try:
+        return {"items": evolution_svc.list_proposals(
+            project_id=body.project_id, user_id=None, limit=body.limit)}
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/internal/fin/evolution/validate")
+async def start_validation(body: ValidateIn, request: Request):
+    """把提案推进到 `validating` 并记下**验证窗口起点**（幂等）。"""
+    _auth_internal(request)
+    try:
+        return evolution_svc.start_validation(
+            proposal_id=body.proposal_id, market=body.market, trade_date=body.trade_date)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/internal/fin/evolution/shadow/prepare")
+async def shadow_prepare(body: ShadowPrepareIn, request: Request):
+    """影子一步的准备数据：两臂配置 / 两臂当前状态 / 初始资金 / 计划（只读）。"""
+    _auth_internal(request)
+    try:
+        return evolution_svc.shadow_prepare(proposal_id=body.proposal_id, market=body.market)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/internal/fin/evolution/shadow/record")
+async def shadow_record(body: ShadowRecordIn, request: Request):
+    """把两臂的影子里程碑**追加**进影子事件表（唯一键幂等）。"""
+    _auth_internal(request)
+    try:
+        out = evolution_svc.record_shadow_events(records=body.records)
+    except evolution_svc.EvolutionValidationError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    logger.info("[fin.evolution] shadow record · written={} skipped={}",
+                out.get("written"), out.get("skipped"))
+    return out
+
+
+@router.post("/internal/fin/evolution/shadow/evaluate")
+async def shadow_evaluate(body: ShadowEvaluateIn, request: Request):
+    """算两臂指标并按冻结计划判定；**终局才**追加 passed / failed / inconclusive 事件。"""
+    _auth_internal(request)
+    try:
+        return evolution_svc.evaluate_validation(
+            proposal_id=body.proposal_id, market=body.market, trade_date=body.trade_date)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+# ════════════════════════════════════════════════════════════════════════
+# R7 · 影子事件读（JWT 通道；R9 界面用）
+# ════════════════════════════════════════════════════════════════════════
+
+@router.get("/v1/fin/evolution/shadow-events")
+async def list_shadow_events(
+    request: Request,
+    proposal_id: str = Query(...),
+    arm: Optional[str] = Query(None),
+    limit: int = Query(500, ge=1, le=5000),
+):
+    """列出某提案的影子事件（可选按臂过滤）。跨用户 / 不存在 → **404**。"""
+    uid = _uid(request)
+    # 归属校验：借用 list_proposals 的同一道 `_owned_project`（跨用户 → LookupError）。
+    try:
+        items = evolution_svc.list_proposals(project_id=_project_of(proposal_id), user_id=uid, limit=1)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    if not items:
+        raise HTTPException(404, "提案不存在")
+    return {"items": evolution_svc.shadow_events(validation_id=proposal_id, arm=arm, limit=limit)}
+
+
+def _project_of(proposal_id: str) -> str:
+    try:
+        return evolution_svc.get_proposal(proposal_id=proposal_id)["project_id"]
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc

@@ -91,14 +91,15 @@ def test_evolution_tables_referenced_only_by_the_single_entry():
 
 
 def test_single_entry_module_actually_references_the_tables():
-    """反向断言：守卫不能是「真空绿」—— 唯一服务模块必须真的引用它写的那三张表。
+    """反向断言：守卫不能是「真空绿」—— 唯一服务模块必须真的引用它写的四张表。
 
-    `fin_evolution_shadow_event` 是 `R7` 的表（`R6` 只建表、不写），所以这里不要求
-    服务模块引用它；它由下面的「迁移建了四张表」反向断言覆盖。
+    `R7` 起 `fin_evolution_shadow_event` 也由本模块写（`R6` 只建表、不写），
+    所以它一并纳入反向断言。
     """
     code = _strip_py_comments(
         (REPO / "apps/api/app/services/fin/evolution.py").read_text(encoding="utf-8"))
-    for table in ("fin_evolution_proposal", "fin_evolution_plan", "fin_evolution_event"):
+    for table in ("fin_evolution_proposal", "fin_evolution_plan",
+                  "fin_evolution_shadow_event", "fin_evolution_event"):
         assert table in code, table
 
 

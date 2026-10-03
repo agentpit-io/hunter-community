@@ -41,6 +41,11 @@ def activity_list() -> list:
         activities.review_collect,
         activities.review_propose,
         activities.review_append,
+        # R7 · 影子验证（fin.shadow）。同上，**必须显式登记**。
+        activities.market_points,
+        activities.shadow_proposals,
+        activities.shadow_step,
+        activities.shadow_evaluate,
     ]
 
 

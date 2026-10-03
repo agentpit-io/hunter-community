@@ -34,6 +34,7 @@ from app.bridge.idem import order_key, point_job_key, report_job_key
 from app.bridge.paper import PaperClient, PaperError
 from app.channels import CAL_MARKET
 from app.market_time import canonical_market
+from app.strategy import shadow as shadow_strategy
 from app.strategy.sample import SampleMemoryBlocked, SampleNoBudget
 from app.strategy.sample import build_decision as build_sample_decision
 
@@ -800,3 +801,131 @@ def review_append(req: dict[str, Any]) -> dict[str, Any]:
     return {"written": written, "skipped": skipped,
             "used_fallback": bool(req.get("used_fallback")),
             "fallback_reason": req.get("fallback_reason")}
+
+
+# ── R7 · 影子验证（`fin.shadow` 工作流的三个活动）─────────────────────────────
+#
+# 三个活动对应「准备 → 记账 → 判定」三步。**两臂同条件**在这里落地：
+# 两臂调同一个 `strategy.shadow.build_for_arm`（同一个策略、同一个行情快照），
+# 只有「该臂的配置」与「该臂自己的现金 / 持仓」不同。影子成交经 paper 的
+# `simulate_arms` **只算不记**（红线 12：那里只依赖 DecisionRecorder，从不碰执行端），
+# 落库由 api 的 `/shadow/record` 做（影子事件表只有 api 能写）。
+
+@activity.defn
+def market_points(req: dict[str, Any]) -> list[dict[str, Any]]:
+    """该市场的**一组调度时点**（影子在每个时点各跑一次两臂）。
+
+    来源与调度一致：优先 `fin_market_rule.points`（经 paper HTTP），读不到用
+    `points.DEFAULT_POINTS` 兜底（与 `0030` 的种子逐项一致）。
+    """
+    market = canonical_market(req.get("market") or "CN_A")
+    times: list[str] = []
+    try:
+        for row in PaperClient().market_rules():
+            if row.get("market") == market and row.get("points"):
+                times = list(row["points"])
+                break
+    except Exception as exc:  # noqa: BLE001 —— 读不到就用兜底，不阻断影子
+        logger.warning("[shadow] 读市场时点失败（用兜底）：{}", exc)
+    if not times:
+        from app.points import DEFAULT_POINTS
+        times = list(DEFAULT_POINTS.get(market) or DEFAULT_POINTS["CN_A"])
+    return [{"at": at, "point": f"{market}-{at.replace(':', '')}"} for at in times]
+
+
+@activity.defn
+def shadow_proposals(req: dict[str, Any]) -> list[dict[str, Any]]:
+    """某项目下**待验证**的提案（`status ∈ {draft, validating}`）。**只读。**"""
+    items = HunterApiClient().evolution_proposals(req["project_id"])
+    return [p for p in items if str(p.get("status")) in ("draft", "validating")]
+
+
+@activity.defn
+def shadow_step(req: dict[str, Any]) -> dict[str, Any]:
+    """影子一步：取一次快照 → 两臂各出一次决策 → 交 paper 影子撮合 → 写两行影子事件。
+
+    **只读 + 只写影子事件表**：不写 `fin_trade` / `fin_order` / `fin_param`。
+    某臂买不起（`SampleNoBudget`）→ `decided=False`、`signal=null` —— 于是它**不计入
+    可比样本**（红线 11）。行情缺口时两臂都记 `filled=false`（`inconclusive` 的依据）。
+    """
+    project_id = req["project_id"]
+    proposal_id = req["proposal_id"]
+    market = canonical_market(req.get("market") or "CN_A")
+    trade_date = req["trade_date"]
+    point = req["point"]
+    now_iso = req.get("now")
+    api = HunterApiClient()
+    paper = PaperClient()
+
+    prep = api.evolution_shadow_prepare(proposal_id, market)
+    # 第一次跑到某提案时把它推进到 `validating` 并记下窗口起点（幂等：已 validating 就跳过）。
+    api.evolution_shadow_validate(proposal_id, market, trade_date)
+
+    view = paper.get_project(project_id, market=market) or {}
+    project = view.get("project") or {}
+    code = req.get("code") or config.sample_code(market)
+    mos = _market_order_supported(paper, market)
+    reference_price: Optional[str] = None
+    lot_size: Any = None
+    if not mos:
+        inst = paper.get_instrument(code)
+        if inst is not None:
+            lot_size = inst.get("lot_size")
+        quote = HunterApiClient().quote(code)
+        reference_price = (quote or {}).get("last_price")
+    active = _active_strategy(view.get("param")) or {}
+    strategy_key = active.get("key") or config.sample_strategy_key()
+    strategy_version = str(active.get("version") or config.sample_strategy_version())
+    now = _parse_iso(now_iso) if now_iso else datetime.now(SHANGHAI)
+    project_for_strategy = {"project_id": project_id, "tier": project.get("tier"), "version": 0}
+
+    arms_payload: list[dict[str, Any]] = []
+    for arm_name, cfg_key in (("incumbent", "base_config"), ("candidate", "candidate_config")):
+        cfg = prep.get(cfg_key) or {}
+        state = (prep.get("states") or {}).get(arm_name) or {}
+        order = shadow_strategy.build_for_arm(
+            project=project_for_strategy, config=cfg, trade_date=trade_date, point=point,
+            now=now, code=code, strategy_key=strategy_key,
+            strategy_version=strategy_version,
+            ttl_seconds=config.contract_timeout_seconds(), market=market,
+            market_order_supported=mos, reference_price=reference_price,
+            lot_size=lot_size, available_cash=state.get("cash_available"),
+        )
+        payload: dict[str, Any] = {"arm": arm_name, "decided": order is not None, "state": state}
+        if order is not None:
+            payload.update(order)
+        arms_payload.append(payload)
+
+    sim = paper.shadow_simulate({
+        "project_id": project_id, "market": market, "symbol": code,
+        "trade_date": trade_date, "point": point,
+        "initial_capital": str(prep.get("initial_capital") or "0"), "arms": arms_payload,
+    })
+
+    records: list[dict[str, Any]] = []
+    for r in sim.get("results") or []:
+        rec = dict(r)
+        rec["validation_id"] = prep["validation_id"]
+        records.append(rec)
+    written = api.evolution_shadow_record(records) if records else {"written": 0, "skipped": 0}
+    summary = {
+        "proposal_id": proposal_id, "trade_date": trade_date, "point": point,
+        "quote_as_of": sim.get("quote_as_of"), "gap": bool(sim.get("gap")),
+        "written": written.get("written"), "skipped": written.get("skipped"),
+        "arms": [{"arm": r["arm"], "decided": r["signal"] is not None, "filled": r["filled"]}
+                 for r in sim.get("results") or []],
+    }
+    logger.info("[shadow] {}/{} {} · {} → 写 {} 跳过 {}", proposal_id, trade_date, point,
+                "行情缺口" if sim.get("gap") else f"quote_as_of={sim.get('quote_as_of')}",
+                written.get("written"), written.get("skipped"))
+    return summary
+
+
+@activity.defn
+def shadow_evaluate(req: dict[str, Any]) -> dict[str, Any]:
+    """验收到期判定：算两臂指标 + 按冻结计划判 verdict（终局才追加状态事件）。"""
+    out = HunterApiClient().evolution_shadow_evaluate(
+        req["proposal_id"], canonical_market(req.get("market") or "CN_A"), req["trade_date"])
+    logger.info("[shadow] evaluate {} → verdict={}（{}）", req.get("proposal_id"),
+                out.get("verdict"), out.get("reason"))
+    return out

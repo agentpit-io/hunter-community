@@ -9,8 +9,22 @@ from app import schedules
 
 def test_three_markets_eighteen_point_schedules_plus_etl_plus_instrument():
     specs = schedules.all_specs()
-    # 3 市场 × 6 时点 + 3 个市场 ETL + 3 个市场的标的元数据同步 + 3 个市场的收盘后复核（R3）
-    assert len(specs) == 18 + 3 + 3 + 3
+    # 3 市场 × 6 时点 + 3 ETL + 3 标的元数据同步 + 3 收盘后复核（R3）+ 3 影子验证（R7）
+    assert len(specs) == 18 + 3 + 3 + 3 + 3
+
+
+def test_r7_shadow_schedule_one_per_market_after_review():
+    """R7 · 影子验证 Schedule：每市场一条，排在复核之后，且**不动** 6 个 point 时点。"""
+    specs = {s.schedule_id: s for s in schedules.shadow_specs()}
+    assert set(specs) == {"fin-shadow-CN_A", "fin-shadow-HK", "fin-shadow-US"}
+    for sid, spec in specs.items():
+        assert spec.workflow == "fin.shadow"
+        assert spec.args["market"] == sid.rsplit("-", 1)[1]
+    # CN_A 收盘 15:00 + 复核 30 + 影子 15 → 15:45
+    assert specs["fin-shadow-CN_A"].cron == "45 15 * * 1-5"
+    # 6 个 point 时点一字不变（这是本轮的硬约束）
+    assert len(schedules.point_specs()) == 18
+    assert {s.schedule_id for s in schedules.point_specs()} & set(specs) == set()
 
 
 def test_point_schedules_have_per_market_timezone():

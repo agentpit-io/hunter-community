@@ -207,3 +207,49 @@ class HunterApiClient:
         if resp.status_code >= 400:
             raise ApiError(resp.status_code, resp.text)
         return resp.json()
+
+    # ── R7 · 影子验证（内网口令通道；唯一服务模块是 api 的 services/fin/evolution.py）──
+    def evolution_proposals(self, project_id: str, limit: int = 200) -> list[dict[str, Any]]:
+        """列出某项目下的提案（含冻结计划）。`fin.shadow` 工作流据此挑出待验证的提案。"""
+        resp = self._request("POST", "/api/internal/fin/evolution/proposals",
+                             json={"project_id": project_id, "limit": limit})
+        if resp.status_code >= 400:
+            raise ApiError(resp.status_code, resp.text)
+        return list(resp.json().get("items", []))
+
+    def evolution_shadow_validate(self, proposal_id: str, market: str,
+                                  trade_date: str) -> dict[str, Any]:
+        """把提案推进到 `validating` 并记下**验证窗口起点**（幂等）。"""
+        resp = self._request("POST", "/api/internal/fin/evolution/validate",
+                             json={"proposal_id": proposal_id, "market": market,
+                                   "trade_date": trade_date})
+        if resp.status_code >= 400:
+            raise ApiError(resp.status_code, resp.text)
+        return resp.json()
+
+    def evolution_shadow_prepare(self, proposal_id: str,
+                                 market: Optional[str] = None) -> dict[str, Any]:
+        """影子一步的准备数据：两臂配置 / 两臂当前状态 / 初始资金 / 计划。"""
+        resp = self._request("POST", "/api/internal/fin/evolution/shadow/prepare",
+                             json={"proposal_id": proposal_id, "market": market})
+        if resp.status_code >= 400:
+            raise ApiError(resp.status_code, resp.text)
+        return resp.json()
+
+    def evolution_shadow_record(self, records: list[dict[str, Any]]) -> dict[str, Any]:
+        """把两臂的影子里程碑**追加**进影子事件表（唯一键幂等）。"""
+        resp = self._request("POST", "/api/internal/fin/evolution/shadow/record",
+                             json={"records": records})
+        if resp.status_code >= 400:
+            raise ApiError(resp.status_code, resp.text)
+        return resp.json()
+
+    def evolution_shadow_evaluate(self, proposal_id: str, market: str,
+                                  trade_date: str) -> dict[str, Any]:
+        """算两臂指标并按冻结计划判定（终局才追加 passed / failed / inconclusive）。"""
+        resp = self._request("POST", "/api/internal/fin/evolution/shadow/evaluate",
+                             json={"proposal_id": proposal_id, "market": market,
+                                   "trade_date": trade_date})
+        if resp.status_code >= 400:
+            raise ApiError(resp.status_code, resp.text)
+        return resp.json()

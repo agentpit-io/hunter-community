@@ -156,9 +156,41 @@ def review_specs(market_rules: Optional[list[dict]] = None) -> list[ScheduleSpec
     return specs
 
 
+def shadow_specs(market_rules: Optional[list[dict]] = None) -> list[ScheduleSpecDef]:
+    """每个市场一条**影子验证** Schedule（R7 · `plan/R7.md` §一.3）。
+
+    时点 = 该市场**时段末点** + `FIN_REVIEW_DELAY_MINUTES`（复核延迟）+ `FIN_SHADOW_DELAY_MINUTES`
+    （影子延迟，默认 15）—— 排在 `fin-review-<market>` **之后**，不抢它的时点，也不改它。
+    id 形如 `fin-shadow-HK`，与 `fin-point-HK-0930` / `fin-review-HK` 一眼可分。
+
+    Schedule 是**全局的、与项目数无关**：工作流内层对「该市场所有进行中的项目」下
+    每个待验证提案各验证一遍。**现有 6 个 point 时点一个都不改**（`point_specs` 一字未动）。
+    """
+    delay = config.review_delay_minutes() + config.shadow_delay_minutes()
+    specs: list[ScheduleSpecDef] = []
+    for rule in _rules_by_market(market_rules):
+        market = rule["market"]
+        tz = rule.get("timezone") or MARKET_TZ.get(market)
+        sessions = list(rule.get("sessions") or [])
+        if not sessions:
+            sessions = next((r.get("sessions") or [] for r in fallback_market_rules()
+                             if r.get("market") == market), [])
+        at = _hhmm_plus(_session_close(sessions), delay)
+        specs.append(ScheduleSpecDef(
+            schedule_id=f"fin-shadow-{market}",
+            workflow="fin.shadow",
+            cron=cron_of(at),
+            args={"market": market, "at": at, "point": f"{market}-shadow"},
+            title=f"{market} · 收盘后影子验证（时段末点 + 复核 {config.review_delay_minutes()} "
+                  f"+ 影子 {config.shadow_delay_minutes()} 分钟）",
+            timezone=tz,
+        ))
+    return specs
+
+
 def all_specs(market_rules: Optional[list[dict]] = None) -> list[ScheduleSpecDef]:
     return (point_specs(market_rules) + list(ETL_SCHEDULES) + list(INSTRUMENT_SCHEDULES)
-            + review_specs(market_rules))
+            + review_specs(market_rules) + shadow_specs(market_rules))
 
 
 def build_schedule(spec: ScheduleSpecDef):

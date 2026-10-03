@@ -135,6 +135,15 @@ class PaperClient:
     def place_order(self, body: dict[str, Any]) -> dict:
         return self._json("POST", "/api/v1/orders", json=body)
 
+    # ── R7 · 影子臂模拟撮合（**不是下单**：纸面路径，不写 fin_trade / fin_order）──
+    def shadow_simulate(self, body: dict[str, Any]) -> dict:
+        """把一个快照上两臂的决策跑一遍，拿回影子里程碑（`POST /api/v1/shadow/simulate`）。
+
+        调用的是 `paper/app/shadow.py` 的 `simulate_arms` —— 它只依赖 `DecisionRecorder`、
+        **从不调用执行端**（红线 12）。所以这里虽然打的是 paper，但**一个订单都不会下**。
+        """
+        return self._json("POST", "/api/v1/shadow/simulate", json=body)
+
     def match_open(self, project_id: str, market: Optional[str] = None) -> dict:
         params = {"market": market} if market else None
         return self._json("POST", f"/api/v1/projects/{project_id}/orders/match-open",

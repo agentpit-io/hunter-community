@@ -1,4 +1,30 @@
-"""智能炒股 · 受控自进化 · **提案层**（第四段 `R6` · `plan/R6.md` §一）。
+"""智能炒股 · 受控自进化 · **提案层 + 影子层**（第四段 `R6` / `R7`）。
+
+模块头（一）讲提案层（`R6`），模块头（二）讲影子层（`R7`）—— 两段合起来才是本文件的全部职责。
+
+## （二）影子层（`R7 · plan/R7.md` §一.2–4）
+
+`fin_evolution_shadow_event` 是**事件溯源式的影子账本**：每一行 = 某臂在某个
+`(validation_id, trade_date, point, symbol)` 上的一次决策，以及它的（模拟）成交 / 拒单 /
+手续费 / 滑点 / **持仓快照 / 估值快照**。两条铁律：
+
+1. **它和 `fin_trade` 毫无关系**（`03 §4-C`）—— `fin_trade` 只记真实 / 现行策略的成交，
+   **推不出未执行过的候选策略的收益**。影子成交只能进这张表，**绝不进** `fin_trade` / `fin_order`
+   （红线 12；由 `paper` 侧的 `DecisionRecorder` / `OrderExecutor` 接口隔离 + 集成测试保证）。
+2. **验证口径写入即冻结**（红线 10）：判定**一律读 `fin_evolution_plan` 冻结下来的**通过线 /
+   失败线 / 窗口 / 最小可比样本，**不许临时改**。样本不足 / 行情缺口 / 未完成持仓 → `inconclusive`
+   （不结论也是结论）。窗口未结束前**任何**路径都不得写出 `passed`。
+
+两臂**同条件**（红线 11）：同一行情快照、同初始现金 / 仓位、同费率 / 滑点 / 停牌 / 撮合假设
+（撮合与费用**复用 `paper` 的实现**，不在别处重写一份）。样本以「**两臂均有可比机会**的
+`(trade_date, point, symbol)`」计 —— **不许**把「候选有交易、现行没交易」的笔数直接相减。
+
+**为什么影子事件由本模块写、而不是 `paper`**：`0043`（照 `0041`）**刻意不给**
+`fin_paper_rw` 任何授权（见 `0043` 文件尾注释），运行期唯一有 `fin_*` 权限的正是那个角色 ——
+所以 `paper` **写不了**这张表，它只负责**算**（`apps/paper/app/shadow.py`），
+api 负责**记**。这正好把「撮合实现」与「影子账本」分成两件事，各自只有一份。
+
+## （一）提案层（`R6 · plan/R6.md` §一`）。
 
 **这一层做的事，一句话**：把「一批经验 → 一个参数改动」变成一个**可审计、可冻结、
 且 AI 提不了越界的东西**的对象。它**不改任何生效配置**（生效在 `R8`）、**不做影子验证**
@@ -51,7 +77,7 @@ import hashlib
 import json
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, Optional
 
@@ -73,9 +99,11 @@ DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://hunter:hunter@localhost:5
 ALGO_VERSION = "evolution-algo-v1"
 
 # `fin_evolution_event.kind` 闭集 —— 与 `0043` 的 CHECK **逐字一致**，改一处必须改另一处。
+# `failed` 是 `R7` 加的（迁移 `0044`）：验证**跑出来不达标**是独立语义，
+# 与 `rejected`（提案被驳回）分开；`proposal.status` 仍投影到 `rejected`（状态列没有 failed）。
 EVENT_KINDS = (
     "created", "validating", "passed", "rejected", "applied",
-    "rolled_back", "inconclusive", "rejected_by_gate",
+    "rolled_back", "inconclusive", "rejected_by_gate", "failed",
 )
 TARGETS = ("strategy", "risk")
 DIRECTIONS = ("tighten", "loosen", "mixed")
@@ -91,6 +119,7 @@ STATUS_OF_KIND = {
     "rolled_back": "rolled_back",
     "inconclusive": "inconclusive",
     "rejected_by_gate": "rejected",
+    "failed": "rejected",      # 验证不达标 → 提案被驳回（状态列无 failed）
 }
 
 
@@ -644,10 +673,32 @@ def _jsonable(value: Any) -> Any:
         return float(value)
     if isinstance(value, datetime):
         return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
     if isinstance(value, list):
         return [_jsonable(v) for v in value]
     if isinstance(value, dict):
         return {k: _jsonable(v) for k, v in value.items()}
+    return value
+
+
+def _shadow_json(value: Any) -> Any:
+    """影子快照 / 信号的 JSON 编码：**金额留下字符串**（不转 float）。
+
+    与 `_jsonable` 的差别就在这里 —— `_jsonable` 把 `Decimal` 转成 `float`（供事件 payload
+    这类只需人读的地方）；影子快照要**逐位可复算**（验收项「估值可复算」），
+    转 float 会引入二进制舍入，所以金额一律 `str(Decimal)` 原样存。
+    """
+    if isinstance(value, Decimal):
+        return format(value, "f")
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, list):
+        return [_shadow_json(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _shadow_json(v) for k, v in value.items()}
     return value
 
 
@@ -984,3 +1035,569 @@ def append_event(*, proposal_id: str, kind: str, payload: Any = None,
     finally:
         if own:
             conn.close()
+
+
+# ════════════════════════════════════════════════════════════════════════
+# 八 · 影子层（R7）：候选臂独立模拟记账 + 两臂同条件验证
+# ════════════════════════════════════════════════════════════════════════
+#
+# 口径见模块头（二）。本段的函数只碰 `fin_evolution_shadow_event` 与 `fin_evolution_event`
+# 两张表（`test_fin_evolution_guard.py` 盯着），**绝不碰** `fin_trade` / `fin_order` / `fin_param`。
+#
+# `validation_id` = `proposal_id`：一条提案恰好一次验证。R6 建阴影表时**不设外键**
+# （见 0043 表三注释），本段沿用 —— 验证是围绕一条提案的，不是一条独立实体。
+
+SHADOW_ARMS = ("incumbent", "candidate")
+
+_SIGNAL_KEYS = ("side", "qty", "price_type", "limit_price", "fill", "realized_pnl", "note")
+
+
+# ── 影子状态（持仓 / 估值快照）─────────────────────────────────────────────
+#
+# **不新建账本表**：一个臂的「现金 + 持仓」就存在它最近一条影子事件的
+# `position_ref`（jsonb）里；下一个时点从这个快照接着算。这就是「由事件逐笔重建」
+# 的落点 —— 每一行本来就带着**它那一步之后的完整快照**，所以重建 = 取最近一条 ≤ 当日的行。
+# 这与「从头逐笔重放」逐位等价，而且**可复算**（估值口径见 `valuation_ref`）。
+
+def _shadow_initial_state(initial_capital: Any) -> dict[str, Any]:
+    """两臂**共同的**初始状态（红线 11：同初始现金 / 仓位）。
+
+    初始仓位 = 空（`positions: []`），初始可用现金 = 项目本金。
+    """
+    cap = _json_num(initial_capital)
+    return {"cash_available": cap, "cash_frozen": 0, "positions": []}
+
+
+def _shadow_apply_diff(base: dict[str, Any], param_diff: Any) -> dict[str, Any]:
+    """把**服务端算出的** `param_diff` 应用到 base 配置 → 候选配置（完整）。
+
+    `param_diff` 曾是提案表里落库的 `[{field, old, new}]`（服务端机器算，见 `config_diff`）。
+    这里只把 `new` 覆盖回去 —— 候选配置必须与 base **字段集一致**（提案已保证）。
+    """
+    cand = dict(base)
+    for entry in (param_diff or []):
+        field = str(entry.get("field") or "")
+        if field in cand:
+            cand[field] = entry.get("new")
+    return cand
+
+
+def _shadow_base_config(cur, project_id: str) -> dict[str, Any]:
+    return read_config(cur, project_id)
+
+
+def shadow_prepare(*, proposal_id: str, market: Optional[str] = None,
+                   conn=None) -> dict[str, Any]:
+    """影子一步的**准备数据**（只读）：提案 / 计划 / 两臂配置 / 两臂当前状态 / 初始资金 / 市场。
+
+    - `base_config` / `candidate_config`：两臂各自的**完整配置**（candidate = base + diff）；
+    - `states`：两臂各自的当前持仓 / 现金（从**最近一条影子事件**重建）；
+      **同初始现金**由 `initial_capital` 保证（t=0 时两臂状态相同 → 满足红线 11）；
+    - `initial_capital` / `market` / `currency`。
+    """
+    own = conn is None
+    conn = conn or get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            prop = get_proposal_inner(cur, proposal_id)
+            project_id = prop["project_id"]
+            base = _shadow_base_config(cur, project_id)
+            cand = _shadow_apply_diff(base, prop.get("param_diff"))
+            cur.execute(
+                "SELECT initial_capital, currency, market_scope FROM fin_project "
+                " WHERE project_id = %s", (project_id,))
+            prow = cur.fetchone() or {}
+            market_v = market or prow.get("market_scope") or "CN_A"
+            cur.execute("SELECT market, currency, initial_capital FROM fin_project_market "
+                        " WHERE project_id = %s AND market = %s", (project_id, market_v))
+            mrow = cur.fetchone() or {}
+            initial_capital = mrow.get("initial_capital") or prow.get("initial_capital")
+            currency = mrow.get("currency") or prow.get("currency")
+            states = {}
+            for arm in SHADOW_ARMS:
+                states[arm] = _shadow_latest_state(cur, proposal_id, arm, initial_capital)
+        conn.rollback()
+    finally:
+        if own:
+            conn.close()
+    return {
+        "validation_id": proposal_id,
+        "proposal_id": proposal_id,
+        "project_id": project_id,
+        "market": market_v,
+        "currency": currency,
+        "initial_capital": _json_num(initial_capital),
+        "target": prop.get("target"),
+        "direction": prop.get("direction"),
+        "status": prop.get("status"),
+        "base_config": base,
+        "candidate_config": cand,
+        "param_diff": _jsonable(prop.get("param_diff")),
+        "plan": _jsonable(prop.get("plan")),
+        "states": states,
+    }
+
+
+def get_proposal_inner(cur, proposal_id: str) -> dict[str, Any]:
+    """在**已有游标**上取提案 + 计划（`shadow_prepare` / `evaluate_validation` 共用）。
+
+    与 `get_proposal()` 同口径，只是不自己开连接（那两个函数本来就在事务里）。
+    """
+    cur.execute("SELECT * FROM fin_evolution_proposal WHERE proposal_id = %s", (proposal_id,))
+    row = cur.fetchone()
+    if not row:
+        raise LookupError("提案不存在")
+    item = dict(row)
+    cur.execute("SELECT * FROM fin_evolution_plan WHERE proposal_id = %s", (proposal_id,))
+    plan = cur.fetchone()
+    item["plan"] = dict(plan) if plan else None
+    return item
+
+
+def _shadow_latest_state(cur, validation_id: str, arm: str, initial_capital) -> dict[str, Any]:
+    """该臂**最近一条**影子事件的持仓快照（≤ 当前），没有则返回初始状态。"""
+    cur.execute(
+        "SELECT position_ref FROM fin_evolution_shadow_event "
+        " WHERE validation_id = %s AND arm = %s "
+        " ORDER BY trade_date DESC, point DESC, created_at DESC LIMIT 1",
+        (validation_id, arm),
+    )
+    row = cur.fetchone()
+    ref = (row or {}).get("position_ref")
+    if ref:
+        return dict(ref)
+    return _shadow_initial_state(initial_capital)
+
+
+# ── 影子事件：写入（幂等）/ 读取 ───────────────────────────────────────────
+
+def record_shadow_events(*, records: list[dict[str, Any]], conn=None) -> dict[str, Any]:
+    """把两臂的影子里程碑**追加**进 `fin_evolution_shadow_event`。**幂等**。
+
+    每个 record 带业务身份 `(validation_id, arm, trade_date, point, symbol)` —— 唯一键撞上
+    就 `ON CONFLICT DO NOTHING`，所以**重试 / 重启 / 补跑不会重复记账**（`03 §6` 必测场景）。
+
+    返回 `{written, skipped}`（本次真正插入的条数与撞键跳过的条数）。
+    """
+    if not records:
+        return {"written": 0, "skipped": 0}
+    written = 0
+    own = conn is None
+    conn = conn or get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            for r in records:
+                arm = str(r.get("arm") or "")
+                if arm not in SHADOW_ARMS:
+                    raise EvolutionValidationError(f"未知的臂：{arm!r}（只认 {SHADOW_ARMS}）")
+                sig = r.get("signal")
+                signal_text = (json.dumps(_shadow_json(sig), ensure_ascii=False)
+                               if sig is not None else None)
+                cur.execute(
+                    """
+                    INSERT INTO fin_evolution_shadow_event
+                      (shadow_event_id, validation_id, arm, trade_date, point, symbol,
+                       quote_as_of, signal, filled, reject_reason, fee, slippage,
+                       position_ref, valuation_ref)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (validation_id, arm, trade_date, point, symbol) DO NOTHING
+                    """,
+                    (
+                        _new_id("evsh_"), r["validation_id"], arm, r["trade_date"], r["point"],
+                        r["symbol"], r.get("quote_as_of"), signal_text,
+                        None if r.get("filled") is None else bool(r.get("filled")),
+                        r.get("reject_reason"),
+                        None if r.get("fee") is None else _money4(r.get("fee")),
+                        None if r.get("slippage") is None else _money4(r.get("slippage")),
+                        psycopg2.extras.Json(_shadow_json(r.get("position"))),
+                        psycopg2.extras.Json(_shadow_json(r.get("valuation"))),
+                    ),
+                )
+                written += 1 if cur.rowcount == 1 else 0
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        if own:
+            conn.close()
+    return {"written": written, "skipped": len(records) - written}
+
+
+def _money4(value: Any) -> Decimal:
+    return Decimal(str(value)).quantize(Decimal("0.0001"))
+
+
+def shadow_events(*, validation_id: str, arm: Optional[str] = None,
+                  limit: int = 2000, conn=None) -> list[dict[str, Any]]:
+    """读某次验证的影子事件（可按臂过滤），按时间顺序。R9 界面 / 指标都用它。"""
+    clause, params = "", []
+    if arm:
+        clause, params = " AND arm = %s", [arm]
+    own = conn is None
+    conn = conn or get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                "SELECT * FROM fin_evolution_shadow_event WHERE validation_id = %s" + clause +
+                " ORDER BY trade_date ASC, point ASC, arm ASC LIMIT %s",
+                (validation_id, *params, max(1, int(limit))),
+            )
+            rows = [dict(r) for r in cur.fetchall()]
+        conn.rollback()
+    finally:
+        if own:
+            conn.close()
+    return [_jsonable(r) for r in rows]
+
+
+def count_shadow_events(*, validation_id: Optional[str] = None, conn=None) -> int:
+    """影子事件行数（验收用：幂等重复跑 → 行数不变）。"""
+    own = conn is None
+    conn = conn or get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            if validation_id:
+                cur.execute("SELECT count(*) AS n FROM fin_evolution_shadow_event "
+                            " WHERE validation_id = %s", (validation_id,))
+            else:
+                cur.execute("SELECT count(*) AS n FROM fin_evolution_shadow_event")
+            n = int(cur.fetchone()["n"])
+        conn.rollback()
+    finally:
+        if own:
+            conn.close()
+    return n
+
+
+# ── 指标（组合口径 + 辅助诊断）─────────────────────────────────────────────
+#
+# `03 §4-C`：**优先用同资本基准的组合口径** —— 组合净收益 / 最大回撤 / 换手 / 交易成本。
+# `realized_net_pnl_per_trade` **只作辅助诊断**（持仓周期与频率会让它失真），
+# 结果里带 `auxiliary: true` 明示。
+
+def _arm_equity(rows: list[dict]) -> list[tuple[str, str, Decimal]]:
+    """一臂的净值曲线 `[(trade_date, point, total_assets)]`（有估值的行才算）。"""
+    pts: list[tuple[str, str, Decimal]] = []
+    for r in rows:
+        v = r.get("valuation_ref") or {}
+        if v.get("total_assets") is None:
+            continue
+        pts.append((str(r["trade_date"]), str(r["point"]), Decimal(str(v["total_assets"]))))
+    return pts
+
+
+def _max_drawdown(pts: list[tuple[str, str, Decimal]]) -> Optional[Decimal]:
+    """最大回撤（负比例，例如 `-0.05`）。没有两个点 → `None`（算不出就不编）。"""
+    if len(pts) < 2:
+        return None
+    peak = pts[0][2]
+    worst = Decimal("0")
+    for _d, _p, total in pts:
+        if total > peak:
+            peak = total
+        if peak > 0:
+            dd = (total - peak) / peak
+            if dd < worst:
+                worst = dd
+    return worst
+
+
+def _arm_metrics(rows: list[dict], initial_capital: Decimal) -> dict[str, Any]:
+    """一臂的组合口径指标 + 辅助诊断。"""
+    pts = _arm_equity(rows)
+    fills = [r for r in rows if r.get("filled")]
+    turnover = Decimal("0")
+    cost = Decimal("0")
+    realized = Decimal("0")
+    n_realized = 0
+    for r in fills:
+        sig = _parse_signal(r.get("signal"))
+        fill = (sig or {}).get("fill") or {}
+        amount = fill.get("amount")
+        if amount is not None:
+            turnover += Decimal(str(amount))
+        if r.get("fee") is not None:
+            cost += Decimal(str(r["fee"]))
+        rp = (sig or {}).get("realized_pnl")
+        if rp is not None:
+            realized += Decimal(str(rp))
+            n_realized += 1
+
+    last_total = pts[-1][2] if pts else initial_capital
+    net_return = ((last_total - initial_capital) / initial_capital
+                  if initial_capital and initial_capital > 0 else None)
+    return {
+        "points": len(pts),
+        "trades": len(fills),
+        "final_total_assets": _json_num(last_total),
+        "portfolio_net_return": None if net_return is None else float(net_return),
+        "max_drawdown": (lambda dd: None if dd is None else float(dd))(_max_drawdown(pts)),
+        "turnover": None if initial_capital <= 0 else float(turnover / initial_capital),
+        "transaction_cost": float(cost),
+        "realized_net_pnl_per_trade": {
+            "value": None if n_realized == 0 else float(realized / n_realized),
+            "n": n_realized,
+            "auxiliary": True,
+            "why": "持仓周期与交易频率会让单笔口径失真，只作辅助诊断（03 §4-C）；无已实现卖出时为 null",
+        },
+    }
+
+
+def _parse_signal(signal: Any) -> Optional[dict]:
+    if signal is None:
+        return None
+    if isinstance(signal, dict):
+        return signal
+    try:
+        return json.loads(str(signal))
+    except (ValueError, TypeError):
+        return None
+
+
+def _comparable_sample_keys(rows: list[dict]) -> set[tuple[str, str, str]]:
+    """**可比样本**的键集合：`(trade_date, point, symbol)`，要求**两臂都出了决策**。
+
+    红线 11：样本以「两臂均有可比机会的交易日 / 事件」计。判据是**两臂各自的数据行都存在、
+    且都带非空 `signal`**（signal = 该臂在该点真的出了决策）。只有一臂出决策的那些点
+    **不计入样本** —— 所以「候选有交易、现行没交易」的笔数不会被当成样本直接相减。
+    """
+    saw: dict[tuple[str, str, str], set[str]] = {}
+    for r in rows:
+        if _parse_signal(r.get("signal")) is None:
+            continue
+        key = (str(r["trade_date"]), str(r["point"]), str(r["symbol"]))
+        saw.setdefault(key, set()).add(str(r["arm"]))
+    return {k for k, arms in saw.items() if arms >= set(SHADOW_ARMS)}
+
+
+def _loss_tail(pts: list[tuple[str, str, Decimal]], n: int = 5) -> list[dict[str, Any]]:
+    """亏损尾部：单步净值变化最差的若干步（真算出来的数，不编）。"""
+    deltas: list[tuple[str, str, Decimal]] = []
+    for i in range(1, len(pts)):
+        deltas.append((pts[i][0], pts[i][1], pts[i][2] - pts[i - 1][2]))
+    deltas.sort(key=lambda t: t[2])
+    return [{"trade_date": d, "point": p, "delta": float(v)} for d, p, v in deltas[:n]]
+
+
+def shadow_metrics(*, validation_id: str, market: Optional[str] = None,
+                   initial_capital: Optional[Any] = None, conn=None) -> dict[str, Any]:
+    """两臂的组合口径指标 + 可比样本 + 亏损尾部 + 分 regime。
+
+    `initial_capital` 不给就现查 `fin_project`。
+    """
+    own = conn is None
+    conn = conn or get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            if initial_capital is None:
+                cur.execute(
+                    "SELECT p.initial_capital FROM fin_evolution_proposal e"
+                    " JOIN fin_project p ON p.project_id = e.project_id"
+                    " WHERE e.proposal_id = %s", (validation_id,))
+                row = cur.fetchone()
+                initial_capital = (row or {}).get("initial_capital") or 0
+            cur.execute(
+                "SELECT * FROM fin_evolution_shadow_event WHERE validation_id = %s"
+                " ORDER BY trade_date ASC, point ASC, arm ASC", (validation_id,))
+            rows = [dict(r) for r in cur.fetchall()]
+        conn.rollback()
+    finally:
+        if own:
+            conn.close()
+
+    cap = Decimal(str(initial_capital or 0))
+    by_arm = {arm: [r for r in rows if r["arm"] == arm] for arm in SHADOW_ARMS}
+    metrics = {arm: _arm_metrics(by_arm[arm], cap) for arm in SHADOW_ARMS}
+    cand_ret = metrics["candidate"]["portfolio_net_return"]
+    inc_ret = metrics["incumbent"]["portfolio_net_return"]
+    delta = None if (cand_ret is None or inc_ret is None) else float(cand_ret - inc_ret)
+    samples = _comparable_sample_keys(rows)
+
+    # 极端 regime 全部落在 `unknown` 一组 —— 本部署**没有基准行情源**（R5 的判定器
+    # `observe()` 默认 None → 恒 unknown）。**不把 unknown 混进别的组**，也不假装有别的组。
+    by_regime = {
+        "unknown": {
+            "comparable_samples": len(samples),
+            "candidate_net_return": cand_ret,
+            "incumbent_net_return": inc_ret,
+            "note": "本部署无基准行情源（R5：regime 判定器恒 unknown）—— 全部样本归此组，"
+                    "不与其他 regime 混组（红线：unknown 不得与明确 regime 同组聚合）",
+        }
+    }
+    return {
+        "validation_id": validation_id,
+        "market": market,
+        "initial_capital": _json_num(cap),
+        "arms": metrics,
+        "delta_candidate_minus_incumbent": delta,
+        "comparable_samples": len(samples),
+        "sample_keys": sorted(f"{d}|{p}|{s}" for d, p, s in samples)[:50],
+        "loss_tail": {
+            "candidate": _loss_tail(_arm_equity(by_arm["candidate"])),
+            "incumbent": _loss_tail(_arm_equity(by_arm["incumbent"])),
+            "note": "单步净值变化最差的若干步（真算），不是单笔损益",
+        },
+        "by_regime": by_regime,
+    }
+
+
+# ── 判定（读冻结计划，不临时改口径）────────────────────────────────────────
+
+def _trading_days_between(cur, market: str, start: str, end: str) -> Optional[int]:
+    """`(start, end]` 区间内该市场的**交易日数**（含 end 不含 start）。日历缺 → 抛。"""
+    cur.execute(
+        "SELECT count(*) AS n FROM fin_market_calendar"
+        " WHERE market = %s AND is_trading AND trade_date > %s AND trade_date <= %s",
+        (market, start, end))
+    row = cur.fetchone()
+    return None if row is None else int(row["n"])
+
+
+def _validation_start(cur, proposal_id: str) -> Optional[str]:
+    """第一次 `validating` 事件里记的 `window_start`（验证窗口的起点）。没有 → None。"""
+    cur.execute(
+        "SELECT payload FROM fin_evolution_event WHERE proposal_id = %s AND kind = 'validating'"
+        " ORDER BY created_at ASC, event_id ASC LIMIT 1", (proposal_id,))
+    row = cur.fetchone()
+    if not row:
+        return None
+    return ((row.get("payload") or {}).get("window_start"))
+
+
+def start_validation(*, proposal_id: str, market: str, trade_date: str,
+                     actor: str = "fin-worker", conn=None) -> dict[str, Any]:
+    """把提案推进到 `validating` 并**记下窗口起点**（幂等：已有 validating 事件则跳过）。"""
+    own = conn is None
+    conn = conn or get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            if _validation_start(cur, proposal_id) is not None:
+                conn.rollback()
+                return {"started": False, "proposal_id": proposal_id, "reason": "already_validating"}
+        conn.rollback()
+    finally:
+        if own:
+            conn.close()
+    row = append_event(proposal_id=proposal_id, kind="validating",
+                       payload={"window_start": trade_date, "market": market,
+                                "started_by": actor},
+                       actor=actor)
+    return {"started": True, "proposal_id": proposal_id, **row}
+
+
+def _decide_verdict(metrics: dict[str, Any], plan: dict[str, Any],
+                    window: dict[str, Any]) -> tuple[Optional[str], str]:
+    """按**冻结计划**判 verdict。返回 `(verdict_or_None, 理由)`。
+
+    顺序与红线：
+    1. 窗口未结束 → **绝不** `passed`；若已触及失败线 / 提前停止线 → `failed`（提前止损是允许的）。
+    2. 窗口结束：样本 < 最小可比样本 → `inconclusive`（不结论是合法终局）。
+    3. `delta >= pass_line` → `passed`；`delta <= fail_line` 或回撤 ≤ early_stop → `failed`；
+       其余 → `inconclusive`。
+    """
+    delta = metrics.get("delta_candidate_minus_incumbent")
+    cand_dd = metrics["arms"]["candidate"]["max_drawdown"]
+    fail_line = _as_float(plan.get("fail_line"))
+    pass_line = _as_float(plan.get("pass_line"))
+    early = (plan.get("early_stop_condition") or {})
+    stop_dd = _as_float(early.get("max_drawdown_pct"))
+
+    # 提前失败（与窗口无关）：触及失败线或提前停止线。
+    if delta is not None and fail_line is not None and delta <= fail_line:
+        return "failed", f"候选相对现行 {delta:+.4%} ≤ 失败线 {fail_line:+.4%}"
+    if cand_dd is not None and stop_dd is not None and Decimal(str(cand_dd)) <= Decimal(str(stop_dd)):
+        return "failed", f"候选最大回撤 {cand_dd:.4%} ≤ 提前停止线 {stop_dd:.4%}"
+
+    if not window.get("ended"):
+        return None, (f"验证窗口未结束（{window.get('elapsed_trading_days')}/"
+                      f"{window.get('window_days')} 交易日）—— 窗口结束前不许通过")
+
+    min_sample = int(plan.get("min_comparable_sample") or 0)
+    if metrics.get("comparable_samples", 0) < min_sample:
+        return "inconclusive", (f"可比样本 {metrics.get('comparable_samples')} < 最小可比样本 "
+                                f"{min_sample}（两臂均有可比机会的交易日才算样本）")
+
+    if delta is None:
+        return "inconclusive", "算不出候选与现行的组合净收益差（缺估值）"
+    if pass_line is not None and delta >= pass_line:
+        return "passed", f"候选相对现行 {delta:+.4%} ≥ 通过线 {pass_line:+.4%}，样本 {metrics.get('comparable_samples')}"
+    return "inconclusive", (f"窗口已结束但差异 {delta:+.4%} 落在 [{fail_line}, {pass_line}] 之间，"
+                            "或样本质量不足以支撑结论")
+
+
+def _as_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(Decimal(str(value)))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def evaluate_validation(*, proposal_id: str, market: str, trade_date: str,
+                        actor: str = "fin-worker", conn=None) -> dict[str, Any]:
+    """跑一次判定：算指标 → 若**终局**（窗口结束或提前失败）则追加状态事件。
+
+    **终局才写事件**：中途每次跑都写一个 `inconclusive` 会把提案的投影状态压成 inconclusive、
+    让它退出 validating，后续就再也跑不到 —— 所以中间结果只算不写。终局三种：
+    `passed` / `failed` / `inconclusive`（样本不足 / 行情缺口 / 未完成持仓）。
+
+    `passed` 只在**窗口结束且样本足够且达标**时产生 —— 这是「窗口未到不得通过」的可执行定义。
+    """
+    own = conn is None
+    conn = conn or get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            prop = get_proposal_inner(cur, proposal_id)
+            plan = prop.get("plan") or dict(DEFAULT_PLAN)
+            start = _validation_start(cur, proposal_id)
+            elapsed = None
+            if start:
+                elapsed = _trading_days_between(cur, market, str(start), str(trade_date))
+            window_days = int(plan.get("window_days") or 0)
+            window = {
+                "start": start,
+                "window_days": window_days,
+                "elapsed_trading_days": elapsed,
+                "ended": bool(start and elapsed is not None and elapsed >= window_days),
+                "market": market,
+                "as_of": trade_date,
+            }
+            # 指标用**同一个连接**（会话时区一致），在关连接之前算完。
+            metrics = shadow_metrics(validation_id=proposal_id, market=market, conn=conn)
+        conn.rollback()
+    finally:
+        if own:
+            conn.close()
+    verdict, reason = _decide_verdict(metrics, plan, window)
+    result = {"proposal_id": proposal_id, "market": market, "trade_date": trade_date,
+              "window": window, "metrics": metrics, "verdict": verdict, "reason": reason,
+              "appended": False}
+    if verdict is None:
+        return result
+    # 终局：追加事件（同时把 proposal.status 更新成它的投影）。
+    ev = append_event(proposal_id=proposal_id, kind=verdict,
+                      payload={"reason": reason, "window": window,
+                               "metrics": {k: metrics[k] for k in
+                                           ("arms", "delta_candidate_minus_incumbent",
+                                            "comparable_samples", "loss_tail", "by_regime")}},
+                      actor=actor)
+    result["appended"] = True
+    result["event"] = ev
+    return result
+
+
+def shadow_summary(*, proposal_id: str, conn=None) -> dict[str, Any]:
+    """给界面 / 文档用的一次性汇总：提案 + 计划 + 事件数 + 两臂指标 + 判定（只读，不写）。"""
+    own = conn is None
+    conn = conn or get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            prop = get_proposal_inner(cur, proposal_id)
+            metrics = shadow_metrics(validation_id=proposal_id, conn=conn)
+        conn.rollback()
+    finally:
+        if own:
+            conn.close()
+    return {"proposal": _jsonable(prop), "metrics": metrics}

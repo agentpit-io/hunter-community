@@ -43,6 +43,8 @@ def test_all_workflows_registered():
         "fin.instrument_sync",
         # R3：收盘后复核（复盘）回路
         "fin.review",
+        # R7：影子验证（候选臂独立模拟记账 + 两臂同条件验证）
+        "fin.shadow",
     }
 
 
@@ -80,6 +82,8 @@ def test_activity_list_covers_workflow_calls():
         "sync_instruments",
         # R3：决策上下文注入 + 复核回路（四个新活动）
         "freeze_memory", "review_collect", "review_propose", "review_append",
+        # R7：影子验证的四个活动
+        "market_points", "shadow_proposals", "shadow_step", "shadow_evaluate",
     } == names
 
 

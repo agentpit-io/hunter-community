@@ -492,5 +492,99 @@ class InstrumentSyncWorkflow:
         )
 
 
+# ── 影子验证（R7 · `plan/R7.md` §一.3）─────────────────────────────────────
+# 收盘后（各市场**时段末点 + 复核延迟 + 影子延迟**，见 `schedules.shadow_specs`）跑一次：
+#
+#   对每一个**待验证**的提案（`status ∈ {draft, validating}`）：
+#     在该市场**每个已有时点**上 → ① 取一次行情快照 → ② 两臂各跑一次 `build_decision`
+#     → ③ 交 paper 影子撮合（只算不记）→ ④ 写两行影子事件（api 落库）
+#   → 全部时点跑完后做一次**数据校验与估值判定**。
+#
+# **两臂同条件**（红线 11）由活动保证：同一个策略、同一个行情快照（paper 侧取一次）、
+# 同费率 / 滑点 / 停牌 / 撮合（都复用 `paper` 的实现）。**零订单出口**（红线 12）：
+# 影子成交只进影子事件表，`paper` 的影子路径只依赖 `DecisionRecorder`。
+#
+# 它是**全局的、与项目数无关**的 Schedule（同 `fin.review`）：一次触发对**该市场所有
+# 进行中的项目**下每个待验证提案各验证一遍。
+SHADOW_TIMEOUT = timedelta(minutes=5)
+
+
+@workflow.defn(name="fin.shadow")
+class ShadowWorkflow:
+    """影子验证工作流（第四段 R7 · 方案 §4-C）。
+
+    **市场经 Schedule 的 `args` 传进来**（同六个时点角色 / `fin.review`）：
+    每个市场一条 Schedule（`fin-shadow-<market>`）。某市场非交易日 / 日历缺失 → 空跑
+    并记明原因，**其他市场照常**。**不改现有 6 个 point 时点、不改 `fin-review-<market>`。**
+    """
+
+    @workflow.run
+    async def run(self, req: dict | None = None) -> dict:
+        req = req or {}
+        market = canonical(req.get("market") or "CN_A")
+        if req.get("trade_date") and req.get("now"):
+            trade_date, now_iso = req["trade_date"], req["now"]
+        else:
+            clock = await _market_clock(market)
+            trade_date = req.get("trade_date") or clock["trade_date"]
+            now_iso = req.get("now") or clock["now"]
+        summary: dict = {"market": market, "trade_date": trade_date,
+                         "point": req.get("point") or "shadow", "kind": "shadow"}
+
+        cal = await _exec(activities.read_calendar, {"trade_date": trade_date, "market": market})
+        summary["calendar"] = cal
+        action, why = gating.gate(cal)
+        if action == gating.SKIP_UNKNOWN:
+            summary["status"] = action
+            summary["warning"] = f"{market} {trade_date} {why}"
+            workflow.logger.warning(summary["warning"])
+            return summary
+        if action == gating.SKIP_NON_TRADING:
+            summary["status"] = action
+            summary["note"] = f"{market} {trade_date} 非交易日（{why}），未验证"
+            workflow.logger.info(summary["note"])
+            return summary
+
+        points = await _exec(activities.market_points, {"market": market})
+        summary["points"] = [p["point"] for p in points]
+        projects = await _exec(activities.list_active_projects, {})
+        projects = projects_for_market(projects, market)
+        only = req.get("project_id")
+        if only:
+            projects = filter_projects(projects, only)
+            summary["filtered_project"] = only
+
+        summary["projects"] = []
+        for project in projects:
+            summary["projects"].append(
+                await _shadow_for_project(project, market, trade_date, now_iso, points, req)
+            )
+        summary["status"] = "ok"
+        summary["active_projects"] = len(projects)
+        return summary
+
+
+async def _shadow_for_project(project: dict, market: str, trade_date: str, now_iso: str,
+                              points: list[dict], req: dict) -> dict:
+    """一个项目下的每个待验证提案各跑一遍影子，并在跑完后做一次判定。"""
+    project_id = project["project_id"]
+    out: dict = {"project_id": project_id, "proposals": []}
+    proposals = await _exec(activities.shadow_proposals, {"project_id": project_id})
+    for prop in proposals:
+        proposal_id = prop["proposal_id"]
+        rec: dict = {"proposal_id": proposal_id, "status": prop.get("status"), "steps": []}
+        for p in points:
+            rec["steps"].append(await _exec(activities.shadow_step, {
+                "project_id": project_id, "proposal_id": proposal_id, "market": market,
+                "trade_date": trade_date, "point": p["point"], "now": now_iso,
+                "code": req.get("code"),
+            }, timeout=SHADOW_TIMEOUT))
+        rec["evaluate"] = await _exec(activities.shadow_evaluate, {
+            "proposal_id": proposal_id, "market": market, "trade_date": trade_date,
+        }, timeout=SHADOW_TIMEOUT)
+        out["proposals"].append(rec)
+    return out
+
+
 ALL_WORKFLOWS = POINT_WORKFLOWS + (MarketEtlWorkflow, InstrumentSyncWorkflow,
-                                   ReviewWorkflow)
+                                   ReviewWorkflow, ShadowWorkflow)
