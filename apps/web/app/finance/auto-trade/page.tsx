@@ -15,8 +15,8 @@ import { useState } from 'react'
 import {
   Zap, Play, Pause, Shield, SlidersHorizontal, ListChecks, Scale, Lock, TriangleAlert,
 } from 'lucide-react'
-import { Button, Card, CardHead, Chip, Note, pct, money } from '../_ui'
-import { MarketSwitcher, MarketStatusLine, useCurrentMarket, useMarketStatus, currencyOf, MARKET_LABEL, type MarketStatus } from '../_market'
+import { Button, Card, CardHead, Chip, Note, pct, money, useCurrentProject } from '../_ui'
+import { MarketSwitcher, MarketStatusLine, useCurrentMarket, useMarketStatus, currencyOf, marketsOf, onlySelected, MARKET_LABEL, type MarketStatus } from '../_market'
 import { Grid, RowKV, SectionTitle, TimelineItem, EmptyState, ErrorState, LoadingCard } from '../_parts'
 import { useFinPage, finPost } from '../_data'
 
@@ -64,8 +64,11 @@ function Switch({ on, busy, onToggle }: { on: boolean; busy: boolean; onToggle: 
 }
 
 export default function FinanceAutoTradePage() {
-  const [market, setMarket] = useCurrentMarket()
-  const { data, loading, error, noProject, reload } = useFinPage<AutoTrade>(`/auto-trade?market=${market}`)
+  const proj = useCurrentProject()
+  // 已选市场（P3）：切换器只列这个项目选中的市场。
+  const allowed = marketsOf(proj.project)
+  const [market, setMarket] = useCurrentMarket('CN_A', allowed)
+  const { data, loading, error, noProject, reload } = useFinPage<AutoTrade>(`/auto-trade?market=${market}`, { skip: proj.loading })
   const { markets } = useMarketStatus()
   const [busy, setBusy] = useState('')
   const [flash, setFlash] = useState('')
@@ -107,8 +110,13 @@ export default function FinanceAutoTradePage() {
   const sw = data.switch.auto_enabled
   const activeKey = data.active_strategy?.key
   const risk = data.risk
-  const mkList = data.markets || markets || []
+  // 只列这个项目**已选**的市场（`allowed` 为空 = 历史遗留项目，退回不限制的老行为）
+  const mkList = onlySelected(data.markets || markets, allowed)
   const mkLocal = mkList.find(m => m.market === data.schedule_market)
+  // 日历缺行 → 后端给 `state='unknown'`（「未知 ≠ 交易日」）。当前看的这个市场
+  // 日历缺失时明文说明它**当前不可交易**，别让用户以为只是「今天休市」。
+  const mkCur = mkList.find(m => m.market === market)
+  const calendarMissing = !!mkCur && mkCur.state === 'unknown'
 
   return (
     <div className="flex flex-col gap-6 max-w-6xl">
@@ -121,14 +129,22 @@ export default function FinanceAutoTradePage() {
             <div>
               <div className="text-sm font-bold" style={{ color: 'var(--text)' }}>看哪个市场</div>
               <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                时刻表、硬约束、今天的动作都随市场切换（各市场规则不同，互不套用）。
+                只列**这个项目已选**的市场。时刻表、硬约束、今天的动作都随市场切换（各市场规则不同，互不套用）。
               </div>
             </div>
-            <MarketSwitcher value={market} onChange={setMarket} />
+            <MarketSwitcher value={market} onChange={setMarket} markets={allowed.length ? allowed : undefined} />
           </div>
           <div className="flex gap-4 flex-wrap">
             {mkList.map(m => <MarketStatusLine key={m.market} m={m} />)}
           </div>
+          {calendarMissing && (
+            <Note tone="warn">
+              <b>{MARKET_LABEL[market] || market}当前不可交易（日历缺失）</b> ——
+              本机/该环境的 <code className="text-[11px]">fin_market_calendar</code> 里没有这个市场今天的行。
+              按「未知 ≠ 交易日」的口径，这个市场的时点会**空跑并告警**，不会退化成「周一到周五就是交易日」。
+              要恢复：跑一次该市场的日历同步（<code className="text-[11px]">fin.point_preopen</code> 的 sync_calendar 活动）。
+            </Note>
+          )}
         </div>
       </Card>
 

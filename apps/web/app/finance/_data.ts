@@ -23,8 +23,9 @@ export type FinPageState<T> = {
   reload: () => void
 }
 
-export function useFinPage<T>(path: string): FinPageState<T> {
+export function useFinPage<T>(path: string, opts?: { skip?: boolean }): FinPageState<T> {
   const router = useRouter()
+  const skip = !!opts?.skip
   const [data, setData] = useState<T | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -32,6 +33,13 @@ export function useFinPage<T>(path: string): FinPageState<T> {
   const [tick, setTick] = useState(0)
 
   useEffect(() => {
+    // P3：`skip` = 「项目还没加载出来，**先别发这一枪**」。
+    // 这几页的 path 里带着 `market=`，而「这个项目有哪些市场」要等
+    // `/projects/current` 回来才知道；先按 localStorage 记住的市场打一枪，
+    // 项目回来后再切，就会白打一枪、还可能闪一下别的市场的数据
+    // （正是「记着美股、这项目没有美股」那个空页的弱化版）。
+    // skip 期间维持 `loading`，页面照常显示加载态。
+    if (skip) { setLoading(true); return }
     let alive = true
     setLoading(true)
     setError('')
@@ -52,7 +60,7 @@ export function useFinPage<T>(path: string): FinPageState<T> {
       }
     })()
     return () => { alive = false }
-  }, [path, router, tick])
+  }, [path, router, tick, skip])
 
   const reload = useCallback(() => setTick(t => t + 1), [])
   return { data, loading, error, noProject, reload }

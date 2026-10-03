@@ -14,10 +14,10 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  Coins, Wallet, Lock, RefreshCw, ShieldCheck, Clock, TrendingUp, Activity, FileSearch, X,
+  Coins, Wallet, Lock, RefreshCw, ShieldCheck, Clock, TrendingUp, Activity, FileSearch, X, Plus,
 } from 'lucide-react'
-import { Button, Card, CardHead, Chip, Note, money, pct, finFetch, currencySymbol } from '../_ui'
-import { MarketSwitcher, MarketStatusLine, useCurrentMarket, useMarketStatus, currencyOf, MARKET_LABEL, type MarketStatus } from '../_market'
+import { Button, Card, CardHead, Chip, Note, money, pct, finFetch, currencySymbol, useCurrentProject } from '../_ui'
+import { MarketSwitcher, MarketStatusLine, useCurrentMarket, useMarketStatus, currencyOf, marketsOf, onlySelected, MARKET_LABEL, MARKET_CURRENCY, type MarketStatus } from '../_market'
 import { Grid, Kpi, Meter, MiniChart, RowKV, SectionTitle, Tbl, EmptyState, ErrorState, LoadingCard } from '../_parts'
 import { useFinPage, finPost } from '../_data'
 
@@ -46,20 +46,56 @@ type Account = {
   param_change_log: any[]
   constraints: { key: string; title: string; text: string }[]
   tier_options: { tier: string; label: string }[]
+  /** P3：这个项目**选中的**每个市场一行（各自本币本金 + 最新收盘净值）。 */
+  market_accounts: {
+    market: string; label: string; currency: string
+    initial_capital: number | null; opened_at: string | null
+    nav: number | null; total_assets: number | null; as_of: string | null
+  }[]
 }
 
 const TIER_LABEL: Record<string, string> = { play: '个人玩玩', manage: '个人资产管理', operate: '资产运营' }
 
 export default function FinanceAccountPage() {
   const router = useRouter()
-  const [market, setMarket] = useCurrentMarket()
-  const { data, loading, error, noProject, reload } = useFinPage<Account>(`/account?market=${market}`)
+  const proj = useCurrentProject()
+  // 已选市场（P3）：切换器、子账户卡片、追加市场都以它为准。
+  const allowed = marketsOf(proj.project)
+  const [market, setMarket] = useCurrentMarket('CN_A', allowed)
+  const { data, loading, error, noProject, reload } = useFinPage<Account>(`/account?market=${market}`, { skip: proj.loading })
   const { markets } = useMarketStatus()
   const [voucher, setVoucher] = useState<{ id: string; snap: Snap | null; err: string; loading: boolean } | null>(null)
   const [newOpen, setNewOpen] = useState(false)
   const [newTier, setNewTier] = useState('manage')
   const [newBusy, setNewBusy] = useState(false)
   const [newErr, setNewErr] = useState('')
+  // 「追加市场」（P3 · 只增不减）
+  const [addOpen, setAddOpen] = useState(false)
+  const [addPick, setAddPick] = useState<string[]>([])
+  const [addBusy, setAddBusy] = useState(false)
+  const [addErr, setAddErr] = useState('')
+
+  async function doAddMarkets() {
+    const pid = data?.project?.project_id
+    if (!pid || addPick.length === 0) return
+    setAddBusy(true); setAddErr('')
+    try {
+      // 入参是**目标集合**（现有 ∪ 新增）—— 服务端要求它是现有集合的超集，
+      // 少传一个就等于「移除某个市场」，会被 400 拦下（P1）。界面也不提供移除控件。
+      await finFetch(`/projects/${encodeURIComponent(pid)}/markets`, {
+        method: 'POST',
+        body: JSON.stringify({ markets: [...allowed, ...addPick] }),
+      })
+      setAddOpen(false)
+      setAddPick([])
+      location.reload()
+    } catch (e: any) {
+      if (e?.status === 401) { router.push('/login'); return }
+      setAddErr(e?.message || '追加市场失败')
+    } finally {
+      setAddBusy(false)
+    }
+  }
 
   async function openVoucher(snapshotId: string) {
     setVoucher({ id: snapshotId, snap: null, err: '', loading: true })
@@ -109,12 +145,62 @@ export default function FinanceAccountPage() {
   const total = a.total_assets
   const pctOf = (v: number | null) => (v === null || !total ? null : (v / total) * 100)
   const lastTradeWithSnap = data.trades.find(t => t.snapshot_id)
-  const mkList = data.markets || markets || []
+  // 只列这个项目**已选**的市场（`allowed` 为空 = 历史遗留项目，退回不限制的老行为）
+  const mkList = onlySelected(data.markets || markets, allowed)
   const mk = mkList.find(m => m.market === market)
   const cur = currencyOf(market, a.currency || data.currency)
+  // 子账户卡片：后端只回 `fin_project_market` 的行（= 已选市场）。项目还没读到时用 `allowed` 兜底。
+  const subs = (data.market_accounts && data.market_accounts.length)
+    ? data.market_accounts
+    : allowed.map(m => ({ market: m, label: MARKET_LABEL[m] || m, currency: MARKET_CURRENCY[m], initial_capital: null, opened_at: null, nav: null, total_assets: null, as_of: null }))
+  const addable = (['CN_A', 'HK', 'US'] as const).filter(m => allowed.indexOf(m) < 0)
 
   return (
     <div className="flex flex-col gap-6 max-w-6xl">
+      {/* 追加市场确认框（P3 · 只增不减） */}
+      {addOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(30,26,22,.45)' }}
+          role="dialog" aria-modal="true" aria-label="追加市场">
+          <Card style={{ maxWidth: 520, width: '100%' }}>
+            <CardHead icon={<Plus className="w-4 h-4" />} title="追加市场 · 只能加，不能减"
+              right={<button onClick={() => setAddOpen(false)} className="p-1" aria-label="关闭"><X className="w-4 h-4" /></button>} />
+            <div className="p-4 flex flex-col gap-3">
+              <Note tone="warn">
+                <b>追加后该市场从此刻开始记账，不回填历史</b> ——
+                新子账户的账本起点就是你点确认的这一刻，之前的行情不补记（账本起点是显式的）。
+                金额 = 当前档位金额，按该市场本币入账，与已有子账户互不折算。
+              </Note>
+              <div>
+                <div className="text-xs font-bold mb-2" style={{ color: 'var(--text-muted)' }}>选要追加的市场（可多选）</div>
+                <div className="flex gap-2 flex-wrap">
+                  {addable.map(m => {
+                    const on = addPick.indexOf(m) >= 0
+                    return (
+                      <button key={m} onClick={() => setAddPick(p => on ? p.filter(x => x !== m) : [...p, m])}
+                        className="px-3 py-2 rounded-[10px] border text-xs font-semibold"
+                        style={{
+                          borderColor: on ? 'var(--blue)' : 'var(--border)',
+                          background: on ? 'rgba(176,106,50,.08)' : 'var(--bg-card)',
+                          color: 'var(--text)', cursor: 'pointer',
+                        }}>{MARKET_LABEL[m] || m} · {MARKET_CURRENCY[m]}</button>
+                    )
+                  })}
+                </div>
+              </div>
+              <Note tone="copper">
+                这里<b>没有「移除市场」</b>：市场范围一旦落库就不能减 —— 要减少只能关停旧项目、开新项目。
+              </Note>
+              {addErr && <Note tone="warn">追加市场失败：{addErr}</Note>}
+              <div className="flex gap-2 pt-1">
+                <Button kind="pri" disabled={addBusy || addPick.length === 0} onClick={doAddMarkets}>
+                  {addBusy ? '正在追加…' : `确认追加${addPick.length ? `（${addPick.map(m => MARKET_LABEL[m] || m).join('、')}）` : ''}`}
+                </Button>
+                <Button onClick={() => setAddOpen(false)}>取消</Button>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
       {/* 顶部大数字 */}
       <Grid cols={4}>
         <Kpi label="模拟总资产" value={money(total, cur)} icon={<Coins className="w-4 h-4" />}
@@ -165,38 +251,57 @@ export default function FinanceAccountPage() {
 
           <Card>
             <CardHead icon={<Wallet className="w-4 h-4" />} title="市场与子账户"
-              sub="一个项目下每个市场各一个子账户，各自本币记账" />
+              sub="只列这个项目已选的市场；每个市场各一个子账户，各自本币记账"
+              right={addable.length > 0
+                ? <Button size="sm" onClick={() => { setAddOpen(true); setAddPick([]); setAddErr('') }}>
+                    <Plus className="w-3.5 h-3.5" />追加市场
+                  </Button>
+                : <Chip tone="slate">三个市场都已开通</Chip>} />
             <div className="p-4 flex flex-col gap-3">
-              <MarketSwitcher value={market} onChange={setMarket} />
+              <MarketSwitcher value={market} onChange={setMarket} markets={allowed.length ? allowed : undefined} />
               <div className="flex flex-col gap-2">
-                {mkList.length === 0 && <div className="text-xs" style={{ color: 'var(--text-muted)' }}>市场状态读取中…</div>}
-                {mkList.map(m => (
-                  <div key={m.market} className="flex items-center justify-between gap-3 rounded-xl border px-3.5 py-2.5"
-                    style={{
-                      borderColor: m.market === market ? 'var(--blue)' : 'var(--border)',
-                      background: m.market === market ? 'rgba(176,106,50,.06)' : 'var(--bg-card)',
-                    }}>
-                    <div>
-                      <div className="text-sm font-semibold" style={{ color: 'var(--text)' }}>
-                        {m.label} · {m.currency}
+                {subs.length === 0 && <div className="text-xs" style={{ color: 'var(--text-muted)' }}>市场状态读取中…</div>}
+                {subs.map(s => {
+                  const st = mkList.find(m => m.market === s.market)
+                  return (
+                    <div key={s.market} className="flex items-center justify-between gap-3 rounded-xl border px-3.5 py-2.5"
+                      style={{
+                        borderColor: s.market === market ? 'var(--blue)' : 'var(--border)',
+                        background: s.market === market ? 'rgba(176,106,50,.06)' : 'var(--bg-card)',
+                      }}>
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold" style={{ color: 'var(--text)' }}>
+                          {s.label} · {s.currency}
+                        </div>
+                        <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                          本金 {money(s.initial_capital, s.currency)}（{s.opened_at ? `${s.opened_at.slice(0, 10)} 起记账` : '记账起点未知'}）
+                        </div>
+                        <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                          当前净值 {money(s.total_assets, s.currency)}{s.nav === null ? '' : ` · 净值倍数 ${s.nav.toFixed(4)}`}
+                          {s.as_of ? ` · 截至 ${s.as_of.slice(0, 10)} 收盘` : ' · 还没有收盘估值'}
+                        </div>
+                        {st?.note && <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>{st.note}</div>}
                       </div>
-                      <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>{m.note}</div>
+                      <Chip tone={st?.state === 'open' ? 'ok' : st?.state === 'unknown' ? 'amber' : 'slate'}>
+                        {st?.state_label || '—'}
+                      </Chip>
                     </div>
-                    <Chip tone={m.state === 'open' ? 'ok' : m.state === 'unknown' ? 'amber' : 'slate'}>
-                      {m.state_label}
-                    </Chip>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
               <Note tone="ok">
-                三个市场的交易时段、T+1 / T+0、整手、价格带、费用规则各不相同，各自按市场规则执行；
+                每个市场的交易时段、T+1 / T+0、整手、价格带、费用规则各不相同，各自按市场规则执行；
                 <b>金额一律以该市场本币记账，账本内不做任何折算</b>。要用哪个市场，用上面的切换器切过去即可。
+              </Note>
+              <Note tone="copper">
+                市场范围<b>只能增、不能减</b>：选完开户之后可以在上面「追加市场」里加新的，
+                但<b>移除不了</b> —— 移除等于弃掉那段账本。要减少只能「关停旧项目 + 开新项目」。
               </Note>
               <div className="pt-3" style={{ borderTop: '1px dashed rgba(216,205,186,.9)' }}>
                 <div className="flex items-center justify-between gap-3 flex-wrap">
                   <div>
                     <div className="text-sm font-semibold" style={{ color: 'var(--text)' }}>更换金额或档位：开新项目</div>
-                    <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>关闭当前项目并开启新项目，另选档位</div>
+                    <div className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>关闭当前项目并开启新项目，另选档位与市场</div>
                   </div>
                   <Button size="sm" onClick={() => { setNewOpen(true); setNewErr('') }}><RefreshCw className="w-3.5 h-3.5" />开新项目</Button>
                 </div>

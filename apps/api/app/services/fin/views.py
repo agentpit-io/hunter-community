@@ -283,6 +283,10 @@ def account_payload(cur, project_id: str, market: Optional[str] = None) -> dict:
         "cash_entries": dash.cash_entries(cur, project_id, market=market),
         "param_change_log": dash.param_change_log(cur, project_id, limit=20),
         "markets": markets_svc.market_status(cur),
+        # P3：「市场与子账户」卡片只列**这个项目选中的**市场 —— 每个市场一行，
+        # 带各自本币本金与最新一行估值的净值。真值来自 `fin_project_market`，
+        # 没有估值的市场 `nav` 为 None（**不补 0**）。
+        "market_accounts": markets_svc.project_market_accounts(cur, project_id),
         "constraints": constraints(cur, market or "CN_A"),
         # 开新项目要另选档位，前端拿这个列表渲染三选一；金额依旧由服务端写死。
         "tier_options": [

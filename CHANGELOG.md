@@ -3,6 +3,62 @@
 All notable changes to HunterCode · Community Edition follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-10-03
+
+> **次要版本 · 开户时自选市场，自动化按选中的市场跑（三期出口）**。有数据库迁移
+> （新增 `0036` 一个迁移，由 api 启动时自动执行，**只加表 / 只放松约束 / 可重复执行**），
+> 有 **`web` / `api` / `paper` / `fin-worker` 四个镜像的更新**。
+>
+> 升级主站：`.env` 里的 **`HUNTER_VERSION` 与 `FIN_TAG` 都改成 `1.5.0`**
+> （`web` / `api` / `paper` / `fin-worker` 四个镜像都动了），然后
+> `docker compose pull && docker compose up -d`。
+> 部署与回滚的逐步清单见 `docs/开发文档/P3-上线清单.md`。
+
+### ✨ 新增 · Added
+
+- **开户时自选市场（可多选）**：设置向导从六步变**七步**，在「选档位」之后新增
+  **「选做哪几个市场」**一步。三张可多选的卡片，每张的信息**全部从 `fin_market_rule` 取表**、
+  不写死：本币 / 时区 / 交易时段 / 涨跌停模式 / T+N / 整手 / 费率模型 / 该市场本币本金。
+  **至少选一个**才能下一步（未选时「下一步」禁用并给提示）；选中港 / 美股时**当场**提示
+  「本版本不做价格带校验，回执与报告里如实标注『未做』」与「日历缺失该市场当日不可交易」。
+- **每市场各一份档位本金、各用本币、互不折算**：10 万档选 A股 / 美股 →
+  A 股子账户 100,000 CNY、美股子账户 100,000 USD，收益率各算各的。
+- **「我的账户」页可追加市场（只增不减）**：常驻可见的「追加市场」入口，列出**还没选的**市场；
+  界面写明「追加后该市场从此刻开始记账，不回填历史」。**全站没有任何「移除市场」控件**——
+  要减少只能关停旧项目、开新项目；服务端对「隐含移除」的请求一律 400（双保险）。
+- **各设置页按已选市场出**：总览 / 自动交易 / 我的账户的市场切换器**只列这个项目选中的市场**
+  （不再是三个市场全列）；自动交易页在已选市场**日历缺失**时明文提示「该市场当前不可交易（日历缺失）」；
+  向导的板块偏好、短线参数时点按市场出（港美股不出现「买入 ST」这条 A 股概念）；
+  每日报告的跨市场汇总（`MULTI`）只在**已选 ≥2 个市场**时出现。
+
+### 🔧 变更 · Changed
+
+- `POST /api/v1/fin/projects` 与 `/projects/new` 收 `markets`（缺省老行为 `["CN_A"]` 逐字不变）；
+  新增 `POST /api/v1/fin/projects/{id}/markets`（追加市场，目标集合必须是现有集合的超集，否则 400）。
+- `GET /api/v1/fin/current` 与 `/projects` 带出 `markets` 数组（每市场本金 / 币种 / 开户时刻）。
+- **`GET /api/v1/fin/markets` 每项新增 `rule`（`fin_market_rule` 的展示子集）与 `constraints`
+  （该市场六条硬约束文案）** —— 只加字段，既有字段一个没动。
+- `GET /api/v1/fin/account` 新增 `market_accounts`（该项目每个子账户一行：本币本金 + 最新收盘净值）。
+- `paper` 的 `list_projects` 带出市场集合；`fin-worker` 的 `projects_for_market()` 由
+  「`market_scope == market` 精确匹配」改为**「选中集合包含该市场」**——`MULTI` 项目不再空转，
+  只在用户选中的那几个市场的时点各驱动一次。
+- **港美股只接限价单**：示例策略按 `fin_market_rule.market_order_supported` 参数化，
+  限价市场用**真实报价 + 真实可用资金 + 真实每手股数**定量，买不起一手就如实不出委托（不编数量）。
+
+### 🗄️ 迁移 · Migrations
+
+`0036` 建表 `fin_project_market(project_id, market, initial_capital, currency, opened_at)`
+（市场集合的唯一真值）+ `fin_project.currency` 放开为可空 + 按**已核实的事实**回填
+（现有项目全部 `market_scope='CN_A'`）。一律幂等，历史行一行未改。
+
+### ⚠️ 已知边界
+
+- **追加市场不回填历史**：新子账户的账本起点是明确的那一刻。
+- 港美股费率仍是**回测级近似**（N2/N4 遗留，本版未动）。
+- 港美股**不做价格带校验**（`price_limit_mode='none'`），回执 / 报告 / 界面三处都标「未做」。
+
+---
+
 ## [1.4.0] - 2026-10-03
 
 > **次要版本 · 智能交易板块支持港美股模拟交易（二期出口）**。有数据库迁移

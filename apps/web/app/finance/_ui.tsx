@@ -203,14 +203,28 @@ export function ComingSoon({ title, purpose, milestone }: { title: string; purpo
   )
 }
 
-/** 拉一次「当前项目」，供各页显示一致的状态。 */
+/** 拉一次「当前项目」，供各页显示一致的状态。
+ *
+ * P3：把 P1 的 `markets` 数组挂到返回的 `project` 上（`project.markets`），
+ * 各页据此决定**展示哪些市场** —— 不再自己拼三个市场（见 `_market.marketsOf`）。
+ * 接口本来就返回 `{project, param, markets, tier_template}`，这里只是把
+ * `markets` 并进 `project`，各页不用改两处取值。
+ * 没有进行中的项目时 `project` 仍是 `null`。
+ */
 export function useCurrentProject() {
   const router = useRouter()
   const [state, setState] = useState<{ loading: boolean; project: any | null; error: string }>({ loading: true, project: null, error: '' })
   useEffect(() => {
     let alive = true
-    finFetch<{ project: any | null }>('/projects/current')
-      .then(d => { if (alive) setState({ loading: false, project: d.project, error: '' }) })
+    finFetch<{ project: any | null; markets?: any[] }>('/projects/current')
+      .then(d => {
+        if (!alive) return
+        setState({
+          loading: false,
+          project: d.project ? { ...d.project, markets: d.markets || [] } : null,
+          error: '',
+        })
+      })
       .catch(e => {
         if (!alive) return
         if ((e as any)?.status === 401) { router.push('/login'); return }

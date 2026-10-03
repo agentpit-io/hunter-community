@@ -99,12 +99,24 @@ async def markets(request: Request, trade_date: Optional[str] = None):
 
     `trade_date` 指定就看那一天（用于回看「A 股休市那天港美股在不在交易」）；
     不给就是「现在」。日历缺行 → 状态 `unknown`（未知 ≠ 交易日）。
+
+    P3 起每项多两块（都从库里的表读，**前端不写死**）：
+    - `rule`：`fin_market_rule` 的展示子集（交易时点 / 涨跌停模式 / 可卖规则 / 整手 /
+      是否接市价单 / 费率版本号）—— 向导「选市场」步与自动交易页的时点用它；
+    - `constraints`：该市场的六条硬约束文案（`views.constraints`，港美股如实标「未做」）。
+    **只加字段，既有字段一个没动**（老前端读到的还是原来那份）。
     """
     _uid(request)
     conn = _conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            payload = {"markets": markets_svc.market_status(cur, trade_date=trade_date)}
+            items = markets_svc.market_status(cur, trade_date=trade_date)
+            rules = markets_svc.market_rules(cur)
+            for m in items:
+                # 查不到该市场的规则行 → `rule` 为空对象（前端显示「规则未知」），不回落 A 股。
+                m["rule"] = rules.get(m["market"]) or {}
+                m["constraints"] = views.constraints(cur, m["market"])
+            payload = {"markets": items}
         conn.rollback()
         return payload
     finally:

@@ -1,0 +1,289 @@
+{
+  "base": "http://127.0.0.1:3110",
+  "email": "p3-demo-1790997528863@example.com",
+  "at": "2026-10-03T03:18:48.863Z",
+  "steps": [
+    {
+      "step": 1,
+      "name": "风险告知",
+      "text": "猎鹿人 · Hunter agentpit.io 总览 自选股 添加自选股 分析工具 AI 对话 新 持仓报告 在线分析 抗投毒 分析历史 K线预测 AI 智能交易 智能交易 模拟 市场信号 信号看板 新 事件分析 P p3-demo-17"
+    }
+  ],
+  "pages": [
+    {
+      "key": "overview",
+      "label": "总览",
+      "path": "/finance/overview",
+      "tabs": [
+        "港股"
+      ],
+      "overflowX": false,
+      "brokenImages": 0,
+      "sample": "猎鹿人 · Hunter agentpit.io 总览 自选股 添加自选股 分析工具 AI 对话 新 持仓报告 在线分析 抗投毒 分析历史 K线预测 AI 智能交易 智能交易 模拟 市场信号 信号看板 新 事件分析 P p3-demo-1790997528863@example.com 智能交易 模拟盘 · 不接实盘 总览 自动交易 我的账户 每日报告 成长与复盘 安全与帮助 设置向导 看哪个市场"
+    },
+    {
+      "key": "auto-trade",
+      "label": "自动交易",
+      "path": "/finance/auto-trade",
+      "tabs": [
+        "港股"
+      ],
+      "overflowX": false,
+      "brokenImages": 0,
+      "sample": "猎鹿人 · Hunter agentpit.io 总览 自选股 添加自选股 分析工具 AI 对话 新 持仓报告 在线分析 抗投毒 分析历史 K线预测 AI 智能交易 智能交易 模拟 市场信号 信号看板 新 事件分析 P p3-demo-1790997528863@example.com 智能交易 模拟盘 · 不接实盘 总览 自动交易 我的账户 每日报告 成长与复盘 安全与帮助 设置向导 看哪个市场"
+    },
+    {
+      "key": "account",
+      "label": "我的账户",
+      "path": "/finance/account",
+      "tabs": [
+        "港股"
+      ],
+      "overflowX": false,
+      "brokenImages": 0,
+      "sample": "猎鹿人 · Hunter agentpit.io 总览 自选股 添加自选股 分析工具 AI 对话 新 持仓报告 在线分析 抗投毒 分析历史 K线预测 AI 智能交易 智能交易 模拟 市场信号 信号看板 新 事件分析 P p3-demo-1790997528863@example.com 智能交易 模拟盘 · 不接实盘 总览 自动交易 我的账户 每日报告 成长与复盘 安全与帮助 设置向导 模拟总资产"
+    },
+    {
+      "key": "overview-after-add",
+      "label": "总览（追加后）",
+      "path": "/finance/overview",
+      "tabs": [
+        "港股",
+        "美股"
+      ]
+    },
+    {
+      "key": "auto-trade-after-add",
+      "label": "自动交易（追加后）",
+      "path": "/finance/auto-trade",
+      "tabs": [
+        "港股",
+        "美股"
+      ]
+    },
+    {
+      "key": "account-after-add",
+      "label": "我的账户（追加后）",
+      "path": "/finance/account",
+      "tabs": [
+        "港股",
+        "美股"
+      ]
+    }
+  ],
+  "checks": [
+    {
+      "kind": "向导",
+      "ok": true,
+      "detail": "第1步 风险告知 · 下一步可点（点了）"
+    },
+    {
+      "kind": "向导",
+      "ok": true,
+      "detail": "第2步 选档位 · 下一步可点（点了）"
+    },
+    {
+      "kind": "选市场",
+      "ok": true,
+      "detail": "未选任何市场时「下一步」禁用 = true"
+    },
+    {
+      "kind": "选市场",
+      "ok": true,
+      "detail": "「港股」市场卡片数 = 1"
+    },
+    {
+      "kind": "选市场",
+      "ok": true,
+      "detail": "勾了港股之后「下一步」可点 = true"
+    },
+    {
+      "kind": "选市场",
+      "ok": true,
+      "detail": "选中港/美股时当场提示「不做价格带校验」= true"
+    },
+    {
+      "kind": "向导",
+      "ok": true,
+      "detail": "第3步 选市场 · 下一步可点（点了）"
+    },
+    {
+      "kind": "第4步",
+      "ok": true,
+      "detail": "板块清单按市场出（出现「港股主板」）"
+    },
+    {
+      "kind": "向导",
+      "ok": true,
+      "detail": "第4步 板块偏好 · 下一步可点（点了）"
+    },
+    {
+      "kind": "向导",
+      "ok": true,
+      "detail": "第5步 策略选择 · 下一步可点（点了）"
+    },
+    {
+      "kind": "第6步",
+      "ok": true,
+      "detail": "时点按市场出、且未选 A 股时硬禁清单不含「买入 ST 与退市整理期股票」= true"
+    },
+    {
+      "kind": "第6步",
+      "ok": true,
+      "detail": "未选 A 股时明说「买入 ST」这条不适用（不是悄悄删掉）"
+    },
+    {
+      "kind": "向导",
+      "ok": true,
+      "detail": "第6步 短线参数 · 下一步可点（点了）"
+    },
+    {
+      "kind": "第7步",
+      "ok": true,
+      "detail": "确认页列出已选市场与各市场本金"
+    },
+    {
+      "kind": "第7步",
+      "ok": true,
+      "detail": "确认页不再出现「默认开设 A 股」"
+    },
+    {
+      "kind": "第7步",
+      "ok": true,
+      "detail": "「立即开启」可点"
+    },
+    {
+      "kind": "开户",
+      "ok": true,
+      "detail": "开户成功页出现 = true"
+    },
+    {
+      "kind": "后端",
+      "ok": true,
+      "detail": "market_scope = HK（期望 HK）"
+    },
+    {
+      "kind": "后端",
+      "ok": true,
+      "detail": "markets = [\"HK\"]（期望 [\"HK\"]）"
+    },
+    {
+      "kind": "切换器",
+      "ok": true,
+      "detail": "总览 切换器 = [\"港股\"]（期望只有港股）"
+    },
+    {
+      "kind": "切换器",
+      "ok": true,
+      "detail": "总览 没有未选市场的页签"
+    },
+    {
+      "kind": "切换器",
+      "ok": true,
+      "detail": "自动交易 切换器 = [\"港股\"]（期望只有港股）"
+    },
+    {
+      "kind": "切换器",
+      "ok": true,
+      "detail": "自动交易 没有未选市场的页签"
+    },
+    {
+      "kind": "切换器",
+      "ok": true,
+      "detail": "我的账户 切换器 = [\"港股\"]（期望只有港股）"
+    },
+    {
+      "kind": "切换器",
+      "ok": true,
+      "detail": "我的账户 没有未选市场的页签"
+    },
+    {
+      "kind": "追加市场",
+      "ok": true,
+      "detail": "「追加市场」入口常驻可见（不是悬停才出现）"
+    },
+    {
+      "kind": "追加市场",
+      "ok": true,
+      "detail": "弹层写明「追加后从此刻开始记账，不回填历史」"
+    },
+    {
+      "kind": "追加市场",
+      "ok": true,
+      "detail": "弹层没有任何「移除市场」控件"
+    },
+    {
+      "kind": "追加市场",
+      "ok": true,
+      "detail": "追加后 markets = [\"HK\",\"US\"]（期望含 HK 与 US）"
+    },
+    {
+      "kind": "切换器",
+      "ok": true,
+      "detail": "总览（追加后）切换器 = [\"港股\",\"美股\"]（期望 港股 + 美股）"
+    },
+    {
+      "kind": "切换器",
+      "ok": true,
+      "detail": "总览（追加后）仍没有 A 股页签"
+    },
+    {
+      "kind": "切换器",
+      "ok": true,
+      "detail": "自动交易（追加后）切换器 = [\"港股\",\"美股\"]（期望 港股 + 美股）"
+    },
+    {
+      "kind": "切换器",
+      "ok": true,
+      "detail": "自动交易（追加后）仍没有 A 股页签"
+    },
+    {
+      "kind": "切换器",
+      "ok": true,
+      "detail": "我的账户（追加后）切换器 = [\"港股\",\"美股\"]（期望 港股 + 美股）"
+    },
+    {
+      "kind": "切换器",
+      "ok": true,
+      "detail": "我的账户（追加后）仍没有 A 股页签"
+    },
+    {
+      "kind": "只增不减",
+      "ok": true,
+      "detail": "传子集 {US} 被服务端拒 = HTTP 400 \"只能增加市场，不能减少；要减少请关停旧项目、开新项目\""
+    }
+  ],
+  "notes": [],
+  "register": {
+    "email": "p3-demo-1790997528863@example.com",
+    "status": 200,
+    "ok": true
+  },
+  "project": {
+    "project_id": "prj_95cc4929709a479099982856",
+    "market_scope": "HK",
+    "currency": "HKD",
+    "markets": [
+      "HK"
+    ],
+    "tier": "manage"
+  },
+  "afterAdd": {
+    "market_scope": "MULTI",
+    "markets": [
+      "HK",
+      "US"
+    ]
+  },
+  "consoleErrors": [],
+  "pageErrors": [],
+  "failedRequests": [],
+  "summary": {
+    "checks": 36,
+    "passed": 36,
+    "failed": 0,
+    "consoleErrors": 0,
+    "pageErrors": 0,
+    "failedRequests": 0
+  }
+}

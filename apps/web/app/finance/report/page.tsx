@@ -11,11 +11,11 @@
  * 每行带 `source_ref`（从哪个账本行算的）与 `computed_by`（哪段代码算的）。
  * **无报告日显示空态而不是空白**（M-17 验收项）。
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { FileText, Check, TriangleAlert, Sparkles, ListTree, ExternalLink } from 'lucide-react'
-import { Card, CardHead, Chip, Note, finFetch, currencySymbol } from '../_ui'
-import { MARKET_LABEL } from '../_market'
+import { Card, CardHead, Chip, Note, finFetch, currencySymbol, useCurrentProject } from '../_ui'
+import { MARKET_LABEL, marketsOf } from '../_market'
 import { Grid, SectionTitle, Tbl, EmptyState, ErrorState, LoadingCard } from '../_parts'
 import { useFinPage } from '../_data'
 
@@ -58,7 +58,12 @@ function Paragraphs({ text }: { text: string }) {
 
 export default function FinanceReportPage() {
   const router = useRouter()
-  const { data, loading, error, noProject, reload } = useFinPage<Payload>('/reports')
+  const proj = useCurrentProject()
+  // P3：跨市场汇总（`market='MULTI'`）只在**选了 ≥2 个市场**时才出现 ——
+  // 单市场项目的那份聚合报告没有东西可聚合（P2 §六.3 把这条留给了界面阶段）。
+  const allowed = marketsOf(proj.project)
+  const showMulti = allowed.length >= 2
+  const { data, loading, error, noProject, reload } = useFinPage<Payload>('/reports', { skip: proj.loading })
   const [picked, setPicked] = useState<Report | null>(null)
   const [pickedErr, setPickedErr] = useState('')
   const [showFacts, setShowFacts] = useState(false)
@@ -76,6 +81,16 @@ export default function FinanceReportPage() {
     }
   }
 
+  const items = (data?.items || []).filter(it => showMulti || it.market !== 'MULTI')
+  const latestIsMulti = data?.latest?.report.market === 'MULTI'
+  const hideDefaultLatest = !showMulti && latestIsMulti
+  // 单市场项目里最新那份恰好是 MULTI 汇总 → 不给它当「今日报告」，自动改看最新一份本市场的。
+  useEffect(() => {
+    if (!hideDefaultLatest || picked || !items.length) return
+    void pick(items[0].report_id)
+    // pick 每次渲染都是新引用，不进依赖；触发条件只看这三项
+  }, [hideDefaultLatest, picked, items.length])  // eslint-disable-line react-hooks/exhaustive-deps
+
   if (loading) return <Card><CardHead title="每日报告" sub="正在从账本读取" /><div className="p-4"><LoadingCard title="加载中…" /></div></Card>
   if (noProject) return (
     <div className="max-w-3xl"><Card><CardHead title="每日报告" sub="还没有进行中的项目" />
@@ -89,7 +104,7 @@ export default function FinanceReportPage() {
     </Card></div>
   )
 
-  const shown = picked || data.latest
+  const shown = picked || (hideDefaultLatest ? null : data.latest)
   const sr = shown?.report.self_review || null
   const shownMarket = MARKET_LABEL[shown?.report.market || ''] || shown?.report.market || ''
 
@@ -106,10 +121,12 @@ export default function FinanceReportPage() {
 
       {!shown ? (
         <Card>
-          <CardHead title="每日报告" sub="还没有报告" />
+          <CardHead title="每日报告" sub={hideDefaultLatest && items.length ? '正在读取本市场最新一份' : '还没有报告'} />
           <div className="p-5">
-            <EmptyState title="这个项目还没有生成过报告"
-              desc={data.empty_state?.reason || '每个交易日收盘后会生成一份。'} />
+            {hideDefaultLatest && items.length
+              ? <LoadingCard title="正在读取本市场最新一份（跳过跨市场汇总）…" />
+              : <EmptyState title="这个项目还没有生成过报告"
+                desc={data.empty_state?.reason || '每个交易日收盘后会生成一份。'} />}
           </div>
         </Card>
       ) : (
@@ -231,15 +248,15 @@ export default function FinanceReportPage() {
 
       {/* 历史报告 */}
       <div>
-        <SectionTitle title="历史报告" sub={`共 ${data.items.length} 份 · 点开可看全文`} />
+        <SectionTitle title="历史报告" sub={`共 ${items.length} 份 · 点开可看全文`} />
         <Card>
-          {data.items.length === 0 ? (
+          {items.length === 0 ? (
             <div className="p-4"><EmptyState title="还没有历史报告" desc="第一个交易日收盘后，这里会出现第一条记录。" /></div>
           ) : (
             <Tbl
               head={['日期', '市场', '状态', '事实行', '写手', '产物']}
-              rows={data.items.map(it => {
-                const on = (picked?.report.report_id || data.latest?.report.report_id) === it.report_id
+              rows={items.map(it => {
+                const on = (picked?.report.report_id || (hideDefaultLatest ? null : data.latest?.report.report_id)) === it.report_id
                 return [
                   <button onClick={() => pick(it.report_id)} className="font-semibold"
                     style={{ color: on ? '#8A5A18' : 'var(--text)', textDecoration: 'underline', cursor: 'pointer' }}>

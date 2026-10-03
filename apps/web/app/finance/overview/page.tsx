@@ -13,8 +13,8 @@ import Link from 'next/link'
 import {
   ArrowRight, Activity, Coins, TrendingUp, Wallet, Clock, ShieldCheck, CheckCircle2,
 } from 'lucide-react'
-import { Card, CardHead, Chip, Note, money, pct } from '../_ui'
-import { MarketSwitcher, MarketStatusLine, useCurrentMarket, useMarketStatus, currencyOf, MARKET_LABEL, type MarketStatus } from '../_market'
+import { Card, CardHead, Chip, Note, money, pct, useCurrentProject } from '../_ui'
+import { MarketSwitcher, MarketStatusLine, useCurrentMarket, useMarketStatus, currencyOf, marketsOf, onlySelected, MARKET_LABEL, type MarketStatus } from '../_market'
 import { Kpi, Grid, MiniChart, RowKV, SectionTitle, Sparkline, TimelineItem, EmptyState, ErrorState, LoadingCard } from '../_parts'
 import { useFinPage } from '../_data'
 
@@ -84,8 +84,11 @@ function nextRun(schedule: { at: string }[], m: MarketStatus | undefined): strin
 }
 
 export default function FinanceOverviewPage() {
-  const [market, setMarket] = useCurrentMarket()
-  const { data, loading, error, noProject, reload } = useFinPage<Overview>(`/overview?market=${market}`)
+  const proj = useCurrentProject()
+  // 已选市场（P3）：切换器、分列卡片、跨市场合计都以它为准 —— 不再列三个市场。
+  const allowed = marketsOf(proj.project)
+  const [market, setMarket] = useCurrentMarket('CN_A', allowed)
+  const { data, loading, error, noProject, reload } = useFinPage<Overview>(`/overview?market=${market}`, { skip: proj.loading })
   const { markets } = useMarketStatus()
 
   if (loading) return <Card><CardHead title="总览" sub="正在从模拟账本读取" /><div className="p-4"><LoadingCard title="加载中…" /></div></Card>
@@ -98,7 +101,7 @@ export default function FinanceOverviewPage() {
           <div className="p-5">
             <EmptyState
               title="你还没有开启模拟项目"
-              desc="走一遍设置向导（六步，约一分钟）：选一个资金档位，系统会按档位写死本金与整套参数，然后它就开始按交易日自动运行。"
+              desc="走一遍设置向导（七步，约一分钟）：选资金档位、再选做哪几个市场（可多选），系统会按档位与市场写死各子账户本金与整套参数，然后它就开始按交易日自动运行。"
               cta={<Link href="/finance/setup" className="mt-1 inline-flex items-center gap-1.5 rounded-[10px] px-4 py-2 text-sm font-semibold"
                 style={{ background: 'var(--blue)', color: '#fff' }}>去设置向导<ArrowRight className="w-4 h-4" /></Link>} />
           </div>
@@ -127,11 +130,18 @@ export default function FinanceOverviewPage() {
   const todayPnl = a.today?.pnl ?? null
   const todayPct = a.today?.pnl_pct ?? null
   const cumPct = a.nav !== null ? a.nav - 1 : null
-  const mkList = data.markets || markets || []
+  // 只列这个项目**已选**的市场（`allowed` 为空 = 历史遗留项目，退回不限制的老行为）
+  const mkList = onlySelected(data.markets || markets, allowed)
   const mk = mkList.find(m => m.market === market)
   const next = nextRun(data.schedule, mk)
   const cur = currencyOf(market, a.currency || data.currency)
   const comb = data.combined
+  // 跨市场汇总只在**选了 2 个及以上**市场时才出现（P3 · 方案 §5.4）：
+  // 单市场项目把本币折成人民币不叫「跨市场合计」，那是凭空多出来的一个数字。
+  const multi = allowed.length >= 2
+  // 分列只列**已选**市场（`comb.by_market` 是「有估值的市场」，两者取交集最诚实：
+  // 已选但还没估值的市场不在里面，卡片本身会有空态说明）
+  const byMarket = onlySelected(comb?.by_market, allowed)
 
   return (
     <div className="flex flex-col gap-6 max-w-6xl">
@@ -142,10 +152,10 @@ export default function FinanceOverviewPage() {
             <div>
               <div className="text-sm font-bold" style={{ color: 'var(--text)' }}>看哪个市场</div>
               <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                三个市场各自独立账本、各自本币记账。切换只换视角，不改任何设置。
+                这里只列**这个项目已选**的市场（各自独立账本、各自本币记账）。切换只换视角，不改任何设置。
               </div>
             </div>
-            <MarketSwitcher value={market} onChange={setMarket} />
+            <MarketSwitcher value={market} onChange={setMarket} markets={allowed.length ? allowed : undefined} />
           </div>
           <div className="flex gap-4 flex-wrap">
             {mkList.map(m => <MarketStatusLine key={m.market} m={m} />)}
@@ -209,7 +219,7 @@ export default function FinanceOverviewPage() {
       {/* KPI */}
       <Grid cols={4}>
         <Kpi label="模拟总资产" value={money(a.total_assets, cur)} icon={<Coins className="w-4 h-4" />}
-          hint={`初始 ${money(data.project?.initial_capital)} · 仅 A 股`} />
+          hint={`初始 ${money(data.project?.initial_capital, cur)} · 本市场子账户（${MARKET_LABEL[market] || market}）`} />
         <Kpi label="最后交易日盈亏" value={a.today ? `${todayPnl! >= 0 ? '+' : '−'}${money(Math.abs(todayPnl!), cur)}` : '—'}
           delta={pct(todayPct)} deltaTone={(todayPct ?? 0) >= 0 ? 'up' : 'down'}
           icon={<TrendingUp className="w-4 h-4" />}
@@ -222,37 +232,42 @@ export default function FinanceOverviewPage() {
       </Grid>
 
       {/* 按市场分列 + 跨市场合计（N5）—— 合计处标注汇率来源与时刻，取不到显示 — */}
+      {/* P3：只列已选市场；「跨市场合计」只在选了 ≥2 个市场时才出现（单市场折人民币不叫跨市场合计）。 */}
       <Card>
-        <CardHead title="三个市场分别有多少" icon={<Coins className="w-4 h-4" />}
-          sub="各自本币记账、不做折算；只有「跨市场合计」一处出现折算值"
-          right={comb && <Chip tone={comb.total_cny === null ? 'amber' : 'ok'}>
-            {comb.total_cny === null ? '合计算不出' : '合计可算'}</Chip>} />
+        <CardHead title={multi ? '已选市场分别有多少' : '这个市场有多少'} icon={<Coins className="w-4 h-4" />}
+          sub={multi
+            ? '各自本币记账、不做折算；只有「跨市场合计」一处出现折算值'
+            : '本币记账、不做折算；只选了一个市场，所以没有「跨市场合计」'}
+          right={multi && comb ? <Chip tone={comb.total_cny === null ? 'amber' : 'ok'}>
+            {comb.total_cny === null ? '合计算不出' : '合计可算'}</Chip> : undefined} />
         <div className="p-4 grid gap-5 md:grid-cols-2">
           <div>
-            {(comb?.by_market || []).length === 0
+            {byMarket.length === 0
               ? <EmptyState title="还读不到任何市场的估值" desc="每个市场收盘后各写一行估值，这里会出现分列。" />
-              : (comb!.by_market.map(b => (
+              : (byMarket.map(b => (
                 <RowKV key={b.market}
                   k={<span>{b.label}{b.market === market ? <Chip tone="copper">当前</Chip> : null}</span>}
                   v={money(b.total_assets, currencyOf(b.market, b.currency))} />
               )))}
-            <RowKV k={<b>跨市场合计（折人民币）</b>}
-              v={<b>{money(comb?.total_cny ?? null, 'CNY')}</b>} />
+            {multi && (
+              <RowKV k={<b>跨市场合计（折人民币）</b>}
+                v={<b>{money(comb?.total_cny ?? null, 'CNY')}</b>} />
+            )}
           </div>
           <div className="flex flex-col gap-3">
-            {comb?.total_cny !== null && comb?.fx_source && (
+            {multi && comb?.total_cny !== null && comb?.fx_source && (
               <Note tone="ok">
                 折算依据：汇率来源 <b>{comb.fx_source}</b>，取值时刻 <b>{comb.fx_at || '—'}</b>。
                 汇率**请求时现取**，不落账本（`11-…实施方案.md` §3.1 A 方案）。
               </Note>
             )}
-            {comb?.total_cny === null && (
+            {multi && comb?.total_cny === null && (
               <Note tone="warn">
                 跨市场合计显示 <b>—</b>（不是 0）。原因：{comb?.reason || '汇率不可得'}。
                 <b>取不到汇率就不折算</b>，这一列如实留空。
               </Note>
             )}
-            {comb?.terms?.some((t: any) => t.fx) && (
+            {multi && comb?.terms?.some((t: any) => t.fx) && (
               <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
                 {comb.terms.filter((t: any) => t.fx).map((t: any) => (
                   <div key={t.market}>
@@ -264,7 +279,7 @@ export default function FinanceOverviewPage() {
             )}
             <Note tone="copper">
               每个市场是**独立子账户**：港币盈亏不会因为汇率波动而改变账本数字。
-              这里的分列与合计都是只读展示，账本内没有任何跨币种换算。
+              这里的分列都是只读展示，账本内没有任何跨币种换算。
             </Note>
           </div>
         </div>

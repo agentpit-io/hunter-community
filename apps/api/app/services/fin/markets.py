@@ -116,6 +116,65 @@ def market_status(cur, *, at: Optional[datetime] = None,
     return out
 
 
+# ── 市场规则事实（P3 · 界面按市场出参数）──────────────────────────────────
+# `fin_market_rule` 的**展示用子集**。界面（向导「选市场」步、自动交易页的时点）
+# 一律从这里读，**不许在 React 里写死**（红线：「不许拿 A 股规则顶替港美股」）。
+#
+# 只回事实列，不回 `source` 那一长段（它是给留档用的，界面不展示）；
+# 中文化（涨跌停模式 → 中文、T+N → 中文）是**展示层**的事，不在这里做。
+_RULE_COLS = (
+    "points", "sellable_rule", "sellable_days", "lot_rule", "lot_fixed",
+    "price_limit_mode", "market_order_supported", "fee_model_version",
+)
+
+
+def market_rules(cur) -> dict[str, dict]:
+    """每个市场的规则事实（`fin_market_rule` 一行一条）。
+
+    查不到该市场的行 → 该市场**不出现在结果里**（调用方据此显示「规则未知」），
+    **不回落 A 股**、不编默认值。
+    """
+    cur.execute(
+        "SELECT market, " + ", ".join(_RULE_COLS) + " FROM fin_market_rule")
+    return {r["market"]: {k: r.get(k) for k in _RULE_COLS} for r in cur.fetchall()}
+
+
+def project_market_accounts(cur, project_id: str) -> list[dict]:
+    """项目的**每个子账户**一行（P3 · 「我的账户」页的「市场与子账户」卡片）。
+
+    真值来自 `fin_project_market`（市场集合 + 各市场本金/币种/开户时刻），
+    当前净值取自该市场**最新一行** `fin_valuation`（没有估值 → `None`，**不补 0**）。
+    顺序恒为 `CN_A → HK → US`（与落库顺序同一口径）。
+    """
+    cur.execute(
+        """
+        SELECT pm.market, pm.currency, pm.initial_capital, pm.opened_at,
+               v.total_assets, v.nav, v.as_of
+          FROM fin_project_market pm
+          LEFT JOIN LATERAL (
+                 SELECT total_assets, nav, as_of
+                   FROM fin_valuation
+                  WHERE project_id = pm.project_id AND market = pm.market
+                  ORDER BY as_of DESC LIMIT 1
+               ) v ON true
+         WHERE pm.project_id = %s
+        """, (project_id,))
+    out = []
+    for r in cur.fetchall():
+        out.append({
+            "market": r["market"],
+            "label": MARKET_LABEL.get(r["market"], r["market"]),
+            "currency": r["currency"],
+            "initial_capital": float(r["initial_capital"]) if r["initial_capital"] is not None else None,
+            "opened_at": r["opened_at"].isoformat() if r.get("opened_at") else None,
+            "nav": float(r["nav"]) if r.get("nav") is not None else None,
+            "total_assets": float(r["total_assets"]) if r.get("total_assets") is not None else None,
+            "as_of": r["as_of"].isoformat() if r.get("as_of") else None,
+        })
+    out.sort(key=lambda x: MARKETS.index(x["market"]) if x["market"] in MARKETS else 99)
+    return out
+
+
 def combined_assets(cur, project_id: str) -> dict:
     """跨市场合计：逐市场本币总资产（不折算）+ 折人民币合计（带汇率来源与时刻）。
 
