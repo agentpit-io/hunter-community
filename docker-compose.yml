@@ -33,9 +33,10 @@ services:
       - hunter_pg_data:/var/lib/postgresql/data
       # 这里原来挂 ./db/migrations:/docker-entrypoint-initdb.d:ro —— **已删除**。
       # 那个目录只在数据卷第一次初始化时执行,已有部署里新加的 .sql 永远跑不到
-      # (仓内铁律「db/migrations 里的 .sql 对已有部署不生效」)。
+      # (当时 CLAUDE.md 那条「db/migrations 里的 .sql 对已有部署不生效」铁律的由来)。
       # 迁移改由 api 启动时执行:镜像自带 /opt/hunter-migrations,boot.sh 调
-      # python -m app.migrate,带 advisory lock 与 schema_migrations 记账。
+      # python -m app.migrate,带 advisory lock 与 schema_migrations 记账 ——
+      # **api 每次启动都增量执行**,上面那条铁律 2026-10-03 已据此改写(见 CLAUDE.md)。
     ports:
       - "${POSTGRES_HOST_PORT:-5442}:5432"
     healthcheck:

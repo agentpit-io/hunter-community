@@ -3,14 +3,47 @@
 All notable changes to HunterCode · Community Edition follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+> **A 股全天交易日历进迁移（`0039`）+ 更正 `0038` 文件头那条说反了的 ⚠️。**
+> 只动 `db/migrations/`，**不含代码改动**；但 `db/migrations/` 是打进 `api` 镜像的，
+> 所以要等下一次 `api` 镜像构建才生效（届时 api 启动时自动执行）。
+
+### ✨ 新增 · Added
+
+- **迁移 `0039_cn_a_market_calendar.sql`：幂等写入 A 股 2026 全年交易日历（365 行 / 242 个交易日）。**
+  `fin_market_calendar` 此前**没有任何迁移写过数据**（`0023` 只建表、`0029` 只加市场维度、
+  `0034` 只 UPDATE 港美股时段），所以**从迁移建起来的库，三个市场的日历都是空的**：
+  自动交易页对 A 股一直显示「日历缺失」，`fin-worker` 的 CN_A 时点永远 `calendar_unknown` 空跑。
+  本次写入与运行时 `fin-worker/app/activities.py:sync_calendar` **同口径**（`note` / `calendar_source`
+  用同一批常量，`sessions` 现取 `fin_market_rule` 的 CN_A 行、不写死），
+  `ON CONFLICT (market, trade_date) DO UPDATE` 幂等；**不带** `BEGIN;` / `COMMIT;`
+  —— `migrate.py:apply_one` 已把每个迁移文件包在独立事务里，文件内再写事务边界会破坏那个承诺。
+  已在演示站用「事务内清空 CN_A → 跑本文件 → 查数 → `ROLLBACK`」验过：**365 / 242 / 123**，
+  国庆口径正确（09-30 交易日、10-01~10-07 休市、10-08 恢复），`sessions` 取自规则表。
+  ⚠️ **港美股不在本次范围内** —— 它们的全天日历仍只存在于现有库里，从零建的库这两个市场依旧「日历缺失」。
+
+### 🐞 修复 · Fixed
+
+- **更正 `0038_fee_model_cn_a.sql` 文件头那条 ⚠️ 说明（该文件本身不改）。**
+  它写「已有部署不会自动执行这个文件 —— `db/migrations` 只在数据卷第一次初始化时跑」，**与事实相反**：
+  那是 `docker-entrypoint-initdb.d` 时代的旧行为；自 `apps/api/app/migrate.py` 上线后，
+  **api 每次启动都按 `schema_migrations` 账本增量执行 `db/migrations/*.sql`**。
+  演示站实测：api 容器 `2026-10-03T04:23:24Z` 启动，`0038` 于 `04:23:27Z` 落账（+3 秒），即自动执行。
+  迁移文件一经发布不可变（改动会触发 checksum drift 告警），故更正写在本节与 `[1.5.1]` 条目里。
+
 ## [1.5.1] - 2026-10-03
 
 > **补丁版本 · 演示站上线验收（P4）就地修的三处**。只有一个数据库迁移
 > （`0038`，幂等补一行 A 股费率；api 启动时自动执行），动到 **`api` / `fin-worker` 两个镜像**。
 > 升级：`.env` 的 **`HUNTER_VERSION` 与 `FIN_TAG` 都改 `1.5.1`**，再
 > `docker compose pull api fin-worker && docker compose up -d api fin-worker`。
-> ⚠️ **已有部署不会自动执行 `db/migrations/0038`**（那个目录只在数据卷首次初始化时跑）——
-> 演示站等历史库请用 `0038` 里那段 `INSERT ... ON CONFLICT DO NOTHING` 手工补一次。
+> ~~⚠️ **已有部署不会自动执行 `db/migrations/0038`**（那个目录只在数据卷首次初始化时跑）——
+> 演示站等历史库请用 `0038` 里那段 `INSERT ... ON CONFLICT DO NOTHING` 手工补一次。~~
+> → **此条作废（2026-10-03 更正）**：`db/migrations/*.sql` 由 api 启动时的迁移器
+> （`apps/api/app/migrate.py`）**按 `schema_migrations` 账本增量执行**，并非「只在数据卷首次初始化时跑」。
+> 演示站实测：api 容器 `04:23:24Z` 启动，`0038` 于 `04:23:27Z` 落账（+3 秒），**自动执行、无需手工补**。
+> 详见 `[Unreleased]` 一节。
 
 ### 🐞 修复 · Fixed
 

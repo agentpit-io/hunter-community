@@ -711,21 +711,31 @@ Next.js 的 `next start` 在**启动时**扫一次 public 目录建静态路由�
 
 排查提示:「文件明明在容器里却 404」这个组合,先想启动期缓存,不要去怀疑挂载或 nginx。
 
-## 铁律:db/migrations 里的 .sql **对已有部署不生效**
+## 铁律:改结构走 `db/migrations/`,api 启动时自动执行
 
-`docker-compose.yml` 把 `./db/migrations` 挂到 postgres 的
-`/docker-entrypoint-initdb.d` —— 那个目录**只在数据卷第一次初始化时执行**。
-线上库已经跑了几周,你新加一个 `00XX_xxx.sql` 它**永远不会被执行**。
+> **本条 2026-10-03 更正过。** 旧标题是「`db/migrations` 里的 .sql **对已有部署不生效**」,
+> 那条**早已不成立**——它是 `docker-entrypoint-initdb.d` 时代的行为。现状:
+> `docker-compose.yml` 里 `./db/migrations:/docker-entrypoint-initdb.d:ro` 那个挂载**已删除**,
+> 改成 `apps/api/Dockerfile` 的 `COPY db/migrations /opt/hunter-migrations`,
+> `boot.sh` → `python -m app.migrate` 在 **api 每次启动**时按 `schema_migrations` 账本**增量执行**。
+> 见证:`docs/setup-wizard/M1-B-自动迁移.md`;演示站实测 2026-10-03:api 容器 `04:23:24Z` 启动,
+> `0038` 于 `04:23:27Z` 落账(+3 秒),**自动执行、无需手工补**。
+> 下面几条旧约束**依然有效**(与新旧行为无关,别一起删),另外补了几条新的。
 
-所以真正生效的 DDL 必须**随代码走**,写成幂等的 `CREATE TABLE IF NOT EXISTS` /
-`ADD COLUMN IF NOT EXISTS`,放在用到它的模块里,首次使用时 `_ensure_table()`。
-参考写法:`app/routers/settings.py` 的 `_DDL`、
-`app/services/cap_group_names.py`、`app/services/cap_item_groups.py`。
-
-`db/migrations/*.sql` 仍然要写,但它的作用是**给全新安装用 + 留档**。
-两处必须保持一致,且在 .sql 里注明"已有部署不会执行这个文件"。
-
-**这个坑不报错**:新表没建 → 首个用到它的请求 500,而你以为迁移已经跑过了。
+- **新增/改表结构 → 写 `db/migrations/00XX_xxx.sql`**,写成幂等的
+  `CREATE TABLE IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS` / `INSERT ... ON CONFLICT`。
+  拉新镜像 = 自动补齐,老用户 `git pull` 之后重建 api 镜像就生效,**不用手工跑 SQL**。
+- **迁移文件一经发布不可变**。改了已记账文件的内容,`migrate.py` 每次启动都会打
+  checksum drift 告警。要改就**新加一个文件**,别改老文件。
+- **文件里不要自带 `BEGIN;` / `COMMIT;`**。`migrate.py:apply_one` 已把每个迁移文件包在
+  **独立事务**里(失败整体回滚 + 不记账),文件内再写事务边界会破坏那个承诺。现存文件无一自带。
+- **`db/migrations/*.sql` 是打进 `api` 镜像的**(`/opt/hunter-migrations`)——改了它必须
+  **重建 api 镜像**才生效,`git pull` 或重启容器都不够。
+- 模块里「随代码走」的 `_DDL` / `_ensure_table()`(参考 `app/routers/settings.py`、
+  `app/services/cap_group_names.py`、`app/services/cap_item_groups.py`)是**历史写法**,
+  仍要与其保持一致——同一个事实两处写法不同会漂。
+- **迁移失败故意让 api 起不来**(`boot.sh` 里 `set -e`):缺表的实例「看着是健康的、一点就 500」
+  比起不来难排查得多。所以**在空库上跑一遍**才算验过。
 
 **随代码走的 DDL 要在空库上跑一遍才算验过**(2026-09-17 本地 docker 实测):`agent_run._DDL` 里给 `agent_position`
 补列的 `ALTER` 写在了 `CREATE TABLE agent_position` **前面**。线上库表早就有,永远不报错;全新安装整段 DDL 失败,
