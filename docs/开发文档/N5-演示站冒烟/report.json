@@ -1,0 +1,320 @@
+{
+  "base": "https://hunter-community.agentpit.io",
+  "pages": [
+    {
+      "key": "overview",
+      "label": "总览",
+      "path": "/finance/overview",
+      "title": "猎鹿人 · Hunter | agentpit.io",
+      "overflowX": false,
+      "brokenImages": 0,
+      "newConsoleErrors": 0,
+      "newPageErrors": 0,
+      "sample": "猎鹿人 · Hunter agentpit.io 总览 自选股 平安银行 000001 A 泸州老窖 000568 A 五 粮 液 000858 A 恒瑞医药 600276 A 贵州茅台 600519 A 用友网络 600588 A NVDA NVDA A 伊格尔矿业 AEM US 谷歌-C GOOG US Nebius Group NV-A NBIS US 添加自选股 分析工具 AI 对话 新 "
+    },
+    {
+      "key": "auto-trade",
+      "label": "自动交易",
+      "path": "/finance/auto-trade",
+      "title": "猎鹿人 · Hunter | agentpit.io",
+      "overflowX": false,
+      "brokenImages": 0,
+      "newConsoleErrors": 0,
+      "newPageErrors": 0,
+      "sample": "猎鹿人 · Hunter agentpit.io 总览 自选股 平安银行 000001 A 泸州老窖 000568 A 五 粮 液 000858 A 恒瑞医药 600276 A 贵州茅台 600519 A 用友网络 600588 A NVDA NVDA A 伊格尔矿业 AEM US 谷歌-C GOOG US Nebius Group NV-A NBIS US 添加自选股 分析工具 AI 对话 新 "
+    },
+    {
+      "key": "account",
+      "label": "我的账户",
+      "path": "/finance/account",
+      "title": "猎鹿人 · Hunter | agentpit.io",
+      "overflowX": false,
+      "brokenImages": 0,
+      "newConsoleErrors": 0,
+      "newPageErrors": 0,
+      "sample": "猎鹿人 · Hunter agentpit.io 总览 自选股 平安银行 000001 A 泸州老窖 000568 A 五 粮 液 000858 A 恒瑞医药 600276 A 贵州茅台 600519 A 用友网络 600588 A NVDA NVDA A 伊格尔矿业 AEM US 谷歌-C GOOG US Nebius Group NV-A NBIS US 添加自选股 分析工具 AI 对话 新 "
+    },
+    {
+      "key": "report",
+      "label": "每日报告",
+      "path": "/finance/report",
+      "title": "猎鹿人 · Hunter | agentpit.io",
+      "overflowX": false,
+      "brokenImages": 0,
+      "newConsoleErrors": 0,
+      "newPageErrors": 0,
+      "sample": "猎鹿人 · Hunter agentpit.io 总览 自选股 平安银行 000001 A 泸州老窖 000568 A 五 粮 液 000858 A 恒瑞医药 600276 A 贵州茅台 600519 A 用友网络 600588 A NVDA NVDA A 伊格尔矿业 AEM US 谷歌-C GOOG US Nebius Group NV-A NBIS US 添加自选股 分析工具 AI 对话 新 "
+    }
+  ],
+  "interactions": [
+    {
+      "page": "overview",
+      "kind": "市场状态条（三市场）",
+      "ok": true,
+      "detail": "猎鹿人 · Hunter agentpit.io 总览 自选股 平安银行 000001 A 泸州老窖 000568 A 五 粮 液 000858 A 恒瑞医药 600276 A 贵州茅台 600519 A 用友网络 600588 A NVD"
+    },
+    {
+      "page": "overview",
+      "kind": "切到港股 → 金额变 HK$",
+      "ok": true,
+      "detail": "未见 HK$"
+    },
+    {
+      "page": "overview",
+      "kind": "切到美股 → 金额变 $",
+      "ok": false,
+      "detail": "未见 $"
+    },
+    {
+      "page": "overview",
+      "kind": "切回 A 股 → 金额变 ¥",
+      "ok": true,
+      "detail": "未见 ¥"
+    },
+    {
+      "page": "overview",
+      "kind": "跨市场合计区（带汇率来源/时刻）",
+      "ok": false,
+      "detail": "未见到合计区"
+    },
+    {
+      "page": "auto-trade",
+      "kind": "时刻表随市场切换",
+      "ok": true,
+      "detail": "A股含 15:30=true · 港股含 16:15=true · 旧文案已去掉=true"
+    },
+    {
+      "page": "account",
+      "kind": "港股规则与币种",
+      "ok": true,
+      "detail": "含 HKD=true · 旧文案「本版本不提供」已去掉=true"
+    },
+    {
+      "page": "report",
+      "kind": "历史表出现「市场」列并列出三个市场",
+      "ok": false,
+      "detail": "未见市场列"
+    },
+    {
+      "page": "report",
+      "kind": "事实行金额带币种符号",
+      "ok": false,
+      "detail": "未见"
+    }
+  ],
+  "notes": [],
+  "login": {
+    "email": "judge-2026@hunter-community.demo",
+    "ok": true
+  },
+  "complianceDismissed": true,
+  "consoleErrors": [],
+  "pageErrors": [],
+  "failedRequests": [
+    {
+      "url": "https://hunter-community.agentpit.io/stock/000001?_rsc=fc3ZimKiyMMGLV5Q",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/_next/static/chunks/369-24e4f070383f3b51.js",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/stock/000568?_rsc=fc3ZimKiyMMGLV5Q",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/_next/static/chunks/app/kpred/page-276fdf876a93fc72.js",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/stock/000858?_rsc=fc3ZimKiyMMGLV5Q",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/signals?_rsc=fc3ZimKiyMMGLV5Q",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/event-analysis?_rsc=fc3ZimKiyMMGLV5Q",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/_next/static/chunks/7232-3b591d8a56e94f49.js",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/_next/static/chunks/app/online-analysis/history/page-63136dc6a821597d.js",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/_next/static/chunks/app/online-analysis/page-835f794d2d1da81e.js",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/finance?_rsc=fc3ZimKiyMMGLV5Q",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/signals?_rsc=fc3ZimKiyMMGLV5Q",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/kpred?_rsc=fc3ZimKiyMMGLV5Q",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/online-analysis/history?_rsc=fc3ZimKiyMMGLV5Q",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/_next/static/chunks/app/online-analysis/page-835f794d2d1da81e.js",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/event-analysis?_rsc=fc3ZimKiyMMGLV5Q",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/_next/static/chunks/7232-3b591d8a56e94f49.js",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/finance?_rsc=dbOgs64ONLok_mEJ",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/stock/000568?_rsc=dbOgs64ONLok_mEJ",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/stock/000001?_rsc=dbOgs64ONLok_mEJ",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/event-analysis?_rsc=dbOgs64ONLok_mEJ",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/_next/static/chunks/app/online-analysis/history/page-63136dc6a821597d.js",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/signals?_rsc=dbOgs64ONLok_mEJ",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/_next/static/chunks/app/kpred/page-276fdf876a93fc72.js",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/_next/static/chunks/7232-3b591d8a56e94f49.js",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/_next/static/chunks/369-24e4f070383f3b51.js",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/_next/static/chunks/app/online-analysis/page-835f794d2d1da81e.js",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/stock/000001?_rsc=ziM35Iw8-P5Vl6_4",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/_next/static/chunks/7232-3b591d8a56e94f49.js",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/finance?_rsc=ziM35Iw8-P5Vl6_4",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/event-analysis?_rsc=ziM35Iw8-P5Vl6_4",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/signals?_rsc=ziM35Iw8-P5Vl6_4",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/_next/static/chunks/369-24e4f070383f3b51.js",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/_next/static/chunks/app/online-analysis/page-835f794d2d1da81e.js",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/_next/static/chunks/app/kpred/page-276fdf876a93fc72.js",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/_next/static/chunks/app/online-analysis/history/page-63136dc6a821597d.js",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/stock/000568?_rsc=ziM35Iw8-P5Vl6_4",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/_next/static/chunks/app/kpred/page-276fdf876a93fc72.js",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/stock/000568?_rsc=ZpincdiH8aPYkb-B",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/_next/static/chunks/app/online-analysis/history/page-63136dc6a821597d.js",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/_next/static/chunks/app/online-analysis/page-835f794d2d1da81e.js",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/finance?_rsc=ZpincdiH8aPYkb-B",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/event-analysis?_rsc=ZpincdiH8aPYkb-B",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/_next/static/chunks/369-24e4f070383f3b51.js",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/stock/000001?_rsc=ZpincdiH8aPYkb-B",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/signals?_rsc=ZpincdiH8aPYkb-B",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/_next/static/chunks/7232-3b591d8a56e94f49.js",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/stock/600519?_rsc=dbOgs64ONLok_mEJ",
+      "err": "net::ERR_ABORTED"
+    },
+    {
+      "url": "https://hunter-community.agentpit.io/stock/600519?_rsc=ziM35Iw8-P5Vl6_4",
+      "err": "net::ERR_ABORTED"
+    }
+  ],
+  "summary": {
+    "login": true,
+    "consoleErrors": 0,
+    "pageErrors": 0,
+    "failedRequests": 49,
+    "overflowPages": [],
+    "brokenImagesTotal": 0,
+    "interactionsFailed": 4
+  }
+}
