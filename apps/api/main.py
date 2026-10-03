@@ -435,6 +435,12 @@ app.include_router(fin_dashboard_router.router, prefix="/api")
 from app.routers import fin_data as fin_data_router
 app.include_router(fin_data_router.router, prefix="/api")
 
+# R2：统一经验系统（记忆服务）· 内网口令写 / JWT 读 —— 唯一入口。
+# 唯一碰「经验三张表」的路由；过滤在服务端（app/services/fin/memory.py），
+# 这里只判通道与翻错误码。
+from app.routers import fin_memory as fin_memory_router
+app.include_router(fin_memory_router.router, prefix="/api")
+
 @app.get("/api/health")
 async def health():
     # hunter_api_key 字段让 docker healthcheck 和运维一眼看出 SaaS 功能可不可用

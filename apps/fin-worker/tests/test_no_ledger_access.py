@@ -31,6 +31,10 @@ CONN_VARS = ("DATABASE_URL", "FIN_DATABASE_URL", "PAPER_DATABASE_URL", "DB_DSN")
 
 WRITE_SQL = re.compile(r"(?i)\b(insert\s+into|update|delete\s+from)\s+fin_[a-z_]+")
 
+# R2 起：**经验三表也纳入守护**（「不建第二套记忆 / 唯一入口」）。
+# fin-worker 只能经 `HunterApiClient` 走内网口令调 memory 路由，**全程不碰这三张表**。
+EXPERIENCE_TABLES = ("fin_experience", "fin_experience_evidence", "fin_memory_snapshot")
+
 _SKIP = {tokenize.COMMENT, tokenize.STRING, tokenize.NL, tokenize.NEWLINE,
          tokenize.INDENT, tokenize.DEDENT, tokenize.ENCODING}
 
@@ -77,6 +81,23 @@ def test_no_write_sql_against_ledger_tables():
             if WRITE_SQL.search(stripped):
                 hits.append(f"{path.relative_to(ROOT)}:{i}: {line.strip()}")
     assert not hits, "fin-worker 不许直接写账本表：\n" + "\n".join(hits)
+
+
+def test_no_experience_table_access():
+    """R2 · fin-worker **不许碰经验三表**（`fin_experience*` / `fin_memory_snapshot`）。
+
+    经验读写只有唯一入口（Memory Service）—— fin-worker 走 `HunterApiClient` 的
+    HTTP 内网口令通道，**不直连数据库**。这条断言只扫代码（去掉 `#` 注释、保留字符串，
+    与 `test_no_write_sql_against_ledger_tables` 同口径），所以 SQL 写在字符串里也拦得住。
+    """
+    hits = []
+    for path in _py_files():
+        for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            stripped = line.split("#", 1)[0]
+            for table in EXPERIENCE_TABLES:
+                if table in stripped:
+                    hits.append(f"{path.relative_to(ROOT)}:{i}: {line.strip()}")
+    assert not hits, "fin-worker 不许碰经验三表（只能经 HunterApiClient 调 api）：\n" + "\n".join(hits)
 
 
 def test_requirements_have_no_db_driver():
