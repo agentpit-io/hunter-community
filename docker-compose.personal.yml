@@ -1,0 +1,78 @@
+# ════════════════════════════════════════════════════════════════════════════
+# 个人本地开源部署 · **覆盖文件**（`03 §5` 路径 B）
+#
+# 用法（**不改六服务默认启动体验** —— 不叠加这个文件时行为与以前完全一致）：
+#
+#     cp .env.personal.example .env.personal
+#     docker compose -f docker-compose.yml -f docker-compose.personal.yml --env-file .env.personal config --quiet
+#     docker compose -f docker-compose.yml -f docker-compose.personal.yml --env-file .env.personal up -d postgres redis api
+#     # 检查 API 健康、迁移账本、0041–0045 与备份记录
+#     docker compose -f docker-compose.yml -f docker-compose.personal.yml --env-file .env.personal --profile paper up -d
+#
+# 这个文件做三件事（其余一律继承 `docker-compose.yml`）：
+#
+#   1. **钉死版本**：六个镜像一律 `1.6.0`（已构建且含迁移 `0041`–`0045` 的那一版）。
+#      ⚠️ 镜像经 GHCR 公开发布，**本文件里不写 `build:`** —— 个人用户 `git clone` 之后
+#      不需要本地编译，也不需要在根分区只有十几 G 的机器上编译 Next.js。
+#   2. **宿主机端口一律绑 `127.0.0.1`**：`03 §2` 明说「现有六服务 Compose 的数据库/Redis
+#      `ports` 没有回环地址前缀，不能误认为已只限本机」。这里把 postgres / redis / api /
+#      web / opencode 五个**全部**收到回环上（paper / temporal / temporal-ui / fin-worker
+#      在默认文件里本来就绑 127.0.0.1）。
+#      ⚠️ 单用户免登录只适合本机回环访问；要让局域网 / 公网访问，请自己加一层带认证的反代，
+#      并把 `HUNTER_SINGLE_USER` 置 0（见 `.env.personal.example`）。
+#   3. **把 fin 栈收进 `paper` profile**：默认文件里那四个服务挂在 `fin` 上；本文件把它们
+#      改挂 `paper`，与 `03 §5` 的操作顺序一致。
+#      ⚠️ **Compose profile 不会自动启用被引用的服务** —— `fin-worker` 的 `depends_on`
+#      里虽有 `paper` / `temporal`，但三者都只在显式 `--profile paper` 时才起。
+#      所以启动命令**必须带 `--profile paper`**，不能只 `up -d fin-worker`。
+#      这条已按 `03 §5` 实测过（见 `docs/开发文档/R10-上线与个人本地交付.md`）。
+#
+# 端口默认值刻意避开常用端口（本地已有别的栈在跑时不会撞车）；要改就在 `.env.personal` 里改。
+# ════════════════════════════════════════════════════════════════════════════
+
+name: hunter-personal
+
+services:
+  postgres:
+    # 数据库只对本机开放。个人部署的账本 / 经验 / 提案全在这里。
+    ports: !override
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5542}:5432"
+
+  redis:
+    ports: !override
+      - "127.0.0.1:${REDIS_HOST_PORT:-6579}:6379"
+
+  api:
+    # 镜像 tag 与 `docker-compose.yml` 同源（`HUNTER_VERSION`），只是这里**显式钉死** 1.6.0：
+    # 个人部署的机器上 `git pull` 拿到新代码不等于镜像也换了 —— 显式写下来，升级时改这一行。
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-api:1.6.0
+    ports: !override
+      - "127.0.0.1:${API_HOST_PORT:-8230}:8000"
+
+  web:
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-web:1.6.0
+    ports: !override
+      - "127.0.0.1:${WEB_HOST_PORT:-3230}:3000"
+
+  opencode:
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-opencode:1.6.0
+    ports: !override
+      - "127.0.0.1:${OPENCODE_HOST_PORT:-4031}:3901"
+
+  llm-shim:
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-llm-shim:1.6.0
+
+  # ── fin 栈：改挂 `paper` profile（与 `03 §5` 的操作顺序一致）────────────────
+  paper:
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-paper:1.6.0
+    profiles: ["paper"]
+
+  temporal:
+    profiles: ["paper"]
+
+  temporal-ui:
+    profiles: ["paper"]
+
+  fin-worker:
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-fin-worker:1.6.0
+    profiles: ["paper"]

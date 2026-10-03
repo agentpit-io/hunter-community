@@ -338,6 +338,18 @@ bash scripts/migrate-volumes.sh          # ⚠️ 只有老用户需要,见下
 > `bash scripts/fin_provision_paper_role.sh` 再 `docker compose --profile fin up -d`。
 > 这一版**只做 A 股**,行情走现仓的 `providers.data_source`。
 
+### 🧠 个人本地部署:记忆系统与受控自进化(`1.6.0` 起)
+
+想让复盘学到的经验**真的改变策略**、并且改得**可验证、可回滚、可审计**,按
+[`docs/个人本地部署.md`](docs/个人本地部署.md) 走:叠加 `docker-compose.personal.yml`
+覆盖文件(端口全部收到 `127.0.0.1`、fin 栈收进 `paper` profile),从
+`.env.personal.example` 拷一份 env。
+
+闭环是「经验 → 提案(白名单 + 冻结验证口径) → **独立影子验证** → **人工确认**生效 → 紧急线回滚」。
+**默认 `observe`**(拉行情、复盘、建经验、展示提案,没有委托发送能力);经验库默认**关**,
+P1 验收后再把 `FIN_MEMORY_ENABLED` 设 `1`。**不交付实盘**(`FIN_LIVE_ORDER_ENABLED` 恒 0),
+`FIN_AUTO_APPLY` 恒 0。界面在**成长页**。
+
 ---
 
 ## 📚 SKILL:把分析方法论变成能力
