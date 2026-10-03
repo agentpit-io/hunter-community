@@ -252,7 +252,7 @@ apps/web/app/setup/
 | 检测 | 请求 | 通过条件 | 失败分类 → 提示 |
 |---|---|---|---|
 | ① 连通 | `GET {base}/models`，10 秒 | 2xx；404 视为网关未实现该接口，继续 | 超时 / DNS 失败 → 「服务器连不上该地址」（本地额外提示代理变量）；401/403 → 「key 无效」；SSL EOF → 「网关拦截了容器连接，需配置代理」 |
-| ② 对话 | `POST /chat/completions`，**只发 1 条 user 消息**（避开部分 Gemini 版本对「system + user 两条消息」返回 400 的问题），`max_tokens=16`，30 秒 | 有非空文本 | 404 / model_not_found → 「模型名不对」并列出 ① 拿到的可用模型；回复含 `<think>` → 黄色提示 |
+| ② 对话 | `POST /chat/completions`，**只发 1 条 user 消息**（避开部分 Gemini 版本对「system + user 两条消息」返回 400 的问题），`max_tokens=16`，30 秒 | 有非空文本；正文为空但 `finish_reason=length`（被探针预算截断，按通过 + 黄色提示） | 404 / model_not_found → 「模型名不对」并列出 ① 拿到的可用模型；回复含 `<think>` → 黄色提示；正文为空且非 `length` 截断 → 「上游没产出内容」 |
 | ③ 工具调用 | 带 1 个工具，schema 故意含 `$schema`、`additionalProperties`（模拟 opencode 实际发送的格式） | 返回 `tool_calls` 且函数名正确 | 400 且报错涉及 schema → 用 shim 同款清洗函数重试，通过则建议清洗开关设 `1`；仍失败或不调用工具 → 「该模型不支持工具调用，行情与分析功能不可用」，**不允许保存** |
 
 - 检测请求由 api 发出（与 opencode 实际调用走同一网络路径），经 llm-shim 的清洗函数（抽成 `scripts/llm-shim/schema_clean.py`，shim 与 api 共用一份）
