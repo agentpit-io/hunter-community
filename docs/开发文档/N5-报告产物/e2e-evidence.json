@@ -1,0 +1,1852 @@
+{
+  "at_utc": "2026-10-02T23:56:20.841255+00:00",
+  "at_shanghai": "2026-10-03T07:56:20.841255+08:00",
+  "steps": [
+    {
+      "label": "① 登录",
+      "method": "POST",
+      "url": "http://127.0.0.1:8102/api/auth/login",
+      "body": {
+        "email": "n5demo@example.com",
+        "password": "n5demo123"
+      },
+      "status": 200,
+      "response": {
+        "ok": true,
+        "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJlNjIyYjg3MS1lN2Q4LTQ5NzYtODYxOS01MmQxMzk2MDhjNzYiLCJlbWFpbCI6Im41ZGVtb0BleGFtcGxlLmNvbSIsInJvbGUiOiJ1c2VyIiwiaWF0IjoxNzkwOTg1MzgwLCJleHAiOjE3OTA5ODg5ODAsInR5cGUiOiJhY2Nlc3MifQ.s-AP_Q6jpHJzjoCOkv6Fu45UxAccIGa_dzQUZGddPG4",
+        "refresh_token": "5ws9xx1IaNZwZCZWSNrs35R_GBUoX62lAxvzKS1-iAdrsLPf83noB95BrSqBH5AP",
+        "token_type": "bearer",
+        "expires_in": 3600,
+        "user": {
+          "id": "e622b871-e7d8-4976-8619-52d139608c76",
+          "email": "n5demo@example.com",
+          "role": "user",
+          "display_name": "N5 回归"
+        },
+        "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJlNjIyYjg3MS1lN2Q4LTQ5NzYtODYxOS01MmQxMzk2MDhjNzYiLCJlbWFpbCI6Im41ZGVtb0BleGFtcGxlLmNvbSIsInJvbGUiOiJ1c2VyIiwiaWF0IjoxNzkwOTg1MzgwLCJleHAiOjE3OTA5ODg5ODAsInR5cGUiOiJhY2Nlc3MifQ.s-AP_Q6jpHJzjoCOkv6Fu45UxAccIGa_dzQUZGddPG4"
+      }
+    },
+    {
+      "label": "② 市场状态（现在）",
+      "method": "GET",
+      "url": "http://127.0.0.1:8102/api/v1/fin/markets",
+      "body": null,
+      "status": 200,
+      "response": {
+        "markets": [
+          {
+            "market": "CN_A",
+            "label": "A 股",
+            "currency": "CNY",
+            "symbol": "¥",
+            "timezone": "Asia/Shanghai",
+            "trade_date": "2026-10-03",
+            "local_time": "2026-10-03T07:56:20.954525+08:00",
+            "is_trading_day": null,
+            "state": "unknown",
+            "state_label": "日历缺失",
+            "sessions": [
+              {
+                "open": "09:30",
+                "close": "11:30"
+              },
+              {
+                "open": "13:00",
+                "close": "15:00"
+              }
+            ],
+            "calendar_source": null,
+            "note": "A 股 2026-10-03 没有交易日历行 —— 按「未知 ≠ 交易日」处理，该市场不可交易（先跑该市场的日历同步）"
+          },
+          {
+            "market": "HK",
+            "label": "港股",
+            "currency": "HKD",
+            "symbol": "HK$",
+            "timezone": "Asia/Hong_Kong",
+            "trade_date": "2026-10-03",
+            "local_time": "2026-10-03T07:56:20.954525+08:00",
+            "is_trading_day": false,
+            "state": "closed",
+            "state_label": "休市",
+            "sessions": [
+              {
+                "open": "09:30",
+                "close": "12:00"
+              },
+              {
+                "open": "13:00",
+                "close": "16:00"
+              },
+              {
+                "open": "16:00",
+                "close": "16:10"
+              }
+            ],
+            "calendar_source": "hkex_official",
+            "note": "港股 2026-10-03 非交易日（休市）"
+          },
+          {
+            "market": "US",
+            "label": "美股",
+            "currency": "USD",
+            "symbol": "$",
+            "timezone": "America/New_York",
+            "trade_date": "2026-10-02",
+            "local_time": "2026-10-02T19:56:20.954525-04:00",
+            "is_trading_day": true,
+            "state": "after_hours",
+            "state_label": "盘后",
+            "sessions": [
+              {
+                "open": "09:30",
+                "close": "16:00"
+              }
+            ],
+            "calendar_source": "nyse_official",
+            "note": "美股 2026-10-02 交易日 · 当前 盘后"
+          }
+        ]
+      }
+    },
+    {
+      "label": "② 市场状态（2026-10-06 · A 股国庆休市对照）",
+      "method": "GET",
+      "url": "http://127.0.0.1:8102/api/v1/fin/markets?trade_date=2026-10-06",
+      "body": null,
+      "status": 200,
+      "response": {
+        "markets": [
+          {
+            "market": "CN_A",
+            "label": "A 股",
+            "currency": "CNY",
+            "symbol": "¥",
+            "timezone": "Asia/Shanghai",
+            "trade_date": "2026-10-06",
+            "local_time": "2026-10-03T07:56:20.972705+08:00",
+            "is_trading_day": false,
+            "state": "closed",
+            "state_label": "休市",
+            "sessions": [
+              {
+                "open": "09:30",
+                "close": "11:30"
+              },
+              {
+                "open": "13:00",
+                "close": "15:00"
+              }
+            ],
+            "calendar_source": "akshare",
+            "note": "A 股 2026-10-06 非交易日（休市）"
+          },
+          {
+            "market": "HK",
+            "label": "港股",
+            "currency": "HKD",
+            "symbol": "HK$",
+            "timezone": "Asia/Hong_Kong",
+            "trade_date": "2026-10-06",
+            "local_time": "2026-10-03T07:56:20.972705+08:00",
+            "is_trading_day": true,
+            "state": "pre_market",
+            "state_label": "盘前",
+            "sessions": [
+              {
+                "open": "09:30",
+                "close": "12:00"
+              },
+              {
+                "open": "13:00",
+                "close": "16:00"
+              },
+              {
+                "open": "16:00",
+                "close": "16:10"
+              }
+            ],
+            "calendar_source": "hkex_official",
+            "note": "港股 2026-10-06 交易日 · 当前 盘前"
+          },
+          {
+            "market": "US",
+            "label": "美股",
+            "currency": "USD",
+            "symbol": "$",
+            "timezone": "America/New_York",
+            "trade_date": "2026-10-06",
+            "local_time": "2026-10-02T19:56:20.972705-04:00",
+            "is_trading_day": true,
+            "state": "after_hours",
+            "state_label": "盘后",
+            "sessions": [
+              {
+                "open": "09:30",
+                "close": "16:00"
+              }
+            ],
+            "calendar_source": "nyse_official",
+            "note": "美股 2026-10-06 交易日 · 当前 盘后"
+          }
+        ]
+      }
+    },
+    {
+      "label": "④ 入金 CN_A",
+      "method": "POST",
+      "url": "http://127.0.0.1:8299/api/v1/projects/prj_b7791191b3af462791ed496b/funding?market=CN_A",
+      "body": {},
+      "status": 200,
+      "response": {
+        "created": false,
+        "entry_id": 3276,
+        "amount": "1000000.0000",
+        "market": "CN_A",
+        "currency": "CNY"
+      }
+    },
+    {
+      "label": "④ 入金 HK",
+      "method": "POST",
+      "url": "http://127.0.0.1:8299/api/v1/projects/prj_b7791191b3af462791ed496b/funding?market=HK",
+      "body": {},
+      "status": 200,
+      "response": {
+        "created": false,
+        "entry_id": 3277,
+        "amount": "1000000.0000",
+        "market": "HK",
+        "currency": "HKD"
+      }
+    },
+    {
+      "label": "④ 入金 US",
+      "method": "POST",
+      "url": "http://127.0.0.1:8299/api/v1/projects/prj_b7791191b3af462791ed496b/funding?market=US",
+      "body": {},
+      "status": 200,
+      "response": {
+        "created": false,
+        "entry_id": 3278,
+        "amount": "1000000.0000",
+        "market": "US",
+        "currency": "USD"
+      }
+    },
+    {
+      "label": "⑤ 下单 CN_A 000001",
+      "method": "POST",
+      "url": "http://127.0.0.1:8299/api/v1/orders",
+      "body": {
+        "project_id": "prj_b7791191b3af462791ed496b",
+        "code": "000001",
+        "side": "buy",
+        "qty": 100,
+        "price_type": "limit",
+        "limit_price": "11.60",
+        "actor": "n5-e2e"
+      },
+      "status": 200,
+      "response": {
+        "order_id": "ord_d728c6dd7fdf4b94b92ec4a8",
+        "status": "rejected",
+        "decline_reason": "不在交易时段内（16:15 上海时间，当日时段 09:30-11:30、13:00-15:00）",
+        "filled_qty": 0,
+        "trade_id": null,
+        "snapshot_id": "SNAP-20260930-161500-000001",
+        "snapshot_time": "2026-09-30T16:15:00+08:00",
+        "snapshot_quality": "ok",
+        "snapshot_missing_flag": false,
+        "price": null,
+        "amount": null,
+        "fee": null,
+        "pending_reason": null,
+        "market": "CN_A",
+        "currency": "CNY",
+        "price_limit_checked": true,
+        "snapshot_market": "CN_A",
+        "snapshot_quote_quality": "last_only",
+        "risk": {
+          "session": {
+            "ok": false,
+            "reason": "不在交易时段内（16:15 上海时间，当日时段 09:30-11:30、13:00-15:00）",
+            "detail": {
+              "market": "CN_A",
+              "calendar_source": "akshare"
+            }
+          },
+          "lot": {
+            "ok": true,
+            "reason": null,
+            "detail": {
+              "qty": 100,
+              "lot_size": 100
+            }
+          },
+          "t1": {
+            "ok": true,
+            "reason": null,
+            "detail": {
+              "sellable_qty": 0
+            }
+          },
+          "price_limit": {
+            "ok": true,
+            "reason": null,
+            "detail": {
+              "limit_up": "12.49",
+              "limit_down": "10.22",
+              "mode": "pct",
+              "checked": true,
+              "price_limit_checked": true
+            }
+          },
+          "fee": {
+            "ok": true,
+            "reason": null,
+            "detail": {
+              "version": "fee-cn-a-v1",
+              "market": "CN_A",
+              "currency": "CNY"
+            }
+          },
+          "funds": {
+            "ok": true,
+            "reason": null,
+            "detail": {
+              "required": "1165.0116",
+              "currency": "CNY"
+            }
+          }
+        },
+        "failed_checks": [
+          "session"
+        ]
+      }
+    },
+    {
+      "label": "⑤ 下单 HK 00700",
+      "method": "POST",
+      "url": "http://127.0.0.1:8299/api/v1/orders",
+      "body": {
+        "project_id": "prj_b7791191b3af462791ed496b",
+        "code": "00700",
+        "side": "buy",
+        "qty": 100,
+        "price_type": "limit",
+        "limit_price": "430.00",
+        "actor": "n5-e2e"
+      },
+      "status": 200,
+      "response": {
+        "order_id": "ord_c3b8b4541f1843ae8d6445e4",
+        "status": "filled",
+        "trade_id": "trd_3b34de04aa294e7b955c0f3e",
+        "filled_qty": 100,
+        "price": "421.2000",
+        "amount": "42120.0000",
+        "fee": {
+          "commission": "12.6360",
+          "stamp_tax": "42.1200",
+          "transfer_fee": "2.5272",
+          "total": "57.2832"
+        },
+        "decline_reason": null,
+        "pending_reason": null,
+        "price_basis": "snapshot_last_price",
+        "market": "HK",
+        "currency": "HKD",
+        "price_limit_checked": false,
+        "risk": {
+          "session": {
+            "ok": true,
+            "reason": null,
+            "detail": {
+              "at": "2026-10-02T16:08:10+08:00",
+              "market": "HK",
+              "calendar_source": "hkex_official"
+            }
+          },
+          "lot": {
+            "ok": true,
+            "reason": null,
+            "detail": {
+              "qty": 100,
+              "lot_size": 100
+            }
+          },
+          "t1": {
+            "ok": true,
+            "reason": null,
+            "detail": {
+              "sellable_qty": 300
+            }
+          },
+          "price_limit": {
+            "ok": true,
+            "reason": null,
+            "detail": {
+              "checked": false,
+              "price_limit_checked": false,
+              "mode": "none",
+              "note": "该市场未做价格带校验（price_limit_mode=none：本地市场无每日涨跌幅限制）"
+            }
+          },
+          "fee": {
+            "ok": true,
+            "reason": null,
+            "detail": {
+              "version": "fee-hk-v1",
+              "market": "HK",
+              "currency": "HKD"
+            }
+          },
+          "funds": {
+            "ok": true,
+            "reason": null,
+            "detail": {
+              "required": "43058.4800",
+              "currency": "HKD"
+            }
+          }
+        },
+        "snapshot_id": "SNAP-20261002-160810-00700",
+        "snapshot_time": "2026-10-02T16:08:10+08:00",
+        "snapshot_quality": "ok",
+        "snapshot_missing_flag": false,
+        "snapshot_market": "HK",
+        "snapshot_quote_quality": "last_only"
+      }
+    },
+    {
+      "label": "⑤ 下单 US AAPL",
+      "method": "POST",
+      "url": "http://127.0.0.1:8299/api/v1/orders",
+      "body": {
+        "project_id": "prj_b7791191b3af462791ed496b",
+        "code": "AAPL",
+        "side": "buy",
+        "qty": 1,
+        "price_type": "limit",
+        "limit_price": "340.00",
+        "actor": "n5-e2e"
+      },
+      "status": 200,
+      "response": {
+        "order_id": "ord_a606982f1e1648888b2c8054",
+        "status": "filled",
+        "trade_id": "trd_edebfd20d79a4f51983005e7",
+        "filled_qty": 1,
+        "price": "333.6900",
+        "amount": "333.6900",
+        "fee": {
+          "commission": "0.0334",
+          "stamp_tax": "0.0000",
+          "transfer_fee": "0.0000",
+          "total": "0.0334"
+        },
+        "decline_reason": null,
+        "pending_reason": null,
+        "price_basis": "snapshot_last_price",
+        "market": "US",
+        "currency": "USD",
+        "price_limit_checked": false,
+        "risk": {
+          "session": {
+            "ok": true,
+            "reason": null,
+            "detail": {
+              "at": "2026-10-02T16:00:01-04:00",
+              "market": "US",
+              "calendar_source": "nyse_official"
+            }
+          },
+          "lot": {
+            "ok": true,
+            "reason": null,
+            "detail": {
+              "qty": 1,
+              "lot_size": 1
+            }
+          },
+          "t1": {
+            "ok": true,
+            "reason": null,
+            "detail": {
+              "sellable_qty": 3
+            }
+          },
+          "price_limit": {
+            "ok": true,
+            "reason": null,
+            "detail": {
+              "checked": false,
+              "price_limit_checked": false,
+              "mode": "none",
+              "note": "该市场未做价格带校验（price_limit_mode=none：本地市场无每日涨跌幅限制）"
+            }
+          },
+          "fee": {
+            "ok": true,
+            "reason": null,
+            "detail": {
+              "version": "fee-us-v1",
+              "market": "US",
+              "currency": "USD"
+            }
+          },
+          "funds": {
+            "ok": true,
+            "reason": null,
+            "detail": {
+              "required": "340.0340",
+              "currency": "USD"
+            }
+          }
+        },
+        "snapshot_id": "SNAP-20261003-040001-AAPL",
+        "snapshot_time": "2026-10-03T04:00:01+08:00",
+        "snapshot_quality": "ok",
+        "snapshot_missing_flag": false,
+        "snapshot_market": "US",
+        "snapshot_quote_quality": "last_only"
+      }
+    },
+    {
+      "label": "⑥ 估值 CN_A",
+      "method": "POST",
+      "url": "http://127.0.0.1:8299/api/v1/projects/prj_b7791191b3af462791ed496b/valuation",
+      "body": {
+        "as_of": "2026-10-02T23:56:21+00:00",
+        "market": "CN_A"
+      },
+      "status": 200,
+      "response": {
+        "project_id": "prj_b7791191b3af462791ed496b",
+        "as_of": "2026-10-03T07:56:21+08:00",
+        "cash_available": "1000000.0000",
+        "cash_frozen": "0.0000",
+        "market_value": "0.0000",
+        "total_assets": "1000000.0000",
+        "nav": "1.000000",
+        "price_source": "fin_snapshot",
+        "quality": "ok",
+        "missing_flag": false,
+        "currency": "CNY",
+        "market": "CN_A",
+        "created": true
+      }
+    },
+    {
+      "label": "⑥ 估值 HK",
+      "method": "POST",
+      "url": "http://127.0.0.1:8299/api/v1/projects/prj_b7791191b3af462791ed496b/valuation",
+      "body": {
+        "as_of": "2026-10-02T23:56:21+00:00",
+        "market": "HK"
+      },
+      "status": 200,
+      "response": {
+        "project_id": "prj_b7791191b3af462791ed496b",
+        "as_of": "2026-10-03T07:56:21+08:00",
+        "cash_available": "831290.8672",
+        "cash_frozen": "0.0000",
+        "market_value": "168480.0000",
+        "total_assets": "999770.8672",
+        "nav": "0.999771",
+        "price_source": "fin_snapshot",
+        "quality": "stale",
+        "missing_flag": true,
+        "currency": "HKD",
+        "market": "HK",
+        "created": true
+      }
+    },
+    {
+      "label": "⑥ 估值 US",
+      "method": "POST",
+      "url": "http://127.0.0.1:8299/api/v1/projects/prj_b7791191b3af462791ed496b/valuation",
+      "body": {
+        "as_of": "2026-10-02T23:56:21+00:00",
+        "market": "US"
+      },
+      "status": 200,
+      "response": {
+        "project_id": "prj_b7791191b3af462791ed496b",
+        "as_of": "2026-10-03T07:56:21+08:00",
+        "cash_available": "998665.1064",
+        "cash_frozen": "0.0000",
+        "market_value": "1334.7600",
+        "total_assets": "999999.8664",
+        "nav": "1.000000",
+        "price_source": "fin_snapshot",
+        "quality": "ok",
+        "missing_flag": false,
+        "currency": "USD",
+        "market": "US",
+        "created": true
+      }
+    },
+    {
+      "label": "⑦ 生成报告",
+      "method": "POST",
+      "url": "http://127.0.0.1:8102/api/internal/fin/reports/generate",
+      "body": {
+        "project_id": "prj_b7791191b3af462791ed496b",
+        "trade_date": "2026-10-03"
+      },
+      "status": 200,
+      "response": {
+        "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+        "status": "validated",
+        "artifact_ref": "artifact:fin-2f32f11da1a3",
+        "market": "CN_A",
+        "check": {
+          "ok": true,
+          "checked": 6,
+          "matched": 6,
+          "violations": []
+        },
+        "facts": 19,
+        "used_fallback": true,
+        "reports": [
+          {
+            "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+            "status": "validated",
+            "artifact_ref": "artifact:fin-2f32f11da1a3",
+            "market": "CN_A",
+            "check": {
+              "ok": true,
+              "checked": 6,
+              "matched": 6,
+              "violations": []
+            },
+            "facts": 19,
+            "used_fallback": true
+          },
+          {
+            "report_id": "rpt_fe61f06bfb44b2fa9c1a9e85",
+            "status": "validated",
+            "artifact_ref": "artifact:fin-fe61f06bfb44",
+            "market": "HK",
+            "check": {
+              "ok": true,
+              "checked": 6,
+              "matched": 6,
+              "violations": []
+            },
+            "facts": 19,
+            "used_fallback": true
+          },
+          {
+            "report_id": "rpt_cacf25aa239096e5dea106e5",
+            "status": "validated",
+            "artifact_ref": "artifact:fin-cacf25aa2390",
+            "market": "US",
+            "check": {
+              "ok": true,
+              "checked": 6,
+              "matched": 6,
+              "violations": []
+            },
+            "facts": 19,
+            "used_fallback": true
+          }
+        ],
+        "summary": {
+          "report_id": "rpt_e82dc4afd480fd1eafa3ceab",
+          "status": "validated",
+          "artifact_ref": "artifact:fin-e82dc4afd480",
+          "market": "MULTI",
+          "check": {
+            "ok": true,
+            "checked": 1,
+            "matched": 1,
+            "violations": []
+          },
+          "facts": 7,
+          "used_fallback": true
+        }
+      }
+    },
+    {
+      "label": "⑧ 报告列表",
+      "method": "GET",
+      "url": "http://127.0.0.1:8102/api/v1/fin/reports?project_id=prj_b7791191b3af462791ed496b",
+      "body": null,
+      "status": 200,
+      "response": {
+        "project_id": "prj_b7791191b3af462791ed496b",
+        "items": [
+          {
+            "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+            "trade_date": "2026-10-03",
+            "market": "CN_A",
+            "status": "validated",
+            "llm_provider": "fallback",
+            "llm_model": "none",
+            "has_artifact": true,
+            "artifact_ref": "artifact:fin-2f32f11da1a3",
+            "fact_count": 19,
+            "created_at": "2026-10-02T23:40:21.545094+00:00"
+          },
+          {
+            "report_id": "rpt_fe61f06bfb44b2fa9c1a9e85",
+            "trade_date": "2026-10-03",
+            "market": "HK",
+            "status": "validated",
+            "llm_provider": "fallback",
+            "llm_model": "none",
+            "has_artifact": true,
+            "artifact_ref": "artifact:fin-fe61f06bfb44",
+            "fact_count": 19,
+            "created_at": "2026-10-02T23:40:21.576239+00:00"
+          },
+          {
+            "report_id": "rpt_e82dc4afd480fd1eafa3ceab",
+            "trade_date": "2026-10-03",
+            "market": "MULTI",
+            "status": "validated",
+            "llm_provider": "fallback",
+            "llm_model": "none",
+            "has_artifact": true,
+            "artifact_ref": "artifact:fin-e82dc4afd480",
+            "fact_count": 7,
+            "created_at": "2026-10-02T23:40:21.945813+00:00"
+          },
+          {
+            "report_id": "rpt_cacf25aa239096e5dea106e5",
+            "trade_date": "2026-10-03",
+            "market": "US",
+            "status": "validated",
+            "llm_provider": "fallback",
+            "llm_model": "none",
+            "has_artifact": true,
+            "artifact_ref": "artifact:fin-cacf25aa2390",
+            "fact_count": 19,
+            "created_at": "2026-10-02T23:40:21.595087+00:00"
+          }
+        ],
+        "latest": {
+          "report": {
+            "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+            "project_id": "prj_b7791191b3af462791ed496b",
+            "trade_date": "2026-10-03",
+            "valuation_as_of": "2026-10-02T23:56:21+00:00",
+            "analysis_text": "（未启用 AI 分析：RuntimeError: 大模型尚未配置:缺 base_url。在 .env 里填 LLM_BASE_URL(如 https://api.openai.com/v1),或在首页完成初始化向导。。以下为按事实表生成的自动摘要，只复述数字。）\n本交易日账本读数：净值 1.0000，累计收益率 +0.00%，当日收益率 —，最大回撤 —。当日成交 0 笔，持仓 0 只。累计费用 ¥0.00，对账通过 —。",
+            "self_review": {
+              "did_bad": "未启用模型分析，无法给出定性复盘；请检查大模型配置后重跑。",
+              "did_well": "本期按既定规则运行，账本自洽性以对账结果为准（口径见事实表）。",
+              "change_tomorrow": "补齐大模型配置，让分析层基于事实表产出归因与改进项。"
+            },
+            "llm_provider": "fallback",
+            "llm_model": "none",
+            "prompt_version": "fin-report-zh@1.1",
+            "status": "validated",
+            "created_at": "2026-10-02T23:40:21.545094+00:00",
+            "artifact_ref": "artifact:fin-2f32f11da1a3",
+            "market": "CN_A"
+          },
+          "facts": [
+            {
+              "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+              "metric_key": "cash_available",
+              "value": 1000000.0,
+              "unit": "money",
+              "source_ref": "fin_valuation:2026-10-03",
+              "computed_by": "fin.report.build_facts@n5.1",
+              "market": "CN_A",
+              "currency": "CNY"
+            },
+            {
+              "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+              "metric_key": "cash_frozen",
+              "value": 0.0,
+              "unit": "money",
+              "source_ref": "fin_valuation:2026-10-03",
+              "computed_by": "fin.report.build_facts@n5.1",
+              "market": "CN_A",
+              "currency": "CNY"
+            },
+            {
+              "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+              "metric_key": "daily_return_pct",
+              "value": null,
+              "unit": "%",
+              "source_ref": "fin_valuation:2026-10-03",
+              "computed_by": "fin.report.build_facts@n5.1",
+              "market": "CN_A",
+              "currency": null
+            },
+            {
+              "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+              "metric_key": "data_quality_ok",
+              "value": 1.0,
+              "unit": "",
+              "source_ref": "fin_valuation:2026-10-03",
+              "computed_by": "fin.report.build_facts@n5.1",
+              "market": "CN_A",
+              "currency": null
+            },
+            {
+              "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+              "metric_key": "days_traded",
+              "value": 1.0,
+              "unit": "日",
+              "source_ref": "fin_valuation:*",
+              "computed_by": "fin.report.build_facts@n5.1",
+              "market": "CN_A",
+              "currency": null
+            },
+            {
+              "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+              "metric_key": "fee_today",
+              "value": 0.0,
+              "unit": "money",
+              "source_ref": "fin_trade:2026-10-03",
+              "computed_by": "fin.report.build_facts@n5.1",
+              "market": "CN_A",
+              "currency": "CNY"
+            },
+            {
+              "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+              "metric_key": "fee_total",
+              "value": 0.0,
+              "unit": "money",
+              "source_ref": "fin_trade:*",
+              "computed_by": "fin.report.build_facts@n5.1",
+              "market": "CN_A",
+              "currency": "CNY"
+            },
+            {
+              "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+              "metric_key": "initial_capital",
+              "value": 1000000.0,
+              "unit": "money",
+              "source_ref": "fin_project:prj_b7791191b3af462791ed496b",
+              "computed_by": "fin.report.build_facts@n5.1",
+              "market": "CN_A",
+              "currency": "CNY"
+            },
+            {
+              "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+              "metric_key": "market_value",
+              "value": 0.0,
+              "unit": "money",
+              "source_ref": "fin_valuation:2026-10-03",
+              "computed_by": "fin.report.build_facts@n5.1",
+              "market": "CN_A",
+              "currency": "CNY"
+            },
+            {
+              "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+              "metric_key": "max_drawdown",
+              "value": null,
+              "unit": "%",
+              "source_ref": "fin_valuation:*（1 根净值）",
+              "computed_by": "fin.report.build_facts@n5.1",
+              "market": "CN_A",
+              "currency": null
+            },
+            {
+              "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+              "metric_key": "nav",
+              "value": 1.0,
+              "unit": "倍",
+              "source_ref": "fin_valuation:2026-10-03",
+              "computed_by": "fin.report.build_facts@n5.1",
+              "market": "CN_A",
+              "currency": null
+            },
+            {
+              "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+              "metric_key": "open_order_count",
+              "value": 0.0,
+              "unit": "笔",
+              "source_ref": "fin_order:pending",
+              "computed_by": "fin.report.build_facts@n5.1",
+              "market": "CN_A",
+              "currency": null
+            },
+            {
+              "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+              "metric_key": "position_count",
+              "value": 0.0,
+              "unit": "只",
+              "source_ref": "fin_position:*",
+              "computed_by": "fin.report.build_facts@n5.1",
+              "market": "CN_A",
+              "currency": null
+            },
+            {
+              "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+              "metric_key": "recon_passed",
+              "value": null,
+              "unit": "",
+              "source_ref": "fin_recon_log:*",
+              "computed_by": "fin.report.build_facts@n5.1",
+              "market": "CN_A",
+              "currency": null
+            },
+            {
+              "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+              "metric_key": "return_caliber_count",
+              "value": 1.0,
+              "unit": "种",
+              "source_ref": "const:caliber=live_paper·01方案§2.2",
+              "computed_by": "fin.report.build_facts@n5.1",
+              "market": "CN_A",
+              "currency": null
+            },
+            {
+              "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+              "metric_key": "return_pct",
+              "value": 0.0,
+              "unit": "%",
+              "source_ref": "fin_valuation:2026-10-03",
+              "computed_by": "fin.report.build_facts@n5.1",
+              "market": "CN_A",
+              "currency": null
+            },
+            {
+              "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+              "metric_key": "total_assets",
+              "value": 1000000.0,
+              "unit": "money",
+              "source_ref": "fin_valuation:2026-10-03",
+              "computed_by": "fin.report.build_facts@n5.1",
+              "market": "CN_A",
+              "currency": "CNY"
+            },
+            {
+              "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+              "metric_key": "trade_count_today",
+              "value": 0.0,
+              "unit": "笔",
+              "source_ref": "fin_trade:2026-10-03",
+              "computed_by": "fin.report.build_facts@n5.1",
+              "market": "CN_A",
+              "currency": null
+            },
+            {
+              "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+              "metric_key": "trade_count_total",
+              "value": 0.0,
+              "unit": "笔",
+              "source_ref": "fin_trade:*",
+              "computed_by": "fin.report.build_facts@n5.1",
+              "market": "CN_A",
+              "currency": null
+            }
+          ],
+          "receipts": [
+            {
+              "receipt_id": "rcp_2599aa72fa2ed3ff941d716d",
+              "channel": "in_app",
+              "status": "SUCCESS",
+              "external_id": "artifact:fin-2f32f11da1a3",
+              "detail": "站内产物",
+              "attempted_at": "2026-10-02T23:56:21.878741+00:00"
+            }
+          ],
+          "validate": {
+            "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+            "status": "validated",
+            "numbers_inspected": 6,
+            "trace": [
+              {
+                "field": "analysis_text",
+                "token": "1",
+                "metric_key": "data_quality_ok"
+              },
+              {
+                "field": "analysis_text",
+                "token": "1.0000",
+                "metric_key": "data_quality_ok"
+              },
+              {
+                "field": "analysis_text",
+                "token": "+0.00%",
+                "metric_key": "return_pct"
+              },
+              {
+                "field": "analysis_text",
+                "token": "0",
+                "metric_key": "cash_frozen"
+              },
+              {
+                "field": "analysis_text",
+                "token": "0",
+                "metric_key": "cash_frozen"
+              },
+              {
+                "field": "analysis_text",
+                "token": "0.00",
+                "metric_key": "cash_frozen"
+              }
+            ],
+            "violations": [],
+            "ok": true
+          }
+        },
+        "empty_state": null
+      }
+    },
+    {
+      "label": "⑧ 读报告 CN_A",
+      "method": "GET",
+      "url": "http://127.0.0.1:8102/api/v1/fin/reports/rpt_2f32f11da1a355cfc0cbde9b",
+      "body": null,
+      "status": 200,
+      "response": {
+        "report": {
+          "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+          "project_id": "prj_b7791191b3af462791ed496b",
+          "trade_date": "2026-10-03",
+          "valuation_as_of": "2026-10-02T23:56:21+00:00",
+          "analysis_text": "（未启用 AI 分析：RuntimeError: 大模型尚未配置:缺 base_url。在 .env 里填 LLM_BASE_URL(如 https://api.openai.com/v1),或在首页完成初始化向导。。以下为按事实表生成的自动摘要，只复述数字。）\n本交易日账本读数：净值 1.0000，累计收益率 +0.00%，当日收益率 —，最大回撤 —。当日成交 0 笔，持仓 0 只。累计费用 ¥0.00，对账通过 —。",
+          "self_review": {
+            "did_bad": "未启用模型分析，无法给出定性复盘；请检查大模型配置后重跑。",
+            "did_well": "本期按既定规则运行，账本自洽性以对账结果为准（口径见事实表）。",
+            "change_tomorrow": "补齐大模型配置，让分析层基于事实表产出归因与改进项。"
+          },
+          "llm_provider": "fallback",
+          "llm_model": "none",
+          "prompt_version": "fin-report-zh@1.1",
+          "status": "validated",
+          "created_at": "2026-10-02T23:40:21.545094+00:00",
+          "artifact_ref": "artifact:fin-2f32f11da1a3",
+          "market": "CN_A"
+        },
+        "facts": [
+          {
+            "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+            "metric_key": "cash_available",
+            "value": 1000000.0,
+            "unit": "money",
+            "source_ref": "fin_valuation:2026-10-03",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "CN_A",
+            "currency": "CNY"
+          },
+          {
+            "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+            "metric_key": "cash_frozen",
+            "value": 0.0,
+            "unit": "money",
+            "source_ref": "fin_valuation:2026-10-03",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "CN_A",
+            "currency": "CNY"
+          },
+          {
+            "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+            "metric_key": "daily_return_pct",
+            "value": null,
+            "unit": "%",
+            "source_ref": "fin_valuation:2026-10-03",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "CN_A",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+            "metric_key": "data_quality_ok",
+            "value": 1.0,
+            "unit": "",
+            "source_ref": "fin_valuation:2026-10-03",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "CN_A",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+            "metric_key": "days_traded",
+            "value": 1.0,
+            "unit": "日",
+            "source_ref": "fin_valuation:*",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "CN_A",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+            "metric_key": "fee_today",
+            "value": 0.0,
+            "unit": "money",
+            "source_ref": "fin_trade:2026-10-03",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "CN_A",
+            "currency": "CNY"
+          },
+          {
+            "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+            "metric_key": "fee_total",
+            "value": 0.0,
+            "unit": "money",
+            "source_ref": "fin_trade:*",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "CN_A",
+            "currency": "CNY"
+          },
+          {
+            "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+            "metric_key": "initial_capital",
+            "value": 1000000.0,
+            "unit": "money",
+            "source_ref": "fin_project:prj_b7791191b3af462791ed496b",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "CN_A",
+            "currency": "CNY"
+          },
+          {
+            "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+            "metric_key": "market_value",
+            "value": 0.0,
+            "unit": "money",
+            "source_ref": "fin_valuation:2026-10-03",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "CN_A",
+            "currency": "CNY"
+          },
+          {
+            "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+            "metric_key": "max_drawdown",
+            "value": null,
+            "unit": "%",
+            "source_ref": "fin_valuation:*（1 根净值）",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "CN_A",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+            "metric_key": "nav",
+            "value": 1.0,
+            "unit": "倍",
+            "source_ref": "fin_valuation:2026-10-03",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "CN_A",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+            "metric_key": "open_order_count",
+            "value": 0.0,
+            "unit": "笔",
+            "source_ref": "fin_order:pending",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "CN_A",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+            "metric_key": "position_count",
+            "value": 0.0,
+            "unit": "只",
+            "source_ref": "fin_position:*",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "CN_A",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+            "metric_key": "recon_passed",
+            "value": null,
+            "unit": "",
+            "source_ref": "fin_recon_log:*",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "CN_A",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+            "metric_key": "return_caliber_count",
+            "value": 1.0,
+            "unit": "种",
+            "source_ref": "const:caliber=live_paper·01方案§2.2",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "CN_A",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+            "metric_key": "return_pct",
+            "value": 0.0,
+            "unit": "%",
+            "source_ref": "fin_valuation:2026-10-03",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "CN_A",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+            "metric_key": "total_assets",
+            "value": 1000000.0,
+            "unit": "money",
+            "source_ref": "fin_valuation:2026-10-03",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "CN_A",
+            "currency": "CNY"
+          },
+          {
+            "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+            "metric_key": "trade_count_today",
+            "value": 0.0,
+            "unit": "笔",
+            "source_ref": "fin_trade:2026-10-03",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "CN_A",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+            "metric_key": "trade_count_total",
+            "value": 0.0,
+            "unit": "笔",
+            "source_ref": "fin_trade:*",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "CN_A",
+            "currency": null
+          }
+        ],
+        "receipts": [
+          {
+            "receipt_id": "rcp_2599aa72fa2ed3ff941d716d",
+            "channel": "in_app",
+            "status": "SUCCESS",
+            "external_id": "artifact:fin-2f32f11da1a3",
+            "detail": "站内产物",
+            "attempted_at": "2026-10-02T23:56:21.878741+00:00"
+          }
+        ]
+      }
+    },
+    {
+      "label": "⑧ 读报告 HK",
+      "method": "GET",
+      "url": "http://127.0.0.1:8102/api/v1/fin/reports/rpt_fe61f06bfb44b2fa9c1a9e85",
+      "body": null,
+      "status": 200,
+      "response": {
+        "report": {
+          "report_id": "rpt_fe61f06bfb44b2fa9c1a9e85",
+          "project_id": "prj_b7791191b3af462791ed496b",
+          "trade_date": "2026-10-03",
+          "valuation_as_of": "2026-10-02T23:56:21+00:00",
+          "analysis_text": "（未启用 AI 分析：RuntimeError: 大模型尚未配置:缺 base_url。在 .env 里填 LLM_BASE_URL(如 https://api.openai.com/v1),或在首页完成初始化向导。。以下为按事实表生成的自动摘要，只复述数字。）\n本交易日账本读数：净值 0.9998，累计收益率 -0.02%，当日收益率 —，最大回撤 —。当日成交 0 笔，持仓 1 只。累计费用 HK$229.13，对账通过 —。",
+          "self_review": {
+            "did_bad": "未启用模型分析，无法给出定性复盘；请检查大模型配置后重跑。",
+            "did_well": "本期按既定规则运行，账本自洽性以对账结果为准（口径见事实表）。",
+            "change_tomorrow": "补齐大模型配置，让分析层基于事实表产出归因与改进项。"
+          },
+          "llm_provider": "fallback",
+          "llm_model": "none",
+          "prompt_version": "fin-report-zh@1.1",
+          "status": "validated",
+          "created_at": "2026-10-02T23:40:21.576239+00:00",
+          "artifact_ref": "artifact:fin-fe61f06bfb44",
+          "market": "HK"
+        },
+        "facts": [
+          {
+            "report_id": "rpt_fe61f06bfb44b2fa9c1a9e85",
+            "metric_key": "cash_available",
+            "value": 831290.8672,
+            "unit": "money",
+            "source_ref": "fin_valuation:2026-10-03",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "HK",
+            "currency": "HKD"
+          },
+          {
+            "report_id": "rpt_fe61f06bfb44b2fa9c1a9e85",
+            "metric_key": "cash_frozen",
+            "value": 0.0,
+            "unit": "money",
+            "source_ref": "fin_valuation:2026-10-03",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "HK",
+            "currency": "HKD"
+          },
+          {
+            "report_id": "rpt_fe61f06bfb44b2fa9c1a9e85",
+            "metric_key": "daily_return_pct",
+            "value": null,
+            "unit": "%",
+            "source_ref": "fin_valuation:2026-10-03",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "HK",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_fe61f06bfb44b2fa9c1a9e85",
+            "metric_key": "data_quality_ok",
+            "value": 0.0,
+            "unit": "",
+            "source_ref": "fin_valuation:2026-10-03",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "HK",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_fe61f06bfb44b2fa9c1a9e85",
+            "metric_key": "days_traded",
+            "value": 1.0,
+            "unit": "日",
+            "source_ref": "fin_valuation:*",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "HK",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_fe61f06bfb44b2fa9c1a9e85",
+            "metric_key": "fee_today",
+            "value": 0.0,
+            "unit": "money",
+            "source_ref": "fin_trade:2026-10-03",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "HK",
+            "currency": "HKD"
+          },
+          {
+            "report_id": "rpt_fe61f06bfb44b2fa9c1a9e85",
+            "metric_key": "fee_total",
+            "value": 229.1328,
+            "unit": "money",
+            "source_ref": "fin_trade:*",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "HK",
+            "currency": "HKD"
+          },
+          {
+            "report_id": "rpt_fe61f06bfb44b2fa9c1a9e85",
+            "metric_key": "initial_capital",
+            "value": 1000000.0,
+            "unit": "money",
+            "source_ref": "fin_project:prj_b7791191b3af462791ed496b",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "HK",
+            "currency": "HKD"
+          },
+          {
+            "report_id": "rpt_fe61f06bfb44b2fa9c1a9e85",
+            "metric_key": "market_value",
+            "value": 168480.0,
+            "unit": "money",
+            "source_ref": "fin_valuation:2026-10-03",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "HK",
+            "currency": "HKD"
+          },
+          {
+            "report_id": "rpt_fe61f06bfb44b2fa9c1a9e85",
+            "metric_key": "max_drawdown",
+            "value": null,
+            "unit": "%",
+            "source_ref": "fin_valuation:*（1 根净值）",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "HK",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_fe61f06bfb44b2fa9c1a9e85",
+            "metric_key": "nav",
+            "value": 0.999771,
+            "unit": "倍",
+            "source_ref": "fin_valuation:2026-10-03",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "HK",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_fe61f06bfb44b2fa9c1a9e85",
+            "metric_key": "open_order_count",
+            "value": 0.0,
+            "unit": "笔",
+            "source_ref": "fin_order:pending",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "HK",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_fe61f06bfb44b2fa9c1a9e85",
+            "metric_key": "position_count",
+            "value": 1.0,
+            "unit": "只",
+            "source_ref": "fin_position:*",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "HK",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_fe61f06bfb44b2fa9c1a9e85",
+            "metric_key": "recon_passed",
+            "value": null,
+            "unit": "",
+            "source_ref": "fin_recon_log:*",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "HK",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_fe61f06bfb44b2fa9c1a9e85",
+            "metric_key": "return_caliber_count",
+            "value": 1.0,
+            "unit": "种",
+            "source_ref": "const:caliber=live_paper·01方案§2.2",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "HK",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_fe61f06bfb44b2fa9c1a9e85",
+            "metric_key": "return_pct",
+            "value": -0.0229,
+            "unit": "%",
+            "source_ref": "fin_valuation:2026-10-03",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "HK",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_fe61f06bfb44b2fa9c1a9e85",
+            "metric_key": "total_assets",
+            "value": 999770.8672,
+            "unit": "money",
+            "source_ref": "fin_valuation:2026-10-03",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "HK",
+            "currency": "HKD"
+          },
+          {
+            "report_id": "rpt_fe61f06bfb44b2fa9c1a9e85",
+            "metric_key": "trade_count_today",
+            "value": 0.0,
+            "unit": "笔",
+            "source_ref": "fin_trade:2026-10-03",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "HK",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_fe61f06bfb44b2fa9c1a9e85",
+            "metric_key": "trade_count_total",
+            "value": 4.0,
+            "unit": "笔",
+            "source_ref": "fin_trade:*",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "HK",
+            "currency": null
+          }
+        ],
+        "receipts": [
+          {
+            "receipt_id": "rcp_c08d37339c1f4738efa3a4e6",
+            "channel": "in_app",
+            "status": "SUCCESS",
+            "external_id": "artifact:fin-fe61f06bfb44",
+            "detail": "站内产物",
+            "attempted_at": "2026-10-02T23:56:21.895322+00:00"
+          }
+        ]
+      }
+    },
+    {
+      "label": "⑧ 读报告 US",
+      "method": "GET",
+      "url": "http://127.0.0.1:8102/api/v1/fin/reports/rpt_cacf25aa239096e5dea106e5",
+      "body": null,
+      "status": 200,
+      "response": {
+        "report": {
+          "report_id": "rpt_cacf25aa239096e5dea106e5",
+          "project_id": "prj_b7791191b3af462791ed496b",
+          "trade_date": "2026-10-03",
+          "valuation_as_of": "2026-10-02T23:56:21+00:00",
+          "analysis_text": "（未启用 AI 分析：RuntimeError: 大模型尚未配置:缺 base_url。在 .env 里填 LLM_BASE_URL(如 https://api.openai.com/v1),或在首页完成初始化向导。。以下为按事实表生成的自动摘要，只复述数字。）\n本交易日账本读数：净值 1.0000，累计收益率 +0.00%，当日收益率 —，最大回撤 —。当日成交 4 笔，持仓 1 只。累计费用 $0.13，对账通过 —。",
+          "self_review": {
+            "did_bad": "未启用模型分析，无法给出定性复盘；请检查大模型配置后重跑。",
+            "did_well": "本期按既定规则运行，账本自洽性以对账结果为准（口径见事实表）。",
+            "change_tomorrow": "补齐大模型配置，让分析层基于事实表产出归因与改进项。"
+          },
+          "llm_provider": "fallback",
+          "llm_model": "none",
+          "prompt_version": "fin-report-zh@1.1",
+          "status": "validated",
+          "created_at": "2026-10-02T23:40:21.595087+00:00",
+          "artifact_ref": "artifact:fin-cacf25aa2390",
+          "market": "US"
+        },
+        "facts": [
+          {
+            "report_id": "rpt_cacf25aa239096e5dea106e5",
+            "metric_key": "cash_available",
+            "value": 998665.1064,
+            "unit": "money",
+            "source_ref": "fin_valuation:2026-10-03",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "US",
+            "currency": "USD"
+          },
+          {
+            "report_id": "rpt_cacf25aa239096e5dea106e5",
+            "metric_key": "cash_frozen",
+            "value": 0.0,
+            "unit": "money",
+            "source_ref": "fin_valuation:2026-10-03",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "US",
+            "currency": "USD"
+          },
+          {
+            "report_id": "rpt_cacf25aa239096e5dea106e5",
+            "metric_key": "daily_return_pct",
+            "value": null,
+            "unit": "%",
+            "source_ref": "fin_valuation:2026-10-03",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "US",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_cacf25aa239096e5dea106e5",
+            "metric_key": "data_quality_ok",
+            "value": 1.0,
+            "unit": "",
+            "source_ref": "fin_valuation:2026-10-03",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "US",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_cacf25aa239096e5dea106e5",
+            "metric_key": "days_traded",
+            "value": 1.0,
+            "unit": "日",
+            "source_ref": "fin_valuation:*",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "US",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_cacf25aa239096e5dea106e5",
+            "metric_key": "fee_today",
+            "value": 0.1336,
+            "unit": "money",
+            "source_ref": "fin_trade:2026-10-03",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "US",
+            "currency": "USD"
+          },
+          {
+            "report_id": "rpt_cacf25aa239096e5dea106e5",
+            "metric_key": "fee_total",
+            "value": 0.1336,
+            "unit": "money",
+            "source_ref": "fin_trade:*",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "US",
+            "currency": "USD"
+          },
+          {
+            "report_id": "rpt_cacf25aa239096e5dea106e5",
+            "metric_key": "initial_capital",
+            "value": 1000000.0,
+            "unit": "money",
+            "source_ref": "fin_project:prj_b7791191b3af462791ed496b",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "US",
+            "currency": "USD"
+          },
+          {
+            "report_id": "rpt_cacf25aa239096e5dea106e5",
+            "metric_key": "market_value",
+            "value": 1334.76,
+            "unit": "money",
+            "source_ref": "fin_valuation:2026-10-03",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "US",
+            "currency": "USD"
+          },
+          {
+            "report_id": "rpt_cacf25aa239096e5dea106e5",
+            "metric_key": "max_drawdown",
+            "value": null,
+            "unit": "%",
+            "source_ref": "fin_valuation:*（1 根净值）",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "US",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_cacf25aa239096e5dea106e5",
+            "metric_key": "nav",
+            "value": 1.0,
+            "unit": "倍",
+            "source_ref": "fin_valuation:2026-10-03",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "US",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_cacf25aa239096e5dea106e5",
+            "metric_key": "open_order_count",
+            "value": 0.0,
+            "unit": "笔",
+            "source_ref": "fin_order:pending",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "US",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_cacf25aa239096e5dea106e5",
+            "metric_key": "position_count",
+            "value": 1.0,
+            "unit": "只",
+            "source_ref": "fin_position:*",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "US",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_cacf25aa239096e5dea106e5",
+            "metric_key": "recon_passed",
+            "value": null,
+            "unit": "",
+            "source_ref": "fin_recon_log:*",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "US",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_cacf25aa239096e5dea106e5",
+            "metric_key": "return_caliber_count",
+            "value": 1.0,
+            "unit": "种",
+            "source_ref": "const:caliber=live_paper·01方案§2.2",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "US",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_cacf25aa239096e5dea106e5",
+            "metric_key": "return_pct",
+            "value": 0.0,
+            "unit": "%",
+            "source_ref": "fin_valuation:2026-10-03",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "US",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_cacf25aa239096e5dea106e5",
+            "metric_key": "total_assets",
+            "value": 999999.8664,
+            "unit": "money",
+            "source_ref": "fin_valuation:2026-10-03",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "US",
+            "currency": "USD"
+          },
+          {
+            "report_id": "rpt_cacf25aa239096e5dea106e5",
+            "metric_key": "trade_count_today",
+            "value": 4.0,
+            "unit": "笔",
+            "source_ref": "fin_trade:2026-10-03",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "US",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_cacf25aa239096e5dea106e5",
+            "metric_key": "trade_count_total",
+            "value": 4.0,
+            "unit": "笔",
+            "source_ref": "fin_trade:*",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "US",
+            "currency": null
+          }
+        ],
+        "receipts": [
+          {
+            "receipt_id": "rcp_d84d8deedcaa71cc17dfa5d4",
+            "channel": "in_app",
+            "status": "SUCCESS",
+            "external_id": "artifact:fin-cacf25aa2390",
+            "detail": "站内产物",
+            "attempted_at": "2026-10-02T23:56:21.908214+00:00"
+          }
+        ]
+      }
+    },
+    {
+      "label": "⑧ 读报告 MULTI",
+      "method": "GET",
+      "url": "http://127.0.0.1:8102/api/v1/fin/reports/rpt_e82dc4afd480fd1eafa3ceab",
+      "body": null,
+      "status": 200,
+      "response": {
+        "report": {
+          "report_id": "rpt_e82dc4afd480fd1eafa3ceab",
+          "project_id": "prj_b7791191b3af462791ed496b",
+          "trade_date": "2026-10-03",
+          "valuation_as_of": "2026-10-02T23:56:21+00:00",
+          "analysis_text": "（未启用 AI 分析：RuntimeError: 大模型尚未配置:缺 base_url。在 .env 里填 LLM_BASE_URL(如 https://api.openai.com/v1),或在首页完成初始化向导。。以下为按事实表生成的自动摘要，只复述数字。）\n本交易日账本读数：净值 —，累计收益率 —，当日收益率 —，最大回撤 —。当日成交 — 笔，持仓 — 只。累计费用 —，对账通过 —。",
+          "self_review": {
+            "did_bad": "未启用模型分析，无法给出定性复盘；请检查大模型配置后重跑。",
+            "did_well": "本期按既定规则运行，账本自洽性以对账结果为准（口径见事实表）。",
+            "change_tomorrow": "补齐大模型配置，让分析层基于事实表产出归因与改进项。"
+          },
+          "llm_provider": "fallback",
+          "llm_model": "none",
+          "prompt_version": "fin-report-zh@1.1",
+          "status": "validated",
+          "created_at": "2026-10-02T23:40:21.945813+00:00",
+          "artifact_ref": "artifact:fin-e82dc4afd480",
+          "market": "MULTI"
+        },
+        "facts": [
+          {
+            "report_id": "rpt_e82dc4afd480fd1eafa3ceab",
+            "metric_key": "fx_HKDCNY",
+            "value": 0.854489,
+            "unit": "汇率",
+            "source_ref": "fx:sina:fx_shkdcny@2026-10-03T06:59:36",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "MULTI",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_e82dc4afd480fd1eafa3ceab",
+            "metric_key": "fx_USDCNY",
+            "value": 6.7061,
+            "unit": "汇率",
+            "source_ref": "fx:sina:fx_susdcnh@2026-10-03T04:59:58",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "MULTI",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_e82dc4afd480fd1eafa3ceab",
+            "metric_key": "return_caliber_count",
+            "value": 1.0,
+            "unit": "种",
+            "source_ref": "const:caliber=live_paper·01方案§2.2",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "MULTI",
+            "currency": null
+          },
+          {
+            "report_id": "rpt_e82dc4afd480fd1eafa3ceab",
+            "metric_key": "total_assets__CN_A",
+            "value": 1000000.0,
+            "unit": "money",
+            "source_ref": "fin_valuation:CN_A:2026-10-03",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "MULTI",
+            "currency": "CNY"
+          },
+          {
+            "report_id": "rpt_e82dc4afd480fd1eafa3ceab",
+            "metric_key": "total_assets__HK",
+            "value": 999770.8672,
+            "unit": "money",
+            "source_ref": "fin_valuation:HK:2026-10-03",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "MULTI",
+            "currency": "HKD"
+          },
+          {
+            "report_id": "rpt_e82dc4afd480fd1eafa3ceab",
+            "metric_key": "total_assets__US",
+            "value": 999999.8664,
+            "unit": "money",
+            "source_ref": "fin_valuation:US:2026-10-03",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "MULTI",
+            "currency": "USD"
+          },
+          {
+            "report_id": "rpt_e82dc4afd480fd1eafa3ceab",
+            "metric_key": "total_assets_cny",
+            "value": 8560392.3126,
+            "unit": "money",
+            "source_ref": "合计=Σ(本币总资产×汇率) · fx:sina:fx_shkdcny@2026-10-03T06:59:36 · fx:sina:fx_susdcnh@2026-10-03T04:59:58",
+            "computed_by": "fin.report.build_facts@n5.1",
+            "market": "MULTI",
+            "currency": "CNY"
+          }
+        ],
+        "receipts": [
+          {
+            "receipt_id": "rcp_60b2fd091b13201f1f987134",
+            "channel": "in_app",
+            "status": "SUCCESS",
+            "external_id": "artifact:fin-e82dc4afd480",
+            "detail": "站内产物",
+            "attempted_at": "2026-10-02T23:56:21.945886+00:00"
+          }
+        ]
+      }
+    }
+  ],
+  "project_id": "prj_b7791191b3af462791ed496b",
+  "trade_date": "2026-10-03",
+  "valuation_as_of": "2026-10-02T23:56:21+00:00",
+  "report_list": [
+    {
+      "report_id": "rpt_2f32f11da1a355cfc0cbde9b",
+      "trade_date": "2026-10-03",
+      "market": "CN_A",
+      "status": "validated",
+      "llm_provider": "fallback",
+      "llm_model": "none",
+      "has_artifact": true,
+      "artifact_ref": "artifact:fin-2f32f11da1a3",
+      "fact_count": 19,
+      "created_at": "2026-10-02T23:40:21.545094+00:00"
+    },
+    {
+      "report_id": "rpt_fe61f06bfb44b2fa9c1a9e85",
+      "trade_date": "2026-10-03",
+      "market": "HK",
+      "status": "validated",
+      "llm_provider": "fallback",
+      "llm_model": "none",
+      "has_artifact": true,
+      "artifact_ref": "artifact:fin-fe61f06bfb44",
+      "fact_count": 19,
+      "created_at": "2026-10-02T23:40:21.576239+00:00"
+    },
+    {
+      "report_id": "rpt_e82dc4afd480fd1eafa3ceab",
+      "trade_date": "2026-10-03",
+      "market": "MULTI",
+      "status": "validated",
+      "llm_provider": "fallback",
+      "llm_model": "none",
+      "has_artifact": true,
+      "artifact_ref": "artifact:fin-e82dc4afd480",
+      "fact_count": 7,
+      "created_at": "2026-10-02T23:40:21.945813+00:00"
+    },
+    {
+      "report_id": "rpt_cacf25aa239096e5dea106e5",
+      "trade_date": "2026-10-03",
+      "market": "US",
+      "status": "validated",
+      "llm_provider": "fallback",
+      "llm_model": "none",
+      "has_artifact": true,
+      "artifact_ref": "artifact:fin-cacf25aa2390",
+      "fact_count": 19,
+      "created_at": "2026-10-02T23:40:21.595087+00:00"
+    }
+  ],
+  "at_utc_end": "2026-10-02T23:56:22.092284+00:00",
+  "at_shanghai_end": "2026-10-03T07:56:22.092284+08:00"
+}

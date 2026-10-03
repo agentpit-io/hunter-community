@@ -111,7 +111,10 @@ def main() -> int:
              {"X-Hunter-Internal-Key": INTERNAL_KEY}, f"⑤ 下单 {m} {code}")
 
     # ── ⑥ 三市场各出一行收盘估值（报告的事实来源）────────────────────────
-    as_of = f"{trade_date}T00:00:00Z"
+    # ⚠️ `fin_valuation` 是**只追加**的：同一 `(project, market, as_of)` 第二次 POST 会原样返回
+    # 已有行（不重算）。所以每次跑必须用一个**新的 as_of**，否则会拿上一轮的快照当这一轮的结果。
+    as_of = os.environ.get("N5_AS_OF") or datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    out["valuation_as_of"] = as_of
     for m, *_ in ORDERS:
         call("POST", f"{PAPER}/api/v1/projects/{pid}/valuation",
              {"as_of": as_of, "market": m},
