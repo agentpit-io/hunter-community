@@ -23,6 +23,14 @@ _HERMES_ROOT = os.path.dirname(_ROOT)
 if _HERMES_ROOT not in sys.path:
     sys.path.insert(0, _HERMES_ROOT)
 
+# R4 · 经验库总开关的**测试默认值 = 开**（与部署一致：`.env` 里 FIN_MEMORY_ENABLED=1）。
+#
+# 代码默认是 0（fail-safe），跑起来的部署由 .env 显式给 1。测试套件测的是**开着的**经验库
+# （R2/R3 的 40+ 条用例都在验读写与硬过滤），所以这里 setdefault 成 1 —— 用 `setdefault`
+# 而不是直接赋值：`FIN_MEMORY_ENABLED=0 pytest tests/` 仍然能覆盖它。
+# 「关着的行为」由 `tests/test_fin_switches.py` **显式清空该变量**来验（那正是它的重点）。
+os.environ.setdefault("FIN_MEMORY_ENABLED", "1")
+
 
 # ── 脚本式测试文件 ────────────────────────────────────────────────
 # tests/ 下多数文件是脚本:导入即执行,打印 ALL OK / SOME FAILED 后 sys.exit,

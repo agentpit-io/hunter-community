@@ -97,6 +97,8 @@ from typing import Any, Optional
 import psycopg2
 import psycopg2.extras
 
+from app.services.fin import switches
+
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://hunter:hunter@localhost:5432/hunter")
 
 SHANGHAI = timezone(timedelta(hours=8))
@@ -138,6 +140,15 @@ _ARABIC_DIGIT_RE = re.compile(r"[0-9０-９]")
 
 class MemoryValidationError(ValueError):
     """任一硬校验不过 —— 路由据此回 **400**（绝不静默降级）。"""
+
+
+class MemoryDisabledError(Exception):
+    """经验库总开关 `FIN_MEMORY_ENABLED=0` —— 写入口拒绝。
+
+    **不是** `MemoryValidationError` 的子类：请求本身没毛病，是这个部署没开这项能力，
+    所以路由把它翻成 **503**、不是 400（见 `routers/fin_memory.py` 的两个写 handler）。
+    `query` 那边不抛这个 —— 它按 §2 的语义**返回空集合**。
+    """
 
 
 def get_conn():
@@ -486,6 +497,12 @@ def append_evidence(
 
     `conn` 给了就用它（测试复用同一连接），否则自己开一个。
     """
+    # R4 · 总开关在**服务端**：`FIN_MEMORY_ENABLED=0` ⇒ 写入口直接拒绝（→503）。
+    # 这一条排在所有校验之前 —— 「关」就是关，与请求长什么样无关。
+    if not switches.memory_enabled():
+        raise MemoryDisabledError(
+            "经验库未启用（FIN_MEMORY_ENABLED=0）：本部署当前不接受经验写入")
+
     if caller not in CALLER_SOURCE:
         raise MemoryValidationError(f"未知调用方通道：{caller!r}")
     if caller == "jwt" and not user_id:
@@ -640,6 +657,17 @@ def query(
 
     ⚠️ 本函数**没有任何** `include_holdout` / `debug` / `admin` 参数，以后也不要加。
     """
+    # R4 · 总开关在**服务端**：`FIN_MEMORY_ENABLED=0` ⇒ 返回**空集合**（200，不是报错）。
+    # 语义照 `03 §2` —— 关掉的是「查得到经验」这件事本身，调用方按「没有经验」继续。
+    # `memory_disabled` 是给自己看的自描述位（前端不依赖它）。
+    if not switches.memory_enabled():
+        return {
+            "memory_snapshot_id": None,
+            "as_of_basis": _basis_now().isoformat(),
+            "items": [],
+            "memory_disabled": True,
+        }
+
     if caller not in CALLER_SOURCE:
         raise MemoryValidationError(f"未知调用方通道：{caller!r}")
 

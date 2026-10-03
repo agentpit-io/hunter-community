@@ -52,6 +52,31 @@ _backtest_task = None
 async def lifespan(app: FastAPI):
     global _signal_task, _gm_alert_task, _backtest_task
 
+    # ─── R4 · 运行开关与安全边界：启动时把状态打进日志 ───
+    #
+    # 开关读在 services/fin/switches.py（全仓唯一点）。这里**不缓存**，只是把启动那一刻
+    # 的值打出来，让运维一眼看到「这台机器开没开经验库、进化模式是什么」。
+    #
+    # ⚠️ 硬开关违规（FIN_AUTO_APPLY / FIN_LIVE_ORDER_ENABLED 非 0）**打 ERROR、不退出**：
+    #    03 §2 要的是「拒绝启动**或**拒绝请求，并在日志与接口里写明」。选后者 ——
+    #    进程活着，GET /v1/fin/runtime 才能用 503 把原因说给前端；退出只剩一条日志。
+    try:
+        from app.services.fin import switches as _fin_switches
+        _hard = _fin_switches.hard_config_errors()
+        if _hard:
+            logger.error(
+                "[fin.switches] 硬开关违规（服务端将拒绝 /api/v1/fin/runtime）：{}",
+                "；".join(_hard))
+        logger.info(
+            "[fin.switches] memory_enabled={} · evolution_mode={} · auto_apply={} · live_order_enabled={}",
+            _fin_switches.memory_enabled(),
+            _fin_switches.evolution_mode_requested(),
+            _fin_switches.auto_apply(),
+            _fin_switches.live_order_enabled(),
+        )
+    except Exception as e:      # noqa: BLE001 — 开关状态打印失败不该挡住启动
+        logger.warning("[fin.switches] 启动开关检查失败（非致命）：{}", e)
+
     # ─── Business tables · always ensure (idempotent · no side effects) ───
     try:
         await init_db()
@@ -444,6 +469,11 @@ app.include_router(fin_memory_router.router, prefix="/api")
 # R3：复核（复盘）回路 · 内网口令，只读 / 产出候选（写经验仍走 fin_memory 的唯一入口）。
 from app.routers import fin_review as fin_review_router
 app.include_router(fin_review_router.router, prefix="/api")
+
+# R4：运行开关与安全边界 · 只读运行时快照（前端读开关的唯一来源）。
+# 开关本身读在 services/fin/switches.py（全仓唯一点）；这里只把它暴露成一个接口。
+from app.routers import fin_runtime as fin_runtime_router
+app.include_router(fin_runtime_router.router, prefix="/api")
 
 @app.get("/api/health")
 async def health():

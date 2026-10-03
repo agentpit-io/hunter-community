@@ -55,6 +55,15 @@ def _bad(exc: Exception) -> HTTPException:
     return HTTPException(status_code=400, detail=str(exc))
 
 
+def _disabled(exc: Exception) -> HTTPException:
+    """`FIN_MEMORY_ENABLED=0` → **503**：能力没开，不是请求写错了。
+
+    用 503 而不是 400，是为了让调用方（前端 / fin-worker）能把「这个部署没开经验库」
+    与「这条经验本身不合法」分开 —— 前者修 env、后者改请求，两件事。
+    """
+    return HTTPException(status_code=503, detail=str(exc))
+
+
 # ════════════════════════════════════════════════════════════════════════
 # 入参模型 —— `source` / `exposure_scope` 收下但不读（规则 7 / 规则 4）
 # ════════════════════════════════════════════════════════════════════════
@@ -144,6 +153,8 @@ async def append_evidence_internal(body: EvidenceIn, request: Request):
     _auth_internal(request)
     try:
         row = memory_svc.append_evidence(**_append_kwargs(body, "internal", None))
+    except memory_svc.MemoryDisabledError as exc:
+        raise _disabled(exc) from exc
     except memory_svc.MemoryValidationError as exc:
         raise _bad(exc) from exc
     except LookupError as exc:
@@ -221,6 +232,8 @@ async def append_evidence_user(body: EvidenceIn, request: Request):
     uid = _uid(request)
     try:
         row = memory_svc.append_evidence(**_append_kwargs(body, "jwt", uid))
+    except memory_svc.MemoryDisabledError as exc:
+        raise _disabled(exc) from exc
     except memory_svc.MemoryValidationError as exc:
         raise _bad(exc) from exc
     except LookupError as exc:

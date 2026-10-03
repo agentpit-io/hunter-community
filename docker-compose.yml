@@ -204,6 +204,20 @@ services:
       # engine-ready 也返回 true,**但发消息永远收不到回复,日志里一条报错都没有**。
       # 显式写在这里,是为了让「api 依赖 shim 地址」这件事在默认文件里就看得见。
       LLM_SHIM_URL: ${LLM_SHIM_URL:-http://llm-shim:3999/v1}
+      # ── R4 · 运行开关与安全边界（03 §2）──────────────────────────────
+      # 四个开关**全在服务端**读 —— 唯一读点是 `app/services/fin/switches.py`。
+      # 前端读开关只认 `GET /api/v1/fin/runtime`（只读），不许自己读 env。
+      # 代码默认一律取安全值（0 / off / 0 / 0）；下面是部署侧的显式值。
+      #   · FIN_MEMORY_ENABLED      0/1            默认 0（fail-safe）；R1–R3 已验收，.env 设 1
+      #   · FIN_EVOLUTION_MODE      off/observe/paper  默认 off；paper 依赖缺一 → 自动降 observe
+      #   · FIN_AUTO_APPLY          只允许 0       非 0 → 服务端拒绝请求（本方案恒为 0）
+      #   · FIN_LIVE_ORDER_ENABLED  只允许 0       非 0 → 服务端拒绝请求（无实盘出口）
+      FIN_MEMORY_ENABLED: "${FIN_MEMORY_ENABLED:-0}"
+      FIN_EVOLUTION_MODE: "${FIN_EVOLUTION_MODE:-off}"
+      FIN_AUTO_APPLY: "${FIN_AUTO_APPLY:-0}"
+      FIN_LIVE_ORDER_ENABLED: "${FIN_LIVE_ORDER_ENABLED:-0}"
+      # paper 前置依赖探针要敲模拟账本（`paper` 的 /healthz）——容器网内用服务名。
+      PAPER_BASE_URL: ${PAPER_BASE_URL:-http://paper:8000}
     volumes:
       # 用户能力**可写** —— UI 里新建/编辑/删除 SKILL 要往这里写文件(_19 §5.2)。
       # 原来是 bind mount ./user-skills;改成 api 自己的具名卷,因为云平台上
@@ -362,6 +376,14 @@ services:
       # 时点 = 该市场**时段末点** + 这个值。**可配**（Q4 拍板，默认 30）——
       # 读不到 / 非数字 / 负数一律回落 30，并在日志里写明「用了默认」。
       FIN_REVIEW_DELAY_MINUTES: ${FIN_REVIEW_DELAY_MINUTES:-30}
+      # R4 · 四个运行开关（03 §2）**透传给 worker，但 worker 不直接读** ——
+      # 唯一读点是 api 的 `services/fin/switches.py`（读点只有一处，别在 worker 里再读一遍）。
+      # 传进来是为了让 `.env` 只有一份值；执行侧要知道**生效**模式（可能被降级）时，
+      # 去问 `GET /api/v1/fin/runtime`，不要照着这里的原始值自己判断。
+      FIN_MEMORY_ENABLED: "${FIN_MEMORY_ENABLED:-0}"
+      FIN_EVOLUTION_MODE: "${FIN_EVOLUTION_MODE:-off}"
+      FIN_AUTO_APPLY: "${FIN_AUTO_APPLY:-0}"
+      FIN_LIVE_ORDER_ENABLED: "${FIN_LIVE_ORDER_ENABLED:-0}"
     ports:
       # 内部 HTTP（给 api 触发用）。只绑本机，不对外。
       - "127.0.0.1:${FIN_WORKER_HOST_PORT:-8300}:8300"
