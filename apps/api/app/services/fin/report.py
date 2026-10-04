@@ -44,6 +44,9 @@ import psycopg2.extras
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://hunter:hunter@localhost:5432/hunter")
 
 from app.services.market_time import market_tz, tz_name
+# 发布（L07）：**发布是独立一步**，渠道走适配器。`publish` 不 import 本模块（只在函数内
+# 延迟 import），所以这里顶部 import 不会成环。
+from app.services.fin import publish as publish_svc
 SHANGHAI = market_tz("CN_A")
 # SQL 里「按上海日期切」用的时区名 —— 同一来源（L02）。
 _SH_TZ = tz_name("CN_A")
@@ -1074,13 +1077,20 @@ def persist(conn, ctx: dict, facts: list[dict], analysis: dict) -> dict:
         if status == "validated":
             report["created_at"] = created_at
             html = render_html(report, facts, project=project)
-            artifact_ref = _store_artifact(cur, report, html, project)
-            _store_receipt(cur, report_id, "SUCCESS", artifact_ref)
-            cur.execute("UPDATE fin_report SET artifact_ref = %s WHERE report_id = %s",
-                        (artifact_ref, report_id))
+            # 发布走**适配器**（L07）：站内渠道的行为与改造前逐字节一致 ——
+            # 适配器落产物，`publish.write_receipt` 写 `channel='in_app'` 的回执。
+            res = publish_svc.ADAPTERS["in_app"].submit(
+                report, None, html=html, ctx={"cur": cur, "project": project})
+            publish_svc.write_receipt(cur, report_id, "in_app", res)
+            if res.status == publish_svc.SUCCESS:
+                artifact_ref = res.external_id
+                cur.execute("UPDATE fin_report SET artifact_ref = %s WHERE report_id = %s",
+                            (artifact_ref, report_id))
         else:
-            # 校验不通过 → 不发布。**连产物都不生成**（无 HTML、无回执）。
-            _store_receipt(cur, report_id, "FAILED", None)
+            # 校验不通过 → 不发布。**连产物都不生成**（无 HTML、无回执的 SUCCESS）。
+            publish_svc.write_receipt(
+                cur, report_id, "in_app",
+                publish_svc.PublishResult(publish_svc.FAILED, None, "回读校验未通过，未发布"))
     conn.commit()
 
     out = {
@@ -1122,18 +1132,14 @@ def _store_artifact(cur, report: dict, html: str, project: dict) -> str:
 
 
 def _store_receipt(cur, report_id: str, status: str, artifact_ref: Optional[str]) -> None:
-    receipt_id = f"rcp_{hashlib.sha256(f'{report_id}:in_app'.encode()).hexdigest()[:24]}"
-    cur.execute(
-        """
-        INSERT INTO fin_publish_receipt (receipt_id, report_id, channel, status, external_id, detail)
-        VALUES (%s,%s,'in_app',%s,%s,%s)
-        ON CONFLICT (receipt_id) DO UPDATE SET
-          status = EXCLUDED.status, external_id = EXCLUDED.external_id,
-          detail = EXCLUDED.detail, attempted_at = NOW()
-        """,
-        (receipt_id, report_id, status, artifact_ref,
-         "站内产物" if status == "SUCCESS" else "回读校验未通过，未发布"),
-    )
+    """写一行 `in_app` 回执。
+
+    L07 起**发布走适配器**，回执的落库 SQL 统一在 `publish.write_receipt`（只有一份）；
+    本函数保留为兼容入口，行为与改造前一致（`in_app` / 状态 / 产物引用 / 说明文案都不变）。
+    """
+    detail = "站内产物" if status == "SUCCESS" else "回读校验未通过，未发布"
+    publish_svc.write_receipt(cur, report_id, "in_app",
+                              publish_svc.PublishResult(status, artifact_ref, detail))
 
 
 # ── 读（前端 / 校验脚本共用）────────────────────────────────────────────

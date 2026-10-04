@@ -469,6 +469,10 @@ app.include_router(fin_project_router.router, prefix="/api")
 from app.routers import fin_report as fin_report_router
 app.include_router(fin_report_router.router, prefix="/api")
 
+# ── 智能炒股 · 发布（五期 L07）· publish.submit/get + 待核实队列 · JWT ──
+from app.routers import fin_publish as fin_publish_router
+app.include_router(fin_publish_router.router, prefix="/api")
+
 # M6：四个正文页的读模型与自动交易页的三个控制（总开关 / 策略 / 风险档位）
 from app.routers import fin_dashboard as fin_dashboard_router
 app.include_router(fin_dashboard_router.router, prefix="/api")
