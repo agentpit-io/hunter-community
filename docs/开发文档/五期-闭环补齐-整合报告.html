@@ -1496,11 +1496,12 @@ docker compose --profile fin pull &amp;&amp; docker compose --profile fin up -d
 <hr><h3>九、给下一段（六期）的交接</h3><ol><li><strong>五期 <code>L01</code>–<code>L10</code> 全部收官</strong>，<code>v2.0.0</code> 已发、演示站已升到 <code>2.0.0</code>。</li><li><strong>要接数据源的四处</strong>（停牌 / 公司行为 / 情绪 / 美股新闻）：改动落点都写在各自 <code>L0x</code> 成果文档的<br>「未接数据源清单」里，<strong>表与登记口已就位，接源不改代码</strong>。</li><li><strong>新代码不许再制造「同一事实多副本」</strong>（五期新增红线 14）—— 时段 / 时区 / tick / DDL 一律从<br><code>L02</code> 定下的单一来源取，<code>L02</code> 的守护用例会红。</li><li><strong>升级到 <code>2.0.0</code> 的部署必须带 <code>HUNTER_EXEC_KEY</code></strong>（否则 <code>paper</code> / <code>fin-worker</code> 起不来），<br>且升级后<strong>要登记执行允许名单</strong>（否则下不了单）。</li></ol>
 <hr><h3>十、上下文守卫档位与读数</h3><pre><code>python3 /mnt/mixplode/hunter-dev/stock-ai-loop/context-guard.py \
     --cwd /mnt/mixplode/hunter-dev/stock-ai/hunter-community --detail
-→ 上下文 23.9% · ok · 约 239,318 / 1,000,000
-  实测（最后一条 usage）   238,646
+→ 上下文 51.5% · ok · 约 515,216 / 1,000,000
+  实测（最后一条 usage）   514,574
   阈值 warn/compact/stop   70% / 85% / 92%
   退出码（档位）= 0</code></pre>
-<table><thead><tr><th>段</th><th>档位</th><th>读数</th></tr></thead><tbody><tr><td><code>L10</code>（本段，收官时）</td><td><strong>0</strong></td><td><strong>23.9%</strong>（239,318 / 1,000,000）</td></tr></tbody></table>
+<table><thead><tr><th>段</th><th>档位</th><th>读数</th></tr></thead><tbody><tr><td><code>L10</code>（写本文档主体时）</td><td><strong>0</strong></td><td><strong>23.9%</strong>（239,318 / 1,000,000）</td></tr><tr><td><code>L10</code>（<strong>收官时</strong>，发版 + 部署 + HTML + 截图都做完之后）</td><td><strong>0</strong></td><td><strong>51.5%</strong>（515,216 / 1,000,000）</td></tr></tbody></table>
+<p><strong>两个读数都留着</strong>：本节的值是<strong>收官那一刻</strong>的（51.5%），档位 0 —— 未触及 20/30，<strong>不需要写 <code>handoff-L10.md</code></strong>。</p>
 <h1 id="p5">⑤ 开发详细测试方案</h1><p class="note">各段成果文档里「测试 / 用例」小节的原文（命令 / 期望 / 实测数字）。</p>
 <h3>L01 · 六、测试用例表（命令 / 结果 / 实测数字）</h3><table><thead><tr><th>命令</th><th>结果</th></tr></thead><tbody><tr><td><code>apps/fin-worker &amp;&amp; .venv/bin/python -m pytest tests -q</code></td><td>241 passed / 0 failed / 0 skipped</td></tr><tr><td><code>apps/paper &amp;&amp; .venv/bin/python -m pytest tests -q</code></td><td>193 passed / 0 failed / 29 skipped</td></tr><tr><td><code>apps/api &amp;&amp; TEST_DATABASE_URL=...l01_test .venv/bin/python -m pytest tests/test_fin_evolution_propose.py -q</code></td><td>12 passed（5 纯函数 + 7 真库）</td></tr><tr><td><code>apps/api &amp;&amp; .venv/bin/python -m pytest tests -q</code>（全量）</td><td>908 passed / 0 failed / 0 errors / 187 skipped</td></tr><tr><td>迁移两遍</td><td>第 1 遍 48 个、第 2 遍 0 个待执行、报错 0</td></tr><tr><td>真调度一轮</td><td><code>evp_f4b71ffe2e414580b1c49efe</code> 落库，<code>fin_evolution_proposal</code> 7 → 8</td></tr></tbody></table>
 <p>本段新增用例：</p>
