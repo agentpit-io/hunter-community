@@ -297,6 +297,67 @@ def can_change() -> dict:
     }
 
 
+# 每个模式的**短标签 / 长说明**。这是「枚举取值 ↔ 中文显示名」的**唯一来源** ——
+# 前端不写死任何枚举（`10` §四 硬规矩 3 / R9 纪律），它只渲染后端给的这份表。
+MODE_META: tuple[tuple[str, str, str], ...] = (
+    ("off", "关闭", "关闭（不复盘、不提案）"),
+    ("observe", "只观察", "观察（拉行情 · 复盘 · 建经验 · 展示提案，没有委托发送能力）"),
+    ("paper", "模拟验证", "模拟盘（独立模拟账本跑现行臂与候选臂）"),
+)
+
+
+def switch_meta() -> dict[str, Any]:
+    """给前端的**展示表**（`GET /v1/fin/runtime` 的 `meta` 字段）。
+
+    前端**不写死任何枚举 / 中文名**：可选项、短标签、长说明、「为什么灰」的提示
+    全部从这份表来。表在这里改，前端一行不用动。
+
+    `evolution_mode.options[].allowed` 由**天花板**算出来：天花板上限之上的选项
+    前端会画成不可选（`10` §四 出口 3「界面选不到 paper」），**服务端另外还会 400**
+    —— 显示与服务端两道一起拦，光灰不算。
+    """
+    ceiling = ceiling_evolution_mode()
+    ceiling_short = dict((v, short) for v, short, _full in MODE_META)[ceiling]
+    return {
+        SWITCH_MEMORY: {
+            "label": "让系统攒经验（经验库）",
+            "on_label": "开",
+            "off_label": "关",
+            "on_text": "已启用",
+            "off_text": "未启用",
+            "desc": "开着：每天收盘后自动复盘，把结论存下来，下次决策时参考。"
+                    "关着：它不攒新经验、也查不到旧经验（已经冻结的决策快照不受影响）。",
+            "not_auto_trade": "⚠️ 这不是「自动交易」开关 —— 那个在「自动交易」页。",
+            "locked": (f"部署侧已锁死（环境变量 {MEMORY_ENABLED_ENV}=0）：界面开不出经验库。"
+                       f"要开，得先让部署侧把那一行改成 1 并重建 api。"),
+        },
+        SWITCH_MODE: {
+            "label": "学习强度（生效模式）",
+            "options": [
+                {"value": v, "label": short, "full": full,
+                 "allowed": MODE_ORDER[v] <= MODE_ORDER[ceiling]}
+                for v, short, full in MODE_META
+            ],
+            "locked": (f"部署侧已锁死（环境变量 {EVOLUTION_MODE_ENV}=off）：界面改不动学习强度。"
+                       f"要改，得先让部署侧把那一行改成 observe 或 paper 并重建 api。"),
+            # 天花板没到 paper 时给一句「上限在哪」；到 paper 就没有更高选项，不给这句话。
+            "ceiling_note": (None if ceiling == "paper" else
+                             f"部署侧允许的上限：{ceiling_short} —— 更高的选项界面上给不出来。"),
+        },
+        "auto_apply": {
+            "label": "自动生效",
+            "on_text": "开（异常）",
+            "off_text": "关（本方案恒为关闭）",
+        },
+        "live_order_enabled": {
+            "label": "实盘下单",
+            "on_text": "开（异常）",
+            "off_text": "无（本项目不接券商）",
+        },
+        "hard_note": "这两项本方案规定不许开，界面上没有入口（服务端也会直接拒绝）。",
+    }
+
+
 def set_project_switch(conn, project_id: str, *, switch_key: str, value: Any,
                        actor: Optional[str], reason: str) -> dict[str, Any]:
     """**R21 唯一写入口**：改一个项目的经验库开关。**同事务**写现值 + 追加流水。
@@ -568,7 +629,9 @@ def runtime_state(*, project_id: Optional[str] = None, conn=None) -> dict[str, A
 
     - **老字段一个没改**（前端已经在读；不带 `project_id` 时它们就是天花板值）；
     - 带了 `project_id` 时 `memory_enabled` / `evolution_mode*` 是**这个项目的生效值**
-      （天花板 ∩ 天窗），于是「网页上改一下 → 这里立刻跟着变」。
+      （天花板 ∩ 天窗），于是「网页上改一下 → 这里立刻跟着变」；
+    - `meta` 是**给前端的展示表**（枚举取值 + 中文名 + 「为什么灰」的说明）——
+      前端不写死任何枚举（`10` §四 硬规矩 3），只渲染这份表。
     """
     requested = evolution_mode_requested(project_id)
     effective = requested
@@ -596,4 +659,6 @@ def runtime_state(*, project_id: Optional[str] = None, conn=None) -> dict[str, A
         },
         "selected": selected_switch(project_id),
         "can_change": can_change(),
+        # 展示表：枚举取值与中文名**全部由后端给**（前端不写死任何枚举）。
+        "meta": switch_meta(),
     }

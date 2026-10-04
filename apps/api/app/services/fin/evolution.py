@@ -856,6 +856,11 @@ def propose(*, project_id: str, evidence_refs: Any, evidence_snapshot_id: Any,
     - 同一项目同一 base 已有待验证提案 → `EvolutionConflictError`（路由 → 409）。
     - `plan_overrides`：按市场 / 需求覆盖 `DEFAULT_PLAN` 的**已有字段**（本轮默认不覆盖）。
     """
+    # 先归一化 `project_id`，**再**判闸门 —— 否则带前后空白的 project_id 会以原样当缓存键
+    # 与查询键，读不到覆盖行 → 悄悄退回「只看天花板」，这个项目在界面上关掉了也照样提案。
+    project_id = str(project_id or "").strip()
+    if not project_id:
+        raise EvolutionValidationError("project_id 不能为空")
     # R21：判据按**项目**取（天花板 ∩ 天窗）。关掉一个项目的学习强度 = 不再为它提案；
     # 其余项目照常。生效 / 回滚（下面两个函数）仍只看**天花板** —— 那是「人工确认」的动作，
     # 一条已经在验证中的提案不该因为事后把学习强度调低而被作废。
@@ -864,9 +869,6 @@ def propose(*, project_id: str, evidence_refs: Any, evidence_snapshot_id: Any,
             "进化未启用（本部署的 FIN_EVOLUTION_MODE=off，或这个项目的学习强度为「关闭」）："
             "本部署当前不接受这个项目的提案")
 
-    project_id = str(project_id or "").strip()
-    if not project_id:
-        raise EvolutionValidationError("project_id 不能为空")
     created_by = str(created_by or "").strip() or "fin-worker"
     pid = str(proposal_id or "").strip() or _new_id("evp_")
 

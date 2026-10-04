@@ -142,6 +142,7 @@ export default function SetupWizardPage() {
   const [swPick, setSwPick] = useState<{ memory_enabled?: boolean; evolution_mode?: string }>({})
   const [swReason, setSwReason] = useState('')
   const [swErr, setSwErr] = useState('')
+  const [rtErr, setRtErr] = useState('')   // 运行设置**读取失败**（与「还在加载」分开）
 
   useEffect(() => {
     let alive = true
@@ -189,7 +190,11 @@ export default function SetupWizardPage() {
         setSwMem(d.memory_enabled)
         setSwMode(d.evolution_mode_requested)
       })
-      .catch(e => { if (alive && e?.status === 401) router.push('/login') })
+      .catch(e => {
+        if (!alive) return
+        if (e?.status === 401) { router.push('/login'); return }
+        setRtErr(e?.message || '读不到运行设置')
+      })
     return () => { alive = false }
   }, [router])
 
@@ -677,7 +682,7 @@ export default function SetupWizardPage() {
                   </div>
                 </div>
                 <RuntimeSwitchPanel
-                  rt={rt} memoryOn={swMem} mode={swMode} editable busy={submitting}
+                  rt={rt} memoryOn={swMem} mode={swMode} editable busy={submitting} loadFailed={!!rtErr}
                   onChange={(k, v, reason) => {
                     setSwPick(p => ({ ...p, [k]: v }))
                     setSwReason(reason)

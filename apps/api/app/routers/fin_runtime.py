@@ -22,13 +22,16 @@
   "project_id": "prj_…",
   "ceiling":  {"memory_enabled": true,  "evolution_mode": "observe"},
   "selected": {"memory_enabled": null,  "evolution_mode": null},
-  "can_change": {"memory_enabled": true, "evolution_mode": true}
+  "can_change": {"memory_enabled": true, "evolution_mode": true},
+  "meta": {"memory_enabled": {…}, "evolution_mode": {"options": [{…}]}, …}
 }
 ```
 
 - `ceiling` = **部署者允许到哪**（只看环境变量）；`selected` = **界面上选了啥**（`null` = 没设过）；
 - `can_change` = 这一项**能不能改**。天花板为关时它是 `false` —— 界面据此把开关画成灰的，
   并且**写接口也会 400**（两条都拦，光灰不算）。
+- `meta` = **给前端的展示表**：枚举取值、中文名、每个选项的 `allowed`（天花板之上的画灰）、
+  「为什么灰」的说明。前端**不写死任何枚举**（`10` §四 硬规矩 3），只渲染这份表。
 - 不带 `project_id` 时，前六个老字段就是**天花板值**（老调用点行为逐字不变）。
 
 **鉴权**：与其它 `/api/v1/fin/*` 一致，走默认硬鉴权（不在 middleware 的免登录前缀里）。

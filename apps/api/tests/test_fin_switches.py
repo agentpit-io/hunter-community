@@ -199,6 +199,8 @@ def test_runtime_state_shape():
     assert set(state) == {
         "memory_enabled", "evolution_mode", "evolution_mode_requested",
         "degraded_reason", "auto_apply", "live_order_enabled",
+        # R21 · 天花板 / 天窗 / 能不能改 / 展示表（前端据此渲染，不写死枚举）
+        "project_id", "ceiling", "selected", "can_change", "meta",
     }
 
 

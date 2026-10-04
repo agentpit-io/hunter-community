@@ -123,6 +123,7 @@ export default function FinanceGrowthPage() {
   const [exps, setExps] = useState<Exp[] | null>(null)
   const [filters, setFilters] = useState<Filters | null>(null)
   const [rt, setRt] = useState<Runtime | null>(null)
+  const [rtErr, setRtErr] = useState('')   // 运行设置**读取失败**（与「还在加载」分开）
   // R21 · 面板上的「界面取值」（初值来自 rt；改完以后端回来的新快照为准）
   const [memOn, setMemOn] = useState(false)
   const [mode, setMode] = useState('off')
@@ -180,6 +181,7 @@ export default function FinanceGrowthPage() {
     // 项目还没加载出来时**先按天花板渲染**（与 R4 的老行为逐字一致：横幅任何时候都在），
     // 拿到 pid 之后再按这个项目刷新一次。
     const path = pid ? `/runtime?project_id=${encodeURIComponent(pid)}` : '/runtime'
+    setRtErr('')
     finFetch<Runtime>(path)
       .then(d => {
         if (!alive) return
@@ -187,7 +189,7 @@ export default function FinanceGrowthPage() {
         setMemOn(d.memory_enabled)
         setMode(d.evolution_mode_requested)
       })
-      .catch(e => { if (alive && !guard(e)) setErr(e?.message || '读不到运行模式') })
+      .catch(e => { if (alive && !guard(e)) setRtErr(e?.message || '读不到运行设置') })
     return () => { alive = false }
   }, [pid, guard])
 
@@ -441,7 +443,7 @@ export default function FinanceGrowthPage() {
             <CardHead icon={<Activity className="w-4 h-4" />} title="这台项目要不要学习"
               sub="改完立刻生效 · 不用重启服务 · 每次改动都记进变更流水" />
             <RuntimeSwitchPanel
-              rt={rt} memoryOn={memOn} mode={mode} editable busy={swBusy}
+              rt={rt} memoryOn={memOn} mode={mode} editable busy={swBusy} loadFailed={!!rtErr}
               onChange={(k, v, reason) => { void changeSwitch(k, v, reason) }}
               extra={swMsg ? (
                 <div className="text-xs" style={{ color: 'var(--text-muted)' }} data-r9="switch-msg">{swMsg}</div>

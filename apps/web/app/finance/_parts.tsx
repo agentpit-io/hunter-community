@@ -176,19 +176,26 @@ export function LoadingCard({ title }: { title: string }) {
   )
 }
 
-/** 两选一 / 三选一的小分段控件（原型 `.seg`）。 */
-export function Seg<T extends string>({ options, value, onChange, disabled }: { options: { v: T; label: string }[]; value: T; onChange: (v: T) => void; disabled?: boolean }) {
+/** 两选一 / 三选一的小分段控件（原型 `.seg`）。
+ *  `disabledValues` 用来把**个别**选项画灰（如天花板只到 observe 时的 paper）——
+ *  灰掉的点不动，服务端另有一道 400 兜底（显示与服务端两道一起拦）。 */
+export function Seg<T extends string>({ options, value, onChange, disabled, disabledValues }: {
+  options: { v: T; label: string }[]; value: T; onChange: (v: T) => void
+  disabled?: boolean; disabledValues?: string[]
+}) {
   return (
     <div className="inline-flex rounded-[10px] border overflow-hidden" style={{ borderColor: 'var(--border)' }}>
       {options.map(o => {
         const on = o.v === value
+        const off = !!disabled || (disabledValues || []).indexOf(o.v) >= 0
         return (
-          <button key={o.v} disabled={disabled} onClick={() => onChange(o.v)}
+          <button key={o.v} disabled={off} onClick={() => onChange(o.v)}
             className="px-3 py-1.5 text-xs font-semibold whitespace-nowrap"
             style={{
               background: on ? 'rgba(176,106,50,.12)' : 'var(--bg-card)',
               color: on ? '#8A5A18' : 'var(--text-muted)',
-              cursor: disabled ? 'not-allowed' : 'pointer',
+              cursor: off ? 'not-allowed' : 'pointer',
+              opacity: off && !on ? 0.5 : 1,
               borderLeft: '1px solid var(--border)',
             }}>{o.label}</button>
         )
@@ -254,6 +261,21 @@ export function RowKV({ k, v, mono }: { k: ReactNode; v: ReactNode; mono?: boole
 //
 // 「自动生效 / 实盘下单」两项**永远只读**（硬开关连界面入口都没有，服务端会 400）。
 
+export type ModeOption = { value: string; label: string; full: string; allowed: boolean }
+/** 后端的**展示表**（`GET /v1/fin/runtime` 的 `meta`）—— 枚举与中文名全在这里，前端不写死。 */
+export type SwitchMeta = {
+  memory_enabled: {
+    label: string; on_label: string; off_label: string; on_text: string; off_text: string
+    desc: string; not_auto_trade: string; locked: string
+  }
+  evolution_mode: {
+    label: string; options: ModeOption[]; locked: string; ceiling_note: string | null
+  }
+  auto_apply: { label: string; on_text: string; off_text: string }
+  live_order_enabled: { label: string; on_text: string; off_text: string }
+  hard_note: string
+}
+
 export type RuntimeState = {
   memory_enabled: boolean
   evolution_mode: string
@@ -265,17 +287,13 @@ export type RuntimeState = {
   ceiling?: { memory_enabled: boolean; evolution_mode: string }
   selected?: { memory_enabled: boolean | null; evolution_mode: string | null }
   can_change?: { memory_enabled: boolean; evolution_mode: boolean }
+  meta?: SwitchMeta
 }
 
-/** 生效模式的中文名（**值来自后端**，前端只做展示映射）。 */
-export const MODE_TEXT: Record<string, string> = {
-  off: '关闭（不复盘、不提提案）',
-  observe: '观察（拉行情 · 复盘 · 建经验 · 展示提案，没有委托发送能力）',
-  paper: '模拟盘（独立模拟账本跑现行臂与候选臂）',
-}
-/** 面板上小分段的短标签（同上，只是短）。 */
-export const MODE_SHORT: Record<string, string> = {
-  off: '关闭', observe: '只观察', paper: '模拟验证',
+/** 某个模式的长说明 —— **查后端给的展示表**，查不到就原样回值（不猜中文名）。 */
+function modeFull(meta: SwitchMeta | undefined, v: string): string {
+  const o = meta?.evolution_mode.options.find(x => x.value === v)
+  return o ? o.full : v
 }
 
 function Toggle({ on, disabled, busy, onClick, labelOn, labelOff }: {
@@ -303,7 +321,7 @@ function Toggle({ on, disabled, busy, onClick, labelOn, labelOff }: {
 }
 
 export function RuntimeSwitchPanel({
-  rt, memoryOn, mode, onChange, editable, busy, extra,
+  rt, memoryOn, mode, onChange, editable, busy, loadFailed, extra,
 }: {
   rt: RuntimeState | null
   /** 界面上的当前取值（页面持有；初值来自 `rt`）。 */
@@ -314,6 +332,8 @@ export function RuntimeSwitchPanel({
   /** 允许操作吗（天花板为关时传 `false`，开关画灰）。 */
   editable: boolean
   busy?: boolean
+  /** 后端读取失败了吗（真失败，不是还在加载）—— 显式传，才分得清「加载中」与「读不到」。 */
+  loadFailed?: boolean
   extra?: ReactNode
 }) {
   const [pending, setPending] = useState<{ key: 'memory_enabled' | 'evolution_mode'; value: any; label: string } | null>(null)
@@ -322,15 +342,21 @@ export function RuntimeSwitchPanel({
   if (!rt) {
     return (
       <div className="p-4">
-        <LoadingCard title="正在读取运行设置…" />
+        {loadFailed
+          ? <Note tone="warn">运行设置读取失败 —— 拿不到服务端的开关状态，这里不显示任何猜测值。</Note>
+          : <LoadingCard title="正在读取运行设置…" />}
       </div>
     )
+  }
+  const meta = rt.meta
+  if (!meta) {
+    // 读到了对象却没有展示表 = 后端契约不对（R9 的「不猜不编」）。
+    return <div className="p-4"><Note tone="warn">运行设置读取失败（后端没有返回展示表）—— 不显示任何猜测值。</Note></div>
   }
 
   const canMem = rt.can_change?.memory_enabled !== false
   const canMode = rt.can_change?.evolution_mode !== false
-  const ceilingMode = rt.ceiling?.evolution_mode || 'off'
-  const order: Record<string, number> = { off: 0, observe: 1, paper: 2 }
+  const notAllowed = meta.evolution_mode.options.filter(o => !o.allowed).map(o => o.value)
 
   const ask = (key: 'memory_enabled' | 'evolution_mode', value: any, label: string) => {
     setReason('')
@@ -348,55 +374,36 @@ export function RuntimeSwitchPanel({
       {/* ① 让系统攒经验（经验库） */}
       <div className="flex flex-col gap-1.5">
         <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="text-sm font-semibold" style={{ color: 'var(--text)' }}>① 让系统攒经验（经验库）</div>
+          <div className="text-sm font-semibold" style={{ color: 'var(--text)' }}>{meta.memory_enabled.label}</div>
           <Toggle on={memoryOn} disabled={!editable || !canMem} busy={busy}
-            labelOn="开" labelOff="关"
-            onClick={() => ask('memory_enabled', !memoryOn, !memoryOn ? '开' : '关')} />
+            labelOn={meta.memory_enabled.on_label} labelOff={meta.memory_enabled.off_label}
+            onClick={() => ask('memory_enabled', !memoryOn,
+              !memoryOn ? meta.memory_enabled.on_label : meta.memory_enabled.off_label)} />
         </div>
-        <div className="text-xs leading-relaxed" style={{ color: 'var(--text-muted)' }}>
-          开着：每天收盘后自动复盘，把结论存下来，下次决策时参考。
-          关着：它不攒新经验、也查不到旧经验（已经冻结的决策快照不受影响）。
-        </div>
-        <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
-          ⚠️ 这不是「自动交易」开关 —— 那个在「自动交易」页。
-        </div>
-        {!canMem && (
-          <Note tone="warn">
-            部署侧已锁死（环境变量 <b>FIN_MEMORY_ENABLED=0</b>）：界面开不出经验库。
-            要开，得先让部署侧把那一行改成 <b>1</b> 并重建 api。
-          </Note>
-        )}
+        <div className="text-xs leading-relaxed" style={{ color: 'var(--text-muted)' }}>{meta.memory_enabled.desc}</div>
+        <div className="text-xs" style={{ color: 'var(--text-muted)' }}>{meta.memory_enabled.not_auto_trade}</div>
+        {!canMem && <Note tone="warn">{meta.memory_enabled.locked}</Note>}
       </div>
 
-      {/* ② 学习强度（生效模式） */}
+      {/* ② 学习强度（生效模式）—— 选项、短标签、长说明全部来自后端展示表 */}
       <div className="flex flex-col gap-1.5">
         <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="text-sm font-semibold" style={{ color: 'var(--text)' }}>② 学习强度（生效模式）</div>
+          <div className="text-sm font-semibold" style={{ color: 'var(--text)' }}>{meta.evolution_mode.label}</div>
           <Seg
-            options={(['off', 'observe', 'paper'] as const).map(v => ({
-              v,
-              label: MODE_SHORT[v] || v,
-            }))}
-            value={mode as any}
+            options={meta.evolution_mode.options.map(o => ({ v: o.value, label: o.label }))}
+            value={mode}
             disabled={!editable || !canMode || busy}
-            onChange={(v) => ask('evolution_mode', v, MODE_SHORT[v] || v)}
+            disabledValues={notAllowed}
+            onChange={(v) => ask('evolution_mode', v,
+              meta.evolution_mode.options.find(o => o.value === v)?.label || v)}
           />
         </div>
         <div className="text-xs leading-relaxed" style={{ color: 'var(--text-muted)' }}>
-          关闭：不主动提「改策略参数」的提案。<br />
-          只观察：复盘、攒经验、看得见提案，但一个单也不会多下。<br />
-          模拟验证：还能在独立的模拟盘里跑两套方案对比。
+          {meta.evolution_mode.options.map(o => <span key={o.value}>{o.full}<br /></span>)}
         </div>
-        {!canMode && (
-          <Note tone="warn">
-            部署侧已锁死（环境变量 <b>FIN_EVOLUTION_MODE=off</b>）：界面改不动学习强度。
-            要改，得先让部署侧把那一行改成 <b>observe</b> 或 <b>paper</b> 并重建 api。
-          </Note>
-        )}
-        {canMode && ceilingMode !== 'paper' && (
-          <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
-            部署侧允许的上限：<b>{MODE_SHORT[ceilingMode] || ceilingMode}</b> —— 更高的选项界面上给不出来。
-          </div>
+        {!canMode && <Note tone="warn">{meta.evolution_mode.locked}</Note>}
+        {canMode && meta.evolution_mode.ceiling_note && (
+          <div className="text-xs" style={{ color: 'var(--text-muted)' }}>{meta.evolution_mode.ceiling_note}</div>
         )}
       </div>
 
@@ -405,7 +412,7 @@ export function RuntimeSwitchPanel({
         <div className="rounded-xl px-3.5 py-3 flex flex-col gap-2"
           style={{ background: 'rgba(176,106,50,.06)', border: '1px solid rgba(176,106,50,.2)' }}>
           <div className="text-xs" style={{ color: '#6B5334' }}>
-            把 <b>{pending.key === 'memory_enabled' ? '经验库' : '学习强度'}</b> 改成 <b>{pending.label}</b>？
+            把 <b>{pending.key === 'memory_enabled' ? meta.memory_enabled.label : meta.evolution_mode.label}</b> 改成 <b>{pending.label}</b>？
             改完<b>立刻生效</b>（不用重启服务）。理由必填，会记进变更流水。
           </div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -422,28 +429,26 @@ export function RuntimeSwitchPanel({
       {/* 只读：本方案规定永远是关的两项 */}
       <div className="pt-1" style={{ borderTop: '1px dashed rgba(216,205,186,.75)' }}>
         <div className="flex items-baseline justify-between gap-3 py-2 text-sm">
-          <span style={{ color: 'var(--text-muted)' }}>自动生效</span>
+          <span style={{ color: 'var(--text-muted)' }}>{meta.auto_apply.label}</span>
           <span className="text-right font-semibold" style={{ color: 'var(--text)' }}>
-            {rt.auto_apply ? '开（异常）' : '关（本方案恒为关闭）'}
+            {rt.auto_apply ? meta.auto_apply.on_text : meta.auto_apply.off_text}
           </span>
         </div>
         <div className="flex items-baseline justify-between gap-3 py-2 text-sm">
-          <span style={{ color: 'var(--text-muted)' }}>实盘下单</span>
+          <span style={{ color: 'var(--text-muted)' }}>{meta.live_order_enabled.label}</span>
           <span className="text-right font-semibold" style={{ color: 'var(--text)' }}>
-            {rt.live_order_enabled ? '开（异常）' : '无（本项目不接券商）'}
+            {rt.live_order_enabled ? meta.live_order_enabled.on_text : meta.live_order_enabled.off_text}
           </span>
         </div>
-        <div className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-          这两项本方案规定不许开，界面上没有入口（服务端也会直接拒绝）。
-        </div>
+        <div className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{meta.hard_note}</div>
       </div>
 
       {/* 当前生效 */}
       <div className="flex items-center gap-3 flex-wrap text-xs pt-1"
         style={{ borderTop: '1px solid rgba(216,205,186,.7)', color: 'var(--text-muted)' }}>
-        <span>生效模式：<b style={{ color: 'var(--text)' }}>{MODE_TEXT[rt.evolution_mode] || rt.evolution_mode}</b></span>
-        <span>请求模式：<b style={{ color: 'var(--text)' }}>{MODE_TEXT[rt.evolution_mode_requested] || rt.evolution_mode_requested}</b></span>
-        <span>经验库：<b style={{ color: 'var(--text)' }}>{rt.memory_enabled ? '已启用' : '未启用'}</b></span>
+        <span>生效模式：<b style={{ color: 'var(--text)' }}>{modeFull(meta, rt.evolution_mode)}</b></span>
+        <span>请求模式：<b style={{ color: 'var(--text)' }}>{modeFull(meta, rt.evolution_mode_requested)}</b></span>
+        <span>经验库：<b style={{ color: 'var(--text)' }}>{rt.memory_enabled ? meta.memory_enabled.on_text : meta.memory_enabled.off_text}</b></span>
       </div>
 
       {rt.degraded_reason && (

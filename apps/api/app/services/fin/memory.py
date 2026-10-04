@@ -636,7 +636,7 @@ def append_evidence(
     # R21：判据按**项目**取（天花板 ∩ 天窗），关掉一个项目不影响别的项目。
     if not switches.memory_enabled(project_id):
         raise MemoryDisabledError(
-            "经验库未启用（本部署的总闸为关，或这个项目的经验库开关是关）："
+            "经验库未启用（部署侧 FIN_MEMORY_ENABLED=0，或这个项目的经验库开关是关）："
             "本部署当前不接受这个项目的经验写入")
 
     if caller not in CALLER_SOURCE:
