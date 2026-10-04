@@ -151,3 +151,49 @@ class ExpireIn(BaseModel):
 
 class CancelIn(BaseModel):
     memo: Optional[str] = None
+
+
+class HaltIn(BaseModel):
+    """停牌状态位的登记（L05）。
+
+    **数据源未接** —— 停牌由人工登记口置位（`halted_source` 如实写 `manual`）。
+    `halted=false` 即解除停牌。
+    """
+
+    halted: bool = True
+    reason: Optional[str] = None
+    actor: str = "system"
+
+
+class CorporateActionIn(BaseModel):
+    """公司行为登记（L05 · **数据源未接** → 人工登记口）。
+
+    - `dividend`：**必须**给 `cash_per_share`（每股现金，本币税前）；`ratio` 不填。
+    - `split` / `bonus`：**必须**给 `ratio`（拆合股 = 拆后/拆前倍数；送股 = 每股送股数）；`cash_per_share` 不填。
+
+    登记即应用（账务在同一事务里落 `fin_cash_ledger` / `fin_position`），并把这次
+    实际应用的净影响写进事件行（`qty_delta` / `cash_delta`），供对账核。
+    """
+
+    code: str = Field(min_length=1)
+    project_id: str = Field(min_length=1)
+    action_type: Literal["dividend", "split", "bonus"]
+    ex_date: date
+    cash_per_share: Optional[Decimal] = Field(default=None, ge=0)
+    ratio: Optional[Decimal] = Field(default=None, gt=0)
+    memo: Optional[str] = None
+    actor: str = "system"
+
+    @model_validator(mode="after")
+    def _required_fields_by_type(self) -> "CorporateActionIn":
+        if self.action_type == "dividend":
+            if self.cash_per_share is None:
+                raise ValueError("分红必须提供 cash_per_share（每股现金）")
+            if self.ratio is not None:
+                raise ValueError("分红不接受 ratio（那是拆合股/送股的比例）")
+        else:
+            if self.ratio is None:
+                raise ValueError("拆合股 / 送股必须提供 ratio")
+            if self.cash_per_share is not None:
+                raise ValueError("拆合股 / 送股不接受 cash_per_share（那是分红的每股现金）")
+        return self

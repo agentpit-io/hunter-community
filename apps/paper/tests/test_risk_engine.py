@@ -53,9 +53,14 @@ def test_all_pass_ok_and_fee_computed():
     assert out.fee.total == Decimal("5.0100")
 
 
-def test_all_six_rules_run():
+def test_all_rules_run():
+    """七条按顺序跑：**停牌**（L05 新增，先读）· 时段 · 数量 · T+1 · 价格带 · 费用 · 资金。
+
+    L05 把「停牌」补进风控（原为六条）—— 停牌先判、停牌即拒单（`halted` 状态位
+    由人工登记口置位，数据源未接）。
+    """
     names = [r.name for r in evaluate(base()).results]
-    assert names == ["session", "lot", "t1", "price_limit", "fee", "funds"]
+    assert names == ["halt", "session", "lot", "t1", "price_limit", "fee", "funds"]
 
 
 def test_multiple_failures_collected_in_reason():

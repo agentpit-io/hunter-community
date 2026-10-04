@@ -220,13 +220,20 @@ def run(cur, project_id: str, as_of, market: Optional[str] = None) -> dict:
         cur.execute(
             """
             SELECT p.code, p.qty,
-                   COALESCE(SUM(CASE WHEN t.side = 'buy' THEN t.qty ELSE -t.qty END), 0) AS net
+                   COALESCE(SUM(CASE WHEN t.side = 'buy' THEN t.qty ELSE -t.qty END), 0)
+                     + COALESCE(MAX(ca.dq), 0) AS net
               FROM fin_position p
               LEFT JOIN fin_trade t ON t.project_id = p.project_id AND t.code = p.code
                                     AND t.market = p.market
+              -- 公司行为（L05）改持仓但不产生成交 —— 持仓净额要把它的 qty_delta 算进去，
+              -- 否则一次拆股就会让本项假不平。
+              LEFT JOIN (
+                SELECT code, SUM(qty_delta) AS dq FROM fin_corporate_action
+                 WHERE project_id = %s AND market = %s GROUP BY code
+              ) ca ON ca.code = p.code
              WHERE p.project_id = %s AND p.market = %s GROUP BY p.code, p.qty
             """,
-            (project_id, market),
+            (project_id, market, project_id, market),
         )
         pos_bad = [r["code"] for r in cur.fetchall() if int(r["qty"]) != int(r["net"])]
         checks.append(_check("position_ties_trades", "持仓 = 成交净额",

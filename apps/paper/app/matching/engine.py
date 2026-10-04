@@ -45,6 +45,7 @@ from app.matching.model import load_execution_model
 from app.matching.pricing import MatchResult, OrderSpec, match
 from app.risk import RiskInputs, evaluate
 from app.risk import t1 as t1_mod
+from app.tick import resolve_tick
 
 
 class NoSnapshot(Exception):
@@ -303,7 +304,12 @@ def execute(cur, req: dict, *, now: Optional[datetime] = None) -> dict:
     # 成交股数不许超过「盘口量 × 参与率」。`None`（没配）时 `match` 不加约束，
     # 与加约束之前逐字节一致。
     participation = ledger.liquidity_participation(cur, project_id)
-    trial = match(spec, snap, model, participation=participation)
+    # 逐市场最小变动价位（L05）：标的级 → 市场级（港股逐价位区间）→ 全局回落。
+    price_hint = (Decimal(str(req["limit_price"])) if req.get("limit_price") is not None
+                  else (None if snap.get("last_price") is None
+                        else Decimal(str(snap["last_price"]))))
+    tick = resolve_tick(instrument, market_rule, price_hint, fallback=model.tick_size)
+    trial = match(spec, snap, model, participation=participation, tick=tick)
 
     # 市价单能力**按市场取表**（`fin_market_rule.market_order_supported`，0037 落列）——
     # 不是散在这里的 `market != "CN_A"`（P2 任务书 §一.4：按 A 股写死的要参数化）。
@@ -364,6 +370,7 @@ def execute(cur, req: dict, *, now: Optional[datetime] = None) -> dict:
         sellable_qty=sellable_qty,
         market=market,
         market_rule=market_rule,
+        tick=tick,
     )
     outcome = evaluate(inputs)
 
@@ -436,6 +443,8 @@ def execute(cur, req: dict, *, now: Optional[datetime] = None) -> dict:
             "price_basis": trial.basis,
             "market": market,
             "currency": currency,
+            # 逐市场最小变动价位（L05）：这笔价格校验实际用的 tick，三市场各不同。
+            "tick_size": tick,
             "price_limit_checked": _price_limit_checked(outcome),
             "risk": _risk_view(outcome),
             **_snapshot_view(snap),
@@ -456,6 +465,7 @@ def execute(cur, req: dict, *, now: Optional[datetime] = None) -> dict:
             "frozen_amount": frozen_amount,
             "market": market,
             "currency": currency,
+            "tick_size": tick,
             "price_limit_checked": _price_limit_checked(outcome),
             "risk": _risk_view(outcome),
             **_snapshot_view(snap),
@@ -640,19 +650,25 @@ def match_open_orders(cur, project_id: str, *, now: Optional[datetime] = None,
         remaining = int(order["qty"]) - int(order["filled_qty"] or 0)
         if remaining <= 0:
             continue
+        # 标的 / 市场 / 费用模型 / tick 都在 `match` 之前取好 —— 再撮合用的撮合假设
+        # （成交量参与率、逐市场 tick）必须与 `execute` 逐条相同。
+        instrument = ledger.get_instrument(cur, order["code"])
+        market = (instrument or {}).get("market") or market_of(order["code"]) or DEFAULT_MARKET
+        market_rule = ledger.get_market_rule(cur, market) or {}
+        price_hint = (Decimal(str(order["limit_price"])) if order.get("limit_price") is not None
+                      else (None if snap.get("last_price") is None
+                            else Decimal(str(snap["last_price"]))))
+        tick = resolve_tick(instrument, market_rule, price_hint, fallback=model.tick_size)
         spec = OrderSpec(
             side=order["side"], qty=remaining, price_type=order["price_type"],
             limit_price=order["limit_price"],
         )
-        result = match(spec, snap, model, participation=participation)
+        result = match(spec, snap, model, participation=participation, tick=tick)
         if not result.matched:
             continue
         project = ledger.get_project(cur, project_id)
         # 费用模型**按该委托所属市场**取（挂单再撮合时按实际成交额重算费用）——
         # 拿 A 股费率给港美股挂单算费就是编数字。市场以标的元数据为准，缺失时按代码形态。
-        instrument = ledger.get_instrument(cur, order["code"])
-        market = (instrument or {}).get("market") or market_of(order["code"]) or DEFAULT_MARKET
-        market_rule = ledger.get_market_rule(cur, market) or {}
         fee_model = ledger.get_fee_model(
             cur, version=market_rule.get("fee_model_version"), market=market
         )

@@ -17,7 +17,8 @@ from fastapi.responses import JSONResponse
 
 from app import ledger
 from app.jsonresp import LedgerJSONResponse
-from app.routers import data_ops, health, jobs, orders, projects, reference, shadow, snapshots
+from app.routers import (corporate_actions, data_ops, health, jobs, orders, projects,
+                         reference, shadow, snapshots)
 from app.security import LiveFieldGuard, require_internal_key
 
 app = FastAPI(
@@ -43,6 +44,7 @@ app.include_router(snapshots.router)
 app.include_router(jobs.router)
 app.include_router(data_ops.router)
 app.include_router(shadow.router)     # R7 · 影子臂模拟撮合（只算不记、绝不下单）
+app.include_router(corporate_actions.router)   # L05 · 公司行为人工登记口
 
 
 @app.exception_handler(ledger.MarketRequired)

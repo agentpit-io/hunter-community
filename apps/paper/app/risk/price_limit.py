@@ -30,14 +30,20 @@ _CENT = Decimal("0.01")
 MODES = ("pct", "none", "band")
 
 
-def _money(value) -> Decimal:
-    return Decimal(str(value)).quantize(_CENT, rounding=ROUND_HALF_UP)
+def _round_to(value, tick) -> Decimal:
+    """对齐到最小变动价位（tick）。缺省 = 分（`_CENT`，A 股 tick）。
+
+    `tick` 由 `app.tick.resolve_tick` 逐市场解析（`L05` 第 5 项）—— 涨跌停价
+    与委托价一律落在该市场的合法价位上。A 股 tick=0.01 → 与本函数改造前逐位一致。
+    """
+    step = _CENT if tick is None else Decimal(str(tick))
+    return Decimal(str(value)).quantize(step, rounding=ROUND_HALF_UP)
 
 
-def limit_prices(prev_close, limit_up_pct, limit_down_pct) -> tuple[Decimal, Decimal]:
+def limit_prices(prev_close, limit_up_pct, limit_down_pct, tick=None) -> tuple[Decimal, Decimal]:
     prev = Decimal(str(prev_close))
-    up = _money(prev * (Decimal("1") + Decimal(str(limit_up_pct))))
-    down = _money(prev * (Decimal("1") - Decimal(str(limit_down_pct))))
+    up = _round_to(prev * (Decimal("1") + Decimal(str(limit_up_pct))), tick)
+    down = _round_to(prev * (Decimal("1") - Decimal(str(limit_down_pct))), tick)
     return up, down
 
 
@@ -48,6 +54,7 @@ def check_price_limit(
     prev_close,
     *,
     mode: str = "pct",
+    tick=None,
 ) -> RiskResult:
     # ── 模式先判：`none` 的市场**根本不该去读** instrument / prev_close（它们可为空）──
     if mode == "none":
@@ -91,7 +98,8 @@ def check_price_limit(
             mode=mode, checked=False, price_limit_checked=False,
         )
 
-    up, down = limit_prices(prev_close, instrument["limit_up_pct"], instrument["limit_down_pct"])
+    up, down = limit_prices(prev_close, instrument["limit_up_pct"],
+                            instrument["limit_down_pct"], tick)
     px = Decimal(str(price))
     if side == "buy" and px > up:
         return RiskResult.reject(

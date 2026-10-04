@@ -21,6 +21,7 @@ from typing import Optional
 from app.market_time import DEFAULT_MARKET
 from app.risk import fee as fee_mod
 from app.risk import funds as funds_mod
+from app.risk import halt as halt_mod
 from app.risk import lot as lot_mod
 from app.risk import price_limit as limit_mod
 from app.risk import session as session_mod
@@ -47,6 +48,7 @@ class RiskInputs:
     lot_size: int = lot_mod.DEFAULT_LOT   # 旧调用方兼容；market_rule 在场时以规则为准
     market: str = DEFAULT_MARKET       # CN_A / HK / US
     market_rule: Optional[dict] = None # fin_market_rule 的一行（六条规则的参数来源）
+    tick: Optional[Decimal] = None     # 最小变动价位（app.tick 解析；None→按分，与改前一致）
 
 
 @dataclass
@@ -96,6 +98,8 @@ def evaluate(inp: RiskInputs) -> RiskOutcome:
         (inp.instrument or {}).get("lot_size"),
     )
     results: list[RiskResult] = [
+        # 停牌**先读**（L05）：停牌即拒单，别的规则不必再跑出别的理由混淆视听。
+        halt_mod.check_halt(inp.instrument),
         session_mod.check_session(
             inp.calendar, inp.at,
             market=inp.market,
@@ -112,6 +116,7 @@ def evaluate(inp: RiskInputs) -> RiskOutcome:
         limit_mod.check_price_limit(
             inp.instrument, inp.side, inp.price, inp.prev_close,
             mode=rule.get("price_limit_mode") or "pct",
+            tick=inp.tick,
         ),
     ]
 

@@ -14,7 +14,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from app import db, ledger
-from app.schemas import CalendarIn, ExecutionModelIn, FeeModelIn, InstrumentIn
+from app.schemas import CalendarIn, ExecutionModelIn, FeeModelIn, HaltIn, InstrumentIn
 
 router = APIRouter(tags=["reference"])
 
@@ -54,6 +54,34 @@ def get_instrument(code: str) -> dict:
     if not row:
         raise HTTPException(404, f"账本里没有标的 {code} 的元数据")
     return row
+
+
+@router.post("/api/v1/instruments/{code}/halt")
+def set_halt(code: str, body: HaltIn) -> dict:
+    """停牌状态位的**人工登记口**（`L05` 第 3 项）。
+
+    **数据源未接** —— 停牌只由这里置位，`halted_source` 如实写 `manual`。
+    `halted=true` 后风控对该标的**一律拒单**（理由写清「停牌」）；
+    `halted=false` 解除（同样留痕于登记时刻）。**不编造停牌数据。**
+    """
+    with db.cursor(commit=True) as cur:
+        inst = ledger.get_instrument(cur, code)
+        if not inst:
+            raise HTTPException(404, f"账本里没有标的 {code} 的元数据，无法登记停牌")
+        cur.execute(
+            """
+            UPDATE fin_instrument
+               SET halted = %s,
+                   halted_reason = CASE WHEN %s THEN %s ELSE NULL END,
+                   halted_at = CASE WHEN %s THEN now() ELSE NULL END,
+                   halted_source = CASE WHEN %s THEN 'manual' ELSE NULL END,
+                   updated_at = now()
+             WHERE code = %s
+            RETURNING *
+            """,
+            (body.halted, body.halted, body.reason, body.halted, body.halted, code),
+        )
+        return cur.fetchone()
 
 
 @router.put("/api/v1/market-calendar/{trade_date}")

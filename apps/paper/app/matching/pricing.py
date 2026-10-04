@@ -123,12 +123,16 @@ def liquidity_cap(snapshot: dict, side: str, participation) -> Optional[int]:
 
 
 def match(spec: OrderSpec, snapshot: dict, model: ExecutionModel, *,
-          participation=None) -> MatchResult:
+          participation=None, tick: Optional[Decimal] = None) -> MatchResult:
     """按一张快照撮合一笔委托。**纯函数**。
 
     `participation`（参与率，来自 `fin_param.liquidity_max_participation`）为 `None`
     时行为与加约束之前**逐字节一致**。给了就按「盘口量 × 参与率」削量/挂单，
     见模块头「成交量约束」。
+
+    `tick`（最小变动价位，来自 `app.tick.resolve_tick`）缺省 `None` → 用执行模型的
+    全局 `tick_size`（与出参前逐字节一致）；给了就按它对齐市价单的成交价
+    （逐市场 tick，`L05` 第 5 项）。
     """
     # ── 快照不可用 → 挂单 ────────────────────────────────────────────────
     if snapshot is None:
@@ -165,16 +169,17 @@ def match(spec: OrderSpec, snapshot: dict, model: ExecutionModel, *,
 
     # ── 市价单：对手价 + 滑点 ────────────────────────────────────────────
     slippage = model.slippage
+    step = model.tick_size if tick is None else tick
     if spec.side == "buy":
         counterparty = _dec(snapshot.get("ask1_price"))
         basis = "ask1_price" if counterparty is not None else "snapshot_last_price"
         reference = counterparty if counterparty is not None else last
-        price = _tick(reference + slippage, model.tick_size)
+        price = _tick(reference + slippage, step)
     else:
         counterparty = _dec(snapshot.get("bid1_price"))
         basis = "bid1_price" if counterparty is not None else "snapshot_last_price"
         reference = counterparty if counterparty is not None else last
-        price = _tick(reference - slippage, model.tick_size)
+        price = _tick(reference - slippage, step)
 
     if price <= 0:
         return MatchResult(

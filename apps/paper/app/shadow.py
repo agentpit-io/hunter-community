@@ -59,6 +59,7 @@ from app.matching.pricing import FILLED, OrderSpec, match
 from app.risk import RiskInputs, evaluate
 from app.risk import fee as fee_mod
 from app.risk import t1 as t1_mod
+from app.tick import resolve_tick
 
 _Q4 = Decimal("0.0001")
 
@@ -244,6 +245,10 @@ def simulate_arms(cur, req: dict[str, Any], *, recorder: DecisionRecorder) -> di
     # `matching.engine.execute` 读的是同一列，于是「成交量约束」这条撮合假设在两臂上
     # 完全一致（红线 11）。
     participation = ledger.liquidity_participation(cur, project_id)
+    # 逐市场最小变动价位（L05）：同一份解析函数（`app.tick`）、同一份快照价 ——
+    # 两臂的 tick 假设也完全一致。
+    tick = resolve_tick(instrument, market_rule, _dec(snap.get("last_price")),
+                        fallback=model.tick_size if model else Decimal("0.01"))
 
     results: list[dict[str, Any]] = []
     for arm in (req.get("arms") or []):
@@ -252,7 +257,7 @@ def simulate_arms(cur, req: dict[str, Any], *, recorder: DecisionRecorder) -> di
             market_rule=market_rule, instrument=instrument, fee_model=fee_model,
             model=model, calendar=calendar, trade_date=trade_date, point=point,
             initial_capital=initial_capital, recorder=recorder,
-            participation=participation,
+            participation=participation, tick=tick,
         ))
     return {
         "quote_as_of": snap["snapshot_time"].isoformat(),
@@ -266,7 +271,7 @@ def simulate_arms(cur, req: dict[str, Any], *, recorder: DecisionRecorder) -> di
 
 def _simulate_one(*, arm, snap, symbol, market, currency, market_rule, instrument,
                   fee_model, model, calendar, trade_date, point, initial_capital,
-                  recorder, participation=None) -> dict[str, Any]:
+                  recorder, participation=None, tick=None) -> dict[str, Any]:
     """一个臂在**已取好的那张快照**上的一次模拟。"""
     state = _state_view(arm.get("state"))
     side = str(arm.get("side") or "buy")
@@ -282,8 +287,8 @@ def _simulate_one(*, arm, snap, symbol, market, currency, market_rule, instrumen
                           price_type=price_type, limit_price=limit_price)
 
     spec = OrderSpec(side=side, qty=qty, price_type=price_type, limit_price=limit_price)
-    # 与真实撮合**同一个纯函数**、同一份参与率（红线 11：两臂同条件）。
-    trial = match(spec, snap, model, participation=participation)
+    # 与真实撮合**同一个纯函数**、同一份参与率与 tick（红线 11：两臂同条件）。
+    trial = match(spec, snap, model, participation=participation, tick=tick)
 
     # ── 过规则（**同一套六条风控**，用该臂自己的现金 / 持仓）─────────────────
     price_for_risk = limit_price if (price_type == "limit" and limit_price is not None) else (
@@ -298,7 +303,7 @@ def _simulate_one(*, arm, snap, symbol, market, currency, market_rule, instrumen
         calendar=calendar, instrument=instrument, fee_model=fee_model,
         prev_close=_dec(snap.get("prev_close")), available=state["cash_available"],
         position_qty=position_qty, sellable_qty=max(0, effective_sellable),
-        market=market, market_rule=market_rule,
+        market=market, market_rule=market_rule, tick=tick,
     )
     outcome = evaluate(inputs)
     if not outcome.passed:

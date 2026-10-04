@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from decimal import Decimal
+from decimal import ROUND_FLOOR, Decimal
 from typing import Optional
 
 import psycopg2.extras
@@ -760,6 +760,134 @@ def confirm_t1(cur, project_id: str, trade_date=None, market: Optional[str] = No
         params.append(market)
     cur.execute(sql, tuple(params))
     return cur.rowcount
+
+
+# ── 公司行为（L05 第 4 项）· 事件表只追加 + 登记即应用 ─────────────────────
+#
+# **数据源未接** → 由人工登记口写入（`source='manual'`）。登记= 记事件 + 应用账务，
+# 同一事务里完成。事件表 `fin_corporate_action` **只追加**（触发器挡 UPDATE / DELETE）。
+#
+# 账务口径（写进事件行的 `qty_delta` / `cash_delta`，对账据此核）：
+#
+# | 类型 | 现金 | 股数 | 成本价 |
+# |---|---|---|---|
+# | 分红 `dividend` | + `持仓 × 每股现金`（`fin_cash_ledger.kind='adjust'`） | 不变 | 不变 |
+# | 拆股 `split`    | 不变 | `持仓 × ratio` | 总成本不变 → `成本价 ÷ ratio` |
+# | 送股 `bonus`    | 不变 | `持仓 × (1 + ratio)`（向下取整 = 只送整股） | 总成本不变 → 按新股数摊 |
+#
+# **不改账户版本**：`fin_project.version` 的口径是「成交笔数」（对账第 6 项核的就是它），
+# 公司行为不是成交，动版本会让对账不平。持仓净额由对账第 5 项加 `qty_delta` 核。
+
+def list_corporate_actions(cur, project_id: Optional[str] = None, code: Optional[str] = None,
+                           limit: int = 200) -> list[dict]:
+    """公司行为事件（只读）。`project_id` 不给 = 全部（跨项目审计用）。"""
+    sql = ("SELECT action_id, project_id, code, market, currency, action_type, ex_date, "
+           "cash_per_share, ratio, qty_delta, cash_delta, source, registered_by, "
+           "registered_at, applied_at, memo FROM fin_corporate_action")
+    clauses: list[str] = []
+    params: list = []
+    if project_id:
+        clauses.append("project_id = %s")
+        params.append(project_id)
+    if code:
+        clauses.append("code = %s")
+        params.append(code)
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
+    sql += " ORDER BY registered_at DESC LIMIT %s"
+    params.append(limit)
+    cur.execute(sql, tuple(params))
+    return cur.fetchall()
+
+
+def apply_corporate_action(cur, project_id: str, *, action_type: str, code: str, ex_date,
+                           ratio=None, cash_per_share=None, actor: str = "system",
+                           memo: Optional[str] = None) -> dict:
+    """登记一次公司行为并**立即应用账务**（`L05` 第 4 项）。
+
+    返回 `{action_id, qty_delta, cash_delta, position_after}`。没有持仓时按时记录、
+    账务无影响（`qty_delta=0` / `cash_delta=0`）—— **不编**一笔不存在的持仓。
+    """
+    if action_type not in ("dividend", "split", "bonus"):
+        raise ValueError(f"未知的公司行为类型：{action_type}")
+    project = get_project(cur, project_id)
+    if not project:
+        raise LookupError(f"项目不存在：{project_id}")
+    # 单写者闸门：公司行为改持仓 / 现金，与下单互斥（同一把按 project 的事务锁）。
+    lock_project(cur, project_id)
+
+    instrument = get_instrument(cur, code)
+    # 市场 / 币种：标的元数据优先，缺失按代码形态兜一层（与下单路径同一口径）。
+    from app.market_time import market_of as _market_of  # 局部 import，避免循环依赖
+    market = (instrument or {}).get("market") or _market_of(code) or "CN_A"
+    currency = currency_for(cur, market) or MARKET_CURRENCY.get(market) or "CNY"
+
+    pos = get_position(cur, project_id, code)
+    old_qty = int(pos["qty"]) if pos else 0
+    old_sellable = int(pos["sellable_qty"]) if pos else 0
+    old_cost = Decimal(str(pos["avg_cost"])) if pos else Decimal("0")
+
+    cash_delta = Decimal("0.0000")
+    qty_delta = 0
+    if action_type == "dividend" and old_qty > 0:
+        cash_delta = _money(Decimal(old_qty) * Decimal(str(cash_per_share)))
+        if cash_delta > 0:
+            available, frozen = cash_balance(cur, project_id, market)
+            _insert_cash(cur, project_id, "adjust", cash_delta,
+                         _money(available + cash_delta), frozen, None, None,
+                         f"公司行为·分红 {code}（每股 {cash_per_share}）",
+                         market=market, currency=currency)
+    elif action_type in ("split", "bonus") and old_qty > 0:
+        factor = Decimal(str(ratio)) if action_type == "split" else (Decimal("1") + Decimal(str(ratio)))
+        new_qty = int((Decimal(old_qty) * factor).to_integral_value(rounding=ROUND_FLOOR))
+        qty_delta = new_qty - old_qty
+        if new_qty != old_qty or old_cost != Decimal("0"):
+            total_cost = old_cost * old_qty
+            new_cost = (total_cost / new_qty) if new_qty > 0 else Decimal("0")
+            # 可卖量按同比例缩放（当日买入的不可卖部分保持不可卖）。
+            new_sellable = (new_qty if old_sellable >= old_qty
+                            else min(new_qty, int((Decimal(old_sellable) * factor)
+                                                  .to_integral_value(rounding=ROUND_FLOOR))))
+            cur.execute(
+                "UPDATE fin_position SET qty = %s, sellable_qty = %s, avg_cost = %s, "
+                "updated_at = now() WHERE project_id = %s AND code = %s",
+                (new_qty, new_sellable, _money(new_cost), project_id, code),
+            )
+
+    action_id = new_id("ca")
+    cur.execute(
+        """
+        INSERT INTO fin_corporate_action
+          (action_id, project_id, code, market, currency, action_type, ex_date,
+           cash_per_share, ratio, qty_delta, cash_delta, source, registered_by, applied_at, memo)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'manual',%s, now(), %s)
+        RETURNING action_id, registered_at, applied_at
+        """,
+        (action_id, project_id, code, market, currency, action_type, ex_date,
+         None if cash_per_share is None else Decimal(str(cash_per_share)),
+         None if ratio is None else Decimal(str(ratio)),
+         qty_delta, _money(cash_delta), actor, memo),
+    )
+    row = cur.fetchone()
+    after = get_position(cur, project_id, code)
+    return {
+        "action_id": row["action_id"],
+        "code": code,
+        "market": market,
+        "currency": currency,
+        "action_type": action_type,
+        "ex_date": str(ex_date),
+        "source": "manual",
+        "qty_delta": qty_delta,
+        "cash_delta": _money(cash_delta),
+        "registered_at": row["registered_at"],
+        "applied_at": row["applied_at"],
+        "position_after": (None if after is None else {
+            "code": after["code"], "qty": int(after["qty"]),
+            "sellable_qty": int(after["sellable_qty"]),
+            "avg_cost": _money(after["avg_cost"]),
+        }),
+    }
 
 
 # ── 时间 ──────────────────────────────────────────────────────────────────
