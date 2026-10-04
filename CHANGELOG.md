@@ -3,6 +3,76 @@
 All notable changes to HunterCode · Community Edition follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-10-04
+
+> **次要版本 · 让「统一经验与自进化」这条链**真的通电**。**
+> `1.6.0` 把「经验 → 提案 → 独立影子验证 → 人工确认生效 → 紧急线回滚」这一圈的**架子**搭好了，
+> 但三处还差最后一段线：判定器手上**没有行情**（永远回 `unknown`）、两条臂跑的是**同一套不读参数的动作**（`delta` 恒 0）、
+> 生效之后**没人自动盯着**（观察期靠人工去叫）。本版把这三段线都接上 ——
+> `regime` 能说出 `bull / bear / range`、示例策略**真读白名单参数**让两臂真的分叉、
+> `fin.observe` **每市场一条 Schedule 到点自动观察**（越普通线只告警、踩紧急线才自动回滚）。
+> **全程人工确认、没有实盘订单出口。**
+>
+> **没有新增数据库迁移**（`R11`–`R13` 一个迁移文件都没加；台账停在 `0045_evolution_apply.sql`，46 个文件 / 46 行）。
+> 唯一的结构变化是新增 `.env` 旋钮 `FIN_OBSERVE_DELAY_MINUTES`（默认 30）—— 不设也能跑。
+>
+> 动到 **`api` / `fin-worker` 两个镜像**：
+> `api`（`R11`：基准指数日线接入 `klines_etl.run_benchmark` + `regime.observe()` 换数据源）·
+> `fin-worker`（`R12`：示例策略真读 `max_position_pct` + 影子臂同源搬参；`R13`：`fin.observe` 工作流 + 每市场 Schedule + 两个活动）。
+> `web` / `paper` / `llm-shim` / `opencode` 代码未动，版本号随发版一起走。
+>
+> 升级：`.env` 的 **`HUNTER_VERSION` 与 `FIN_TAG` 两个旋钮一起改 `1.7.0`**，再
+> `docker compose --profile fin pull && docker compose --profile fin up -d`。
+> 逐步清单见 `docs/开发文档/R13-上线与自动观察.md`（含**回滚一步**）。
+>
+> ⚠️ **升级前先备份**：`pg_dump -Fc` 记下路径 / 大小 / `sha256` / PG 版本 / `schema_migrations` 行数。
+> 本版不加迁移、不回填任何历史行，但 `R11` 会让三个 `fin-etl-*` Schedule 的那一轮**开始顺带取基准指数**（写进 `klines`）。
+
+### ✨ 新增 · Added
+
+- **`R11` · 基准指数日线接入，`regime` 不再恒 `unknown`。** `apps/api/app/services/data/klines_etl.py` 加显式基准映射
+  `BENCHMARKS = {cn: 000300, hk: HSI, us: .INX}` 与 `run_benchmark(market)`；`fetch_tencent` 的解析口径抽成
+  `_fetch_tencent_bars`（股票与指数**共用一处**，`[日期,开,收,高,低,量]` 的顺序只解一次）；
+  `run_market()` 在**股票池检查之前**顺带取基准（**空池的新部署也取得到**，失败不挡股票池那一轮）。
+  `regime.observe()` 数据源由 `fin_snapshot` 换成 `klines`（**只改这一个函数**）——
+  `RULES` / `classify()` / `detect()` / 四元组形状**逐字节未动**。取不到 / 窗口不足 / 查库异常 → 仍 `unknown` → **仍停止策略提案**（fail-closed，规矩一条没放宽）。
+  ⚠️ **不许靠 `_tencent_symbol` 前缀猜基准代码**：`.split(".")[0]` 会把 `.INX` 截成空串、把 `HSI` 拼成 `hk00HSI`；基准走**显式映射**。
+- **`R12` · 示例策略真读白名单参数，影子两臂 `delta` 第一次非零。** `apps/fin-worker/app/strategy/sample.py` 的
+  定量口径改为按 `max_position_pct` 算：`qty = min(档位手数, ⌊可用资金 × 占比 × 0.995 ÷ (参考价 × 每手股数)⌋ × 每手股数)`；
+  四个输入（可用资金 / 参考价 / 每手股数 / 占比）**全是真值**，量价三输入任一缺失 → 回落**档位固定手数**（写死的数字，不是猜的）。
+  **A 股市价单路径一行未改**（市价单出意图时不取价格与余额，硬按占比算的分母是编的 → 如实不作为，仍按档位固定手数）。
+  策略读的字段是**唯一一份清单** `sample.STRATEGY_READ_FIELDS`，影子臂 `shadow.param_of()` 从它推导（少搬一个字段 = 接线做完但 `delta` 还是 0 且不报错）。
+- **`R13` · 自动盯盘 `fin.observe` 接调度（本轮唯一缺自动化的一环）。** 新增 Temporal 工作流 `fin.observe`
+  （`apps/fin-worker/app/workflows.py`）+ **每市场一条 Schedule**（`fin-observe-CN_A` / `fin-observe-HK` / `fin-observe-US`，`schedules.observe_specs`）：
+  时点 = 该市场**时段末点** + `FIN_REVIEW_DELAY_MINUTES`（30）+ `FIN_SHADOW_DELAY_MINUTES`（15）+ **`FIN_OBSERVE_DELAY_MINUTES`（默认 30）**。
+  骨架照 `fin.review` / `fin.shadow`：**查日历 → 非交易日空跑并记明原因 → 其他市场照常**；
+  内层对「该市场所有进行中的项目」下每个**已生效**的提案各观察一次（两个活动 `observe_proposals` / `observe_applied`，经 `HunterApiClient` 走内网口令，**全程不碰数据库**）。
+  **行为逐字复用服务层**：越普通线（提前停止线 / 观察期结束净收益 ≤ 失败线）→ **只写 `alert`**（`fin_alert_log` + 追加事件，**配置一动不动**、等人确认）；
+  **只有**踩到冻结计划的 `rollback_line` 才自动回滚 —— 回滚目标取**版本链**（`applied` 事件的 `from_key`，**不许只信 `base_strategy_key` 字符串**），
+  并一并产出 `polarity='refute'` 的失败经验（写入失败**不许吞**：落回灌重试队列，只读接口据此报「回灌待完成」）。
+  **单条提案观察失败不挂整条工作流**（记进汇总继续）；**回滚失败必须可见**（api 把「回滚核验失败」翻成 409、把「进化未启用」翻成 503，工作流标 `rollback_error` 并打 `ERROR` 日志）。
+
+### 🔧 变更 · Changed
+
+- **`docker-compose.yml` 补齐 `FIN_SHADOW_DELAY_MINUTES` 透传。** `R7` 起 `config.shadow_delay_minutes()` 就读这个 env，
+  但 compose **没接线** —— 部署侧改了 `.env` 也不生效（隐性缺口）。本版与新增的 `FIN_OBSERVE_DELAY_MINUTES` 一并补上（默认值与代码默认一致：15 / 30）。
+- **`.env.example` / `.env.personal.example` / `docker-compose*.yml` 的版本旋钮升到 `1.7.0`。**
+
+### 🆕 新增环境变量 · Added env
+
+| 变量 | 默认 | 作用 |
+|---|---|---|
+| `FIN_OBSERVE_DELAY_MINUTES` | `30` | `fin-observe-<market>` 相对「时段末点 + 复核 + 影子」再往后推多少分钟。**可配**；读不到 / 非数字 / 负数一律回落 30 并在日志写明「用了默认」。 |
+| `FIN_SHADOW_DELAY_MINUTES` | `15` | （本版**补上透传**）`fin-shadow-<market>` 相对「时段末点 + 复核」再往后推多少分钟。 |
+
+### ⚠️ 与上游文档 / 旧方案不同、需要知道的
+
+1. **`regime` 的 `unknown` 语义没变**，只是不再恒真：取不到基准 → 仍 `unknown` → 仍停止策略提案。
+   演示站/线上要等这一版 `api` 镜像重建后，三个 `fin-etl-*` Schedule 的那一轮才会**自动开始取基准**。
+2. **`R12` 只让「只接限价单的市场」（港美股）按占比定量**；A 股市价单路径不读占比 —— 这不是漏读，是如实的不作为。
+3. **`R13` 的观察对象是「已生效」提案**，待验证提案归 `fin.shadow` 管，两者不重叠。
+4. **`R13` 的 `fin.observe` 是「唯一自主改配置」的场合（紧急回滚）**，仍然**没有实盘出口**：`FIN_AUTO_APPLY` 恒 `0`、`FIN_LIVE_ORDER_ENABLED` 恒 `0`。
+
 ## [1.6.0] - 2026-10-04
 
 > **次要版本 · 统一经验与迭代（记忆系统 + 受控自进化闭环）。**

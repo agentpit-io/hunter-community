@@ -11,7 +11,7 @@
 #
 # 这个文件做三件事（其余一律继承 `docker-compose.yml`）：
 #
-#   1. **钉死版本**：六个镜像一律 `1.6.0`（已构建且含迁移 `0041`–`0045` 的那一版）。
+#   1. **钉死版本**：六个镜像一律 `1.7.0`（已构建且含迁移 `0041`–`0045` 的那一版）。
 #      ⚠️ 镜像经 GHCR 公开发布，**本文件里不写 `build:`** —— 个人用户 `git clone` 之后
 #      不需要本地编译，也不需要在根分区只有十几 G 的机器上编译 Next.js。
 #   2. **宿主机端口一律绑 `127.0.0.1`**：`03 §2` 明说「现有六服务 Compose 的数据库/Redis
@@ -43,28 +43,28 @@ services:
       - "127.0.0.1:${REDIS_HOST_PORT:-6579}:6379"
 
   api:
-    # 镜像 tag 与 `docker-compose.yml` 同源（`HUNTER_VERSION`），只是这里**显式钉死** 1.6.0：
+    # 镜像 tag 与 `docker-compose.yml` 同源（`HUNTER_VERSION`），只是这里**显式钉死** 1.7.0：
     # 个人部署的机器上 `git pull` 拿到新代码不等于镜像也换了 —— 显式写下来，升级时改这一行。
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-api:1.6.0
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-api:1.7.0
     ports: !override
       - "127.0.0.1:${API_HOST_PORT:-8230}:8000"
 
   web:
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-web:1.6.0
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-web:1.7.0
     ports: !override
       - "127.0.0.1:${WEB_HOST_PORT:-3230}:3000"
 
   opencode:
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-opencode:1.6.0
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-opencode:1.7.0
     ports: !override
       - "127.0.0.1:${OPENCODE_HOST_PORT:-4031}:3901"
 
   llm-shim:
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-llm-shim:1.6.0
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-llm-shim:1.7.0
 
   # ── fin 栈：改挂 `paper` profile（与 `03 §5` 的操作顺序一致）────────────────
   paper:
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-paper:1.6.0
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-paper:1.7.0
     profiles: ["paper"]
 
   temporal:
@@ -74,5 +74,5 @@ services:
     profiles: ["paper"]
 
   fin-worker:
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-fin-worker:1.6.0
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-fin-worker:1.7.0
     profiles: ["paper"]

@@ -586,5 +586,121 @@ async def _shadow_for_project(project: dict, market: str, trade_date: str, now_i
     return out
 
 
+# ── 自动盯盘（R13 · `plan/R13.md` §A）─────────────────────────────────────
+# 收盘后 + 复核 + 影子之后（见 `schedules.observe_specs`）跑一次：
+#
+#   对每一个**已生效**的提案 → 观察一次（`observe_applied`）：
+#     按**原冻结计划**算实盘净值表现 → 越普通线只告警（配置不动）、
+#     踩紧急线才自动回滚（回滚一并产出 `polarity='refute'` 失败经验）。
+#
+# 判断全在服务端 —— 工作流只负责「到点、按市场、逐提案」地调用它。
+# **零订单出口**：观察只读模拟盘净值，回滚只动 `fin_param`（系统唯一自主改配置的场合）。
+OBSERVE_TIMEOUT = timedelta(minutes=5)
+
+
+async def _observe_for_project(project: dict, market: str, trade_date: str,
+                               now_iso: str, req: dict) -> dict:
+    """一个项目下的每个已生效提案各观察一次。
+
+    **单条失败不挂整条工作流**（红线：观察是例行盯盘，一条查询错不该让别的项目不观察）——
+    逐提案 catch、把失败记进汇总继续下一个。但**回滚失败必须可见**：回滚是系统唯一
+    自主改 `fin_param` 的场合（红线 9），所以回滚失败额外打 `ERROR` 日志并标 `rollback_error`。
+    """
+    project_id = project["project_id"]
+    out: dict = {"project_id": project_id, "market": market, "proposals": []}
+    proposals = await _exec(activities.observe_proposals, {"project_id": project_id})
+    as_of = req.get("as_of") or trade_date
+    for prop in proposals:
+        proposal_id = prop["proposal_id"]
+        rec: dict = {"proposal_id": proposal_id, "status": prop.get("status")}
+        try:
+            obs = await _exec(activities.observe_applied, {
+                "proposal_id": proposal_id, "market": market, "as_of": as_of,
+            }, timeout=OBSERVE_TIMEOUT)
+        except Exception as exc:                        # noqa: BLE001 —— 单条失败不挂工作流
+            # api 侧把「回滚核验失败」翻成 409、把「进化未启用 / 硬开关违规」翻成 503；
+            # 这两类都只在**回滚那一支**出现，标出来让人一眼看到「回滚没成功」。
+            status = getattr(exc, "status", None)
+            rec["observed"] = False
+            rec["error"] = f"{type(exc).__name__}: {exc}"
+            if status in (409, 503):
+                rec["rollback_error"] = True
+                workflow.logger.error(
+                    "[observe] {} 回滚未成功（HTTP {}）—— 必须人工确认：{}",
+                    proposal_id, status, exc)
+            else:
+                workflow.logger.error("[observe] {} 观察失败：{}", proposal_id, exc)
+            out["proposals"].append(rec)
+            continue
+        rec["observed"] = obs.get("observed")
+        rec["action"] = obs.get("action")
+        rec["reason"] = obs.get("reason")
+        rec["live"] = obs.get("live")
+        rec["rollback_line"] = obs.get("rollback_line")
+        rec["fail_line"] = obs.get("fail_line")
+        if obs.get("action") == "rolled_back":
+            rec["rollback"] = obs.get("rollback")
+        out["proposals"].append(rec)
+    return out
+
+
+@workflow.defn(name="fin.observe")
+class ObserveWorkflow:
+    """自动盯盘工作流（第四段 R13 · 方案 §A）。
+
+    **市场经 Schedule 的 `args` 传进来**（同六个时点角色 / `fin.review` / `fin.shadow`）：
+    每个市场一条 Schedule（`fin-observe-<market>`），时点 = 该市场时段末点 + 复核延迟
+    + 影子延迟 + 观察延迟（排在 `fin-shadow-<market>` 之后，**不改现有任何一条 Schedule**）。
+    某市场非交易日 / 日历缺失 → 空跑并记明原因，**其他市场照常**。
+
+    内层对「该市场**所有进行中的项目**下每个**已生效**的提案」各观察一次。
+    **观察对象是「已生效」，不是「待验证」** —— 待验证由 `fin.shadow` 管，两者不重叠。
+    行为（只告警 / 才回滚）**逐字复用服务层**，这里一个字都不改判据。
+    """
+
+    @workflow.run
+    async def run(self, req: dict | None = None) -> dict:
+        req = req or {}
+        market = canonical(req.get("market") or "CN_A")
+        if req.get("trade_date") and req.get("now"):
+            trade_date, now_iso = req["trade_date"], req["now"]
+        else:
+            clock = await _market_clock(market)
+            trade_date = req.get("trade_date") or clock["trade_date"]
+            now_iso = req.get("now") or clock["now"]
+        summary: dict = {"market": market, "trade_date": trade_date,
+                         "point": req.get("point") or "observe", "kind": "observe"}
+
+        cal = await _exec(activities.read_calendar, {"trade_date": trade_date, "market": market})
+        summary["calendar"] = cal
+        action, why = gating.gate(cal)
+        if action == gating.SKIP_UNKNOWN:
+            summary["status"] = action
+            summary["warning"] = f"{market} {trade_date} {why}"
+            workflow.logger.warning(summary["warning"])
+            return summary
+        if action == gating.SKIP_NON_TRADING:
+            summary["status"] = action
+            summary["note"] = f"{market} {trade_date} 非交易日（{why}），未观察"
+            workflow.logger.info(summary["note"])
+            return summary
+
+        projects = await _exec(activities.list_active_projects, {})
+        projects = projects_for_market(projects, market)
+        only = req.get("project_id")
+        if only:
+            projects = filter_projects(projects, only)
+            summary["filtered_project"] = only
+
+        summary["projects"] = []
+        for project in projects:
+            summary["projects"].append(
+                await _observe_for_project(project, market, trade_date, now_iso, req)
+            )
+        summary["status"] = "ok"
+        summary["active_projects"] = len(projects)
+        return summary
+
+
 ALL_WORKFLOWS = POINT_WORKFLOWS + (MarketEtlWorkflow, InstrumentSyncWorkflow,
-                                   ReviewWorkflow, ShadowWorkflow)
+                                   ReviewWorkflow, ShadowWorkflow, ObserveWorkflow)

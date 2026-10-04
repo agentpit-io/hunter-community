@@ -61,7 +61,7 @@ services:
   api:
     # HUNTER_VERSION / HUNTER_REGISTRY 见 .env.example。**钉具体版本,别用 latest** ——
     # 浮动标签意味着某次 pull 会无声换掉运行的代码,排查时连「什么时候变的」都查不出来。
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-api:${HUNTER_VERSION:-1.6.0}
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-api:${HUNTER_VERSION:-1.7.0}
     <<: *restart
     depends_on:
       postgres:
@@ -257,7 +257,7 @@ services:
   #        bash scripts/fin_provision_paper_role.sh   # 一次
   #        docker compose --profile fin up -d paper
   paper:
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-paper:${FIN_TAG:-1.6.0}
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-paper:${FIN_TAG:-1.7.0}
     <<: *restart
     profiles: ["fin"]
     depends_on:
@@ -352,7 +352,7 @@ services:
   #    **依赖里根本没有 DB 驱动**（见 requirements.txt），写账本只有一个入口：
   #    `PAPER_BASE_URL`。理由与 grep 证据写在 `docs/开发文档/M4-成果与测试报告.md`。
   fin-worker:
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-fin-worker:${FIN_TAG:-1.6.0}
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-fin-worker:${FIN_TAG:-1.7.0}
     <<: *restart
     profiles: ["fin"]
     depends_on:
@@ -376,6 +376,13 @@ services:
       # 时点 = 该市场**时段末点** + 这个值。**可配**（Q4 拍板，默认 30）——
       # 读不到 / 非数字 / 负数一律回落 30，并在日志里写明「用了默认」。
       FIN_REVIEW_DELAY_MINUTES: ${FIN_REVIEW_DELAY_MINUTES:-30}
+      # R7 · 影子验证 `fin-shadow-<market>` 相对「时段末点 + 复核延迟」再往后推多少分钟
+      # （默认 15）。**可配** —— R13 补上透传：在此之前它只读 env 却没在 compose 里接线，
+      # 部署侧改了 `.env` 也不生效（是个隐性缺口，本轮一并补）。
+      FIN_SHADOW_DELAY_MINUTES: ${FIN_SHADOW_DELAY_MINUTES:-15}
+      # R13 · 自动盯盘 `fin-observe-<market>` 相对「时段末点 + 复核 + 影子」再往后推多少分钟
+      # （默认 30）。**可配** —— 读不到 / 非数字 / 负数一律回落 30，并在日志里写明「用了默认」。
+      FIN_OBSERVE_DELAY_MINUTES: ${FIN_OBSERVE_DELAY_MINUTES:-30}
       # R4 · 四个运行开关（03 §2）**透传给 worker，但 worker 不直接读** ——
       # 唯一读点是 api 的 `services/fin/switches.py`（读点只有一处，别在 worker 里再读一遍）。
       # 传进来是为了让 `.env` 只有一份值；执行侧要知道**生效**模式（可能被降级）时，
@@ -389,7 +396,7 @@ services:
       - "127.0.0.1:${FIN_WORKER_HOST_PORT:-8300}:8300"
 
   web:
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-web:${HUNTER_VERSION:-1.6.0}
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-web:${HUNTER_VERSION:-1.7.0}
     <<: *restart
     depends_on:
       - api
@@ -433,7 +440,7 @@ services:
     # 原来是裸 python:3.12-alpine + 挂 ./scripts/llm-shim。现在源码打进镜像
     # (deploy/llm-shim.Dockerfile),command 与 healthcheck 也在镜像里,
     # 这样不写 compose 的平台(K8s / 云平台表单)拿到的是同一套行为。
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-llm-shim:${HUNTER_VERSION:-1.6.0}
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-llm-shim:${HUNTER_VERSION:-1.7.0}
     <<: *restart
     environment:
       # 监听地址。默认 0.0.0.0;Railway 的老环境私有网络是 IPv6-only,那里设 `::`。
@@ -455,7 +462,7 @@ services:
     # 所以这个服务不再需要任何 bind mount。
     #
     # 换源(自建 registry / 国内镜像)改 HUNTER_REGISTRY,见 .env.example。
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-opencode:${HUNTER_VERSION:-1.6.0}
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-opencode:${HUNTER_VERSION:-1.7.0}
     <<: *restart
     depends_on:
       api:

@@ -45,6 +45,8 @@ def test_all_workflows_registered():
         "fin.review",
         # R7：影子验证（候选臂独立模拟记账 + 两臂同条件验证）
         "fin.shadow",
+        # R13：自动盯盘观察（已生效提案的观察期盯盘 + 紧急线自动回滚）
+        "fin.observe",
     }
 
 
@@ -84,6 +86,8 @@ def test_activity_list_covers_workflow_calls():
         "freeze_memory", "review_collect", "review_propose", "review_append",
         # R7：影子验证的四个活动
         "market_points", "shadow_proposals", "shadow_step", "shadow_evaluate",
+        # R13：自动盯盘观察的两个活动
+        "observe_proposals", "observe_applied",
     } == names
 
 

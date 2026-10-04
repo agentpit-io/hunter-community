@@ -929,3 +929,51 @@ def shadow_evaluate(req: dict[str, Any]) -> dict[str, Any]:
     logger.info("[shadow] evaluate {} → verdict={}（{}）", req.get("proposal_id"),
                 out.get("verdict"), out.get("reason"))
     return out
+
+
+# ── R13 · 自动盯盘 · 观察（`fin.observe`）──────────────────────────────────
+#
+# 与 `fin.shadow` 同构：一次触发对**该市场所有进行中的项目**下每个**已生效**的提案
+# 各观察一次。判断全在 api 的 `evolution.observe_applied`（**只读净值 + 按冻结计划比**）——
+# 这里**一行 SQL 都没有**，也不 import 任何数据库驱动（`test_no_ledger_access.py` 盯着）。
+
+@activity.defn
+def observe_proposals(req: dict[str, Any]) -> list[dict[str, Any]]:
+    """某项目下**已生效**的提案（`status == 'applied'`）。**只读。**
+
+    `status` 是事件表的**可重建投影**（`applied` / `alert` 都投影成 `applied`）——
+    所以观察对象 = 处于生效 / 观察态的提案，正是 `observe_applied` 认的那一种
+    （它要求最后事件是 `applied` 或 `alert`，否则如实报「不是已生效态」）。
+    """
+    items = HunterApiClient().evolution_proposals(req["project_id"])
+    return [p for p in items if str(p.get("status")) == "applied"]
+
+
+@activity.defn
+def observe_applied(req: dict[str, Any]) -> dict[str, Any]:
+    """观察一条已生效提案：**只告警 / 只回滚**，判据全在服务端。
+
+    **读 + 有副作用（告警 / 回滚）都在 api 侧完成**（`services/fin/evolution.py`）：
+    这里只把 `proposal_id` / `market` / `as_of` 传下去，把结果原样带回。
+
+    - 越普通线（提前停止线 / 观察期结束净收益 ≤ 失败线）→ `action='alert'`，**配置不动**；
+    - 踩紧急线（冻结的 `rollback_line`）→ `action='rolled_back'`，服务端按**版本链**
+      回滚到上一个已验证版本，并产出一条 `polarity='refute'` 的失败经验（回灌失败留在
+      api 侧的回灌重试表，由 `rollback.reinject.status == 'pending'` 报出）。
+
+    失败（含**回滚被拒**）按 HTTP 码抛 `ApiError`。**调用方（工作流）逐提案 catch**
+    —— 单条失败不挂整条工作流，但**回滚失败必须可见**（工作流记进汇总 + ERROR 日志）。
+    """
+    proposal_id = req["proposal_id"]
+    out = HunterApiClient().evolution_observe(
+        proposal_id, market=req.get("market"), as_of=req.get("as_of"))
+    action = out.get("action")
+    live = out.get("live") or {}
+    logger.info("[observe] {} → action={} · 回撤={} · 净收益={}（{}）",
+                proposal_id, action, live.get("max_drawdown"), live.get("net_return"),
+                out.get("reason") or "无告警")
+    if action == "rolled_back":
+        rb = (out.get("rollback") or {}).get("reinject") or {}
+        logger.warning("[observe] {} 触发紧急线，已自动回滚 → 回灌状态 {}",
+                       proposal_id, rb.get("status"))
+    return out

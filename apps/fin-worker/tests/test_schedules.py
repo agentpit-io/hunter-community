@@ -4,13 +4,61 @@ from __future__ import annotations
 
 import pytest
 
-from app import schedules
+from app import config, schedules
 
 
 def test_three_markets_eighteen_point_schedules_plus_etl_plus_instrument():
     specs = schedules.all_specs()
     # 3 市场 × 6 时点 + 3 ETL + 3 标的元数据同步 + 3 收盘后复核（R3）+ 3 影子验证（R7）
-    assert len(specs) == 18 + 3 + 3 + 3 + 3
+    # + 3 自动盯盘观察（R13）
+    assert len(specs) == 18 + 3 + 3 + 3 + 3 + 3
+
+
+def test_r13_observe_schedule_one_per_market_after_shadow():
+    """R13 · 自动盯盘 Schedule：每市场一条，排在影子之后，且**不动**任何既有 Schedule。"""
+    specs = {s.schedule_id: s for s in schedules.observe_specs()}
+    assert set(specs) == {"fin-observe-CN_A", "fin-observe-HK", "fin-observe-US"}
+    for sid, spec in specs.items():
+        assert spec.workflow == "fin.observe"
+        assert spec.args["market"] == sid.rsplit("-", 1)[1]
+        assert spec.args["point"] == f"{spec.args['market']}-observe"
+    # CN_A 收盘 15:00 + 复核 30 + 影子 15 + 观察 30 → 16:15
+    assert specs["fin-observe-CN_A"].cron == "15 16 * * 1-5"
+    # HK 收市竞价末点 16:10 + 75 → 17:25；US 16:00 + 75 → 17:15
+    assert specs["fin-observe-HK"].cron == "25 17 * * 1-5"
+    assert specs["fin-observe-US"].cron == "15 17 * * 1-5"
+    # 既有 Schedule 一条没变：point 时点、复核、影子都在
+    assert len(schedules.point_specs()) == 18
+    assert {s.schedule_id for s in schedules.review_specs()} == {
+        "fin-review-CN_A", "fin-review-HK", "fin-review-US"}
+    assert {s.schedule_id for s in schedules.shadow_specs()} == {
+        "fin-shadow-CN_A", "fin-shadow-HK", "fin-shadow-US"}
+    # 与观察那条不撞 id
+    assert {s.schedule_id for s in schedules.shadow_specs()} & set(specs) == set()
+
+
+def test_r13_observe_delay_is_configurable(monkeypatch):
+    """`FIN_OBSERVE_DELAY_MINUTES` 改值 → 时点跟着变（可配，不是写死 30）。"""
+    monkeypatch.setenv("FIN_OBSERVE_DELAY_MINUTES", "5")
+    specs = {s.schedule_id: s for s in schedules.observe_specs()}
+    assert specs["fin-observe-CN_A"].cron == "50 15 * * 1-5"     # 15:00+30+15+5
+    assert "5 分钟" in specs["fin-observe-CN_A"].title
+
+
+@pytest.mark.parametrize("bad", ["", "abc", "-5", "3.5", "三十"])
+def test_r13_illegal_observe_delay_falls_back_to_default(monkeypatch, bad):
+    """非法值 → 默认 30（**不按 0**：配置写错不该让保护悄悄变）。"""
+    monkeypatch.setenv("FIN_OBSERVE_DELAY_MINUTES", bad)
+    assert config.observe_delay_minutes() == config.DEFAULT_OBSERVE_DELAY_MINUTES == 30
+    specs = {s.schedule_id: s for s in schedules.observe_specs()}
+    assert specs["fin-observe-CN_A"].cron == "15 16 * * 1-5"
+
+
+def test_r13_observe_schedules_use_market_timezones():
+    specs = {s.schedule_id: s for s in schedules.observe_specs()}
+    assert specs["fin-observe-CN_A"].timezone == "Asia/Shanghai"
+    assert specs["fin-observe-HK"].timezone == "Asia/Hong_Kong"
+    assert specs["fin-observe-US"].timezone == "America/New_York"
 
 
 def test_r7_shadow_schedule_one_per_market_after_review():

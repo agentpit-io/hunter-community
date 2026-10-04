@@ -165,3 +165,34 @@ def shadow_delay_minutes() -> int:
                        value, DEFAULT_SHADOW_DELAY_MINUTES)
         return DEFAULT_SHADOW_DELAY_MINUTES
     return value
+
+
+# ── 自动盯盘 · 观察（R13 · `plan/R13.md` §A）───────────────────────────────
+# `fin-observe-<market>` 的触发时点 = 该市场**时段末点** + 复核延迟 + 影子延迟 +
+# 这个观察延迟（排在 `fin-shadow-<market>` 之后，不抢它的时点）。**可配** ——
+# 所以具体分钟数不许硬编码进调度代码，这里只给默认值。
+DEFAULT_OBSERVE_DELAY_MINUTES = 30
+
+
+def observe_delay_minutes() -> int:
+    """自动观察相对「时段末点 + 复核延迟 + 影子延迟」再往后推多少分钟。**默认 30**。
+
+    读不到 / 非数字 / 负数 → 用默认 30，并**在日志里写明用了默认**
+    （与 `review_delay_minutes` / `shadow_delay_minutes` 同一口径：配置写错不该让保护悄悄变）。
+    """
+    raw = (os.getenv("FIN_OBSERVE_DELAY_MINUTES") or "").strip()
+    if not raw:
+        logger.info("[config] FIN_OBSERVE_DELAY_MINUTES 未设置，观察延迟用默认 {} 分钟",
+                    DEFAULT_OBSERVE_DELAY_MINUTES)
+        return DEFAULT_OBSERVE_DELAY_MINUTES
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("[config] FIN_OBSERVE_DELAY_MINUTES={!r} 不是整数，观察延迟用默认 {} 分钟",
+                       raw, DEFAULT_OBSERVE_DELAY_MINUTES)
+        return DEFAULT_OBSERVE_DELAY_MINUTES
+    if value < 0:
+        logger.warning("[config] FIN_OBSERVE_DELAY_MINUTES={} 为负数，观察延迟用默认 {} 分钟",
+                       value, DEFAULT_OBSERVE_DELAY_MINUTES)
+        return DEFAULT_OBSERVE_DELAY_MINUTES
+    return value

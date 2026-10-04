@@ -46,6 +46,9 @@ def activity_list() -> list:
         activities.shadow_proposals,
         activities.shadow_step,
         activities.shadow_evaluate,
+        # R13 · 自动盯盘观察（fin.observe）。同上，**必须显式登记**。
+        activities.observe_proposals,
+        activities.observe_applied,
     ]
 
 

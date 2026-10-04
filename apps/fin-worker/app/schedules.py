@@ -188,9 +188,50 @@ def shadow_specs(market_rules: Optional[list[dict]] = None) -> list[ScheduleSpec
     return specs
 
 
+def observe_specs(market_rules: Optional[list[dict]] = None) -> list[ScheduleSpecDef]:
+    """每个市场一条**自动盯盘观察** Schedule（R13 · `plan/R13.md` §A）。
+
+    时点 = 该市场**时段末点** + `FIN_REVIEW_DELAY_MINUTES`（复核）+
+    `FIN_SHADOW_DELAY_MINUTES`（影子，默认 15）+ `FIN_OBSERVE_DELAY_MINUTES`
+    （观察，默认 30）—— 排在 `fin-shadow-<market>` **之后**，不抢它的时点，也不改它。
+    id 形如 `fin-observe-HK`，与 `fin-point-HK-0930` / `fin-review-HK` / `fin-shadow-HK`
+    一眼可分。
+
+    延迟分钟数**一律读 `config`**（连复核 / 影子那两个也现读）——「可配」这条对每一段
+    都成立，硬编码任何一段都等于把拍板废掉。
+
+    Schedule 是**全局的、与项目数无关**：工作流内层对「该市场所有进行中的项目」下
+    每个**已生效**的提案各观察一次。**现有 Schedule 一条都不改**
+    （`point_specs` / `ETL_SCHEDULES` / `INSTRUMENT_SCHEDULES` / `review_specs` /
+    `shadow_specs` 一字未动）。
+    """
+    delay = (config.review_delay_minutes() + config.shadow_delay_minutes()
+             + config.observe_delay_minutes())
+    specs: list[ScheduleSpecDef] = []
+    for rule in _rules_by_market(market_rules):
+        market = rule["market"]
+        tz = rule.get("timezone") or MARKET_TZ.get(market)
+        sessions = list(rule.get("sessions") or [])
+        if not sessions:
+            sessions = next((r.get("sessions") or [] for r in fallback_market_rules()
+                             if r.get("market") == market), [])
+        at = _hhmm_plus(_session_close(sessions), delay)
+        specs.append(ScheduleSpecDef(
+            schedule_id=f"fin-observe-{market}",
+            workflow="fin.observe",
+            cron=cron_of(at),
+            args={"market": market, "at": at, "point": f"{market}-observe"},
+            title=f"{market} · 收盘后自动观察（时段末点 + 复核 {config.review_delay_minutes()} "
+                  f"+ 影子 {config.shadow_delay_minutes()} + 观察 {config.observe_delay_minutes()} 分钟）",
+            timezone=tz,
+        ))
+    return specs
+
+
 def all_specs(market_rules: Optional[list[dict]] = None) -> list[ScheduleSpecDef]:
     return (point_specs(market_rules) + list(ETL_SCHEDULES) + list(INSTRUMENT_SCHEDULES)
-            + review_specs(market_rules) + shadow_specs(market_rules))
+            + review_specs(market_rules) + shadow_specs(market_rules)
+            + observe_specs(market_rules))
 
 
 def build_schedule(spec: ScheduleSpecDef):

@@ -253,3 +253,26 @@ class HunterApiClient:
         if resp.status_code >= 400:
             raise ApiError(resp.status_code, resp.text)
         return resp.json()
+
+    # ── R13 · 自动盯盘观察（内网口令通道；唯一服务模块是 api 的 evolution.observe_applied）──
+    def evolution_observe(self, proposal_id: str, *, market: Optional[str] = None,
+                          as_of: Optional[str] = None) -> dict[str, Any]:
+        """观察一次**已生效**的提案：按**原冻结计划**算实盘净值表现。
+
+        **行为完全在服务端**（`services/fin/evolution.py:observe_applied`）：
+        普通不达标 → 只写 `alert`（配置一动不动）；**只有**实盘回撤触及冻结的
+        `rollback_line` 才**自动回滚**（回滚目标取版本链，不许只信字符串）。
+
+        返回 `{observed, action(none|alert|rolled_back), window, live, rollback_line, fail_line}`；
+        触发回滚时多一个 `rollback` 子体（含 `reinject` 回灌状态）。
+        失败（含回滚被拒）按 HTTP 码抛 `ApiError` —— 调用方**不吞**。
+        """
+        body: dict[str, Any] = {"proposal_id": proposal_id}
+        if market is not None:
+            body["market"] = market
+        if as_of is not None:
+            body["as_of"] = as_of
+        resp = self._request("POST", "/api/internal/fin/evolution/observe", json=body)
+        if resp.status_code >= 400:
+            raise ApiError(resp.status_code, resp.text)
+        return resp.json()
