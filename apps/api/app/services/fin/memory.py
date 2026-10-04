@@ -631,11 +631,13 @@ def append_evidence(
 
     `conn` 给了就用它（测试复用同一连接），否则自己开一个。
     """
-    # R4 · 总开关在**服务端**：`FIN_MEMORY_ENABLED=0` ⇒ 写入口直接拒绝（→503）。
+    # R4 · 总开关在**服务端**：`FIN_MEMORY_ENABLED=0`（或本项目在界面上关掉）⇒ 写入口直接拒绝（→503）。
     # 这一条排在所有校验之前 —— 「关」就是关，与请求长什么样无关。
-    if not switches.memory_enabled():
+    # R21：判据按**项目**取（天花板 ∩ 天窗），关掉一个项目不影响别的项目。
+    if not switches.memory_enabled(project_id):
         raise MemoryDisabledError(
-            "经验库未启用（FIN_MEMORY_ENABLED=0）：本部署当前不接受经验写入")
+            "经验库未启用（本部署的总闸为关，或这个项目的经验库开关是关）："
+            "本部署当前不接受这个项目的经验写入")
 
     if caller not in CALLER_SOURCE:
         raise MemoryValidationError(f"未知调用方通道：{caller!r}")
@@ -816,10 +818,11 @@ def query(
 
     ⚠️ 本函数**没有任何** `include_holdout` / `debug` / `admin` 参数，以后也不要加。
     """
-    # R4 · 总开关在**服务端**：`FIN_MEMORY_ENABLED=0` ⇒ 返回**空集合**（200，不是报错）。
+    # R4 · 总开关在**服务端**：`FIN_MEMORY_ENABLED=0`（或本项目在界面上关掉）⇒ 返回**空集合**（200，不是报错）。
     # 语义照 `03 §2` —— 关掉的是「查得到经验」这件事本身，调用方按「没有经验」继续。
     # `memory_disabled` 是给自己看的自描述位（前端不依赖它）。
-    if not switches.memory_enabled():
+    # R21：判据按**项目**取（天花板 ∩ 天窗）—— 关掉一个项目不影响别的项目。
+    if not switches.memory_enabled(project_id):
         return {
             "memory_snapshot_id": None,
             "as_of_basis": _basis_now().isoformat(),

@@ -25,6 +25,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from app.services.fin import review as review_svc
+from app.services.fin import switches as switches_svc
 
 router = APIRouter(tags=["fin-review"])
 
@@ -72,8 +73,19 @@ async def review_propose(body: ReviewIn, request: Request):
 
     模型不可用 / 候选全废 → 降级为规则文案（`used_fallback=true`，如实标注）。
     **本端点一行经验都不写** —— 写走 `POST /api/internal/fin/memory/evidence`。
+
+    ⚠️ **`R21` · 开关关掉的项目，这一步整个跳过（模型一次都不调）。**
+    在此之前，开关关着时工作流照样跑完整条链，只在最后一步「写经验」被 503 拒 ——
+    也就是**为一个写不进去的结论付模型钱**（还因为 Temporal 重试可能被重放多次）。
+    判据按**项目**取：关掉一个项目不该停掉别的项目的复盘。
     """
     _auth_internal(request)
+    if not switches_svc.memory_enabled(body.project_id):
+        reason = "经验库未启用（本项目开关为关），跳过复盘提案"
+        logger.info("[fin.review] propose project={} date={} 跳过：{}",
+                    body.project_id, body.trade_date, reason)
+        return {"candidates": [], "used_fallback": False, "reason": reason,
+                "rejected": [], "skipped": "memory_disabled"}
     try:
         out = await review_svc.run_review(body.project_id, body.trade_date, market=body.market)
     except LookupError as exc:

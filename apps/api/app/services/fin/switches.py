@@ -23,6 +23,16 @@
 3. **开关每次调用现读环境变量**，不在 import 期缓存。理由：`docker compose up -d`
    之后进程会重建、环境本来就会变；而测试要在同一个进程里切 env 验两条路径。
    缓存一份只会让「改完 env 却不生效」看起来像代码没部署。
+4. **环境变量是天花板，`fin_memory_switch` 是天窗（R21）。**
+   `FIN_MEMORY_ENABLED` / `FIN_EVOLUTION_MODE` 是**部署者的意志**（这台机器最多允许多少）；
+   数据库里那两列是**使用者的日常选择**（在额度内）。**最终生效值 = 两者的交集**，
+   取**更保守**的一个（`0 < 1`、`off < observe < paper`）。
+   环境变量设成关时，界面上的开关是灰的、写入口直接 400 ——
+   **界面永远开不出部署者不允许的东西**。
+   **硬开关（`FIN_AUTO_APPLY` / `FIN_LIVE_ORDER_ENABLED`）不参与覆盖**，永远只认环境变量。
+   **覆盖层只活在这个文件里**：别处不许读 `fin_memory_switch`（读点仍是一处）。
+   候选值落库后靠一个 **5 秒 TTL 的模块级缓存**挡住热路径上的库往返；写入口主动清缓存，
+   所以**改完立刻生效**（多进程最多差 5 秒，写进文档说明过）。
 
 **硬开关为什么拒绝请求而不是拒绝启动**
 
@@ -36,6 +46,7 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Any, Optional
 
 import httpx
@@ -58,6 +69,20 @@ AUTO_APPLY_DEFAULT = "0"
 LIVE_ORDER_DEFAULT = "0"
 
 EVOLUTION_MODES = ("off", "observe", "paper")
+
+# 保守序：值越小越保守。取交集 = 取更小的那个（`off < observe < paper`）。
+MODE_ORDER: dict[str, int] = {mode: i for i, mode in enumerate(EVOLUTION_MODES)}
+
+# ── R21 · 天窗（按项目的覆盖层）────────────────────────────────────────────
+# 可改的两项；**硬开关刻意不在这里** —— 它们连界面入口都没有（写入口直接 400）。
+SWITCH_MEMORY = "memory_enabled"
+SWITCH_MODE = "evolution_mode"
+SWITCH_KEYS = (SWITCH_MEMORY, SWITCH_MODE)
+# 请求里带了这两个 key → 400（报错里写清「本方案规定不许开」）。
+HARD_SWITCH_KEYS = ("auto_apply", "live_order_enabled")
+
+# 覆盖层的短 TTL 缓存：改完由写入口主动清，5 秒只是多副本之间的兜底上限。
+SWITCH_CACHE_TTL_S = 5.0
 
 # 硬开关被拒时用户看到的那句话（`03 §2` 原文）。日志与接口共用同一份，不许两处各写一句。
 AUTO_APPLY_MESSAGE = f"{AUTO_APPLY_ENV} 必须为 0：本方案恒为 0，自动生效未交付"
@@ -85,8 +110,8 @@ def _raw(name: str, default: str) -> str:
     return value or default
 
 
-def memory_enabled() -> bool:
-    """经验库总开关。默认 **关**（`0`）。非法值 → 关 + 留痕。"""
+def ceiling_memory_enabled() -> bool:
+    """**天花板**：这台机器允不允许有经验库（只看环境变量）。默认 **关**（`0`）。"""
     raw = _raw(MEMORY_ENABLED_ENV, MEMORY_ENABLED_DEFAULT)
     if raw == "1":
         return True
@@ -97,8 +122,8 @@ def memory_enabled() -> bool:
     return False
 
 
-def evolution_mode_requested() -> str:
-    """**请求**的进化模式（未做依赖校验）。默认 `off`。非法值 → `off` + 留痕。"""
+def ceiling_evolution_mode() -> str:
+    """**天花板**：这台机器最多允许多强的学习（只看环境变量）。默认 `off`。"""
     raw = _raw(EVOLUTION_MODE_ENV, EVOLUTION_MODE_DEFAULT).lower()
     if raw in EVOLUTION_MODES:
         return raw
@@ -107,14 +132,47 @@ def evolution_mode_requested() -> str:
     return "off"
 
 
-def evolution_enabled() -> bool:
-    """进化能力是否开启（`FIN_EVOLUTION_MODE != 'off'`）。
+def memory_enabled(project_id: Optional[str] = None) -> bool:
+    """经验库总开关（**生效值**）。
+
+    - 不带 `project_id`（老调用点 / 老接口）：就是**天花板**，行为逐字不变。
+    - 带 `project_id`（`R21`）：**天花板 ∩ 天窗** —— 天花板关 ⇒ 一律关（界面开不出来）；
+      天花板开 ⇒ 看这个项目自己的选择，没设过就跟随天花板。
+    """
+    if not ceiling_memory_enabled():
+        return False
+    if not project_id:
+        return True
+    override = _read_override(project_id)
+    if override and override.get(SWITCH_MEMORY) is not None:
+        return bool(override[SWITCH_MEMORY])
+    return True
+
+
+def evolution_mode_requested(project_id: Optional[str] = None) -> str:
+    """**请求**的进化模式（未做依赖校验）。默认 `off`。非法值 → `off` + 留痕。
+
+    带 `project_id` 时取**天花板 ∩ 天窗**：两项谁更保守用谁
+    （`off < observe < paper`，见 `MODE_ORDER`）。
+    """
+    ceiling = ceiling_evolution_mode()
+    if not project_id:
+        return ceiling
+    override = _read_override(project_id)
+    selected = override.get(SWITCH_MODE) if override else None
+    if selected is None:
+        return ceiling
+    return selected if MODE_ORDER[selected] <= MODE_ORDER[ceiling] else ceiling
+
+
+def evolution_enabled(project_id: Optional[str] = None) -> bool:
+    """进化能力是否开启（生效模式 != `off`）。
 
     `R6` 的提案层用这一个判据（**别在 `evolution.py` 里另写 `mode != 'off'`** ——
     开关只在这里读，见模块顶部的铁律）。`observe` / `paper` 都允许提案；
     只不过 `paper` 的依赖缺一会先被降级成 `observe`（`runtime_state`）。
     """
-    return evolution_mode_requested() != "off"
+    return evolution_mode_requested(project_id) != "off"
 
 
 def auto_apply() -> bool:
@@ -150,6 +208,190 @@ def assert_hard_ok() -> None:
         message = "；".join(errors)
         logger.error("[fin.switches] 硬开关违规，拒绝本次请求：{}", message)
         raise SwitchConfigError(message)
+
+
+# ════════════════════════════════════════════════════════════════════════
+# 一之二 · R21 · 天窗：按项目的覆盖层（**只活在这个文件里**）
+# ════════════════════════════════════════════════════════════════════════
+#
+# 现值表 `fin_memory_switch` 与流水账 `fin_memory_switch_log`（迁移 `0046`）。
+# 这里只做三件事：**读覆盖（带 5 秒缓存）· 写覆盖（同事务写流水）· 清缓存**。
+#
+# ⚠️ 失败一律**回落环境变量**，绝不「猜一个」：库不通 / 表还没迁移 / 行读坏了
+#    ⇒ 当作「没设过」，于是生效值 == 天花板 == 部署者的意志（fail-safe）。
+
+_override_cache: dict[str, tuple[float, Optional[dict]]] = {}
+# 「读不到覆盖层」的告警**每个进程只打一次**：热路径上每次决策都打一遍会把日志淹掉，
+# 但第一次必须看得见（否则「表没迁移」会静默地退化成「开关点了没用」）。
+_override_warned = False
+
+
+def invalidate_switch_cache(project_id: Optional[str] = None) -> None:
+    """清缓存。`project_id=None` 清全部（写入口与测试用）。"""
+    if project_id is None:
+        _override_cache.clear()
+    else:
+        _override_cache.pop(str(project_id), None)
+
+
+def _read_override(project_id: str) -> Optional[dict]:
+    """读这个项目的覆盖行（5 秒缓存）。**任何异常 → `None` + 留痕**（回落天花板）。
+
+    返回 `{memory_enabled: bool|None, evolution_mode: str|None}`；没设过 → `None`。
+    """
+    key = str(project_id)
+    now = time.monotonic()
+    hit = _override_cache.get(key)
+    if hit is not None and hit[0] > now:
+        return hit[1]
+
+    row: Optional[dict] = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        try:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT memory_enabled, evolution_mode FROM fin_memory_switch "
+                    "WHERE project_id = %s", (key,))
+                got = cur.fetchone()
+            conn.rollback()          # 只读，显式回滚，不留 idle in transaction
+        finally:
+            conn.close()
+        if got is not None:
+            row = {SWITCH_MEMORY: got["memory_enabled"],
+                   SWITCH_MODE: got["evolution_mode"]}
+    except Exception as exc:                                     # noqa: BLE001
+        # 表还没迁移 / 库不通 / 权限不足 —— 都落到「按没设过处理」。
+        # 这里**不抛**：热路径（每次决策）不能因为一个附加开关读不到就整个 500。
+        global _override_warned
+        if not _override_warned:
+            _override_warned = True
+            logger.warning("[fin.switches] 读 fin_memory_switch 失败（{}），回落环境变量；"
+                           "本进程后续不再重复这条告警：{}", type(exc).__name__, exc)
+        else:
+            logger.debug("[fin.switches] 读 fin_memory_switch 失败（{}），回落环境变量",
+                         type(exc).__name__)
+
+    _override_cache[key] = (now + SWITCH_CACHE_TTL_S, row)
+    return row
+
+
+def _jsonable_switch(item: dict) -> dict:
+    """覆盖行 → 可 JSON 序列化的展示值（`None` 原样保留 = 未设置）。"""
+    return {SWITCH_MEMORY: item.get(SWITCH_MEMORY), SWITCH_MODE: item.get(SWITCH_MODE)}
+
+
+def selected_switch(project_id: Optional[str]) -> dict:
+    """界面上**选的**那两项（未设置 = `None`）。给只读接口用。"""
+    if not project_id:
+        return {SWITCH_MEMORY: None, SWITCH_MODE: None}
+    override = _read_override(project_id)
+    return _jsonable_switch(override) if override else {SWITCH_MEMORY: None, SWITCH_MODE: None}
+
+
+def can_change() -> dict:
+    """这两项**能不能从界面改**（天花板说了算）。硬开关没有这一项 —— 它们不可改。"""
+    return {
+        SWITCH_MEMORY: ceiling_memory_enabled(),
+        SWITCH_MODE: ceiling_evolution_mode() != "off",
+    }
+
+
+def set_project_switch(conn, project_id: str, *, switch_key: str, value: Any,
+                       actor: Optional[str], reason: str) -> dict[str, Any]:
+    """**R21 唯一写入口**：改一个项目的经验库开关。**同事务**写现值 + 追加流水。
+
+    四条硬规矩（**写在这里，不靠界面自觉**）：
+
+    1. **硬开关 key → `ValueError`**（路由翻 400）。它们连可改项都不在。
+    2. **超天花板 → `ValueError`**，报错里写清天花板是多少、为什么。
+    3. **`reason` 必填**；每次**真的改动**都追加一行流水（谁、何时、从什么到什么、为什么）。
+    4. **没变就不写**（`changed=false`）—— 流水账记的是「改动」，不是「点了一下」。
+
+    调用方（路由）负责：项目归属校验、把 `ValueError` 翻成 400。本函数**不查归属**。
+    """
+    import uuid as _uuid
+
+    project_id = str(project_id or "").strip()
+    if not project_id:
+        raise ValueError("project_id 不能为空")
+    reason = str(reason or "").strip()
+    if not reason:
+        raise ValueError("reason 必填：每次改动都要写清「为什么改」")
+
+    if switch_key in HARD_SWITCH_KEYS:
+        hint = (AUTO_APPLY_MESSAGE if switch_key == "auto_apply" else LIVE_ORDER_MESSAGE)
+        raise ValueError(f"{switch_key} 是硬开关，界面上没有入口：{hint}")
+    if switch_key not in SWITCH_KEYS:
+        raise ValueError(f"未知开关 {switch_key!r}（可改的只有 {'、'.join(SWITCH_KEYS)}）")
+
+    if switch_key == SWITCH_MEMORY:
+        if not isinstance(value, bool):
+            raise ValueError("memory_enabled 必须是 true / false")
+        if value and not ceiling_memory_enabled():
+            raise ValueError(
+                f"部署侧已锁死（{MEMORY_ENABLED_ENV}=0）：界面开不出经验库。"
+                f"要开，得先让部署侧把 {MEMORY_ENABLED_ENV} 改成 1 并重建 api。")
+        new_value: Any = value
+    else:
+        new_mode = str(value or "").strip().lower()
+        if new_mode not in EVOLUTION_MODES:
+            raise ValueError(f"evolution_mode 必须是 {' / '.join(EVOLUTION_MODES)}")
+        ceiling = ceiling_evolution_mode()
+        if MODE_ORDER[new_mode] > MODE_ORDER[ceiling]:
+            raise ValueError(
+                f"超过部署侧允许的上限（{EVOLUTION_MODE_ENV}={ceiling}）：界面最多选到 {ceiling}。")
+        new_value = new_mode
+
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute("SELECT memory_enabled, evolution_mode FROM fin_memory_switch "
+                    "WHERE project_id = %s", (project_id,))
+        row = cur.fetchone()
+        cur_mem = row["memory_enabled"] if row else None
+        cur_mode = row["evolution_mode"] if row else None
+        old_value = cur_mem if switch_key == SWITCH_MEMORY else cur_mode
+        changed = old_value != new_value
+
+        if changed:
+            new_mem = new_value if switch_key == SWITCH_MEMORY else cur_mem
+            new_mode_db = new_value if switch_key == SWITCH_MODE else cur_mode
+            cur.execute(
+                """
+                INSERT INTO fin_memory_switch
+                    (project_id, memory_enabled, evolution_mode, updated_by, updated_at)
+                VALUES (%s, %s, %s, %s, now())
+                ON CONFLICT (project_id) DO UPDATE SET
+                    memory_enabled = EXCLUDED.memory_enabled,
+                    evolution_mode = EXCLUDED.evolution_mode,
+                    updated_by     = EXCLUDED.updated_by,
+                    updated_at     = now()
+                """,
+                (project_id, new_mem, new_mode_db, actor),
+            )
+            cur.execute(
+                """
+                INSERT INTO fin_memory_switch_log
+                    (log_id, project_id, switch_key, old_value, new_value, actor, reason)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                ("fmsl_" + _uuid.uuid4().hex[:24], project_id, switch_key,
+                 psycopg2.extras.Json(old_value) if old_value is not None else None,
+                 psycopg2.extras.Json(new_value), actor, reason),
+            )
+    conn.commit()
+
+    # 改完**立刻生效**：清掉缓存，下一次读就是新值（不等 5 秒）。
+    invalidate_switch_cache(project_id)
+    return {
+        "project_id": project_id,
+        "switch_key": switch_key,
+        "old_value": old_value,
+        "new_value": new_value,
+        "changed": changed,
+        "memory_enabled": memory_enabled(project_id),
+        "evolution_mode": evolution_mode_requested(project_id),
+        "effective": "立刻生效（写入口已清缓存）",
+    }
 
 
 # ════════════════════════════════════════════════════════════════════════
@@ -316,13 +558,19 @@ def paper_dependency_failures(*, conn=None) -> list[dict[str, Any]]:
 # 三 · 运行时状态（只读接口的唯一取值来源）
 # ════════════════════════════════════════════════════════════════════════
 
-def runtime_state(*, conn=None) -> dict[str, Any]:
+def runtime_state(*, project_id: Optional[str] = None, conn=None) -> dict[str, Any]:
     """`GET /v1/fin/runtime` 的返回体。**只读、无副作用。**
 
     `paper` 请求 + 依赖缺一 ⇒ `evolution_mode` 报 `observe`、`degraded_reason` 非空。
     请求的不是 `paper` 时**不跑探针**（前端每次轮询都打 5 个探针既慢又吵）。
+
+    **`R21` 起多三个字段**（`ceiling` / `selected` / `can_change`）与 `project_id`：
+
+    - **老字段一个没改**（前端已经在读；不带 `project_id` 时它们就是天花板值）；
+    - 带了 `project_id` 时 `memory_enabled` / `evolution_mode*` 是**这个项目的生效值**
+      （天花板 ∩ 天窗），于是「网页上改一下 → 这里立刻跟着变」。
     """
-    requested = evolution_mode_requested()
+    requested = evolution_mode_requested(project_id)
     effective = requested
     reason: Optional[str] = None
 
@@ -334,10 +582,18 @@ def runtime_state(*, conn=None) -> dict[str, Any]:
                 f"{f['name']}未就绪（{f['detail']}）" for f in failures)
 
     return {
-        "memory_enabled": memory_enabled(),
+        "memory_enabled": memory_enabled(project_id),
         "evolution_mode": effective,
         "evolution_mode_requested": requested,
         "degraded_reason": reason,
         "auto_apply": auto_apply(),
         "live_order_enabled": live_order_enabled(),
+        # ── R21 · 天花板 / 天窗 / 能不能改 ──
+        "project_id": project_id,
+        "ceiling": {
+            SWITCH_MEMORY: ceiling_memory_enabled(),
+            SWITCH_MODE: ceiling_evolution_mode(),
+        },
+        "selected": selected_switch(project_id),
+        "can_change": can_change(),
     }

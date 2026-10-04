@@ -23,6 +23,7 @@ import { useRouter } from 'next/navigation'
 import { Lock, ShieldCheck, Layers, ListChecks, SlidersHorizontal, Rocket, Check, TriangleAlert, Globe } from 'lucide-react'
 import { FEATURE_COPILOT } from '../../lib/features'
 import { Button, Card, CardHead, Chip, KV, Note, finFetch, money, pct } from '../_ui'
+import { RuntimeSwitchPanel, type RuntimeState } from '../_parts'
 import { MARKET_LABEL, MARKET_CURRENCY } from '../_market'
 
 type Strategy = { key: string; name: string; params: Record<string, number>; version: string }
@@ -134,6 +135,13 @@ export default function SetupWizardPage() {
   const [submitting, setSubmitting] = useState(false)
   const [submitErr, setSubmitErr] = useState('')
   const [result, setResult] = useState<{ project: CurrentProject; created: boolean } | null>(null)
+  // ── R21 · 「这台机器要不要学习」的开关（与档位无关，开户后立刻应用）──────────
+  const [rt, setRt] = useState<RuntimeState | null>(null)
+  const [swMem, setSwMem] = useState(false)
+  const [swMode, setSwMode] = useState('off')
+  const [swPick, setSwPick] = useState<{ memory_enabled?: boolean; evolution_mode?: string }>({})
+  const [swReason, setSwReason] = useState('')
+  const [swErr, setSwErr] = useState('')
 
   useEffect(() => {
     let alive = true
@@ -171,15 +179,52 @@ export default function SetupWizardPage() {
   const toggleMarket = (code: string) =>
     setPicked(p => (p.indexOf(code) >= 0 ? p.filter(x => x !== code) : [...p, code]))
 
+  // ── R21 · 读「这台机器允许到哪」（天花板）。项目还没建，所以**不带 project_id**。
+  useEffect(() => {
+    let alive = true
+    finFetch<RuntimeState>('/runtime')
+      .then(d => {
+        if (!alive) return
+        setRt(d)
+        setSwMem(d.memory_enabled)
+        setSwMode(d.evolution_mode_requested)
+      })
+      .catch(e => { if (alive && e?.status === 401) router.push('/login') })
+    return () => { alive = false }
+  }, [router])
+
   async function submit() {
     if (!tier) return
-    setSubmitting(true); setSubmitErr('')
+    setSubmitting(true); setSubmitErr(''); setSwErr('')
     try {
       const r = await finFetch<{ project: CurrentProject; created: boolean }>('/projects', {
         method: 'POST',
         // P3：带上选中的市场（服务端去重 + 固定顺序落库；空数组会被 400 拦下，所以这里也拦）。
         body: JSON.stringify({ tier: tier.tier, markets: picked }),
       })
+      // R21：把向导里选的开关落到**刚建好的这个项目**上。只提交与部署侧默认**不同**的那几项
+      // （一样的值服务端会写「没有变化」，不必白打两枪）。失败**不吞**：写进 swErr 显示出来。
+      const pid = r.project.project_id
+      const errs: string[] = []
+      if (rt) {
+        const want: [string, any][] = []
+        if (swMem !== rt.memory_enabled) want.push(['memory_enabled', swMem])
+        if (swMode !== rt.evolution_mode_requested) want.push(['evolution_mode', swMode])
+        for (const [key, value] of want) {
+          try {
+            await finFetch('/runtime/switch', {
+              method: 'POST',
+              body: JSON.stringify({
+                project_id: pid, switch_key: key, value,
+                reason: swReason.trim() || '开户时在设置向导里设置',
+              }),
+            })
+          } catch (e: any) {
+            errs.push(`${key}: ${e?.message || '修改失败'}`)
+          }
+        }
+      }
+      if (errs.length) setSwErr(`项目已建好，但运行开关没设上（${errs.join('；')}）—— 去「成长」页可以再改。`)
       setResult({ project: r.project, created: r.created })
     } catch (e: any) {
       if (e?.status === 401) { router.push('/login'); return }
@@ -224,6 +269,7 @@ export default function SetupWizardPage() {
               每个市场一个子账户，各用本币记账、互不折算。之后想加市场，去「我的账户」页的
               <b>追加市场</b>（追加后从此刻开始记账，不回填历史）；<b>不能移除</b>市场。
             </Note>
+            {swErr && <Note tone="warn">{swErr}</Note>}
             <div className="flex gap-2 pt-1">
               <Button kind="pri" onClick={() => router.push('/finance/overview')}>去总览</Button>
               <Button onClick={() => router.push('/finance/account')}>看我的账户</Button>
@@ -620,6 +666,31 @@ export default function SetupWizardPage() {
                   运行中途随时可以切到人机协作。
                 </Note>
               )}
+
+              {/* R21 · 「这台机器的运行设置」—— 与档位无关，开户后立刻生效，之后在「成长」页随时可改 */}
+              <div className="rounded-xl" style={{ border: '1px solid var(--border)' }}>
+                <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--border)' }}>
+                  <div className="text-sm font-bold" style={{ color: 'var(--text)' }}>这台机器要不要学习</div>
+                  <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                    这几项管的是「这台机器要不要攒经验、学到多深」，跟你要开的这个项目
+                    （多少钱、哪些市场）没有关系。开完户后去「成长」页也能随时改，改完立刻生效、不用重启服务。
+                  </div>
+                </div>
+                <RuntimeSwitchPanel
+                  rt={rt} memoryOn={swMem} mode={swMode} editable busy={submitting}
+                  onChange={(k, v, reason) => {
+                    setSwPick(p => ({ ...p, [k]: v }))
+                    setSwReason(reason)
+                    if (k === 'memory_enabled') setSwMem(!!v)
+                    else setSwMode(String(v))
+                  }}
+                  extra={(swPick.memory_enabled !== undefined || swPick.evolution_mode !== undefined) ? (
+                    <Note tone="copper">
+                      这些改动会在<b>点「立即开启」之后</b>应用到新项目上（现在还没有项目可挂）。
+                    </Note>
+                  ) : null}
+                />
+              </div>
 
               {submitErr && <Note tone="warn">开户失败：{submitErr}</Note>}
 

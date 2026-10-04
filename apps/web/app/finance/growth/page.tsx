@@ -23,7 +23,11 @@ import {
   BookOpen, ShieldCheck, FlaskConical, History, ClipboardList, Plus, Activity, GitBranch,
 } from 'lucide-react'
 import { Card, CardHead, Chip, Note, KV, Button, finFetch } from '../_ui'
-import { Grid, SectionTitle, Tbl, EmptyState, ErrorState, LoadingCard, Meter } from '../_parts'
+import {
+  Grid, SectionTitle, Tbl, EmptyState, ErrorState, LoadingCard, Meter,
+  RuntimeSwitchPanel, type RuntimeState,
+} from '../_parts'
+import { finPost } from '../_data'
 
 // ── 类型（形状照后端返回体；**不在这里定义任何枚举值**）────────────────────
 
@@ -46,10 +50,7 @@ type Filters = {
   kinds: Opt[]; statuses: Opt[]; markets: Opt[]; regimes: Opt[]
   polarities: Opt[]; memory_layers: Opt[]; symbols: Opt[]
 }
-type Runtime = {
-  memory_enabled: boolean; evolution_mode: string; evolution_mode_requested: string
-  degraded_reason: string | null; auto_apply: boolean; live_order_enabled: boolean
-}
+type Runtime = RuntimeState
 type Plan = {
   metric: string; window_days: number; min_comparable_sample: number
   pass_line: number | null; fail_line: number | null
@@ -99,12 +100,7 @@ function numOrDash(v: number | null | undefined, digits = 2): string {
 const ARABIC = /[0-9０-９]/
 const DIGIT_MSG = '结论里不要写数字，数字请通过「证据引用」挂上去'
 
-/** 生效模式的中文名（值来自后端，前端只做展示映射）。 */
-const MODE_TEXT: Record<string, string> = {
-  off: '关闭（不复盘、不提案）',
-  observe: '观察（拉行情 · 复盘 · 建经验 · 展示提案，没有委托发送能力）',
-  paper: '模拟盘（独立模拟账本跑现行臂与候选臂）',
-}
+/** 生效模式的中文名（值来自后端，前端只做展示映射）—— 定义在 `_parts.tsx`，本页与向导共用。 */
 const KIND_TONE: Record<string, 'copper' | 'ok' | 'amber' | 'slate' | 'up' | 'down'> = {
   fact: 'copper', hypothesis: 'amber', verified: 'down',
 }
@@ -127,6 +123,11 @@ export default function FinanceGrowthPage() {
   const [exps, setExps] = useState<Exp[] | null>(null)
   const [filters, setFilters] = useState<Filters | null>(null)
   const [rt, setRt] = useState<Runtime | null>(null)
+  // R21 · 面板上的「界面取值」（初值来自 rt；改完以后端回来的新快照为准）
+  const [memOn, setMemOn] = useState(false)
+  const [mode, setMode] = useState('off')
+  const [swBusy, setSwBusy] = useState(false)
+  const [swMsg, setSwMsg] = useState('')
   const [props, setProps] = useState<Proposal[] | null>(null)
   const [events, setEvents] = useState<Ev[] | null>(null)
   const [metrics, setMetrics] = useState<Metrics | null>(null)
@@ -172,14 +173,44 @@ export default function FinanceGrowthPage() {
     return () => { alive = false }
   }, [guard])
 
-  // ── 运行模式横幅（`R4` 的只读接口）—— 与项目无关，加载一次
+  // ── 运行模式横幅（`R4` 的只读接口 · R21 起带 `project_id`）────────────────
+  // 给了项目 = 拿这个项目的**生效值**（天花板 ∩ 天窗），于是「网页上改一下 → 这里立刻跟着变」。
   useEffect(() => {
     let alive = true
-    finFetch<Runtime>('/runtime')
-      .then(d => { if (alive) setRt(d) })
+    // 项目还没加载出来时**先按天花板渲染**（与 R4 的老行为逐字一致：横幅任何时候都在），
+    // 拿到 pid 之后再按这个项目刷新一次。
+    const path = pid ? `/runtime?project_id=${encodeURIComponent(pid)}` : '/runtime'
+    finFetch<Runtime>(path)
+      .then(d => {
+        if (!alive) return
+        setRt(d)
+        setMemOn(d.memory_enabled)
+        setMode(d.evolution_mode_requested)
+      })
       .catch(e => { if (alive && !guard(e)) setErr(e?.message || '读不到运行模式') })
     return () => { alive = false }
-  }, [guard])
+  }, [pid, guard])
+
+  // ── R21 · 改一个开关（理由必填；服务端写流水 + 立刻生效）────────────────────
+  const changeSwitch = useCallback(async (
+    key: 'memory_enabled' | 'evolution_mode', value: any, reason: string) => {
+    if (!pid) return
+    setSwBusy(true); setSwMsg('')
+    try {
+      const r = await finPost<{ changed: boolean; runtime: Runtime }>('/runtime/switch', {
+        project_id: pid, switch_key: key, value, reason,
+      })
+      setRt(r.runtime)
+      setMemOn(r.runtime.memory_enabled)
+      setMode(r.runtime.evolution_mode_requested)
+      setSwMsg(r.changed ? '已改，立刻生效（变更已记入流水）' : '没有变化，未写入流水')
+    } catch (e: any) {
+      if (guard(e)) return
+      setSwMsg(e?.message || '修改失败')
+    } finally {
+      setSwBusy(false)
+    }
+  }, [pid, guard])
 
   // ── 换项目 / 换筛选 → 重新取数
   const load = useCallback(async () => {
@@ -404,26 +435,18 @@ export default function FinanceGrowthPage() {
       <div>
         <SectionTitle title="⑥ 提案与验证" sub="它提出的改动、冻结的验证口径、两臂对照、以及谁能让它生效" />
 
-        {/* 运行模式横幅 */}
+        {/* 运行模式横幅 —— R21 起可改（按项目） */}
         <div data-r9="runtime-banner">
           <Card style={{ marginBottom: 16 }}>
-            <CardHead icon={<Activity className="w-4 h-4" />} title="运行模式" sub="读服务端的只读接口 · 前端不自己判断模式" />
-            <div className="p-4 flex flex-col gap-3">
-              {!rt ? <LoadingCard title="正在读取运行模式…" /> : (
-                <>
-                  <Grid cols={4}>
-                    <KV k="经验库" v={rt.memory_enabled ? '已启用' : '未启用'} />
-                    <KV k="生效模式" v={MODE_TEXT[rt.evolution_mode] || rt.evolution_mode} />
-                    <KV k="请求模式" v={MODE_TEXT[rt.evolution_mode_requested] || rt.evolution_mode_requested} />
-                    <KV k="自动生效" v={rt.auto_apply ? '开（异常）' : '关（本方案恒为关闭）'} />
-                  </Grid>
-                  <KV k="实盘订单出口" v={rt.live_order_enabled ? '开（异常）' : '无（本项目不接券商）'} />
-                  {rt.degraded_reason && (
-                    <Note tone="warn"><b>已降级运行</b>：{rt.degraded_reason}</Note>
-                  )}
-                </>
-              )}
-            </div>
+            <CardHead icon={<Activity className="w-4 h-4" />} title="这台项目要不要学习"
+              sub="改完立刻生效 · 不用重启服务 · 每次改动都记进变更流水" />
+            <RuntimeSwitchPanel
+              rt={rt} memoryOn={memOn} mode={mode} editable busy={swBusy}
+              onChange={(k, v, reason) => { void changeSwitch(k, v, reason) }}
+              extra={swMsg ? (
+                <div className="text-xs" style={{ color: 'var(--text-muted)' }} data-r9="switch-msg">{swMsg}</div>
+              ) : null}
+            />
           </Card>
         </div>
 
