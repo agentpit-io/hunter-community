@@ -1,0 +1,25 @@
+{
+  "note": "L10 真浏览器截图（Playwright headless Chromium，打演示站 https://hunter-community.agentpit.io，登录后）。由 scripts/gen_wuqi_report.py 读入并以 base64 内嵌进整合报告 HTML。",
+  "shots": [
+    {
+      "file": "01-成长页-演示站-r13.png",
+      "caption": "演示站成长页（升级 2.0.0 后 · 登录后真浏览器）· scripts/r13_browser_check.mjs 17/17 OK · pageErrors 0"
+    },
+    {
+      "file": "02-经验库开关-可点可切.png",
+      "caption": "成长页 ④ 经验库开关：可点、点完出「理由必填」确认条 · scripts/r21_browser_check.mjs A 段"
+    },
+    {
+      "file": "03-切完立刻生效-未启用.png",
+      "caption": "切到「未启用」后当场生效（不刷新），后端 GET /runtime 同步为 false · 29/29 OK · pageErrors 0"
+    },
+    {
+      "file": "04-向导第7步-这台机器要不要学习.png",
+      "caption": "开户向导第 7 步「这台机器要不要学习」——开户之前就能设置 · r21_browser_check B 段"
+    },
+    {
+      "file": "05-空项目-零阿拉伯数字.png",
+      "caption": "空项目成长页：空态文案如实、本页全文零阿拉伯数字 · r9_browser_check R9_PHASE=empty 7/7 · pageErrors 0"
+    }
+  ]
+}

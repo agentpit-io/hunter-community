@@ -378,12 +378,14 @@ def build(plan_dir: Path, date: str) -> str:
         for t, b in pick_sections(md, r"测试|用例"):
             test_blocks.append(f'<h3>{seg} · {_inline(t)}</h3>{md_to_html(b)}')
 
-    # ④ 开发部署：从 L10 报告里挑部署 / 发版 / 验收相关小节
+    # ④ 开发部署：从 L10 报告里挑部署 / 发版 / 验收 / 总账相关小节。
+    # ⚠️ **故意不挑「出口标准」那节**：那一节里写着本 HTML 自己的大小与 sha256，
+    #    把那一节塞回 HTML 就成了自指（改一个字节，数字立刻过期）。见脚本头「重跑一致」。
     l10 = sorted(DOCS.glob("L10-*.md"))
     if not l10:
         raise SystemExit("缺少 L10 成果文档（docs/开发文档/L10-*.md）—— ④ 开发部署 从它读。")
     l10_md = l10[0].read_text(encoding="utf-8")
-    deploy_secs = pick_sections(l10_md, r"全量验收|发版|镜像|演示站|部署|回滚|遗留|守卫")
+    deploy_secs = pick_sections(l10_md, r"全量验收|发版|镜像|演示站|部署|回滚|遗留|守卫|总账|整合|交接|一句话")
     deploy_html = "".join(f"<h3>{_inline(t)}</h3>{md_to_html(b)}" for t, b in deploy_secs)
     if not deploy_html:
         deploy_html = f"<p><em>（{l10[0].name} 里没有匹配到部署小节）</em></p>"
