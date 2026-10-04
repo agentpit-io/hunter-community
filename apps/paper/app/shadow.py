@@ -314,19 +314,21 @@ def _simulate_one(*, arm, snap, symbol, market, currency, market_rule, instrumen
             qty=qty, price_type=price_type, limit_price=limit_price,
             failed=outcome.failed_names)
 
-    if not trial.filled:
+    if not trial.matched:
         return _arm_event(arm=arm, symbol=symbol, point=point, trade_date=trade_date,
                           snapshot=snap, reason=trial.pending_reason or "未成交", filled=False,
                           recorder=recorder, state=state, initial_capital=initial_capital,
                           side=side, qty=qty, price_type=price_type, limit_price=limit_price)
 
     # ── 成交：按**实际成交额**重算费用（与 engine._recompute_fee 同一口径）───
+    # 部分成交（L05）：成交 `trial.qty` 股（与真实账本同一个 `match` 的同一个结果）。
+    fill_qty = qty if trial.filled else int(trial.qty)
     fill_price = Decimal(str(trial.price))
-    fill_amount = _money(Decimal(qty) * fill_price)
+    fill_amount = _money(Decimal(fill_qty) * fill_price)
     fill_fee = fee_mod.compute_fee(side, fill_amount, fee_model)
-    slippage_total = (_money(model.slippage * qty)
+    slippage_total = (_money(model.slippage * fill_qty)
                       if "slippage" in str(trial.basis) else Decimal("0.0000"))
-    realized = _apply_fill(state, symbol=symbol, side=side, qty=qty, price=fill_price,
+    realized = _apply_fill(state, symbol=symbol, side=side, qty=fill_qty, price=fill_price,
                            fee_total=fill_fee.total)
     position = _position(state, symbol)
     position["price"] = format(fill_price, "f")
@@ -338,6 +340,7 @@ def _simulate_one(*, arm, snap, symbol, market, currency, market_rule, instrumen
         limit_price=limit_price, fill_price=fill_price, fill_amount=fill_amount,
         fill_basis=trial.basis, fee=fill_fee.total, slippage=slippage_total,
         realized=realized, currency=currency, market=market,
+        fill_qty=fill_qty, partial=trial.partial,
     )
 
 
@@ -376,7 +379,7 @@ def _arm_event(*, arm, symbol, point, trade_date, snapshot, reason, filled, reco
                state, initial_capital, side, qty, price_type, limit_price,
                fill_price=None, fill_amount=None, fill_basis=None, fee=None,
                slippage=None, realized=None, currency=None, market=None,
-               failed=None) -> dict[str, Any]:
+               failed=None, fill_qty=None, partial=False) -> dict[str, Any]:
     """拼一条影子事件、交给 `recorder`，并原样返回（供调用方汇总）。
 
     `signal` = 该臂在这一点**是否真的出了决策**（`decided`）。没出决策（如总开关关闭 /
@@ -402,6 +405,9 @@ def _arm_event(*, arm, symbol, point, trade_date, snapshot, reason, filled, reco
                 "price": format(fill_price, "f"),
                 "amount": format(_money(fill_amount), "f"),
                 "basis": fill_basis,
+                # 部分成交（L05）：只成交了 `filled_qty` 股（两臂同一个 match 结果）。
+                "filled_qty": int(fill_qty if fill_qty is not None else qty or 0),
+                "partial": bool(partial),
             }),
             "realized_pnl": None if realized is None else format(_money(realized), "f"),
             "failed_checks": failed or None,

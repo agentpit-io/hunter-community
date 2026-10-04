@@ -168,6 +168,49 @@ def test_two_arms_share_one_snapshot_and_same_quote_as_of(pg, project):
         assert e["signal"]["fill"]["price"] == format(expected.price, "f")
 
 
+def test_two_arms_share_the_l05_volume_and_tick_assumptions(pg, project):
+    """**红线 11 · L05**：成交量参与率与逐市场 tick 在**两臂上完全一致**。
+
+    配参与率 0.2、盘口卖挂 250 股、申报 100 股 → 上限 `floor(250 × 0.2) = 50`。
+    两臂各自**部分成交 50 股**（同一个 `match` 结果），且与直接调
+    `match(..., participation=0.2, tick=…)` 逐位相同 —— 这就是「本段撮合改动
+    同时作用于两臂」的可执行证据。
+    """
+    from app.tick import resolve_tick
+    _seed_reference(pg, project)
+    # 参与率 0.2 + 打开部分成交 —— 都**只在本用例的事务里**（不提交 → 用例结束回滚，
+    # 不污染别的用例；`simulate_arms(pg, …)` 用同一个 cursor，看得见）。
+    pg.execute("UPDATE fin_param SET liquidity_max_participation = 0.2 WHERE project_id = %s",
+               (project,))
+    pg.execute("UPDATE fin_execution_model SET part_fill = true")
+    # **本用例要一张带盘口量的新快照**：`fin_snapshot` 全局只追加、编号精确到秒，
+    # 用固定 `WHEN` 会命中别的用例先落的同一张（无盘口量）行 —— 换个独有的秒。
+    ss = int(project.rsplit("_", 1)[-1], 16) % 60
+    install_quote_source(when=f"{DAY}T10:00:{ss:02d}+08:00", price="10.00", prev_close="10.00",
+                         ask1="10.00", ask1_volume=250)
+    recorder = S.CollectingRecorder()
+    out = S.simulate_arms(pg, _req(project, arms=[_arm("incumbent"), _arm("candidate")]),
+                          recorder=recorder)
+
+    model = load_execution_model(pg)
+    snap = {**snap_mod.get_snapshot(pg, out["snapshot_id"]), "tradable": True}
+    tick = resolve_tick(ledger.get_instrument(pg, CODE), ledger.get_market_rule(pg, "CN_A"),
+                        None, fallback=model.tick_size)
+    expected = match(OrderSpec(side="buy", qty=100, price_type="market"), snap, model,
+                     participation=Decimal("0.2"), tick=tick)
+    assert expected.partial and expected.qty == 50
+
+    assert len(recorder.events) == 2
+    for e in recorder.events:
+        assert e["filled"] is True
+        assert e["signal"]["fill"]["filled_qty"] == 50        # 两臂都只成交 50 股
+        assert e["signal"]["fill"]["partial"] is True
+        assert e["signal"]["fill"]["price"] == format(expected.price, "f")
+    # 两臂结果逐位相同（同条件）
+    f0, f1 = recorder.events[0]["signal"]["fill"], recorder.events[1]["signal"]["fill"]
+    assert f0 == f1
+
+
 def test_valuation_recomputes_from_the_snapshot(pg, project):
     """估值可复算：`total_assets == 可用 + 冻结 + Σ(股数 × 价)`。"""
     _seed_reference(pg, project)
