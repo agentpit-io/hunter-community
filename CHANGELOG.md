@@ -3,6 +3,124 @@
 All notable changes to HunterCode · Community Edition follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-10-05
+
+> **主版本 · 智能炒股「五期 · 闭环补齐」（`L01`–`L10`）。**
+> 一/二/三/四期把「能跑、能记账、能学、能提案」做完了，五期补的是**最后几块不闭环的地方**：
+> 自动闭环只闭了一半（**会复盘、会验证，但不会自己把经验变成提案**）· 策略没有身份与版本锁 ·
+> 决策缺「当时看到了什么、用什么模型算的」的时间字段 · 账本缺部分成交 / 成交量约束 / 停牌 / 公司行为 / 逐市场 tick ·
+> 行情口令与下单口令是同一把、放行靠拒绝名单 · 报告只有站内一个出口且「发出去没发出去」从不写 ·
+> 外面**没法启动 / 查询 / 暂停 / 取消**工作流 · 新闻 / 基本面没接定时采集、情绪完全无表。
+> 本期把这几块一一补齐，并把全过程整合成一份**自包含 HTML**（`docs/开发文档/五期-闭环补齐-整合报告.html`）。
+>
+> **新增七个数据库迁移** `0047`–`0053`（只做加法、可重复执行、**不改任何历史行**、文件内不带 `BEGIN;`/`COMMIT;`），
+> 由 `api` 启动时按 `schema_migrations` 账本**增量自动执行**。台账从 **47 个文件 / 47 行**
+> 走到 **54 个文件 / 54 行**（`max = 0053_collection_complete.sql`）。
+>
+> **动到 `api` / `fin-worker` / `paper` 三个镜像**（`web` / `llm-shim` / `opencode` **代码未动**，版本号随发版一起走）。
+>
+> **新增两个环境变量**：`HUNTER_EXEC_KEY`（下单执行凭证，与行情读取的 `HUNTER_INTERNAL_KEY` **分开**；
+> **都没有默认值**，缺任一 `paper` / `fin-worker` **拒绝启动**）。**默认值没变**：
+> `FIN_MEMORY_ENABLED=0` / `FIN_EVOLUTION_MODE=off` / `FIN_AUTO_APPLY=0` / `FIN_LIVE_ORDER_ENABLED=0`。
+>
+> 升级：`.env` 的 **`HUNTER_VERSION` 与 `FIN_TAG` 两个旋钮一起改 `2.0.0`**，再
+> `docker compose --profile fin pull && docker compose --profile fin up -d`（**`--profile fin` 必须带**，
+> 否则 `paper` / `fin-worker` 不参与重建）。逐步清单见 `docs/开发文档/L10-五期上线与整合报告.md`（含**回滚一步**）。
+>
+> ⚠️ **升级前先备份**：`pg_dump -Fc` 记下路径 / 大小 / `sha256` / PG 版本 / `schema_migrations` 行数。
+> 本版**只加表加列、不改任何历史行**。
+>
+> ⚠️ **`HUNTER_EXEC_KEY` 是本期新加的必填项**：老 `.env` 里没有它，升级后 `paper` / `fin-worker`
+> **会因为缺凭证拒绝启动** —— 先在 `.env` 里生成一个（`openssl rand -hex 32`）再 `up -d`。
+
+### ✨ 新增 · Added
+
+- **`L01` · 「经验 → 提案」接上（`fin.propose` 工作流 + 「实验」实体）。** 原来那个能提提案的
+  `POST /internal/fin/evolution/proposal` 写好了却**全仓没有调用方**（自动闭环只闭了一半）。
+  现在 `fin.propose` 是 **Temporal Schedule 里的一条**（**不另起 cron / 线程定时器**），
+  按市场、对进行中的项目**自动、有闸门地**把可用经验变成提案；并补出**「实验」实体**
+  （方案 §12 时间线里缺的那一格「样本外 / 滚动验证」）。**只自动「提」，不自动「生效」** ——
+  `FIN_AUTO_APPLY` 恒 0 未动，生效仍要人工 `confirm=true`。迁移 `0047_evolution_experiment.sql`。
+- **`L03` · 决策「出身证」。** 补 §6.2 的缺失时间字段（`available_at` / `revision_id` / `decision_as_of`）·
+  §10.2 的 `DataSnapshot` 对象 · §10.3 的决策上下文（`execution_model_version` / 显式 `mode` / `portfolio_version`）。
+  **拿不到真值的一律 `NULL`**（红线 5），不拿 `now()` / 自增号 / 默认值冒充。迁移 `0048_decision_provenance.sql`。
+- **`L04` · 自有策略服务。** 「策略定义」这一层原来根本没有：唯一的策略是写死的示例策略，身份是
+  `fin_param.strategies` 里一个**可被任意改写的自由字符串**。现在有**只追加的登记表 + 内容哈希 + 触发器锁版本**，
+  外加 `strategy.submit` / `strategy.get` / `strategy.cancel` 三个正式入口；示例策略**降级为一个登记在册、
+  可被替换的内置策略**（不删 —— 个人本地开源部署靠它开箱可用）。迁移 `0049_strategy_registry.sql`。
+- **`L05` · 账本补齐五项。** ① **成交量约束**真的读 `liquidity_max_participation`（成交股数 ≤ `floor(盘口量 × 参与率)`）；
+  ② **部分成交** `part_fill` 开关真的生效（开着成交一部分 + 剩余挂着；关着**行为逐字节不变**）；
+  ③ **停牌** `fin_instrument.halted` + 风控**先读它** + 拒单；④ **公司行为**只追加事件表
+  `fin_corporate_action` + 账务（分红入现金 / 拆送股调股数与成本）；⑤ **逐市场 tick**
+  （标的 → 市场分档 → 全局回落三级解析，三市场各不同，替掉原来写死的全局 `0.01`）。
+  **停牌 / 公司行为数据源没有 → 只做「状态位 / 事件表 + 账务 + 人工登记入口」，如实标注「数据源未接」，一个字节都没编。**
+  迁移 `0050_account_ledger_complete.sql`。
+- **`L06` · 凭证分离 + 执行允许名单（默认拒绝）。** **两把钥匙分开**：行情读取用 `HUNTER_INTERNAL_KEY`，
+  下单执行用新的 `HUNTER_EXEC_KEY`（两个不同环境变量、**都没有默认值**）。**门改成「允许名单」**：
+  `paper` 会改账本的四个端点入口先查新表 `fin_exec_allowance`（**只追加**）—— **空名单 = 谁都不许**，
+  要**显式登记**才放行（`POST /api/v1/exec-allowances`）。实盘字段的**拒绝名单**（`LIVE_FIELD_DENYLIST`）
+  **继续保留**，两道防线都在。`GET /healthz` 多报一个执行允许名单现行条目数。迁移 `0051_exec_allowance.sql`。
+- **`L07` · 发布适配器 + `UNKNOWN` 待核实。** 发布从生成流程里**拆出来独立一步**、渠道**走适配器**：
+  `in_app`（原样搬，**行为不变**）· 通用 **`webhook`** · **`file`** 落盘（记路径 + `sha256`）。
+  **只做这三个**，不接任何要注册 / 要付费 / 要审资质的第三方内容平台。新增 `publish.submit` / `publish.get`
+  两个入口，回执统一落 `fin_publish_receipt`。**`UNKNOWN` 待核实 + 不盲目重发**：超时 / 回执不明 → 写 `UNKNOWN`
+  并进待核实队列；`UNKNOWN` 下再发同一份报告**拒绝**（除非显式「重发」标记且**留痕**）。
+  **补上故障注入第 7 项**（「内容已发布，但返回超时或网络断开」）。迁移 `0052_publish_adapter.sql`。
+- **`L08` · 控制通道 + MCP 控制类 + 长任务取消。** 四个控制入口 `runtime.workflow_start / get / pause / cancel`
+  （**只认白名单模板名 + 类型化参数**，**不接受任意代码或 shell**；状态**从 Temporal 现查**，不另存一份；
+  四个都**幂等**）。新增**一个控制类 MCP**（`scripts/opencode-mcp/runtime_mcp.py`），
+  在 `gen-config.py` 里**与数据类 MCP 分开登记** —— 这就是方案 §6.3 的「控制通道与数据通道分离」。
+  **长任务取消接通**：`workflow_cancel` → 查工作流当前 `fin_job` → Temporal 取消 → 调 paper 的 `cancel`
+  → `fin_job` 落 `CANCEL_REQUESTED`，补上 §10.4 的「可请求取消」。
+- **`L09` · 采集补齐。** 方案要的「24 小时自动采集」里，**新闻与基本面真的接上了定时采集**
+  （每个交易日按市场触发、写库、记来源 / 发布时刻 / 入库时刻 / **缺口**）；**情绪没有数据源 → 只建表 + 登记口 + 口径**，
+  **一个情绪值都没编**。三条链路全走 **Temporal Schedule**，**没有另起任何 cron / 线程定时器**。
+  迁移 `0053_collection_complete.sql`。
+- **`L10` · 整合报告（自包含 HTML）。** `scripts/gen_wuqi_report.py` 生成
+  `docs/开发文档/五期-闭环补齐-整合报告.html` —— **一份文件、六部分**（开发方案 / 开发计划 /
+  开发完成后总结 / 开发部署 / 开发详细测试方案 / 测试后截图），**截图 base64 内嵌，离线可读**。
+  脚本随仓库提交、**可重跑**（同一 `--date` + 同一输入 → 逐字节相同的输出）。
+
+### 🔧 变更 · Changed
+
+- **`L02` · 同一事实只留一份（工程债）。** 三处最要命的「同一事实多副本」各合成一份，并加了
+  **会真失败的守护用例**：① **港股交易时段** 3 份 → 1 份字面量（`market_sessions.py` 双镜像逐字节相同）
+  + **DB 行为权威**（api 种子脚本改成读 DB 行）；② `apps/api` 业务代码里的
+  `timezone(timedelta(hours=±N))` **27 处 → 0**、IANA 时区名字面量 **11 处 → 0**（只在 `market_time.py`）；
+  ③ `ensure_schema` 里重复定义的 DDL **2 处 → 0**（paper 内 3 份收成 `aux_ddl.py` 一份）。
+  **新代码不许再制造「同一事实多副本」**（五期新增红线 14）。
+- **`L05` · 风控规则清单从六条变七条**（停牌作为**第一条**，方案要求「风控先读它」）。
+
+### 🆕 新增环境变量 · Added env
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `HUNTER_EXEC_KEY` | **无（必填）** | **下单执行**凭证。与行情读取的 `HUNTER_INTERNAL_KEY` **分开**。缺任一 → `paper` / `fin-worker` **拒绝启动**。 |
+
+> 迁移 `0047`–`0053` 均为**只做加法**；`0051` 新建的 `fin_exec_allowance` **默认空名单 = 拒绝**，
+> 空库 / 老部署升级后需要**显式登记**才放行（这是设计，不是故障）。
+
+### ⚠️ 与上游文档 / 旧方案不同、需要知道的
+
+- **发布渠道只做 `in_app` / `webhook` / `file`**（方案 §6.1 的缩小范围）——**不接**任何要注册、要付费、
+  要审资质的第三方内容平台。
+- **停牌 / 公司行为 / 情绪没有数据源**：只做**表 + 账务 / 规则 + 人工登记入口**，如实写「数据源未接」，
+  **绝不编造**（红线 5）。清单见各段成果文档的「未接数据源清单」一节。
+- **`L04` 的策略服务不写 `fin_param`** —— 策略参数改动仍走 `control.py` 的**唯一写入口**（红线 7）。
+- **api 全量用例里有 17 条**（`tests/test_fin_evolution_router.py`）在「整目录一次跑」时失败 ——
+  这是**既有的跨文件测试污染**（`test_fin_evolution_propose.py` 泄漏模块级 `_INTERNAL_KEY`），
+  与本期无关：**同一文件单独跑 18 passed**，**排除污染源后全量 986 · 0 fail · 4 skip**。
+  本期**不改别人的用例**（红线 6）。
+
+### 🧪 测试 · Tests
+
+- `apps/api`：**998 条 · 17 fail（上述既有污染）· 0 err · 4 skip**；排除污染源 **986 · 0 fail · 4 skip · 982 passed**。
+- `apps/fin-worker`：**319 passed · 0 failed · 0 skipped**。
+- `apps/paper`：**320 · 319 passed · 1 skipped · 0 failed**。
+- 迁移幂等：**54 个文件 = 54 行台账**，**连跑两遍 0 报错**（第二遍 `本次待执行 0 个`）。
+- `03 §6` 十二条必测场景（`scripts/r10_demo_verify.py`）：**24/24 通过**。
+- 真浏览器（Playwright）：`r13` / `r9`（`empty` / `degraded`）**0 pageErrors**。
+
 ## [1.8.0] - 2026-10-05
 
 > **次要版本 · 把「经验库开关」从 `.env` 搬上界面（按项目）。**
