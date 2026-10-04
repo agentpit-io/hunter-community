@@ -228,10 +228,44 @@ def observe_specs(market_rules: Optional[list[dict]] = None) -> list[ScheduleSpe
     return specs
 
 
+def propose_specs(market_rules: Optional[list[dict]] = None) -> list[ScheduleSpecDef]:
+    """每个市场一条**自动提案** Schedule（L01 · `plan/L01.md` §3.2）。
+
+    时点 = 该市场**时段末点** + `FIN_REVIEW_DELAY_MINUTES`（复核）+ `FIN_PROPOSE_DELAY_MINUTES`
+    （提案，默认 2）—— 排在 `fin-review-<market>`（产经验）之后、`fin-shadow-<market>`
+    （验提案）之前，不抢它们的时点，也不改它们。id 形如 `fin-propose-HK`，与
+    `fin-point-HK-0930` / `fin-review-HK` / `fin-shadow-HK` / `fin-observe-HK` 一眼可分。
+
+    延迟分钟数**一律读 `config`**（连复核那个也现读）——「可配」这条对每一段都成立。
+    Schedule 是**全局的、与项目数无关**：工作流内层对「该市场所有进行中的项目」各读一次候选。
+    **现有 Schedule 一条都不改。**
+    """
+    delay = config.review_delay_minutes() + config.propose_delay_minutes()
+    specs: list[ScheduleSpecDef] = []
+    for rule in _rules_by_market(market_rules):
+        market = rule["market"]
+        tz = rule.get("timezone") or MARKET_TZ.get(market)
+        sessions = list(rule.get("sessions") or [])
+        if not sessions:
+            sessions = next((r.get("sessions") or [] for r in fallback_market_rules()
+                             if r.get("market") == market), [])
+        at = _hhmm_plus(_session_close(sessions), delay)
+        specs.append(ScheduleSpecDef(
+            schedule_id=f"fin-propose-{market}",
+            workflow="fin.propose",
+            cron=cron_of(at),
+            args={"market": market, "at": at, "point": f"{market}-propose"},
+            title=f"{market} · 收盘后自动提案（时段末点 + 复核 {config.review_delay_minutes()} "
+                  f"+ 提案 {config.propose_delay_minutes()} 分钟）",
+            timezone=tz,
+        ))
+    return specs
+
+
 def all_specs(market_rules: Optional[list[dict]] = None) -> list[ScheduleSpecDef]:
     return (point_specs(market_rules) + list(ETL_SCHEDULES) + list(INSTRUMENT_SCHEDULES)
-            + review_specs(market_rules) + shadow_specs(market_rules)
-            + observe_specs(market_rules))
+            + review_specs(market_rules) + propose_specs(market_rules)
+            + shadow_specs(market_rules) + observe_specs(market_rules))
 
 
 def build_schedule(spec: ScheduleSpecDef):

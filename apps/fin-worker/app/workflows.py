@@ -702,5 +702,117 @@ class ObserveWorkflow:
         return summary
 
 
+# ── 自动提案（L01 · `plan/L01.md` §3.1）────────────────────────────────────
+# 收盘后（各市场**时段末点 + 复核延迟 + 提案延迟**，见 `schedules.propose_specs`）跑一次：
+#
+#   对每一个**进行中的项目**：① 读候选（`propose_candidates`，只读；开关 / 预算 / 证据闸门
+#   都在 api 侧算）→ ② 逐条走**唯一写入口**（`propose_submit`）落库。
+#
+# **顺序**：在 `fin.review`（产经验）**之后**、`fin.shadow`（验提案）**之前** ——
+# 复盘产经验 → 提案 → 影子验提案，这是整条链子的时间序。
+#
+# **确定性编排，零 LLM**（方案 §5.2）：工作流只负责「到点、按市场、逐项目」地调用与留痕；
+# 聚什么经验、提哪个字段全在 api 的 `services/fin/evolution.py`。
+# **不自动生效**：`FIN_AUTO_APPLY` 恒 0 —— 这一步只产出 `draft` 提案，生效仍要人工 `confirm`。
+PROPOSE_TIMEOUT = timedelta(minutes=5)
+
+
+async def _propose_for_project(project: dict, market: str, trade_date: str,
+                               now_iso: str) -> dict:
+    """一个项目的一次自动提案。**逐条 catch**：一条候选失败（撞唯一索引 / 闸门拒绝）
+    不该挂掉别的候选，也不该挂掉别的项目 —— 失败如实记进汇总。"""
+    project_id = project["project_id"]
+    out: dict = {"project_id": project_id, "market": market, "proposals": []}
+
+    cand = await _exec(activities.propose_candidates,
+                       {"project_id": project_id, "market": market}, timeout=PROPOSE_TIMEOUT)
+    out["action"] = cand.get("action")
+    out["reason"] = cand.get("reason")
+    out["budget"] = cand.get("budget")
+    if cand.get("action") != "propose":
+        # 关着 / 超预算 / 证据不足 —— **如实记「不提」与原因**（不是静默跳过）。
+        workflow.logger.info("[propose] {} 不提：{}", project_id, cand.get("reason"))
+        return out
+
+    for draft in cand.get("drafts") or []:
+        rec: dict = {"proposal_id": draft.get("proposal_id"),
+                     "evidence_count": len(draft.get("evidence_refs") or [])}
+        try:
+            res = await _exec(activities.propose_submit, {"draft": draft},
+                              timeout=PROPOSE_TIMEOUT)
+        except Exception as exc:                            # noqa: BLE001 —— 单条失败不挂工作流
+            rec["ok"] = False
+            rec["error"] = f"{type(exc).__name__}: {exc}"
+            workflow.logger.warning("[propose] {} 候选 {} 落库失败：{}",
+                                    project_id, draft.get("proposal_id"), exc)
+            out["proposals"].append(rec)
+            continue
+        prop = res.get("proposal") or {}
+        rec["ok"] = True
+        rec["saved_id"] = prop.get("proposal_id")
+        rec["target"] = prop.get("target")
+        rec["direction"] = prop.get("direction")
+        out["proposals"].append(rec)
+    return out
+
+
+@workflow.defn(name="fin.propose")
+class ProposeWorkflow:
+    """自动提案工作流（L01 · 把「经验 → 提案」这一节接上）。
+
+    **市场经 Schedule 的 `args` 传进来**（同 `fin.review` / `fin.shadow` / `fin.observe`）：
+    每个市场一条 Schedule（`fin-propose-<market>`），时点 = 该市场时段末点 + 复核延迟
+    + 提案延迟 —— 排在 `fin-review-<market>`（产经验）之后、`fin-shadow-<market>`（验提案）之前。
+    某市场非交易日 / 日历缺失 → 空跑并记明原因，**其他市场照常**。
+
+    内层对「该市场**所有进行中的项目**」各读一次候选、逐条经唯一写入口落库。
+    **只自动「提」，不自动「生效」**（`FIN_AUTO_APPLY` 恒 0）。
+    """
+
+    @workflow.run
+    async def run(self, req: dict | None = None) -> dict:
+        req = req or {}
+        market = canonical(req.get("market") or "CN_A")
+        if req.get("trade_date") and req.get("now"):
+            trade_date, now_iso = req["trade_date"], req["now"]
+        else:
+            clock = await _market_clock(market)
+            trade_date = req.get("trade_date") or clock["trade_date"]
+            now_iso = req.get("now") or clock["now"]
+        summary: dict = {"market": market, "trade_date": trade_date,
+                         "point": req.get("point") or "propose", "kind": "propose"}
+
+        cal = await _exec(activities.read_calendar, {"trade_date": trade_date, "market": market})
+        summary["calendar"] = cal
+        action, why = gating.gate(cal)
+        if action == gating.SKIP_UNKNOWN:
+            summary["status"] = action
+            summary["warning"] = f"{market} {trade_date} {why}"
+            workflow.logger.warning(summary["warning"])
+            return summary
+        if action == gating.SKIP_NON_TRADING:
+            summary["status"] = action
+            summary["note"] = f"{market} {trade_date} 非交易日（{why}），未提案"
+            workflow.logger.info(summary["note"])
+            return summary
+
+        projects = await _exec(activities.list_active_projects, {})
+        projects = projects_for_market(projects, market)
+        only = req.get("project_id")
+        if only:
+            projects = filter_projects(projects, only)
+            summary["filtered_project"] = only
+
+        summary["projects"] = []
+        for project in projects:
+            summary["projects"].append(
+                await _propose_for_project(project, market, trade_date, now_iso)
+            )
+        summary["status"] = "ok"
+        summary["active_projects"] = len(projects)
+        return summary
+
+
 ALL_WORKFLOWS = POINT_WORKFLOWS + (MarketEtlWorkflow, InstrumentSyncWorkflow,
-                                   ReviewWorkflow, ShadowWorkflow, ObserveWorkflow)
+                                   ReviewWorkflow, ShadowWorkflow, ObserveWorkflow,
+                                   ProposeWorkflow)

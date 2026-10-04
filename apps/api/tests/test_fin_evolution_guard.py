@@ -19,8 +19,9 @@ REPO = Path(__file__).resolve().parents[3]        # hunter-community
 
 # 四张表。用分组正则，避免 `fin_evolution_plan` 之类互相前缀误伤。
 # `R8` 起把 `reinject_task`（回灌重试队列）也纳入 —— 它同样是「只许唯一服务模块碰」的表。
+# `L01` 起把 `experiment`（实验实体）也纳入 —— 唯一读写入口是同一个服务模块。
 TABLE_RE = re.compile(
-    r"fin_evolution_(proposal|plan|shadow_event|event|reinject_task)\b")
+    r"fin_evolution_(proposal|plan|shadow_event|event|reinject_task|experiment)\b")
 
 SCAN_ROOTS = [REPO / "apps", REPO / "db"]
 
@@ -100,22 +101,27 @@ def test_single_entry_module_actually_references_the_tables():
     code = _strip_py_comments(
         (REPO / "apps/api/app/services/fin/evolution.py").read_text(encoding="utf-8"))
     for table in ("fin_evolution_proposal", "fin_evolution_plan",
-                  "fin_evolution_shadow_event", "fin_evolution_event"):
+                  "fin_evolution_shadow_event", "fin_evolution_event",
+                  "fin_evolution_experiment"):
         assert table in code, table
 
 
 def test_migration_is_the_only_schema_definition():
-    """进化表只在迁移里建：`0043` 建四张，`R8` 的 `0045` 再建回灌队列（各一处、齐全）。"""
+    """进化表只在迁移里建：`0043` 建四张，`R8` 的 `0045` 再建回灌队列，
+    `L01` 的 `0047` 再建「实验」表（各一处、齐全）。"""
     sql_files = sorted((REPO / "db" / "migrations").glob("*.sql"))
     creators = [p.name for p in sql_files
                 if re.search(r"CREATE TABLE IF NOT EXISTS fin_evolution_", p.read_text(encoding="utf-8"))]
-    assert creators == ["0043_evolution_loop.sql", "0045_evolution_apply.sql"], creators
+    assert creators == ["0043_evolution_loop.sql", "0045_evolution_apply.sql",
+                        "0047_evolution_experiment.sql"], creators
     sql = (REPO / "db" / "migrations" / "0043_evolution_loop.sql").read_text(encoding="utf-8")
     for table in ("fin_evolution_proposal", "fin_evolution_plan",
                   "fin_evolution_shadow_event", "fin_evolution_event"):
         assert f"CREATE TABLE IF NOT EXISTS {table}" in sql, table
     sql45 = (REPO / "db" / "migrations" / "0045_evolution_apply.sql").read_text(encoding="utf-8")
     assert "CREATE TABLE IF NOT EXISTS fin_evolution_reinject_task" in sql45
+    sql47 = (REPO / "db" / "migrations" / "0047_evolution_experiment.sql").read_text(encoding="utf-8")
+    assert "CREATE TABLE IF NOT EXISTS fin_evolution_experiment" in sql47
 
 
 def test_immutability_triggers_defined_in_migration():

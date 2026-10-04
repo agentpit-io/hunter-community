@@ -2294,3 +2294,436 @@ def retry_reinject(*, proposal_id: Optional[str] = None, conn=None) -> dict[str,
         if _reinject_one(task_id=tid)["status"] == "done":
             done += 1
     return {"tried": len(ids), "done": done, "pending": len(ids) - done}
+
+
+# ════════════════════════════════════════════════════════════════════════
+# 九 · L01 · 自动提案（确定性聚合 + 预算闸门 + 经验库开关）
+# ════════════════════════════════════════════════════════════════════════
+#
+# 这一节把「经验 → 提案」这一节接上（此前**全仓没有调用方**，`propose()` 写好了没人调）。
+# 它只做**确定性编排**，**不出现任何 LLM 调用**（方案 §5.2：固定流程不依赖大模型逐步决策）：
+#
+#   查有没有可用经验 → 判经验库开关 → 判预算 → 产出候选（draft）→ 交给 `propose()` 落库
+#
+# **口径边界（红线，改之前先读）**：
+#   1. 本段只自动**提**提案，**不自动生效**（`FIN_AUTO_APPLY` 恒 0；生效仍要 `confirm=true`）。
+#   2. **不放宽证据要求**：候选的证据就是走 `propose()` 的同一套校验（冻结快照 / 同项目 /
+#      非 holdout / 时间边界）。这里**只挑哪些经验可用**，不替它开后门。
+#   3. **只收紧、不放宽**：候选方向恒为 `tighten`，改动幅度取白名单里已登记的 `max_step`
+#      （**不是新写的阈值**）。风控字段的 `loosened` 提案在 `propose()` 里本就被拒（红线 8）。
+#   4. 经验**只从 `memory.query` 读**（`memory_svc.query`），**一行 SQL 都不读 `fin_experience`**。
+#
+# **「可用的经验」是怎么定义的**（沿用四期已有的结构化列，不另发明一套）：
+#   `kind='verified'` + `status='已确认'` + `polarity='refute'`（**失败经验是自进化的燃料**，
+#   见 `0042` 文件头）+ `sample_size >= PROPOSE_MIN_SAMPLE`。分组键 = `strategy_keys`。
+#   这四列都是 R5（`0042`）已经落库的结构化标签，不是从自由文本猜的。
+
+PROPOSE_MIN_SAMPLE_ENV = "FIN_PROPOSE_MIN_SAMPLE"
+PROPOSE_BUDGET_ENV = "FIN_PROPOSE_BUDGET_PER_WINDOW"
+PROPOSE_WINDOW_HOURS_ENV = "FIN_PROPOSE_WINDOW_HOURS"
+
+# 默认值（**依据写进 `docs/开发文档/L01-*.md` 的配置一节，不许当既成事实**）：
+#   · `min_sample=20` —— 与 `DEFAULT_PLAN.min_comparable_sample`（R7 校准的 20）同口径，
+#     避免「提案证据的样本门槛」与「验证判定的样本门槛」两个数各说各话；
+#   · `budget=1 / 24h` —— 同一项目同一 base **同时只允许一个待验证提案**（`0043` 的唯一索引），
+#     所以一天提一条以上几乎必然撞唯一索引；1 是最保守的默认，**可配**；
+#   · `window=24h` —— 一个自然交易日一个窗口。
+PROPOSE_MIN_SAMPLE_DEFAULT = 20
+PROPOSE_BUDGET_DEFAULT = 1
+PROPOSE_WINDOW_HOURS_DEFAULT = 24
+
+# 提案算法版本（「怎么从经验聚合出一条候选」的版本键）—— 改聚合规则 = 换版本。
+PROPOSE_ALGO_VERSION = "propose-algo-v1"
+
+# 未知策略键时的兜底目标字段：`stop_loss_pct`（顶层列、所有策略共用、「越接近 0 越紧」，
+# 方向唯一、恒为收紧 —— **不需要发明「策略键 → 参数」的映射就能给出一个安全候选**）。
+PROPOSE_DEFAULT_FIELD = "stop_loss_pct"
+
+
+def _propose_int_env(name: str, default: int, *, minimum: int = 0) -> int:
+    """读一个正整数配置（预算 / 样本 / 窗口）。缺失 / 非法 / 越界 → 默认值 + 留痕。
+
+    与 `switches._raw` / `config.*_delay_minutes` 同口径：**配置写错不该让保护悄悄变了**，
+    所以宁可回落到默认值并打一行日志，也不猜别的数。
+    """
+    raw = (os.getenv(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("[fin.evolution] {}={!r} 不是整数，用默认 {}", name, raw, default)
+        return default
+    if value < minimum:
+        logger.warning("[fin.evolution] {}={} 小于下限 {}，用默认 {}", name, value, minimum, default)
+        return default
+    return value
+
+
+def propose_min_sample() -> int:
+    """可用经验的 `sample_size` 门槛（**默认 20**，见上面的依据）。"""
+    return _propose_int_env(PROPOSE_MIN_SAMPLE_ENV, PROPOSE_MIN_SAMPLE_DEFAULT)
+
+
+def propose_budget() -> int:
+    """每项目每窗口最多自动提几条（**默认 1**，见上面的依据）。`0` = 关闭自动提案。"""
+    return _propose_int_env(PROPOSE_BUDGET_ENV, PROPOSE_BUDGET_DEFAULT)
+
+
+def propose_window_hours() -> int:
+    """预算窗口的小时数（**默认 24**）。"""
+    return _propose_int_env(PROPOSE_WINDOW_HOURS_ENV, PROPOSE_WINDOW_HOURS_DEFAULT, minimum=1)
+
+
+def _eligible_evidence(items: list[dict], min_sample: int) -> list[dict]:
+    """从 `memory.query` 的结果里挑「可用的经验」。
+
+    **只看结构化列**，绝不从 `statement` 自由文本猜（`0042` 的纪律）：
+    `kind='verified'` · `status='已确认'` · `polarity='refute'` · `sample_size >= min_sample`。
+    """
+    out: list[dict] = []
+    for it in items or []:
+        if str(it.get("kind")) != "verified":
+            continue
+        if str(it.get("status")) != "已确认":
+            continue
+        if str(it.get("polarity")) != "refute":
+            continue
+        try:
+            sample = int(it.get("sample_size"))
+        except (TypeError, ValueError):
+            continue
+        if sample < min_sample:
+            continue
+        out.append(it)
+    return out
+
+
+def _group_key(item: dict) -> str:
+    """分组键 = 策略键（`strategy_keys` 的第一项；没有 → 空串）。`0042` 的稳定版本键。"""
+    keys = item.get("strategy_keys") or []
+    for key in keys:
+        s = str(key).strip()
+        if s:
+            return s
+    return ""
+
+
+def _propose_field_for(strategy_key: str, base: dict[str, Any]) -> str:
+    """该组要**收紧哪个字段**（确定性，无随机）：
+
+    · 该策略在项目配置里有白名单参数（`strategies.<key>.params.<name>`）→ 取**字典序第一个**；
+    · 否则 → 兜底 `stop_loss_pct`（顶层、通用、恒可收紧）。
+
+    「字典序第一个」是**确定性**的排序选择，不是「哪个参数更好」的启发式 —— 后者要么需要一个
+    未登记的映射表，要么等于替用户做参数决策（本段不做）。
+    """
+    prefix = f"strategies.{strategy_key}.params." if strategy_key else ""
+    if prefix:
+        names = sorted(f for f in base if f.startswith(prefix))
+        if names:
+            return names[0]
+    return PROPOSE_DEFAULT_FIELD
+
+
+def _tighten(base_value: Any, entry: dict[str, Any]) -> Optional[float]:
+    """把一个字段朝**收紧**方向挪一个 `max_step`，夹在 `[min, max]` 内。
+
+    收紧方向由白名单条目的 `tighter_when` 决定（与其他地方同一份口径）：
+    `tighter_when='larger'`（如 `stop_loss_pct` 负数越接近 0）→ 加一个 step；
+    `tighter_when='smaller'`（如 `take_profit_pct` / `hold_days_max`）→ 减一个 step。
+    结果超出 `[min, max]` 就夹住；夹住后**与基线相等**（例如已经在最紧端点）→ 返回 None
+    （**没有可收紧的余地，不硬凑一个提案** —— 红线 5）。
+    """
+    try:
+        cur = float(base_value)
+    except (TypeError, ValueError):
+        return None
+    step = float(entry.get("max_step") or 0.0)
+    if step <= 0:
+        return None
+    if entry.get("tighter_when") == "larger":
+        new = cur + step
+    else:
+        new = cur - step
+    lo, hi = float(entry.get("min", new)), float(entry.get("max", new))
+    new = max(lo, min(hi, new))
+    if _canon_num(new) == _canon_num(cur):
+        return None
+    if entry.get("type") == "int":
+        new = float(round(new))
+    return new
+
+
+def _regime_tags_for(evidence: list[dict], market: Optional[str], conn) -> list[str]:
+    """候选的 `regime_tags`（`propose()` 要求非空且每个都 `is_available`）。
+
+    优先取**证据自己的明确 regime 标签**（`check_regime` 要求证据的 definite ⊆ 提案声明的范围，
+    所以用它最不容易被拒）；证据一个都没带（旧经验没有标签）→ 退到**该市场当前 regime**
+    （`regime.detect_for_market`）。当前 regime 是 `unknown`（没有可靠数据源）→ 返回空，
+    调用方据此**停止提案**（`R5` §一.2 规则 4：unknown 只复盘、不提案）。
+    """
+    definite = sorted({str(t).strip() for it in evidence for t in (it.get("regime_tags") or [])
+                       if str(t).strip() and regime_svc.is_available({"label": str(t).strip()})})
+    if definite:
+        return definite
+    try:
+        cur = regime_svc.detect_for_market(market=market, conn=conn)
+    except Exception as exc:                                        # noqa: BLE001
+        logger.warning("[fin.evolution] 读当前 regime 失败（{}），本组不提案", exc)
+        return []
+    if regime_svc.is_available(cur):
+        return sorted(set(regime_svc.tags_for(cur)))
+    return []
+
+
+def _budget_used(cur, project_id: str, window_hours: int) -> int:
+    """这个项目**窗口内已经自动提了几条**（按 `fin_evolution_proposal.created_at` 数）。
+
+    数的是**已经落库的提案行**（不论后续状态）—— 预算管的是「别一次复盘提一堆」，
+    已驳回落库的那条也算提过。
+    """
+    cur.execute(
+        "SELECT count(*) AS n FROM fin_evolution_proposal "
+        "WHERE project_id = %s AND created_at > now() - make_interval(hours => %s)",
+        (project_id, window_hours),
+    )
+    return int(cur.fetchone()["n"])
+
+
+def propose_candidates(*, project_id: str, market: Optional[str] = None,
+                       conn=None) -> dict[str, Any]:
+    """**确定性编排**：给一个项目产出「该自动提哪些提案」的候选清单（**只读，不落库**）。
+
+    返回体（`fin-worker` 的 `fin.propose` 工作流据此决定要不要调写得入口）：
+
+    ```
+    {
+      "project_id": ..., "market": ...,
+      "action": "propose" | "skip",
+      "reason": <skip 时的可读原因，**看得见**，不是静默>,
+      "budget": {"limit": N, "used": M, "window_hours": H, "remaining": R},
+      "min_sample": S,
+      "drafts": [ {proposal_id?, evidence_refs, evidence_snapshot_id, candidate_config,
+                   param_diff, rationale, target, regime_tags}... ]   # 最多 remaining 条
+    }
+    ```
+    """
+    import uuid as _uuid
+
+    project_id = str(project_id or "").strip()
+    if not project_id:
+        raise EvolutionValidationError("project_id 不能为空")
+
+    budget = propose_budget()
+    window_hours = propose_window_hours()
+    min_sample = propose_min_sample()
+
+    def _skip(reason: str, **extra: Any) -> dict[str, Any]:
+        out = {"project_id": project_id, "market": market, "action": "skip",
+               "reason": reason, "budget": {"limit": budget, "used": None,
+                                            "window_hours": window_hours, "remaining": None},
+               "min_sample": min_sample, "drafts": []}
+        out.update(extra)
+        return out
+
+    # ① 经验库开关（天花板 ∩ 天窗，按项目）—— **关着就不提案**（R20 口径：不烧钱、不写库）。
+    if not switches.evolution_enabled(project_id):
+        return _skip("这个项目的学习强度为「关闭」（或部署侧 FIN_EVOLUTION_MODE=off）——不自动提案")
+
+    # ② 预算为 0 = 显式关闭自动提案（可配）。
+    if budget <= 0:
+        return _skip(f"自动提案预算为 0（{PROPOSE_BUDGET_ENV}=0）——不自动提案")
+
+    own = conn is None
+    conn = conn or get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            _owned_project(cur, project_id, None)
+
+            used = _budget_used(cur, project_id, window_hours)
+            budget_state = {"limit": budget, "used": used, "window_hours": window_hours,
+                            "remaining": max(0, budget - used)}
+            if budget_state["remaining"] <= 0:
+                out = _skip(f"本窗口（{window_hours}h）已提 {used} 条，达到预算上限 {budget} ——"
+                            "本窗口不再自动提案")
+                out["budget"] = budget_state
+                return out
+
+            # ③ 可用经验：**经 Memory Service 唯一读入口**取（`kind` / `status` 在服务端过滤，
+            #    不读 `fin_experience` 表）。**先探一次不冻结** —— 多数项目没有可用证据，
+            #    若每次都为它们冻一份快照，一晚上会凭空写几百行 `fin_memory_snapshot`。
+            #    只有真的有可用证据时才**当场冻结**（`propose()` 的证据校验要求
+            #    `evidence_snapshot_id` 指向冻结集合）。
+            probe = memory_svc.query(
+                project_id=project_id, caller="internal", market=market,
+                kind="verified", status="已确认", freeze=False, purpose="review", conn=conn)
+            if not _eligible_evidence(probe.get("items") or [], min_sample):
+                out = _skip(
+                    f"没有可用的失败经验（要求 kind=verified · status=已确认 · polarity=refute · "
+                    f"sample_size≥{min_sample}）——证据不足就不提案")
+                out["budget"] = budget_state
+                return out
+            snap = memory_svc.query(
+                project_id=project_id, caller="internal", market=market,
+                kind="verified", status="已确认", freeze=True, purpose="review", conn=conn)
+            evidence = _eligible_evidence(snap.get("items") or [], min_sample)
+            if not evidence:
+                out = _skip("冻结那一刻可用经验变了（并发写入）——本轮不提案")
+                out["budget"] = budget_state
+                return out
+
+            base = read_config(cur, project_id)
+            if not base:
+                out = _skip("该项目没有可调配置（fin_param 白名单字段全空）——不提案")
+                out["budget"] = budget_state
+                return out
+
+            # ④ 按策略键分组（每组的证据单独引用；`refute` 失败经验是燃料）。
+            groups: dict[str, list[dict]] = {}
+            for it in evidence:
+                groups.setdefault(_group_key(it), []).append(it)
+
+            drafts: list[dict[str, Any]] = []
+            for group_key in sorted(groups):
+                if len(drafts) >= budget_state["remaining"]:
+                    break
+                group = groups[group_key]
+                field = _propose_field_for(group_key, base)
+                wl = whitelist_for(field)
+                if wl is None or wl[0] != "strategy":
+                    # 兜底字段也找不到 → 这一组跳过（不发明一个白名单外的字段）。
+                    logger.warning("[fin.evolution] 组 {} 的目标字段 {} 不在策略白名单，跳过",
+                                   group_key or "(无)", field)
+                    continue
+                new_value = _tighten(base.get(field), wl[2])
+                if new_value is None:
+                    continue
+                tags = _regime_tags_for(group, market, conn)
+                if not tags:
+                    logger.info("[fin.evolution] 组 {} 没有可用的 regime 标签（unknown），跳过",
+                                group_key or "(无)")
+                    continue
+                candidate = dict(base)
+                candidate[field] = new_value
+                computed = config_diff(base, candidate)
+                refs = [str(it["experience_id"]) for it in group]
+                drafts.append({
+                    "project_id": project_id,          # `ProposalIn` 的必填字段（写入口要它）
+                    "proposal_id": _new_id("evp_"),
+                    "evidence_refs": refs,
+                    "evidence_snapshot_id": snap.get("memory_snapshot_id"),
+                    "candidate_config": candidate,
+                    "param_diff": computed,
+                    "target": "strategy",
+                    "regime_tags": tags,
+                    "rationale": (
+                        f"自动提案（{PROPOSE_ALGO_VERSION}）：依据 {len(refs)} 条已验证的失败经验"
+                        f"（策略 {group_key or '未标注'}），把 {field} 朝收紧方向调一档"
+                        f"（{_canon_num(base.get(field))} → {_canon_num(new_value)}）。"
+                        "只收紧、不放宽；生效仍需人工确认。"),
+                    "created_by": "fin.propose",
+                })
+    finally:
+        if own:
+            conn.close()
+
+    if not drafts:
+        return _skip("有可用经验，但没有可收紧的白名单字段 / regime 不可用 —— 不提案",
+                     budget=budget_state)
+
+    return {
+        "project_id": project_id, "market": market, "action": "propose",
+        "reason": f"产出 {len(drafts)} 条候选（预算上限 {budget}，本窗口已用 {used}）",
+        "budget": budget_state, "min_sample": min_sample, "drafts": drafts,
+    }
+
+
+# ── L01 · 「实验」实体（只追加；**不碰 `fin_evolution_plan`**）────────────────
+#
+# 见迁移 `0047_evolution_experiment.sql`。本模块是它的**唯一读写入口**：
+# 写 = `record_experiment`（只 INSERT），读 = `list_experiments`（只 SELECT）。
+
+EXPERIMENT_CONCLUSIONS = ("pass", "fail", "inconclusive")
+
+
+def record_experiment(*, proposal_id: str, conclusion: Optional[str] = None,
+                      data_snapshot_id: Optional[str] = None,
+                      sample_start: Any = None, sample_end: Any = None,
+                      cost_model: Optional[str] = None,
+                      execution_model_version: Optional[str] = None,
+                      method_text: str = "", method_params: Any = None,
+                      result: Any = None, result_note: Optional[str] = None,
+                      owner: str = "system", experiment_id: Optional[str] = None,
+                      conn=None) -> dict[str, Any]:
+    """**只追加**一条实验记录（挂在一个提案上）。
+
+    · `conclusion` ∈ `pass` / `fail` / **`inconclusive`**（合法终局）/ `None`（进行中）；
+    · 数字字段**算不出就传 `None`** —— 本函数**不为空值编默认值**（铁律）；
+    · 提案不存在 → `LookupError`（路由 → 404）。
+    """
+    if conclusion is not None and conclusion not in EXPERIMENT_CONCLUSIONS:
+        raise EvolutionValidationError(
+            f"conclusion 必须是 {' / '.join(EXPERIMENT_CONCLUSIONS)} 或空，收到 {conclusion!r}")
+
+    eid = str(experiment_id or "").strip() or _new_id("expr_")
+    own = conn is None
+    conn = conn or get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT project_id FROM fin_evolution_proposal WHERE proposal_id = %s",
+                        (proposal_id,))
+            if not cur.fetchone():
+                raise LookupError(f"提案不存在：{proposal_id}")
+            cur.execute(
+                """
+                INSERT INTO fin_evolution_experiment
+                  (experiment_id, proposal_id, conclusion, data_snapshot_id,
+                   sample_start, sample_end, cost_model, execution_model_version,
+                   method_text, method_params, result, result_note, owner)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (eid, proposal_id, conclusion, data_snapshot_id,
+                 sample_start, sample_end, cost_model, execution_model_version,
+                 str(method_text or ""),
+                 psycopg2.extras.Json(_jsonable(method_params)) if method_params is not None else None,
+                 psycopg2.extras.Json(_jsonable(result)) if result is not None else None,
+                 result_note, str(owner or "system")),
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        if own:
+            conn.close()
+    return {"experiment_id": eid, "proposal_id": proposal_id, "conclusion": conclusion}
+
+
+def list_experiments(*, proposal_id: str, user_id: Optional[str] = None,
+                     limit: int = 200, conn=None) -> list[dict]:
+    """列出某提案的实验（**只读**，倒序）。跨用户 / 不存在 → `LookupError`。
+
+    归属校验复用 `get_proposal` + `_owned_project` 的同一道口径（与列提案一致）。
+    """
+    own = conn is None
+    conn = conn or get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT project_id FROM fin_evolution_proposal WHERE proposal_id = %s",
+                        (proposal_id,))
+            row = cur.fetchone()
+            if not row:
+                raise LookupError(f"提案不存在：{proposal_id}")
+            _owned_project(cur, str(row["project_id"]), user_id)
+            cur.execute(
+                "SELECT * FROM fin_evolution_experiment WHERE proposal_id = %s "
+                "ORDER BY created_at DESC, experiment_id DESC LIMIT %s",
+                (proposal_id, int(limit)),
+            )
+            rows = [_jsonable(dict(r)) for r in cur.fetchall()]
+        conn.rollback()
+        return rows
+    finally:
+        if own:
+            conn.close()

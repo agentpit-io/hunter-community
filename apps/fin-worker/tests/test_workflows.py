@@ -47,6 +47,8 @@ def test_all_workflows_registered():
         "fin.shadow",
         # R13：自动盯盘观察（已生效提案的观察期盯盘 + 紧急线自动回滚）
         "fin.observe",
+        # L01：自动提案（经验 → 提案这一节接上；只自动「提」不自动「生效」）
+        "fin.propose",
     }
 
 
@@ -88,6 +90,8 @@ def test_activity_list_covers_workflow_calls():
         "market_points", "shadow_proposals", "shadow_step", "shadow_evaluate",
         # R13：自动盯盘观察的两个活动
         "observe_proposals", "observe_applied",
+        # L01：自动提案的两个活动
+        "propose_candidates", "propose_submit",
     } == names
 
 

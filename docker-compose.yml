@@ -383,6 +383,9 @@ services:
       # R13 · 自动盯盘 `fin-observe-<market>` 相对「时段末点 + 复核 + 影子」再往后推多少分钟
       # （默认 30）。**可配** —— 读不到 / 非数字 / 负数一律回落 30，并在日志里写明「用了默认」。
       FIN_OBSERVE_DELAY_MINUTES: ${FIN_OBSERVE_DELAY_MINUTES:-30}
+      # L01 · 自动提案 `fin-propose-<market>` 相对「时段末点 + 复核延迟」再往后推多少分钟
+      # （默认 2，排在 review 之后、shadow 之前）。**可配** —— 读不到 / 非数字 / 负数一律回落 2。
+      FIN_PROPOSE_DELAY_MINUTES: ${FIN_PROPOSE_DELAY_MINUTES:-2}
       # R4 · 四个运行开关（03 §2）**透传给 worker，但 worker 不直接读** ——
       # 唯一读点是 api 的 `services/fin/switches.py`（读点只有一处，别在 worker 里再读一遍）。
       # 传进来是为了让 `.env` 只有一份值；执行侧要知道**生效**模式（可能被降级）时，

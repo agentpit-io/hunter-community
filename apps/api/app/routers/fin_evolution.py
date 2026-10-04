@@ -472,3 +472,99 @@ async def retry_reinject_user(body: ReinjectIn, request: Request):
     if body.proposal_id:
         _owned_proposal(body.proposal_id, uid)
     return _apply_errors(lambda: evolution_svc.retry_reinject(proposal_id=body.proposal_id))
+
+
+# ════════════════════════════════════════════════════════════════════════
+# L01 · 自动提案（内网口令）+ 「实验」读写
+# ════════════════════════════════════════════════════════════════════════
+#
+# 这一节把「经验 → 提案」这一节接上，并补出「实验」实体（方案 §12 的「样本外/滚动验证」）。
+# 与前几节同口径：**路由不做任何业务判断**（开关 / 预算 / 证据聚合全在
+# `services/fin/evolution.py`），只负责（a）判通道、（b）把服务层异常翻成 HTTP 码。
+
+
+class ProposeCandidatesIn(BaseModel):
+    """`fin.propose` 工作流的读入参。**只读** —— 它只产出「该提哪些候选」，不落库。"""
+
+    project_id: str
+    market: Optional[str] = None
+
+
+class ExperimentIn(BaseModel):
+    """挂一次实验（**只追加**）。数字字段**算不出就不传**，由 `None` 落成 NULL，不许编。"""
+
+    proposal_id: str
+    conclusion: Optional[str] = None            # pass / fail / inconclusive / None（进行中）
+    data_snapshot_id: Optional[str] = None
+    sample_start: Optional[str] = None
+    sample_end: Optional[str] = None
+    cost_model: Optional[str] = None
+    execution_model_version: Optional[str] = None
+    method_text: str = ""
+    method_params: Optional[dict] = None
+    result: Optional[dict] = None
+    result_note: Optional[str] = None
+    owner: Optional[str] = None
+
+
+@router.post("/internal/fin/evolution/propose-candidates")
+async def propose_candidates(body: ProposeCandidatesIn, request: Request):
+    """**自动提案的只读一步**：给项目产出候选清单（开关 / 预算 / 证据闸门都在服务端）。
+
+    `fin.propose` 工作流据此决定要不要调**唯一写入口**（下面的 `proposal`）逐条提交。
+    ⚠️ 本端点**不落库** —— 落库仍走 `POST /internal/fin/evolution/proposal`（语义不变）。
+    """
+    _auth_internal(request)
+    try:
+        out = evolution_svc.propose_candidates(project_id=body.project_id, market=body.market)
+    except evolution_svc.EvolutionValidationError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    logger.info("[fin.evolution] propose-candidates project={} → action={} drafts={}（{}）",
+                body.project_id, out.get("action"), len(out.get("drafts") or []),
+                out.get("reason"))
+    return out
+
+
+@router.post("/internal/fin/evolution/experiment")
+async def record_experiment(body: ExperimentIn, request: Request):
+    """**只追加**一条实验记录（挂提案；验证口径的输入 / 方法 / 结果 / 结论）。
+
+    调用方是 `fin-worker`（内网口令）；`inconclusive` 是**合法终局**，照实收。
+    """
+    _auth_internal(request)
+    try:
+        out = evolution_svc.record_experiment(
+            proposal_id=body.proposal_id, conclusion=body.conclusion,
+            data_snapshot_id=body.data_snapshot_id,
+            sample_start=body.sample_start, sample_end=body.sample_end,
+            cost_model=body.cost_model, execution_model_version=body.execution_model_version,
+            method_text=body.method_text, method_params=body.method_params,
+            result=body.result, result_note=body.result_note,
+            owner=body.owner or "fin-worker")
+    except evolution_svc.EvolutionValidationError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    logger.info("[fin.evolution] experiment(record) id={} proposal={} conclusion={}",
+                out.get("experiment_id"), out.get("proposal_id"), out.get("conclusion"))
+    return {"ok": True, "experiment": out}
+
+
+@router.get("/v1/fin/evolution/experiments")
+async def list_experiments(
+    request: Request,
+    proposal_id: str = Query(...),
+    limit: int = Query(200, ge=1, le=1000),
+):
+    """列出某提案挂了哪些实验、结论是什么（**只读**；R9 成长页 / 运维查询用）。
+
+    跨用户 / 不存在 → **404**（不泄露存在性，口径同 `list_proposals`）。
+    """
+    uid = _uid(request)
+    try:
+        items = evolution_svc.list_experiments(proposal_id=proposal_id, user_id=uid, limit=limit)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return {"items": items}

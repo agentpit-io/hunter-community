@@ -196,3 +196,36 @@ def observe_delay_minutes() -> int:
                        value, DEFAULT_OBSERVE_DELAY_MINUTES)
         return DEFAULT_OBSERVE_DELAY_MINUTES
     return value
+
+
+# ── 自动提案（L01 · `plan/L01.md` §3.1 / §3.2）─────────────────────────────
+# `fin-propose-<market>` 的触发时点 = 该市场**时段末点** + 复核延迟 + 这个提案延迟
+# （排在 `fin-review-<market>` 产经验**之后**、`fin-shadow-<market>` 验提案**之前**，
+# 不抢它们的时点）。**可配** —— 所以具体分钟数不许硬编码进调度代码，这里只给默认值。
+#
+# 默认 2：复核（时段末点 +30）之后 `fin-review` 立刻开始写经验；提案只依赖「复盘已写下的
+# 经验」，所以排在它后面留一点点余量即可。**样本 / 证据不足时提案自然为「不提」**（红线 13），
+# 这个延迟不改变判据，只决定「早看还是晚看」。
+DEFAULT_PROPOSE_DELAY_MINUTES = 2
+
+
+def propose_delay_minutes() -> int:
+    """自动提案相对「时段末点 + 复核延迟」再往后推多少分钟。**默认 2**。
+
+    读不到 / 非数字 / 负数 → 用默认 2，并**在日志里写明用了默认**
+    （与 `review_delay_minutes` / `shadow_delay_minutes` 同一口径：配置写错不该让保护悄悄变）。
+    """
+    raw = (os.getenv("FIN_PROPOSE_DELAY_MINUTES") or "").strip()
+    if not raw:
+        return DEFAULT_PROPOSE_DELAY_MINUTES
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("[config] FIN_PROPOSE_DELAY_MINUTES={!r} 不是整数，提案延迟用默认 {} 分钟",
+                       raw, DEFAULT_PROPOSE_DELAY_MINUTES)
+        return DEFAULT_PROPOSE_DELAY_MINUTES
+    if value < 0:
+        logger.warning("[config] FIN_PROPOSE_DELAY_MINUTES={} 为负数，提案延迟用默认 {} 分钟",
+                       value, DEFAULT_PROPOSE_DELAY_MINUTES)
+        return DEFAULT_PROPOSE_DELAY_MINUTES
+    return value

@@ -254,6 +254,41 @@ class HunterApiClient:
             raise ApiError(resp.status_code, resp.text)
         return resp.json()
 
+    # ── L01 · 自动提案（内网口令通道；唯一服务模块是 api 的 evolution.propose_candidates → propose）──
+    def evolution_propose_candidates(self, project_id: str,
+                                     market: Optional[str] = None) -> dict[str, Any]:
+        """**只读**：给项目产出「该自动提哪些候选」（开关 / 预算 / 证据闸门都在 api 侧算）。
+
+        返回 `{action: propose|skip, reason, budget, drafts:[...]}`。`action=skip` 是本段
+        合法的「不提」结果（关着 / 超预算 / 证据不足），**不是错误** —— 工作流照实记下来。
+        """
+        body: dict[str, Any] = {"project_id": project_id}
+        if market is not None:
+            body["market"] = market
+        resp = self._request("POST", "/api/internal/fin/evolution/propose-candidates", json=body)
+        if resp.status_code >= 400:
+            raise ApiError(resp.status_code, resp.text)
+        return resp.json()
+
+    def evolution_propose(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """**唯一写入口**：提交一条提案（提案 + 冻结计划 + 首条事件，api 侧同一事务）。
+
+        `payload` 就是 `evolution_propose_candidates` 返回的一条 draft（`direction` /
+        两个 hash 都不带 —— **服务端算**）。闸门拒绝回 400、同 base 已有待验证提案回 409 ——
+        **不吞**，让工作流如实记下来。
+        """
+        resp = self._request("POST", "/api/internal/fin/evolution/proposal", json=payload)
+        if resp.status_code >= 400:
+            raise ApiError(resp.status_code, resp.text)
+        return resp.json()
+
+    def evolution_record_experiment(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """**只追加**一条实验记录（挂提案）。`inconclusive` 是合法终局，照传。"""
+        resp = self._request("POST", "/api/internal/fin/evolution/experiment", json=payload)
+        if resp.status_code >= 400:
+            raise ApiError(resp.status_code, resp.text)
+        return resp.json()
+
     # ── R13 · 自动盯盘观察（内网口令通道；唯一服务模块是 api 的 evolution.observe_applied）──
     def evolution_observe(self, proposal_id: str, *, market: Optional[str] = None,
                           as_of: Optional[str] = None) -> dict[str, Any]:

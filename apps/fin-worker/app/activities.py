@@ -977,3 +977,42 @@ def observe_applied(req: dict[str, Any]) -> dict[str, Any]:
         logger.warning("[observe] {} 触发紧急线，已自动回滚 → 回灌状态 {}",
                        proposal_id, rb.get("status"))
     return out
+
+
+# ── L01 · 自动提案（`fin.propose` 工作流的两个活动）──────────────────────────
+#
+# 「经验 → 提案」这一节此前**全仓没有调用方**（接口写好了没人调）。这里补上**确定性编排**：
+# 先读候选（`propose_candidates`，只读）→ 再逐条走**唯一写入口**（`propose_submit`）。
+#
+# **不出现任何 LLM 调用**（方案 §5.2：固定流程不依赖大模型逐步决策）——
+# 开关 / 预算 / 证据聚合 / 候选生成全在 api 侧（`services/fin/evolution.py`），
+# 这里只负责「到点、按市场、逐项目」地搬运与留痕。fin-worker 依旧**一行 SQL 都不碰**。
+
+@activity.defn
+def propose_candidates(req: dict[str, Any]) -> dict[str, Any]:
+    """**只读**：给项目产出候选清单（开关 / 预算 / 证据闸门都在 api 侧算）。
+
+    `action='skip'` 是合法终局（关着 / 超预算 / 证据不足），工作流照实记下来，
+    **不当错误**、更不硬造一条提案。
+    """
+    out = HunterApiClient().evolution_propose_candidates(
+        req["project_id"], market=req.get("market"))
+    logger.info("[propose] candidates project={} market={} → action={} drafts={}（{}）",
+                req.get("project_id"), req.get("market"), out.get("action"),
+                len(out.get("drafts") or []), out.get("reason"))
+    return out
+
+
+@activity.defn
+def propose_submit(req: dict[str, Any]) -> dict[str, Any]:
+    """把一条候选交**唯一写入口**落库。闸门拒绝（400）/ 同 base 已有待验证提案（409）→ 抛。
+
+    抛出由工作流**逐条 catch**（一条撞唯一索引不该挂掉别的组 / 别的项目）—— 见
+    `workflows._propose_for_project`。
+    """
+    draft = req["draft"]
+    out = HunterApiClient().evolution_propose(draft)
+    prop = out.get("proposal") or {}
+    logger.info("[propose] submit → proposal={} target={} direction={}",
+                prop.get("proposal_id"), prop.get("target"), prop.get("direction"))
+    return {"proposal": prop, "ok": bool(out.get("ok"))}

@@ -10,8 +10,8 @@ from app import config, schedules
 def test_three_markets_eighteen_point_schedules_plus_etl_plus_instrument():
     specs = schedules.all_specs()
     # 3 市场 × 6 时点 + 3 ETL + 3 标的元数据同步 + 3 收盘后复核（R3）+ 3 影子验证（R7）
-    # + 3 自动盯盘观察（R13）
-    assert len(specs) == 18 + 3 + 3 + 3 + 3 + 3
+    # + 3 自动盯盘观察（R13）+ 3 自动提案（L01）
+    assert len(specs) == 18 + 3 + 3 + 3 + 3 + 3 + 3
 
 
 def test_r13_observe_schedule_one_per_market_after_shadow():
