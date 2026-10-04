@@ -11,6 +11,16 @@
 | `intent` | **意图** | 买/卖、代码、数量、价型、限价 |
 | `valid_until` | **有效期** | 过期不补单（`01方案 §11.2`「信号过期」） |
 
+**决策上下文（L03 · 技术方案 §10.3）** 另外四样也在这份契约里，进 `fin_order.intent_ref`
+留痕（出事复盘时要能答「是不是模拟、站在哪一版账本 / 哪一版数据上做的决定」）：
+
+| 字段 | 是什么 | 口径 |
+|---|---|---|
+| `mode` | 显式模式 | 本服务恒 `PAPER` —— **显式写出来**，不靠「没配就是 PAPER」 |
+| `portfolio_version` | 账户（组合）版本 | §10.3 的名字；= 契约里的 `account_version`（`fin_project.version`）。**正式名是 `account_version`**（仓里已在用），此处只加别名 |
+| `decision_as_of` | 本次决策允许使用信息的截止时间 | = 决策时刻（策略只能用到此刻为止的信息）；**口径写明**，不是编的时间 |
+| `data_snapshot_id` | 绑定的不可变数据快照键 | `L04` 起策略绑定 `fin_data_snapshot` 的行；示例策略不绑 → 空串（不编） |
+
 **契约版本与命令版本是两回事**：`contract_version` 说的是这份 JSON 的形状，
 `strategy_version` 说的是策略逻辑。两者都进 `decision_ref`，落进 `fin_order`。
 
@@ -96,6 +106,19 @@ class StrategyDecision:
     # 好让 `fin_order.intent_ref` 记得住「这笔委托是站在哪一版经验上做的决定」。
     memory: dict[str, Any] = field(default_factory=dict)
     contract_version: str = CONTRACT_VERSION
+    # ── L03 · 决策上下文（技术方案 §10.3）──────────────────────────────────
+    # `mode` —— 显式模式（本服务恒 PAPER）。**示例策略显式写它**；这里给默认只是为了
+    # 「老契约（没这个字段）也能进来」，但 `to_dict` / `to_paper_command` 一定原样带出去，
+    # 决策对象**始终显式声明**它是哪种模式（不是靠下游「没看到就是 PAPER」）。
+    mode: str = "PAPER"
+    # `portfolio_version` —— §10.3 的名字，等价于契约里的 `account_version`
+    # （本仓正式名，`fin_project.version`）。缺省时取 `account_version`，不编新数。
+    portfolio_version: Optional[int] = None
+    # `decision_as_of` —— 本次决策允许使用信息的截止时间。能由「决策时刻」推出就写清楚；
+    # 推不出就留空串（→ 落库时 `NULL`），**不编**。
+    decision_as_of: str = ""
+    # `data_snapshot_id` —— 绑定的不可变数据快照键（`L04` 起用）。示例策略不绑 → 空串。
+    data_snapshot_id: str = ""
 
     # ── 构造 ──────────────────────────────────────────────────────────────
     @classmethod
@@ -132,6 +155,15 @@ class StrategyDecision:
         memory = raw.get("memory") or {}
         if not isinstance(memory, dict):
             raise ContractError("memory 必须是对象（决策前冻结的经验集）")
+        # L03 · 决策上下文。都是**可选**（老契约没有这几项也能进），缺省按下面的口径：
+        #   · mode 缺省 PAPER —— 本桥只连 paper；但 `to_dict` 会显式带出去；
+        #   · portfolio_version 缺省取 account_version（同一件事，§10.3 的别名）；
+        #   · decision_as_of / data_snapshot_id 缺省空串 → 落库 `NULL`（不编时间、不编快照）。
+        mode = str(raw.get("mode") or "PAPER")
+        pv = raw.get("portfolio_version")
+        portfolio_version = account_version if pv is None else int(pv)
+        decision_as_of = str(raw.get("decision_as_of") or "").strip()
+        data_snapshot_id = str(raw.get("data_snapshot_id") or "").strip()
         return cls(
             decision_id=decision_id,
             strategy_key=strategy_key,
@@ -142,6 +174,10 @@ class StrategyDecision:
             data_snapshot=snapshot,
             memory=memory,
             contract_version=cv,
+            mode=mode,
+            portfolio_version=portfolio_version,
+            decision_as_of=decision_as_of,
+            data_snapshot_id=data_snapshot_id,
         )
 
     @property
@@ -157,6 +193,11 @@ class StrategyDecision:
             "account_version": self.account_version,
             "data_snapshot": self.data_snapshot,
             "memory": self.memory,
+            # L03 · 决策上下文（显式带出，落进 intent_ref）。
+            "mode": self.mode,
+            "portfolio_version": self.portfolio_version,
+            "decision_as_of": self.decision_as_of,
+            "data_snapshot_id": self.data_snapshot_id,
             "intent": {
                 "code": self.intent.code,
                 "side": self.intent.side,
@@ -203,6 +244,15 @@ class StrategyDecision:
                 "data_snapshot": self.data_snapshot,
                 # R3 · 这笔委托站在哪一版经验上做的决定（没有经验集时为空对象）。
                 "memory": self.memory,
+                # L03 · 决策上下文（§10.3）。**mode 显式写死**；portfolio_version 与
+                # 顶层 account_version 同一件事（§10.3 的别名）；decision_as_of 是
+                # 「本次决策允许使用信息的截止时间」（= 决策时刻，口径写明）；没有绑数据集
+                # 快照时 data_snapshot_id 为空串 —— 不编一个假快照。（撮合时用的执行模型
+                # 版本不在这里：那是 paper 侧选的，落 `fin_trade.execution_model_version`。）
+                "mode": self.mode,
+                "portfolio_version": self.portfolio_version,
+                "decision_as_of": self.decision_as_of or None,
+                "data_snapshot_id": self.data_snapshot_id or None,
             },
         }
         if self.intent.limit_price is not None:

@@ -242,6 +242,16 @@ def build_decision(
         "strategy_key": strategy_key,
         "strategy_version": strategy_version,
         "account_version": int(project.get("version") or 0),
+        # L03 · 决策上下文（§10.3）——**显式写出来**，不靠下游「没看到就是 PAPER」：
+        #   · mode：本服务恒 PAPER；
+        #   · portfolio_version：§10.3 的名字（= account_version，同一件事，只加别名）；
+        #   · decision_as_of：本次决策允许使用信息的截止时间 = 决策时刻 `now`
+        #     （策略只能用到此刻为止的信息，口径写明；不是拿本机时间冒充一个别的时刻）。
+        #   · data_snapshot_id **不写**：示例策略只读项目参数、不绑定数据集快照 ——
+        #     空 → 落库 `NULL`（不编一个假快照键；绑定是 L04 的策略服务的活）。
+        "mode": "PAPER",
+        "portfolio_version": int(project.get("version") or 0),
+        "decision_as_of": now.isoformat(),
         "data_snapshot": {
             # 示例策略**不做分析**：A 股不读行情（成交价由 paper 定）；港美股只取一个
             # 真实报价当限价单的参考价（限价单必须带价）。这里如实写清它用到的输入。

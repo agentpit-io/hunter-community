@@ -67,11 +67,16 @@ def take_snapshot(cur, code: str, *, now: Optional[datetime] = None) -> dict:
 # ── ④ 记账 ────────────────────────────────────────────────────────────────
 
 def _book_fill(cur, project, order_id, req, snap, match, fee, amount, source, fee_version,
-               *, market="CN_A", currency="CNY") -> str:
+               *, market="CN_A", currency="CNY", exec_model_version=None) -> str:
     """成交记账：委托 → 成交（绑快照）→ 现金 → 持仓 → 版本。返回 `trade_id`。
 
     **按该市场子账户落账**：成交 / 流水 / 持仓都带 `market` 与 `currency`（本币原值，
     不做任何跨币种换算）。A 股订单的 `market='CN_A' / currency='CNY'`，与改前逐位一致。
+
+    **决策「出身证」（L03）**：把「这笔用的执行模型版本」（`exec_model_version`，
+    撮合时已从 `load_execution_model` 拿到）、显式模式 `PAPER`、以及本笔应用在的
+    账户版本（`project["version"]`，`bump_version` **之前**的取值）落进成交行 ——
+    出事时这三样能直接答「用什么模型算的、是不是模拟、站在哪一版账本上」。
     """
     project_id = project["project_id"]
     side = req["side"]
@@ -85,6 +90,9 @@ def _book_fill(cur, project, order_id, req, snap, match, fee, amount, source, fe
         cur, trade_id, order_id, project_id, code, side, qty, match.price, amount,
         fee, snap["snapshot_id"], source, fee_version, snap["snapshot_time"],
         market=market, currency=currency,
+        execution_model_version=exec_model_version,
+        mode="PAPER",                      # 显式：本服务恒模拟盘（不靠「没配就是 PAPER」）
+        portfolio_version=int(project.get("version") or 0),
     )
     if side == "buy":
         order = ledger.get_order(cur, order_id)
@@ -381,7 +389,8 @@ def execute(cur, req: dict, *, now: Optional[datetime] = None) -> dict:
         trade_id = _book_fill(cur, project, order_id, req, snap,
                               MatchResult(FILLED, Decimal(str(trial.price)), trial.basis),
                               fill_fee, fill_amount, source, fee_model["version"],
-                              market=market, currency=currency)
+                              market=market, currency=currency,
+                              exec_model_version=model.version)
         receipt = {
             "order_id": order_id,
             "status": "filled",
@@ -622,7 +631,8 @@ def match_open_orders(cur, project_id: str, *, now: Optional[datetime] = None,
                               MatchResult(FILLED, Decimal(str(result.price)),
                                                   result.basis),
                               fee, fill_amount, order["source"], fee_model["version"],
-                              market=market, currency=currency)
+                              market=market, currency=currency,
+                              exec_model_version=model.version)
         filled.append({"order_id": order["order_id"], "trade_id": trade_id,
                        "price": Decimal(str(result.price)), "qty": qty,
                        "market": market,

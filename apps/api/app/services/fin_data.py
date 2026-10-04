@@ -477,9 +477,16 @@ def quote(code: str) -> Optional[dict]:
     返回体（字段固定，换数据源不改字段）：
     `code / name / market / last_price / prev_close / open / high / low /
      bid1_price / bid1_volume / ask1_price / ask1_volume /
-     event_time / ingested_at / source / orderbook / quote_quality / gaps`
+     snapshot_time / event_time / ingested_at / available_at / revision_id /
+     source / orderbook / quote_quality / gaps`
 
     `market` 输出本仓统一三值（`CN_A`/`HK`/`US`），`quote_quality` 见附 B。
+
+    **口径统一（L03）**：这个临时 dict 与持久化的 `fin_snapshot` 用**同一套字段名** ——
+    `snapshot_time`（数据源回报的时刻 = 这张快照的「数据截止时间」，**正式名**；`event_time`
+    保留为别名，老读取方不受影响）· `source` · `quote_quality` · `available_at` · `revision_id`。
+    `available_at` / `revision_id` 数据源**不返回** → 恒 `None`（**不许拿 now() 冒充**，红线 5），
+    与 `fin_snapshot.available_at` / `.revision_id` 同口径。
     """
     now = datetime.now(UTC)
     gaps: list[str] = []
@@ -550,7 +557,14 @@ def quote(code: str) -> Optional[dict]:
         "ask1_price": hit.get("ask1_price"),
         "ask1_volume": hit.get("ask1_volume"),
         "event_time": hit["event_time"].isoformat() if hit.get("event_time") else None,
+        # L03 · `snapshot_time` 是 `event_time` 的**正式名**（= `fin_snapshot.snapshot_time`，
+        # 也是这张快照的「数据截止时间」）；`event_time` 留作别名，不删。
+        "snapshot_time": hit["event_time"].isoformat() if hit.get("event_time") else None,
         "ingested_at": now.isoformat(),
+        # L03 · §6.2 缺的两个时间字段：数据源不报它们 → 恒 None（**不拿 now() 冒充**，红线 5）。
+        # 与 `fin_snapshot.available_at` / `.revision_id` 同口径。
+        "available_at": None,
+        "revision_id": None,
         "source": hit.get("source"),
         "orderbook": orderbook,
         "quote_quality": quote_quality_of(orderbook),

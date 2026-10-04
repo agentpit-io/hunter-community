@@ -17,12 +17,16 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime
 from typing import Optional
 
+import psycopg2.extras
 from fastapi import APIRouter, HTTPException, Query, Request
 from loguru import logger
+from pydantic import BaseModel
 
 from app.services import fin_data
+from app.services.fin import data_snapshot as ds_svc
 
 router = APIRouter(prefix="/internal/fin", tags=["internal-fin-data"])
 
@@ -206,3 +210,85 @@ def _intl_instruments(market: str, wanted: list[str], limit: int) -> dict:
         "universe": universe,
         "lot_source": "hkex_listofsecurities" if market == "hk" else "us_lot_is_1",
     }
+
+
+# ── DataSnapshot 对象（L03 · 技术方案 §10.2 / §10.1）────────────────────────
+#
+# 两个入口照 §10.1 的工具名：`data.snapshot_create`（POST）/ `data.snapshot_get`（GET）。
+# 落在已有内网数据面（同一个 `X-Hunter-Internal-Key`），不另起一套。
+#
+# ⛔ 红线 5：拿不到真值的列一律 `NULL`（`revision_id` / `available_at` / `artifact_ref`）——
+#    服务层不设默认值；`available_at` 若落在 now() 附近会被 `reject_forged_available_at` 拒掉。
+
+class DataSnapshotIn(BaseModel):
+    """`data.snapshot_create` 请求体。**只有必需的三项要必填，其余缺省即 `NULL`。**"""
+
+    data_cutoff_at: str = ""            # ISO8601，带时区（数据截止时间）
+    source: str = ""
+    quality: str = "ok"
+    revision_id: Optional[str] = None   # 数据源不给 → 省略
+    artifact_ref: Optional[str] = None  # 没有落盘产物 → 省略
+    available_at: Optional[str] = None  # 拿不到 → 省略（**不要填当前时间**）
+    market: Optional[str] = None
+    code: Optional[str] = None
+    note: Optional[str] = None
+
+
+def _parse_dt(value: Optional[str], field: str) -> Optional[datetime]:
+    """ISO8601 → 带时区 datetime。空串 / None → None。非法 → 400（不猜）。"""
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        raise HTTPException(400, f"{field} 不是合法的 ISO8601 时间：{value!r}")
+    if dt.tzinfo is None:
+        raise HTTPException(400, f"{field} 必须带时区（TIMESTAMPTZ），不接受裸本地时间")
+    return dt
+
+
+@router.post("/data/snapshot")
+def data_snapshot_create(request: Request, body: DataSnapshotIn) -> dict:
+    """`data.snapshot_create`：落一张**不可变** `DataSnapshot`，返回落库后的行。
+
+    只 `INSERT`（改 / 删由 `0048` 的触发器抛异常挡下）。`data_cutoff_at` / `source` 必填。
+    """
+    _auth(request)
+    conn = ds_svc.get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            row = ds_svc.create(
+                cur,
+                data_cutoff_at=_parse_dt(body.data_cutoff_at, "data_cutoff_at"),
+                source=body.source,
+                quality=body.quality,
+                revision_id=body.revision_id,
+                artifact_ref=body.artifact_ref,
+                available_at=_parse_dt(body.available_at, "available_at"),
+                market=body.market,
+                code=body.code,
+                note=body.note,
+            )
+        conn.commit()
+    except ds_svc.SnapshotError as exc:
+        conn.rollback()
+        raise HTTPException(400, str(exc))
+    finally:
+        conn.close()
+    return row
+
+
+@router.get("/data/snapshot/{data_snapshot_id}")
+def data_snapshot_get(request: Request, data_snapshot_id: str) -> dict:
+    """`data.snapshot_get`：按编号取一张快照；没有 → 404。"""
+    _auth(request)
+    conn = ds_svc.get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            row = ds_svc.get(cur, data_snapshot_id)
+    finally:
+        conn.close()
+    if row is None:
+        raise HTTPException(404, f"没有这张数据快照：{data_snapshot_id}")
+    return row

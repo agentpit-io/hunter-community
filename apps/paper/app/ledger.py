@@ -159,7 +159,8 @@ def list_trades(cur, project_id: str, limit: int = 200, market: Optional[str] = 
     cur.execute(
         """
         SELECT trade_id, order_id, code, side, qty, price, amount, commission, stamp_tax,
-               transfer_fee, total_fee, snapshot_id, source, fee_model_version, market,
+               transfer_fee, total_fee, snapshot_id, source, fee_model_version,
+               execution_model_version, mode, portfolio_version, market,
                currency, traded_at
           FROM fin_trade WHERE project_id = %s
         """ + clause + " ORDER BY traded_at DESC LIMIT %s",
@@ -534,19 +535,36 @@ def update_order_filled(cur, order_id: str, status: str, filled_qty: int,
 
 def insert_trade(cur, trade_id, order_id, project_id, code, side, qty, price, amount,
                  fee, snapshot_id, source, fee_version, traded_at,
-                 *, market: str = "CN_A", currency: str = "CNY") -> None:
+                 *, market: str = "CN_A", currency: str = "CNY",
+                 execution_model_version: Optional[str] = None,
+                 mode: Optional[str] = None,
+                 portfolio_version: Optional[int] = None) -> None:
+    """成交落库。**只 INSERT**（账本不 UPDATE 历史）。
+
+    决策「出身证」三列（L03）由**调用方**给**真值**，本函数**不设默认**：
+
+    · `execution_model_version` —— 撮合用的执行模型版本（`fin_execution_model.version`），
+      与 `fee_model_version` 对齐；撮合那一刻已知（`engine._book_fill` 从 `model.version` 传）；
+    · `mode` —— 显式模式（本服务恒 `PAPER`），**不靠「没传就是 PAPER」** —— 不传就 `NULL`
+      （`NULL` = 这一笔没记录模式，比记一个猜出来的值诚实，见红线 5）；
+    · `portfolio_version` —— 本笔成交应用在的那一版账户（`fin_project.version` 撮合前值）。
+
+    三列都可空：历史上（0048 之前）的成交行没有它们，保持 `NULL`。
+    """
     cur.execute(
         """
         INSERT INTO fin_trade
           (trade_id, order_id, project_id, code, side, qty, price, amount, commission,
            stamp_tax, transfer_fee, total_fee, snapshot_id, source, fee_model_version,
-           traded_at, market, currency)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+           traded_at, market, currency,
+           execution_model_version, mode, portfolio_version)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         """,
         (
             trade_id, order_id, project_id, code, side, qty, _money(price), amount,
             fee.commission, fee.stamp_tax, fee.transfer_fee, fee.total,
             snapshot_id, source, fee_version, traded_at, market, currency,
+            execution_model_version, mode, portfolio_version,
         ),
     )
 
