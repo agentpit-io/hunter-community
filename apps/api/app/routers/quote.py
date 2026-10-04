@@ -15,7 +15,8 @@ _redis = redis.Redis.from_url(
     decode_responses=True,
 )
 
-CST = timezone(timedelta(hours=8))
+from app.services.market_time import market_tz
+CST = market_tz("CN_A")
 
 # 防微信内嵌浏览器 / 部分手机 App webview 激进缓存行情数据（曾出现用户看到很老的 quote）
 _NO_STORE_HEADERS = {

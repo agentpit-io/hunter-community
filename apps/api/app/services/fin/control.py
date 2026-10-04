@@ -28,9 +28,11 @@
 本模块**晚导入**它们（函数体内 `from … import`）—— 既不复制一份口径，也避开
 `evolution → control`（生效调用）与 `control → evolution`（哈希）的模块级循环。
 
-**DDL 随代码走**（仓内铁律：`db/migrations/*.sql` 对已有部署不生效）：
-新增两列由本模块的 `ensure_schema()` 幂等补齐，`db/migrations/0027_fin_control.sql`
-只是给全新安装与留档用，两处保持一致。
+**DDL 单一来源**（L02）：`fin_param` 的 `auto_enabled` / `risk_tier` 两列
+**只由迁移 `db/migrations/0027_fin_control.sql` 定义** —— api 启动时 `app.migrate`
+按 `schema_migrations` 账本增量执行（`boot.sh` 里 `set -e`，迁移失败 api 起不来）。
+本模块原来还抄了一份 `_DDL` + `ensure_schema()`，与 `0027` 两处定义同一事实，
+L02 已删除（守护用例 `tests/test_l02_single_source.py` 盯着它不许回来）。
 """
 
 from __future__ import annotations
@@ -41,28 +43,6 @@ import psycopg2
 import psycopg2.extras
 
 from app.services.fin import risk
-
-# 幂等 DDL。放在模块里、由 `ensure_schema()` 每进程跑一次 —— 与
-# `report.ensure_columns` 同一套路数（部署后、迁移跑完之前也不该 500）。
-_DDL = [
-    "ALTER TABLE fin_param ADD COLUMN IF NOT EXISTS auto_enabled BOOLEAN NOT NULL DEFAULT true",
-    "ALTER TABLE fin_param ADD COLUMN IF NOT EXISTS risk_tier TEXT",
-]
-
-_schema_done = False
-
-
-def ensure_schema(conn) -> None:
-    """补两列（幂等）。**每进程只跑一次**，与 `agent_run._conn` 同一个理由：
-    每次连库都 ALTER 会在有 idle in transaction 的连接时排队拿 ACCESS EXCLUSIVE。"""
-    global _schema_done
-    if _schema_done:
-        return
-    with conn.cursor() as cur:
-        for stmt in _DDL:
-            cur.execute(stmt)
-    conn.commit()
-    _schema_done = True
 
 
 def _param_row(cur, project_id: str) -> Optional[dict[str, Any]]:
@@ -106,7 +86,6 @@ def set_auto_enabled(conn, project_id: str, enabled: bool, actor: str) -> dict[s
     为 false 时不下单（改的是 fin-worker 的 `build_decision` 活动，见那边注释）。
     已有持仓与已成交记录**一个字节都不动** —— 停的是后续操作，不是清仓。
     """
-    ensure_schema(conn)
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         row = _param_row(cur, project_id)
         if not row:
@@ -141,7 +120,6 @@ def active_strategy(param: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]
 
 def set_strategy(conn, project_id: str, key: str, actor: str) -> dict[str, Any]:
     """切换生效策略。**下一次 `decide` 时点生效**（不是当场补一笔）。"""
-    ensure_schema(conn)
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
         row = _param_row(cur, project_id)
         if not row:
@@ -176,7 +154,6 @@ def apply_risk_tier(conn, project_id: str, tier: str, *, confirm: bool, actor: s
     没有 confirm 时抛 `ValueError`，由路由翻成 409 并把「哪一条被放宽了」原样带回前端，
     二次确认框里照原话显示。
     """
-    ensure_schema(conn)
     try:
         target = risk.preset(tier)
     except ValueError as exc:
@@ -305,7 +282,6 @@ def activate_candidate(conn, project_id: str, *, candidate_config: dict[str, Any
     返回 receipt（含 `from_key` / `to_key` / 两个哈希 / `active_config_hash`）。
     """
     evo = _evo()
-    ensure_schema(conn)
     project_id = str(project_id or "").strip()
     new_key = str(new_key or "").strip()
     if not project_id or not new_key:
@@ -404,7 +380,6 @@ def restore_base_config(conn, project_id: str, *, target_key: str, base_config: 
 
     `within_txn` 同 `activate_candidate`（回滚时写 `rolled_back` 事件）。
     """
-    ensure_schema(conn)
     project_id = str(project_id or "").strip()
     target_key = str(target_key or "").strip()
     if not project_id or not target_key:

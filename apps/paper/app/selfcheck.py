@@ -65,39 +65,11 @@ STATEFUL_TABLES = (
     "fin_alert_log",
 )
 
-# ── M7 新增表的 DDL（与 `app/data_gap.py` / `app/recon.py` 里的两份一致）─────
-# **随代码走**：`db/migrations/*.sql` 对已有部署不生效（仓库铁律），真正建表的是这里。
-# 启动时补一次，让「缺表的实例看着健康、一点就 500」这件事不会发生。
-_AUX_DDL = """
-CREATE TABLE IF NOT EXISTS fin_data_gap (
-  id          BIGSERIAL PRIMARY KEY,
-  code        TEXT NOT NULL,
-  market      TEXT,
-  source      TEXT,
-  kind        TEXT NOT NULL CHECK (kind IN ('no_data','no_timestamp','no_price')),
-  detail      TEXT,
-  event_time  TIMESTAMPTZ,
-  observed_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS fin_data_gap_code_time ON fin_data_gap (code, observed_at DESC);
-CREATE TABLE IF NOT EXISTS fin_alert_log (
-  id         BIGSERIAL PRIMARY KEY,
-  kind       TEXT NOT NULL,
-  ref_id     BIGINT,
-  channel    TEXT NOT NULL,
-  project_id TEXT,
-  subject    TEXT,
-  body       TEXT,
-  sent_at    TIMESTAMPTZ,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE UNIQUE INDEX IF NOT EXISTS fin_alert_log_ref ON fin_alert_log (kind, ref_id);
-CREATE INDEX IF NOT EXISTS fin_alert_log_unsent ON fin_alert_log (id) WHERE sent_at IS NULL;
-GRANT SELECT, INSERT ON fin_data_gap TO fin_paper_rw;
-GRANT USAGE ON SEQUENCE fin_data_gap_id_seq TO fin_paper_rw;
-GRANT SELECT, INSERT, UPDATE ON fin_alert_log TO fin_paper_rw;
-GRANT USAGE ON SEQUENCE fin_alert_log_id_seq TO fin_paper_rw;
-"""
+# ── M7 新增表的 DDL ────────────────────────────────────────────────────────
+# **随代码走**：启动时补一次，让「缺表的实例看着健康、一点就 500」这件事不会发生。
+# L02 起 DDL 的**单一来源**是 `app/aux_ddl.py`（原来这里与 `data_gap.py` / `recon.py`
+# 各写一遍，三份文本一漂就出「自检过了、调用点报缺列」）。
+from app.aux_ddl import AUX_DDL as _AUX_DDL
 
 
 def _ensure_aux_tables(conn) -> None:

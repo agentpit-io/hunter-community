@@ -35,7 +35,8 @@ from app.services.chat_debate.stock_resolver import resolve_stock
 from app.services.chat_debate.kpred_html_renderer import render_kpred_html
 from app.services.database import get_conn
 
-_CST = timezone(timedelta(hours=8))
+from app.services.market_time import market_tz
+_CST = market_tz("CN_A")
 
 _RATE_LIMIT_WINDOW_SEC = 24 * 3600   # 24 h
 _RATE_LIMIT_MAX = 30                  # 24h 30 次 · 比 debate 宽松

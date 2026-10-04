@@ -10,6 +10,7 @@ from app.services.collector import start_collector, stop_collector
 from app.services.database import init_db, get_stocks
 from app.services.finance_data_client import register_stocks
 from app.services import signal_monitor
+from app.services.market_time import tz_name
 import asyncio
 import os
 
@@ -107,7 +108,7 @@ async def lifespan(app: FastAPI):
     try:
         from apscheduler.schedulers.asyncio import AsyncIOScheduler as _AS
         from app.services.quant.scheduler import register_local as _reg_local
-        _local_sched = _AS(timezone="Asia/Shanghai")
+        _local_sched = _AS(timezone=tz_name("CN_A"))
         _reg_local(_local_sched)
         _local_sched.start()
         logger.info("[quant.local] 每日 17:10 CST 本地流水线已挂载(不需要任何 key)")
@@ -204,7 +205,7 @@ async def lifespan(app: FastAPI):
         try:
             from apscheduler.schedulers.asyncio import AsyncIOScheduler
             from apscheduler.triggers.cron import CronTrigger
-            _catalog_sched = AsyncIOScheduler(timezone="Asia/Shanghai")
+            _catalog_sched = AsyncIOScheduler(timezone=tz_name("CN_A"))
             _catalog_sched.add_job(
                 lambda: asyncio.create_task(asyncio.to_thread(_seed_catalog)),
                 CronTrigger(hour=3, minute=0),

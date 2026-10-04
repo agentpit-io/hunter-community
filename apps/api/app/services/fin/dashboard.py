@@ -26,7 +26,10 @@ from typing import Any, Optional
 
 import psycopg2.extras
 
-SHANGHAI = timezone(timedelta(hours=8))
+from app.services.market_time import market_tz, tz_name
+
+SHANGHAI = market_tz("CN_A")
+_SH_TZ = tz_name("CN_A")
 
 # 持仓只数上限（页面「持仓概览」一屏放得下的量）。超过就截断并在返回体里说明，
 # 不做无声截断（`05` 的口径：截了要说）。
@@ -228,7 +231,7 @@ def orders_on_date(cur, project_id: str, day: str, market: Optional[str] = None)
           LEFT JOIN fin_instrument i ON i.code = o.code
           LEFT JOIN fin_trade t ON t.order_id = o.order_id
          WHERE o.project_id = %s
-           AND (o.created_at AT TIME ZONE 'Asia/Shanghai')::date = %s{mf}
+           AND (o.created_at AT TIME ZONE '{_SH_TZ}')::date = %s{mf}
          ORDER BY o.created_at
         """, (project_id, day, *((market,) if market else ())))
     return [_d(r) for r in cur.fetchall()]

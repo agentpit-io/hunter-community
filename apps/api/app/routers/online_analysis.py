@@ -49,7 +49,8 @@ from app.services.finance_data_client import (
 )
 from app.services.database import get_user_preference, save_stock_memory, update_user_portrait
 
-_CST = timezone(timedelta(hours=8))
+from app.services.market_time import market_tz
+_CST = market_tz("CN_A")
 _DEBATE_ROUNDS = 2
 
 router = APIRouter()

@@ -50,23 +50,10 @@ _LOT = 100
 #   · `fin_recon_log` 保持只追加（`09 §四` 的表都在「只追加」约定里）；
 #   · 投递状态（发出去了没有）放在这张单独的日志表里，宿主 dispatcher 读它的
 #     `sent_at IS NULL` 决定要不要发 —— 于是「发过没有」不需要 UPDATE 对账表。
-_DDL = """
-CREATE TABLE IF NOT EXISTS fin_alert_log (
-  id         BIGSERIAL PRIMARY KEY,
-  kind       TEXT NOT NULL,
-  ref_id     BIGINT,
-  channel    TEXT NOT NULL,
-  project_id TEXT,
-  subject    TEXT,
-  body       TEXT,
-  sent_at    TIMESTAMPTZ,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE UNIQUE INDEX IF NOT EXISTS fin_alert_log_ref ON fin_alert_log (kind, ref_id);
-CREATE INDEX IF NOT EXISTS fin_alert_log_unsent ON fin_alert_log (id) WHERE sent_at IS NULL;
-"""
-_GRANT = ("GRANT SELECT, INSERT, UPDATE ON fin_alert_log TO fin_paper_rw;"
-          " GRANT USAGE ON SEQUENCE fin_alert_log_id_seq TO fin_paper_rw;")
+#
+# 建表 / 授权语句的**单一来源**（L02）：见 `app/aux_ddl.py`（原来这里与
+# `selfcheck.py` 各写一遍）。
+from app.aux_ddl import FIN_ALERT_LOG_DDL as _DDL, FIN_ALERT_LOG_GRANT as _GRANT
 _ddl_done = False
 
 

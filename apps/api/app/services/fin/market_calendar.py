@@ -37,18 +37,15 @@ OFFICIAL_SOURCES = {
     "US": "https://www.nyse.com/markets/hours-calendars",
 }
 
-# 每个市场各自的常设交易时段（当地时刻）。**必须和 `fin_market_rule.sessions` 逐字一致**
-# —— 这是同一份事实的第三份副本（另两份见 `db/migrations/0030`/`0034` 种下的 `fin_market_rule`
-# 与 `apps/fin-worker/app/activities.py:DEFAULT_SESSIONS`），**改一处必须改三处**。
-# 本副本是 `scripts/seed_hk_us_calendar.py` 种日历时写进 `fin_market_calendar.sessions` 的取值，
-# 而 `paper/app/risk/session.py:resolve_sessions` 与 `markets.py` 都是**日历行优先** ——
-# 少了 16:00–16:10 会让港股收市竞价的成交被判「不在交易时段」。v1.5.1 修了另两份、
-# 漏了这一份（2026-10-03 演示站实测：HK 2026 交易日 247 行里 236 行只有两段），v1.5.2 补齐。
-MARKET_SESSIONS = {
-    "HK": [{"open": "09:30", "close": "12:00"}, {"open": "13:00", "close": "16:00"},
-           {"open": "16:00", "close": "16:10"}],
-    "US": [{"open": "09:30", "close": "16:00"}],
-}
+# 港美股各自的常设交易时段（当地时刻）。**L02 起不再在这里手写一份** ——
+# 唯一来源是 `app.services.fin.market_sessions`（同一份事实还要给 fin-worker 用，
+# 两份文件逐字节相同 + parity 用例；权威其实在 `fin_market_rule.sessions`，
+# 常量只是读不到 DB 时的兜底，守护用例直接比对迁移种子）。
+# 本模块只用到 HK / US 两行（A 股日历走 `0039`），所以这里**由全量导出子集**，
+# 取值逐字不变；`scripts/seed_hk_us_calendar.py` 用它写 `fin_market_calendar.sessions`。
+from app.services.fin.market_sessions import MARKET_SESSIONS as _ALL_SESSIONS
+
+MARKET_SESSIONS = {m: _ALL_SESSIONS[m] for m in ("HK", "US")}
 
 MARKET_LABEL = {"HK": "港股", "US": "美股"}
 

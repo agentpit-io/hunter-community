@@ -16,7 +16,8 @@ from app.services.database import (
 )
 from app.services import runtime_config
 
-CST = timezone(timedelta(hours=8))
+from app.services.market_time import market_tz
+CST = market_tz("CN_A")
 
 _CPI_CONSENSUS_YOY = float(os.getenv("CPI_CONSENSUS_YOY", "2.5"))
 _OIL_SPIKE_1H_PCT  = float(os.getenv("OIL_SPIKE_1H_PCT",  "3.0"))

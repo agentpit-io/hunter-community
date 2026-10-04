@@ -114,7 +114,8 @@ from app.services.fin import symbols as symbols_svc
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://hunter:hunter@localhost:5432/hunter")
 
-SHANGHAI = timezone(timedelta(hours=8))
+from app.services.market_time import market_tz
+SHANGHAI = market_tz("CN_A")
 
 # ── 枚举（与 0041 的 CHECK 逐字一致，改一处必须改另一处）────────────────────
 KINDS = ("fact", "hypothesis", "verified")

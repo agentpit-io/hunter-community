@@ -62,7 +62,9 @@ from typing import Any, Optional
 
 from loguru import logger
 
-CST = timezone(timedelta(hours=8))
+from app.services.market_time import market_tz
+
+CST = market_tz("CN_A")
 UTC = timezone.utc
 
 # 免费通道超时。执行区最不该久等：拿不到就是不成交，不是等下去。
@@ -244,14 +246,10 @@ def parse_event_time(raw: Any, market: str = "a") -> Optional[datetime]:
 
 
 def _market_tz(market: str):
-    if market == "us":
-        try:
-            from zoneinfo import ZoneInfo
-
-            return ZoneInfo("America/New_York")
-        except Exception:  # noqa: BLE001 —— 缺 tzdata 时退回 EST（不静默当 +08:00）
-            return timezone(timedelta(hours=-5))
-    return CST
+    # L02：统一走 `market_time`（IANA 名，夏令时自动跟随）。旧实现在缺 tzdata 时
+    # 静默退回固定 EST(-5) —— 那个兜底本身在夏天就是错的（应为 -4）；现在缺 tzdata
+    # 由 `market_time.market_tz` **明确报错**，不再静默给一个错的时区。
+    return market_tz("US") if market == "us" else market_tz("CN_A")
 
 
 def _dec(value: Any) -> Optional[str]:

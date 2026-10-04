@@ -43,7 +43,10 @@ import psycopg2.extras
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://hunter:hunter@localhost:5432/hunter")
 
-SHANGHAI = timezone(timedelta(hours=8))
+from app.services.market_time import market_tz, tz_name
+SHANGHAI = market_tz("CN_A")
+# SQL 里「按上海日期切」用的时区名 —— 同一来源（L02）。
+_SH_TZ = tz_name("CN_A")
 
 # 代码位置 + 算法版本。`computed_by` 写的就是它 —— 「这个数哪段代码算的」。
 CODE_VERSION = "fin.report.build_facts@n5.1"
@@ -879,8 +882,8 @@ def markets_with_valuation(conn, project_id: str, trade_date: str) -> list[str]:
     """
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT DISTINCT market FROM fin_valuation "
-            "WHERE project_id = %s AND (as_of AT TIME ZONE 'Asia/Shanghai')::date = %s",
+            f"SELECT DISTINCT market FROM fin_valuation "
+            f"WHERE project_id = %s AND (as_of AT TIME ZONE '{_SH_TZ}')::date = %s",
             (project_id, trade_date))
         got = {str(r[0]) for r in cur.fetchall() if r[0]}
     return [m for m in ("CN_A", "HK", "US") if m in got]

@@ -111,7 +111,7 @@ DUAL_LISTED_HK = {v: k for k, v in DUAL_LISTED.items()}
 def us_quote(symbol: str) -> dict | None:
     """美股快照：最新1分钟bar价 + 上一交易日收盘算涨跌。
     盘前/盘后时段额外给出 regular_price(正常时段收盘) 与 ext_price(延时价)分离。"""
-    from zoneinfo import ZoneInfo
+    from app.services.market_time import market_tz
     symbol = symbol.upper()
     if not _db_available():
         return _us_quote_via_gateway(symbol)
@@ -139,7 +139,7 @@ def us_quote(symbol: str) -> dict | None:
             price, ts = float(m[1]), m[0]
             base = latest_daily_close if ts.date() > latest_daily_date else prev_close
             # 三段分离: 最新bar落在盘前/盘后时段时, 单独给出延时段价格
-            ny = ts.astimezone(ZoneInfo("America/New_York"))
+            ny = ts.astimezone(market_tz("US"))
             hm = ny.hour * 60 + ny.minute
             if ny.weekday() < 5 and (hm < 570 or hm >= 960):  # 9:30=570, 16:00=960
                 ext_price = price

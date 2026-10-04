@@ -46,6 +46,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from app.services.quant import agent_vcp as av, agent_opt as ao, agent_sim, commission as cm
 from app.services.quant import agent_store
+from app.services.market_time import market_tz
 
 log = logging.getLogger(__name__)
 
@@ -657,7 +658,7 @@ def _bench_at(bench: dict, d: date):
 
 
 def _hm() -> str:
-    return datetime.now(timezone(timedelta(hours=8))).strftime("%H:%M")
+    return datetime.now(market_tz("CN_A")).strftime("%H:%M")
 
 
 def _backfill_followups(cur, branch: str, d: date, bars_of, sym: str = "$") -> list[dict]:
@@ -799,7 +800,7 @@ def _max_dd(equities: list[float]) -> tuple[float, float, int, int]:
 def _fmt_sh(dt: datetime | None) -> str | None:
     if not dt:
         return None
-    return dt.astimezone(timezone(timedelta(hours=8))).strftime("%m-%d %H:%M 沪")
+    return dt.astimezone(market_tz("CN_A")).strftime("%m-%d %H:%M 沪")
 
 
 def _next_run_text(market: str = MARKET) -> str:

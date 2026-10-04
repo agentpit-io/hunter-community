@@ -14,7 +14,8 @@ _redis = redis.Redis.from_url(
 _task = None
 
 # A 股 + 港股交易时段以北京时间 (CST) 判定；服务器若为 UTC 也能正确比较
-CST = timezone(timedelta(hours=8))
+from app.services.market_time import market_tz
+CST = market_tz("CN_A")
 
 
 def _today_cst() -> str:

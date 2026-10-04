@@ -27,7 +27,8 @@ import psycopg2.extras  # noqa: E402
 from app.services.fin import tiers  # noqa: E402
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://hunter:hunter@localhost:5432/hunter")
-SH = timezone(timedelta(hours=8))
+from app.services.market_time import market_tz
+SH = market_tz("CN_A")
 
 PROJECT_ID = "prj_m5demo"
 # 固定 UUID：读接口要过 JWT 中间件的 `_user_exists`，所以这个用户必须真的在

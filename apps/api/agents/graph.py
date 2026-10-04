@@ -29,7 +29,8 @@ from agents.comprehensive_judge import run_comprehensive_judge
 from agents.exit_strategy_advisor import run_exit_strategy_advisor
 from agents.risk_judge import run_risk_judge
 
-_CST          = timezone(timedelta(hours=8))
+from app.services.market_time import market_tz
+_CST          = market_tz("CN_A")
 _DEBATE_ROUNDS = 2    # 每方辩论轮数
 
 

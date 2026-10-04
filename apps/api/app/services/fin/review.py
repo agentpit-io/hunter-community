@@ -46,7 +46,9 @@ from app.services.fin import symbols as symbols_svc
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://hunter:hunter@localhost:5432/hunter")
 
-SHANGHAI = timezone(timedelta(hours=8))
+from app.services.market_time import market_tz, tz_name
+SHANGHAI = market_tz("CN_A")
+_SH_TZ = tz_name("CN_A")
 
 # 复核回路只产出这两类（见模块文档第 3 条）。`verified` 的样本数只能来自真实验证过程。
 REVIEW_KINDS = ("fact", "hypothesis")
@@ -122,7 +124,7 @@ def collect(conn, project_id: str, trade_date: str,
             "       t.source, t.market, t.traded_at, o.actor, o.intent_ref, o.decline_reason "
             "FROM fin_trade t JOIN fin_order o ON o.order_id = t.order_id "
             "WHERE t.project_id = %s "
-            f"  AND (t.traded_at AT TIME ZONE 'Asia/Shanghai')::date = %s"
+            f"  AND (t.traded_at AT TIME ZONE '{_SH_TZ}')::date = %s"
             + (" AND t.market = %s" if market else "") +
             " ORDER BY t.traded_at ASC",
             (project_id, trade_date, *margs),

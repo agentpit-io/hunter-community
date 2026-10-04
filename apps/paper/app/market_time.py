@@ -1,17 +1,20 @@
 """按市场时区归一（二期追加规则 §六-12）。
 
-⚠️ 本文件在 `apps/paper/app/market_time.py` 与 `apps/fin-worker/app/market_time.py`
-**逐字节相同**：两个服务各有各的构建上下文（`apps/paper/` / `apps/fin-worker/`），
-不能互相 import，只能各留一份同实现。`apps/paper/tests/test_market_time_parity.py`
-逐字节比对这两份文件，谁漂了谁红。
+⚠️ 本文件在三处**逐字节相同**：`apps/paper/app/market_time.py`、
+`apps/fin-worker/app/market_time.py` 与 `apps/api/app/services/market_time.py`
+（`L02` 把「时区单一来源」从 paper / fin-worker 扩到了 api 侧）。
+三个服务各有各的构建上下文（`apps/paper/` / `apps/fin-worker/` / 仓库根），
+不能互相 import，只能各留一份同实现。
+`apps/paper/tests/test_market_time_parity.py` 逐字节比对三份文件，谁漂了谁红。
 
-**禁止任何地方再用 `timedelta(hours=±N)` 手工算时区** —— 那是 M7「美股 `event_time`
-时差 12 小时」的根因。要某市场的当地时间，一律经本模块。
+**禁止任何地方再手写固定时区偏移（`timezone(...)` + `timedelta`）** —— 那是 M7
+「美股 `event_time` 时差 12 小时」的根因。要某市场的当地时间，一律经本模块。
 
 为什么用 `zoneinfo`（而不是固定偏移）：美股有夏令时，同一时刻冬夏偏移不同；
 `Asia/Shanghai` / `Asia/Hong_Kong` 无夏令时，但**语义上是市场时区**，
 统一走 IANA 时区名，不写死 `+8`。运行镜像必须装 `tzdata`（slim 基础镜像不带，
-见 `apps/*/Dockerfile`），启动自检会真取一次 `America/New_York` 把它验出来。
+见 `apps/paper/Dockerfile` · `apps/fin-worker/Dockerfile` · `apps/api/Dockerfile`），
+启动自检会真取一次 `America/New_York` 把它验出来。
 """
 
 from __future__ import annotations

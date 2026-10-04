@@ -22,7 +22,8 @@ from app.services.factor_engine import WEIGHTS, FACTOR_LABELS, compute_pro_predi
 
 log = logging.getLogger(__name__)
 
-CST = timezone(timedelta(hours=8))   # 服务器系统时区是 UTC, 一律显式转北京时间
+from app.services.market_time import market_tz
+CST = market_tz("CN_A")   # 服务器系统时区是 UTC, 一律显式转北京时间
 # 走 hunter 网关 · 同 kpred.py · 老 env KRONOS_URL 可回退直连
 _CFG_CACHE: dict = {}                # 本轮运行的配置快照(供 _predict_one 内部读取)
 

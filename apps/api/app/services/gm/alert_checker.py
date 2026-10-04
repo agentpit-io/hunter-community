@@ -11,7 +11,8 @@ import logging
 from datetime import datetime, timezone, timedelta
 
 log = logging.getLogger(__name__)
-CST = timezone(timedelta(hours=8))
+from app.services.market_time import market_tz
+CST = market_tz("CN_A")
 CHECK_INTERVAL = 300
 
 

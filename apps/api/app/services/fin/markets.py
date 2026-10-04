@@ -29,7 +29,8 @@ MARKETS = ("CN_A", "HK", "US")
 MARKET_LABEL = {"CN_A": "A 股", "HK": "港股", "US": "美股"}
 MARKET_CURRENCY = {"CN_A": "CNY", "HK": "HKD", "US": "USD"}
 CURRENCY_SYMBOL = {"CNY": "¥", "HKD": "HK$", "USD": "$"}
-MARKET_TZ = {"CN_A": "Asia/Shanghai", "HK": "Asia/Hong_Kong", "US": "America/New_York"}
+# 时区名单一来源（L02）：不再在本模块手写一份，改走 `market_time`（paper / fin-worker 同一份）。
+from app.services.market_time import MARKET_TZ  # noqa: E402,F401
 
 # 中文标签沿用 `gm/market_calendar.state_label` 那批词（文案可复用，判定不可复用）。
 STATE_LABEL = {

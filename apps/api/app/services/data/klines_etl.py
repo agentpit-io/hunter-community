@@ -51,7 +51,8 @@ from app.services.database import get_conn
 
 log = logging.getLogger(__name__)
 
-CST = timezone(timedelta(hours=8))
+from app.services.market_time import market_tz
+CST = market_tz("CN_A")
 
 # 单次请求的最大 K 线根数 —— 见模块头第 2 条
 MAX_BARS = 800

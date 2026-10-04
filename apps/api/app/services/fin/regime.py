@@ -45,7 +45,8 @@ from typing import Any, Callable, Optional
 
 from app.services.fin import symbols as symbols_svc
 
-SHANGHAI = timezone(timedelta(hours=8))
+from app.services.market_time import market_tz
+SHANGHAI = market_tz("CN_A")
 
 # ── 闭集 ────────────────────────────────────────────────────────────────
 # `unknown` **单列**：它不是「没判定出 bull/bear/range 之外的一种 regime」，

@@ -28,22 +28,9 @@ from typing import Optional
 import psycopg2.extras
 from loguru import logger
 
-_DDL = """
-CREATE TABLE IF NOT EXISTS fin_data_gap (
-  id          BIGSERIAL PRIMARY KEY,
-  code        TEXT NOT NULL,
-  market      TEXT,
-  source      TEXT,
-  kind        TEXT NOT NULL CHECK (kind IN ('no_data','no_timestamp','no_price')),
-  detail      TEXT,
-  event_time  TIMESTAMPTZ,
-  observed_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS fin_data_gap_code_time ON fin_data_gap (code, observed_at DESC);
-"""
-
-# GRANT 单独一条：新表必须显式授权，否则角色读不到（`09 §七` 权限一行）。
-_GRANT = "GRANT SELECT, INSERT ON fin_data_gap TO fin_paper_rw; GRANT USAGE ON SEQUENCE fin_data_gap_id_seq TO fin_paper_rw;"
+# 建表 / 授权语句的**单一来源**（L02）：见 `app/aux_ddl.py`。原来这里与
+# `app/selfcheck.py` / `app/recon.py` 各写了一遍，漂了就会「自检过了、调用点报缺列」。
+from app.aux_ddl import FIN_DATA_GAP_DDL as _DDL, FIN_DATA_GAP_GRANT as _GRANT
 
 _ddl_done = False
 

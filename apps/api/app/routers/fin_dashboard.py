@@ -35,7 +35,8 @@ from app.services.fin import report as report_svc
 
 router = APIRouter(tags=["fin-dashboard"])
 
-SHANGHAI = timezone(timedelta(hours=8))
+from app.services.market_time import market_tz
+SHANGHAI = market_tz("CN_A")
 
 
 def _uid(request: Request) -> str:
@@ -78,7 +79,6 @@ def _read(project_id: Optional[str], request: Request, build):
     conn = _conn()
     try:
         pid = _resolve(conn, uid, project_id)
-        control.ensure_schema(conn)     # 读路径也要补列：全新库里 fin_param 可能还没这两列
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             payload = build(cur, pid)
         conn.rollback()     # 只读，显式回滚，不留 idle in transaction

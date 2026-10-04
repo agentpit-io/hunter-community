@@ -41,23 +41,12 @@ from app.strategy.sample import build_decision as build_sample_decision
 # A 股交易日按上海时间切。用 IANA 时区名（不是固定偏移）—— 镜像装 tzdata（N2）。
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
-# 各市场的常设时段（本地时刻）。这不是「编」——
-# `fin_market_calendar.sessions` 就是给撮合判时段用的，时段是交易所公开口径
-# （A 股 09:30-11:30/13:00-15:00、港股 09:30-12:00/13:00-16:00、美股 09:30-16:00），
-# 与 `fin_market_rule.sessions` 的种子逐项一致；同步时优先用市场规则行里的那一份。
-A_SESSIONS = [{"open": "09:30", "close": "11:30"}, {"open": "13:00", "close": "15:00"}]
-DEFAULT_SESSIONS: dict[str, list[dict[str, str]]] = {
-    "CN_A": A_SESSIONS,
-    # HK **必须和 `fin_market_rule.sessions` 逐字一致**（含 16:00–16:10 收市竞价）。
-    # 2026-10-03 演示站实测：兜底少了收市竞价那一段，凡是「读市场规则失败 → 走兜底」
-    # 那一次同步写出来的日历，16:00–16:10 的报价（港股收市竞价那根 tick，实测
-    # `00700` 的 `event_time` 就是 16:08:10）会被判「不在交易时段」→ 委托永远拒。
-    # 两份时段是**同一个事实**，改一处必须改另一处（`db/migrations/0030`/`0034` 喂
-    # `fin_market_rule`）。
-    "HK": [{"open": "09:30", "close": "12:00"}, {"open": "13:00", "close": "16:00"},
-           {"open": "16:00", "close": "16:10"}],
-    "US": [{"open": "09:30", "close": "16:00"}],
-}
+# 各市场的常设时段（本地时刻）。这不是「编」—— 时段是交易所公开口径。
+# **L02 起不再在这里手写一份**：唯一来源是 `app.market_sessions`
+# （与 api 侧 `app/services/fin/market_sessions.py` 逐字节相同，有 parity 用例；
+# 权威其实在数据库 `fin_market_rule.sessions`，本常量只是「读市场规则失败」时的兜底）。
+# 同步日历时优先用市场规则行里的那一份，见 `_market_sessions`。
+from app.market_sessions import A_SESSIONS, MARKET_SESSIONS as DEFAULT_SESSIONS  # noqa: E402,F401
 
 
 def _market_sessions(market: str) -> list[dict[str, str]]:

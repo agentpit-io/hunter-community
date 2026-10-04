@@ -62,9 +62,25 @@ def _window(holidays: dict[str, str], coverage: tuple[date, date]) -> tuple[date
     return start, end
 
 
+def rule_sessions(cur, market: str) -> list:
+    """该市场的常设时段：**以数据库 `fin_market_rule.sessions` 为准**（L02 单一来源）。
+
+    读不到那一行（全新库还没跑到 `0030`）才回落 `mcal.MARKET_SESSIONS` 那份常量 ——
+    两份取值由守护用例逐项比对（`tests/test_l02_single_source.py`），不会漂。
+    """
+    try:
+        cur.execute("SELECT sessions FROM fin_market_rule WHERE market = %s", (market,))
+        row = cur.fetchone()
+        if row and row[0]:
+            return list(row[0])
+    except Exception:  # noqa: BLE001 —— 表还没建 / 无权限 → 用同一份常量兜底
+        pass
+    return mcal.MARKET_SESSIONS[market]
+
+
 def seed_market(cur, market: str, info: dict, *, dry_run: bool = False) -> dict:
     start, end = _window(info["holidays"], mcal.COVERAGE[market])
-    sessions = mcal.MARKET_SESSIONS[market]
+    sessions = rule_sessions(cur, market)
     cal_days = mcal.trading_days(start, end, info["holidays"])
     trading = set(cal_days)
     written = 0
@@ -105,7 +121,7 @@ def apply_fixes(cur, market: str, mismatches: dict) -> int:
             "UPDATE fin_market_calendar SET is_trading = true, sessions = %s, "
             "note = COALESCE(note,'') || ' · 对账修正为交易日', calendar_source = 'reconcile' "
             "WHERE market = %s AND trade_date = %s AND is_trading = false",
-            (psycopg2.extras.Json(mcal.MARKET_SESSIONS[market]), market, iso),
+            (psycopg2.extras.Json(rule_sessions(cur, market)), market, iso),
         )
         fixed += cur.rowcount
     return fixed

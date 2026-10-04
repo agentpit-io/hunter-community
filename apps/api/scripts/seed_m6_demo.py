@@ -39,7 +39,8 @@ import psycopg2.extras  # noqa: E402
 from app.services.fin import tiers  # noqa: E402
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://hunter:hunter@localhost:5432/hunter")
-SH = timezone(timedelta(hours=8))
+from app.services.market_time import market_tz
+SH = market_tz("CN_A")
 
 PROJECT_ID = "prj_m6demo"
 # 单用户模式下的本机账户（`/auth/local-session` 按 email_lower 找它）。**预置固定 UUID**，
