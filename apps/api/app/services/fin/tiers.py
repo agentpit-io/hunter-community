@@ -18,6 +18,10 @@ from __future__ import annotations
 
 from typing import Any
 
+# 稳定版本键（L04）——`strategy` 模块级只依赖标准库 + psycopg2，`tiers` 引它不会成环
+# （`strategy` 里的 `builtin_definitions` 反过来**晚导入**本模块）。
+from app.services.fin import strategy as strategy_svc
+
 # 三档顺序固定：① 个人玩玩 → ② 个人资产管理 → ③ 资产运营
 TIER_ORDER = ("play", "manage", "operate")
 
@@ -151,11 +155,28 @@ def _board_flags(tier: str) -> dict[str, bool]:
 
 
 def _strategies(tier: str) -> list[dict[str, Any]]:
-    """该档开放的策略，带 03 §5.3 的默认参数与版本号。"""
+    """该档开放的策略，带 03 §5.3 的默认参数与**稳定版本键**。
+
+    `version` 从 `"v1"` 这个自由字符串换成**登记表里的稳定版本键**（L04）：
+    由定义内容（key / name / source_ref / params）的哈希推导 —— 同一份定义在任何进程
+    算出来都是同一个键，内容一变就是新键。「版本不可改」由登记表的触发器强制
+    （`db/migrations/0049_strategy_registry.sql`），不再是一句自觉。
+
+    这里只算键、**不落库**（本函数是开户模板的纯函数）；登记在 api 启动 / 首次使用时
+    由 `strategy.ensure_builtins` 幂等补上，键对得上。
+    """
     out = []
     for key in _TIER_STRATEGIES[tier]:
         meta = _STRATEGIES[key]
-        out.append({"key": key, "name": meta["name"], "params": dict(meta["params"]), "version": "v1"})
+        params = dict(meta["params"])
+        out.append({
+            "key": key,
+            "name": meta["name"],
+            "params": params,
+            "version": strategy_svc.version_id_of(
+                strategy_key=key, name=meta["name"],
+                source_ref=strategy_svc.BUILTIN_SOURCE_REF, params=params),
+        })
     return out
 
 

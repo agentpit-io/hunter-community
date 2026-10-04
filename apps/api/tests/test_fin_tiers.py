@@ -32,6 +32,7 @@ if _bad_app is not None and Path(getattr(_bad_app, "__file__", "") or "").parent
     del sys.modules["app"]
 
 from app.services.fin import tiers  # noqa: E402
+from app.services.fin import strategy as strategy_svc  # noqa: E402
 
 
 def test_三档顺序与标签():
@@ -120,7 +121,12 @@ def test_策略默认参数照抄_5_3():
     }
     for s in tiers.build_template("operate")["strategies"]:
         assert s["params"] == want[s["key"]], s["key"]
-        assert s["version"] == "v1"
+        # L04：`version` 从自由字符串 `"v1"` 换成**登记表里的稳定版本键**（内容哈希推导）。
+        # 同一份定义在任何进程算出来都是同一个键；键与内置登记行对得上（见 test_strategy_registry）。
+        assert s["version"].startswith("strv_") and len(s["version"]) == len("strv_") + 24
+        assert s["version"] == strategy_svc.version_id_of(
+            strategy_key=s["key"], name=s["name"], params=s["params"],
+            source_ref=strategy_svc.BUILTIN_SOURCE_REF)
 
 
 def test_行业偏好默认不限():

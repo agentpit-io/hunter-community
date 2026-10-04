@@ -118,6 +118,21 @@ def active_strategy(param: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]
     return items[0] if isinstance(items[0], dict) else None
 
 
+def _record_activated(cur, project_id: str, actor: str, *, payload: dict[str, Any]) -> None:
+    """生效事务内追加一条 `activated` 事件（L04 · 策略服务的审计侧记）。
+
+    **晚导入** `strategy`（避开循环，与 `_evo()` 同一手法）。它内部用 SAVEPOINT 兜错 ——
+    这条侧记失败**不拖垮**生效本身（登记表还没建的老库也能照常切策略）。
+    """
+    from app.services.fin import strategy as strategy_svc
+    vid = strategy_svc.active_version_id(cur, project_id)
+    if not vid:
+        return                      # 老库那个自由字符串 "v1" 不是版本键，不假装
+    strategy_svc.record_activated_event(
+        cur, candidate_id=vid, strategy_key=str(payload.get("strategy_key") or ""),
+        project_id=project_id, payload=payload, actor=actor)
+
+
 def set_strategy(conn, project_id: str, key: str, actor: str) -> dict[str, Any]:
     """切换生效策略。**下一次 `decide` 时点生效**（不是当场补一笔）。"""
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -135,6 +150,10 @@ def set_strategy(conn, project_id: str, key: str, actor: str) -> dict[str, Any]:
             cur.execute("UPDATE fin_param SET strategies = %s, updated_at = now() WHERE project_id = %s",
                         (psycopg2.extras.Json(new_items), project_id))
             _log(cur, project_id, actor, "active_strategy", before.get("key"), key)
+            # L04：同一事务里追加 activated 事件（审计「哪一版曾生效」）。
+            _record_activated(cur, project_id, actor,
+                              payload={"strategy_key": key, "from_key": before.get("key"),
+                                       "to_key": key, "via": "set_strategy"})
         after = active_strategy({"strategies": new_items})
     conn.commit()
     return {
@@ -344,6 +363,10 @@ def activate_candidate(conn, project_id: str, *, candidate_config: dict[str, Any
                         (psycopg2.extras.Json(new_items), project_id))
             _log(cur, project_id, actor, f"strategies.{new_key}", None, new_entry)
             _log(cur, project_id, actor, "active_strategy", base_key, new_key)
+            # L04：同一事务里追加 activated 事件（审计「哪一版曾生效」）。
+            _record_activated(cur, project_id, actor,
+                              payload={"strategy_key": new_key, "from_key": base_key,
+                                       "to_key": new_key, "via": "activate_candidate"})
 
             receipt = {
                 "project_id": project_id,

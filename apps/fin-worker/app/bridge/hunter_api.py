@@ -103,6 +103,46 @@ class HunterApiClient:
             raise ApiError(resp.status_code, resp.text)
         return resp.json()
 
+    def strategy_active(self, project_id: str) -> dict[str, Any]:
+        """L04 · 项目当前生效的策略版本（自有策略服务）。
+
+        `GET /api/internal/fin/strategy/active` 返回 `{strategy_key, strategy_version,
+        definition, resolved_by, …}` —— `strategy_version` 是**登记表里的稳定版本键**
+        （`strv_…`），决策对象带它就能反查到策略登记行。
+
+        **只读**。调用方（`build_decision`）**必须容错**：拿不到就回退到 `fin_param`
+        声明的原值（离线 / api 未起时照常决策，不因策略服务不可用而停摆）。
+        """
+        resp = self._request(
+            "GET", "/api/internal/fin/strategy/active",
+            params={"project_id": project_id}, timeout=5.0)
+        if resp.status_code >= 400:
+            raise ApiError(resp.status_code, resp.text)
+        return resp.json()
+
+    def data_snapshot_create(self, *, data_cutoff_at: str, source: str,
+                             quality: str = "ok", market: Optional[str] = None,
+                             code: Optional[str] = None,
+                             note: Optional[str] = None) -> dict[str, Any]:
+        """L04 · 冻结一张**不可变** `DataSnapshot`（§10.2），返回落库行（含 `data_snapshot_id`）。
+
+        `POST /api/internal/fin/data/snapshot`（L03 的 `data.snapshot_create`）。只 `INSERT`。
+        `data_cutoff_at` / `source` 必填；`available_at` / `revision_id` **不传**（拿不到真值
+        → 落库 `NULL`，红线 5 —— 不许用 now() 冒充）。
+
+        调用方（`build_decision`）**必须容错**：建不出就 `data_snapshot_id` 留空
+        （落库 `NULL`），**不编一个假快照键**。
+        """
+        body: dict[str, Any] = {"data_cutoff_at": data_cutoff_at, "source": source,
+                                "quality": quality}
+        for k, v in (("market", market), ("code", code), ("note", note)):
+            if v is not None:
+                body[k] = v
+        resp = self._request("POST", "/api/internal/fin/data/snapshot", json=body, timeout=10.0)
+        if resp.status_code >= 400:
+            raise ApiError(resp.status_code, resp.text)
+        return resp.json()
+
     def generate_report(self, project_id: str, trade_date: str) -> dict[str, Any]:
         """触发每日报告生成（M5）。
 

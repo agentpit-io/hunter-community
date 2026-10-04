@@ -85,6 +85,34 @@ def _active_strategy(param: Optional[dict[str, Any]]) -> Optional[dict[str, Any]
     return items[0] if isinstance(items[0], dict) else None
 
 
+def _resolve_strategy(project_id: str, active: dict[str, Any]) -> tuple[str, str]:
+    """L04 · 解析「本次决策用的策略版本」—— 从**自有策略服务**取，拿不到就回退声明值。
+
+    返回 `(strategy_key, strategy_version)`。`strategy_version` 是登记表里的**稳定版本键**
+    （`strv_…`），决策对象带它就能反查到策略登记行（`fin_strategy_definition`）。
+
+    **回退是设计的一部分**：策略服务不可用（api 没起 / 离线 / 老库没这个 key 的登记行）
+    时，回退到 `fin_param.strategies` 声明的 `key` / `version` —— 与 L04 之前逐字一致，
+    决策不会因为「策略服务查不到」而停摆。**回退时如实记 warning**，不静默。
+    """
+    key = str((active or {}).get("key") or config.sample_strategy_key())
+    version = str((active or {}).get("version") or config.sample_strategy_version())
+    if not project_id:
+        return key, version
+    try:
+        info = HunterApiClient().strategy_active(project_id)
+    except Exception as exc:      # noqa: BLE001 —— 策略服务不可用 → 回退，不阻断决策
+        logger.warning("[decide] 读策略服务失败，回退 fin_param 声明值（{} / {}）：{}",
+                       key, version, exc)
+        return key, version
+    resolved_version = str((info or {}).get("strategy_version") or "").strip()
+    resolved_key = str((info or {}).get("strategy_key") or "").strip()
+    if resolved_version and (info or {}).get("resolved_by") != "unregistered":
+        return (resolved_key or key), resolved_version
+    return key, version
+
+
+
 def _resolve_market(market_arg: Optional[str], view: dict, project: dict,
                     project_id: str) -> str:
     """该时点要驱动哪个子账户。
@@ -380,9 +408,10 @@ def build_decision(req: dict[str, Any]) -> dict[str, Any]:
         }
 
     # ── M6 · 生效策略：取 fin_param.strategies 里 active 的那一条 ────────
+    # L04：再经**自有策略服务**把它解析成**稳定版本键**（登记行 `strv_…`）—— 拿不到就回退
+    # 声明的原值（离线 / api 未起照常决策）。见 `_resolve_strategy`。
     active = _active_strategy(param) or {}
-    strategy_key = active.get("key") or config.sample_strategy_key()
-    strategy_version = str(active.get("version") or config.sample_strategy_version())
+    strategy_key, strategy_version = _resolve_strategy(project_id, active)
 
     # 市场：该时点所属市场（N4 起市场是一等参数）。示例标的按市场取。
     # **`MULTI` 不许被当成市场**（P1 遗留：老代码 `or project["market_scope"]` 会得到
@@ -408,13 +437,14 @@ def build_decision(req: dict[str, Any]) -> dict[str, Any]:
         reference_price = (quote or {}).get("last_price")
         available_cash = (view.get("cash") or {}).get("available")
 
+    now = _parse_iso(req["now"])
     try:
         decision_dict = build_sample_decision(
             project=project,
             param=param,
             trade_date=req["trade_date"],
             point=req["point"],
-            now=_parse_iso(req["now"]),
+            now=now,
             code=code,
             strategy_key=strategy_key,
             strategy_version=strategy_version,
@@ -442,10 +472,42 @@ def build_decision(req: dict[str, Any]) -> dict[str, Any]:
         logger.info("[decide] {} {} 本时点不出委托：{}", project_id, market, exc)
         return {"halted": True, "project_id": project_id, "reason": str(exc),
                 "decision": None, "idempotency_key": None, "command": None}
+    # L04 · 绑定不可变数据集快照（L03 交接）：策略看到的数据冻结成 `DataSnapshot`，
+    # 决策对象带 `data_snapshot_id` 供复盘反查。建不出就留空（NULL，不编假键）。
+    _bind_data_snapshot(decision_dict, market=market, code=code, now=now,
+                        project=project, reference_price=reference_price)
     decision = StrategyDecision.from_dict(decision_dict)
     key = order_key(project_id, req["trade_date"], req["point"], decision.decision_id)
     body = decision.to_paper_command(project_id=project_id, idempotency_key=key)
     return {"decision": decision.to_dict(), "idempotency_key": key, "command": body}
+
+
+def _bind_data_snapshot(decision_dict: dict[str, Any], *, market: str, code: str,
+                        now: datetime, project: dict[str, Any],
+                        reference_price: Any = None) -> None:
+    """L04 · 把这次决策用到的数据集冻结成一张不可变 `DataSnapshot`，写回 `data_snapshot_id`。
+
+    `L03` 交接（`docs/开发文档/L03-决策出身证.md` §八）：决策对象已经支持 `data_snapshot_id`，
+    只是示例策略留空 → `L04` 产出真键。示例策略**用到的数据**是项目参数（外加限价单市场
+    的一个参考报价）—— `source` 如实写出来，`data_cutoff_at` = 决策时刻（策略只用到此刻为止
+    的信息）。**建不出来就留空 → 落库 `NULL`**（不编一个假快照键，红线 5）。
+    """
+    source = "project_params" + ("+reference_quote" if reference_price is not None else "")
+    note = ("示例策略决策用到的数据集：项目参数"
+            + (f"（tier={project.get('tier')}）" if project.get("tier") else "")
+            + (f" + 参考报价 {reference_price}" if reference_price is not None else "")
+            + f"；时点 {now.isoformat()}")
+    try:
+        row = HunterApiClient().data_snapshot_create(
+            data_cutoff_at=now.isoformat(), source=source, quality="ok",
+            market=market, code=code, note=note)
+    except Exception as exc:      # noqa: BLE001 —— 建不出快照不该挡住决策（留空 = NULL）
+        logger.warning("[decide] 冻结 DataSnapshot 失败，data_snapshot_id 留空（NULL）：{}", exc)
+        return
+    dsid = str((row or {}).get("data_snapshot_id") or "").strip()
+    if dsid:
+        decision_dict["data_snapshot_id"] = dsid
+        decision_dict.setdefault("data_snapshot", {})["data_snapshot_id"] = dsid
 
 
 @activity.defn
@@ -863,8 +925,8 @@ def shadow_step(req: dict[str, Any]) -> dict[str, Any]:
         quote = HunterApiClient().quote(code)
         reference_price = (quote or {}).get("last_price")
     active = _active_strategy(view.get("param")) or {}
-    strategy_key = active.get("key") or config.sample_strategy_key()
-    strategy_version = str(active.get("version") or config.sample_strategy_version())
+    # L04：同 `build_decision` —— 经策略服务解析稳定版本键，拿不到回退声明值。
+    strategy_key, strategy_version = _resolve_strategy(project_id, active)
     now = _parse_iso(now_iso) if now_iso else datetime.now(SHANGHAI)
     project_for_strategy = {"project_id": project_id, "tier": project.get("tier"), "version": 0}
 

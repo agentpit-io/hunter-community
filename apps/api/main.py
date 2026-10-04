@@ -84,6 +84,22 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("[boot] init_db failed (service will run but table-backed features may 500): {}", e)
 
+    # ─── L04 · 策略登记表：把内置策略登记进去（幂等，`ON CONFLICT DO NOTHING`）───
+    # 迁移 0049 已建表（api 启动时 `app.migrate` 自动跑）；这里只把内置定义补登一次，
+    # 让 `strategy.get` / `active` 一启动就有可解析的版本。失败只记 warning（读路径会自愈）。
+    try:
+        from app.services.fin import strategy as _strategy
+        _c = _strategy.get_conn()
+        try:
+            with _c.cursor() as _cur:
+                _builtins = _strategy.ensure_builtins(_cur)
+            _c.commit()
+            logger.info("[fin.strategy] 内置策略登记就绪：{} 个", len(_builtins))
+        finally:
+            _c.close()
+    except Exception as e:      # noqa: BLE001 — 登记失败不该挡住启动（读路径自愈）
+        logger.warning("[fin.strategy] 内置策略登记失败（非致命，读路径会自愈）：{}", e)
+
     # 上次崩掉留下的下载任务 —— worker 是进程内的线程,容器一重启它就没了,
     # 而库里状态还是 running。不处理的话页面上永远显示"进行中"然后不动。
     # 标成 paused,用户点一下续跑就接着下(已下载的不会重来)。
@@ -475,6 +491,11 @@ app.include_router(fin_review_router.router, prefix="/api")
 # 开关本身读在 services/fin/switches.py（全仓唯一点）；这里只把它暴露成一个接口。
 from app.routers import fin_runtime as fin_runtime_router
 app.include_router(fin_runtime_router.router, prefix="/api")
+
+# L04：自有策略服务 · 内网口令（`strategy.submit/get/cancel` + 只读 active）。
+# 业务在 services/fin/strategy.py（唯一服务模块）；**不写 fin_param**（生效仍走 control 唯一入口）。
+from app.routers import fin_strategy as fin_strategy_router
+app.include_router(fin_strategy_router.router, prefix="/api")
 
 # R6：受控自进化 · 提案层 · 内网口令提交（写）/ JWT 列出（读，供 R9 界面）。
 # 闸门（白名单 / 证据 / param_diff / 方向 · 红线 8 / regime）全在
