@@ -3,6 +3,90 @@
 All notable changes to HunterCode · Community Edition follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-10-05
+
+> **次要版本 · 把「经验库开关」从 `.env` 搬上界面（按项目）。**
+> `1.7.0` 那条链本来就能学，但「要不要学」这个总闸只藏在环境变量 `FIN_MEMORY_ENABLED` 里：
+> 想开要改 `.env`、还得 `up -d`（不是 `restart`）、六步操作，而且四个开关一个都不留痕。
+> 本版让你在**成长页**和**设置向导第 7 步**直接点：**按项目**设，点完**立刻生效**（不用重建容器），
+> **每次改动都留一行流水账**。**环境变量仍是天花板**（部署者的意志），界面是**天窗**（使用者的日常选择）：
+> 部署侧把 `FIN_MEMORY_ENABLED` 设成 `0` 时，界面上的开关是灰的、写接口直接 `400` —— **界面永远开不出部署者不允许的东西**。
+> 顺手修了一个隐性浪费：**经验库关着时，复核工作流不再先调一次模型再被拒**（原来那一次模型调用白烧）。
+>
+> **新增一个数据库迁移** `0046_memory_switch.sql`（两张表：`fin_memory_switch` 现值 + `fin_memory_switch_log` 纯追加流水），
+> 由 `api` 启动时按 `schema_migrations` 账本**增量自动执行**，只做加法（`CREATE TABLE IF NOT EXISTS`）、
+> 可重复执行、**不改任何历史行**、文件内不带 `BEGIN;`/`COMMIT;`。
+> 台账从 **46 个文件 / 46 行** 走到 **47 个文件 / 47 行**（`max = 0046_memory_switch.sql`）。
+>
+> 动到 **`api` / `web` 两个镜像**：
+> `api`（`switches.py` 加覆盖层 + `switch_meta()` 展示表 · `fin_runtime.py` 新写入口与只读接口扩展 ·
+> `fin_review.py` 的「关着不烧钱」守卫 · `memory.py` / `evolution.py` 按项目判闸）·
+> `web`（共用组件 `RuntimeSwitchPanel` + 成长页 ④ + 向导第 7 步）。
+> `fin-worker` / `paper` / `llm-shim` / `opencode` **代码未动，版本号随发版一起走**。
+>
+> 升级：`.env` 的 **`HUNTER_VERSION` 与 `FIN_TAG` 两个旋钮一起改 `1.8.0`**，再
+> `docker compose --profile fin pull && docker compose --profile fin up -d`（**`--profile fin` 必须带**，
+> 否则 `paper` / `fin-worker` 不参与重建）。逐步清单见 `docs/开发文档/R21-开关上界面·发版与演示站验收.md`（含**回滚一步**）。
+>
+> ⚠️ **升级前先备份**：`pg_dump -Fc` 记下路径 / 大小 / `sha256` / PG 版本 / `schema_migrations` 行数。
+> 本版**加两张新表、不改任何历史行**；记忆层是可审计数据，备份与恢复演练的做法随 `1.6.0` 交付（`docs/开发文档/R4`）。
+>
+> **默认值没变**：出厂默认仍是关（`FIN_MEMORY_ENABLED=0` / `FIN_EVOLUTION_MODE=off`）。
+> 本版给的是「**想开的时候有个地方点**」，不是「默认打开」。
+
+### ✨ 新增 · Added
+
+- **迁移 `0046_memory_switch.sql`：按项目的经验库开关（现值 + 流水账）。** 造型照抄既有的 `fin_param` / `fin_param_change_log`：
+  `fin_memory_switch`（现值 · PK `project_id` · `memory_enabled` / `evolution_mode` **两列可空**，
+  `NULL` = 这个项目还没单独设过、跟随部署侧默认）+ `fin_memory_switch_log`
+  （**纯追加** · 无 `UPDATE` / `DELETE` · `switch_key` / `old_value` / `new_value` / `actor` / `reason`（必填）/ `created_at`）。
+  `evolution_mode` 有 `CHECK` 约束；`project_id` 不建外键（流水账要活过项目本身）。**两个硬开关不进这张表** —— 它们连界面入口都没有。
+- **写入口 `POST /v1/fin/runtime/switch`（`R21` 的唯一写入口）。** body `{project_id, switch_key, value, reason}`，
+  JWT + **项目归属校验**（跨用户 / 不存在一律 `404`，不区分两者、不泄露存在性）。
+  四条硬规矩写在服务端、不靠界面自觉：**硬开关 key → 400**（且库里零写入）· **超天花板 → 400**（报错写清天花板是多少）·
+  **`reason` 必填** · **没变就不写**（`changed=false`，流水账记的是「改动」不是「点了一下」）。
+  改完**立刻生效**（写入口主动清 5 秒 TTL 缓存），**不需要重建 / 重启任何服务**。
+- **前端共用组件 `RuntimeSwitchPanel`（表驱动 · 前端零枚举）。** 成长页 ④ 与向导第 7 步共用；
+  可选项、短标签、长说明、「为什么灰」的提示**全部来自后端 `GET /v1/fin/runtime` 的 `meta`** ——
+  前端**不写死任何枚举 / 中文名**（`R9` 既有纪律）。天花板之上的选项**画灰、点不动**（服务端另外还会 400 —— 两道一起拦）。
+
+### 🔧 变更 · Changed
+
+- **`switches.py` 加覆盖层：环境变量是天花板，`fin_memory_switch` 是天窗。**
+  `memory_enabled(project_id)` / `evolution_mode_requested(project_id)` 的生效值 = **天花板 ∩ 天窗**，
+  **取更保守的一个**（`0 < 1`、`off < observe < paper`）。**不带 `project_id` 时就是天花板、行为逐字节不变**（老调用点一个没动）。
+  覆盖层读库带 **5 秒模块级 TTL 缓存**（热路径上挡住库往返）；**库不通 / 表还没迁移 / 行读坏了 → 回落环境变量**（fail-safe，绝不「猜一个」）。
+  **覆盖层只活在这一个文件里** —— 读点仍是一处（守护用例盯着）。
+- **只读接口 `GET /v1/fin/runtime` 扩展（老字段一个没改）。** 新增 `project_id` / `ceiling`（部署侧允许到哪）/
+  `selected`（界面上选了啥，`null` = 没设过）/ `can_change`（这一项能不能改）/ `meta`（给前端的展示表）。
+  带 `project_id` 时 `memory_enabled` / `evolution_mode*` 是**这个项目的生效值**（天花板 ∩ 天窗）；
+  不带时就是天花板值，老调用点行为逐字不变。
+- **复核不再「关着也烧钱」。** `routers/fin_review.py` 的 `review/propose` 在经验库关时**直接返回空候选、不调模型**
+  （原来会先调一次模型写候选，最后一步才被唯一写入口拒掉 —— 那一次模型调用白烧，且 `503` 会让 Temporal 重试、可能被重放）。
+  守卫**排在模型调用之前**，`fin-worker` 一行不用改（`R20` 实测：模型 **0 次调用**、worker 不报错 / 不重试）。
+- **`evolution.py` 的提案闸门按项目判**（`propose` 用 `evolution_enabled(project_id)`）；**`apply_proposal` / `rollback_proposal` 仍只看天花板** ——
+  把学习关掉不该让已经走到验证中途的提案变孤儿（故意的不对称，写进 `R20` 成果文档）。
+- **`memory.py` 的 `MemoryDisabledError` 文案点名是哪个闸**（既有断言盯着）：同时提 `FIN_MEMORY_ENABLED=0` 与本项目开关。
+- **`.env.example` / `.env.personal.example` / `docker-compose*.yml` 的版本旋钮升到 `1.8.0`。**
+
+### 🆕 新增环境变量 · Added env
+
+**无。** 这四个 `FIN_*` 开关的**口径没变** —— 只是从「只能改 env」变成「env 是天花板、界面是天窗」。
+`FIN_MEMORY_ENABLED` / `FIN_EVOLUTION_MODE` 的默认值仍是 `0` / `off`（见 §「与上游文档 / 旧方案不同」）。
+
+### ⚠️ 与上游文档 / 旧方案不同、需要知道的
+
+1. **本版是「按项目」，不是「按机器」。** 方案稿 `10` 原设计是机器级（`fin_runtime_switch`，迁移 `0047`）；
+   用户口径落成了**按项目**（`fin_memory_switch` + `fin_memory_switch_log`，迁移 `0046`）——
+   一个部署里不同项目可以有不同的学习设置。原稿其余设计一条不改。
+2. **默认仍是关。** 出厂默认 `FIN_MEMORY_ENABLED=0` / `FIN_EVOLUTION_MODE=off` 未动。
+   界面能改，是因为**部署侧允许**；部署侧没开时，界面上的开关就是灰的。
+3. **两个硬开关仍无任何界面入口。** `FIN_AUTO_APPLY` / `FIN_LIVE_ORDER_ENABLED` 不进可改项列表，
+   请求带这两个 key → `400` 且**库里零写入**（`R20` 实测）。本版**不交付实盘能力**。
+4. **「关着不烧钱」的守卫落在 `api` 侧，不在 `fin-worker`。** 花模型钱的那一步本来就在 api 的
+   `review/propose` 里；在它前面拦下就够，比在 `fin-worker` 三个工作流各加一道更小、更少重复。
+5. **多进程最多差 5 秒。** 覆盖层缓存的 TTL 缘故；个人本地部署只有一个 api 进程，实际是「立刻」。
+
 ## [1.7.0] - 2026-10-04
 
 > **次要版本 · 让「统一经验与自进化」这条链**真的通电**。**
