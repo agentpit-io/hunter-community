@@ -25,14 +25,17 @@
    **前置条件**。本模块提供 `is_available(result)` 这一个判据；`R6` 在提案入口调它，
    `unknown` 时只复盘、不提案（`R5` 只把返回值和「不可用」状态做出来）。
 
-## 本部署当前的现实（**如实写在代码里，别当成 bug**）
+## 行情从哪来（`R11` 起）
 
-判定器要的是**基准指数的日线窗口**（`RULES[…]["benchmarks"]`）。
-本部署的 `fin_snapshot` 里存的是**持仓 / 成交标的**的行情快照，**没有基准指数**——
-所以 `observe()` 在现网默认返回 `None`，`detect()` 于是给出 `unknown`。
-这正是上面第 4 条的形态：**没有可靠数据源 → 继续复盘、停止策略提案**，
-而不是拿一只持仓股票冒充大盘。要接基准行情时接 `observe()` 一处即可
-（它已经是唯一碰库的入口），判定规则与四元组输出都不用动。
+判定器要的是**基准指数的日线窗口**（`RULES[…]["benchmarks"]`）。`R11` 之前 `observe()`
+读的是 `fin_snapshot` —— 那里只有**持仓 / 成交标的**的行情快照，**没有基准指数**，
+所以现网恒定返回 `None` → `unknown`（「没有可靠数据源 → 继续复盘、停止策略提案」）。
+
+`R11` 把 `observe()` 的**数据源**换成 `klines`（基准指数日线，由
+`klines_etl.run_benchmark` 每晚随 ETL 落库）：`CN_A→000300` / `HK→HSI` / `US→.INX`。
+**只动了这一个函数** —— `RULES` / `classify()` / `detect()` 与四元组形状一个字节没动，
+`unknown` 的 fail-closed 语义也不变（取不到 / 行数不足 → `unknown`）。
+仍**不拿一只持仓股票冒充大盘** —— 基准取不到就继续 `unknown`。
 """
 
 from __future__ import annotations
@@ -220,13 +223,16 @@ def _benchmark_code(market: str, rule_version: str) -> str:
 
 def observe(*, market: Optional[str], conn=None, provider: Optional[Callable] = None,
             rule_version: str = RULE_VERSION) -> Optional[dict]:
-    """取某市场**基准指数**的日线窗口 → `{"code","closes","dates","source_snapshot_id"}`；取不到 → `None`。
+    """取某市场**基准指数**的日线窗口 → `{"code","closes","dates"}`；取不到 → `None`。
 
-    `provider` 给了就用它（测试 / 以后换数据源用）；否则从 `fin_snapshot` 里
-    按基准代码取快照序列（升序），**本部署没有基准快照 → `None`**（见模块文档末节）。
+    `provider` 给了就用它（测试 / 以后换数据源用）；否则从 **`klines`** 按基准代码取
+    **收盘日线窗口**（升序）。基准代码 = `RULES[rule_version]["benchmarks"][market]`
+    （`CN_A→000300` / `HK→HSI` / `US→.INX`），由 `klines_etl.run_benchmark` 落库，
+    两处代码**逐字一致**（`test_klines_etl_benchmark.py` 盯着）。
 
-    只取 `quality != 'missing'` 且 `last_price` 非空的行 —— 缺行不补齐、
-    不拿前一天顶替（规则 2）。序列长度由 `classify` 判（不够 → `unknown`）。
+    只取 `close IS NOT NULL` 的行 —— 缺行不补齐、不拿前一天顶替（规则 2）；
+    序列长度由 `classify` 判（不够 → `unknown`）。**`conn is None` / 查库异常 → `None`**
+    （取不到就继续 `unknown`，fail-closed —— 这是本阶段最重要的不变式）。
     """
     if market in (None, ""):
         return None
@@ -240,11 +246,9 @@ def observe(*, market: Optional[str], conn=None, provider: Optional[Callable] = 
         import psycopg2.extras
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
-                "SELECT snapshot_id, last_price, "
-                "       (snapshot_time AT TIME ZONE 'Asia/Shanghai')::date AS day "
-                "FROM fin_snapshot "
-                "WHERE code = %s AND last_price IS NOT NULL AND quality <> 'missing' "
-                "ORDER BY snapshot_time ASC",
+                "SELECT ts, close FROM klines "
+                "WHERE code = %s AND period = 'daily' AND close IS NOT NULL "
+                "ORDER BY ts ASC",
                 (code,),
             )
             rows = [dict(r) for r in cur.fetchall()]
@@ -254,9 +258,8 @@ def observe(*, market: Optional[str], conn=None, provider: Optional[Callable] = 
         return None
     return {
         "code": code,
-        "closes": [float(r["last_price"]) for r in rows],
-        "dates": [str(r["day"]) for r in rows],
-        "source_snapshot_id": rows[-1].get("snapshot_id"),
+        "closes": [float(r["close"]) for r in rows],
+        "dates": [str(r["ts"]) for r in rows],
     }
 
 

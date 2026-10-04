@@ -134,12 +134,13 @@ def _tencent_symbol(code: str, market: str) -> str | None:
     return ("sh" if c[0] in "69" else "sz") + c
 
 
-def fetch_tencent(code: str, market: str, bars: int = MAX_BARS) -> list[dict]:
-    """腾讯前复权日线。A 股和港股是**同一个接口**,只差前缀。"""
+def _fetch_tencent_bars(sym: str, bars: int = MAX_BARS) -> list[dict]:
+    """按**已解析好的腾讯代码**拉前复权日线并解析。
+
+    `fetch_tencent`(股票)与 `run_benchmark`(指数)**共用这一处** ——
+    字段顺序的坑只在这里解一次。
+    """
     import requests
-    sym = _tencent_symbol(code, market)
-    if not sym:
-        return []
     try:
         r = requests.get(
             "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get",
@@ -147,7 +148,7 @@ def fetch_tencent(code: str, market: str, bars: int = MAX_BARS) -> list[dict]:
             headers={"User-Agent": "Mozilla/5.0"}, timeout=20)
         data = (r.json() or {}).get("data") or {}
     except Exception as e:                                    # noqa: BLE001
-        log.debug("[etl] 腾讯失败 %s · %s", code, e)
+        log.debug("[etl] 腾讯失败 %s · %s", sym, e)
         return []
     node = data.get(sym) or (next(iter(data.values()), {}) if data else {})
     bars_raw = node.get("qfqday") or node.get("day") or []
@@ -165,6 +166,14 @@ def fetch_tencent(code: str, market: str, bars: int = MAX_BARS) -> list[dict]:
         except (ValueError, IndexError, TypeError):
             continue
     return out
+
+
+def fetch_tencent(code: str, market: str, bars: int = MAX_BARS) -> list[dict]:
+    """腾讯前复权日线。A 股和港股是**同一个接口**,只差前缀。"""
+    sym = _tencent_symbol(code, market)
+    if not sym:
+        return []
+    return _fetch_tencent_bars(sym, bars)
 
 
 def fetch_sina_us(code: str, bars: int = MAX_BARS) -> list[dict]:
@@ -240,6 +249,55 @@ def fetch_one(code: str, market: str, bars: int = MAX_BARS) -> tuple[list[dict],
 
 
 # ═══════════════════════════════════════════════════════════
+# 基准指数（regime 判定要的行情）· **显式映射,不许靠前缀猜**
+# ═══════════════════════════════════════════════════════════
+#
+# `regime.RULES["regime-v1"]["benchmarks"]` = {CN_A: 000300, HK: HSI, US: .INX}。
+# 这里把「ETL 通道写法(cn/hk/us)」映射到 (落库代码, 腾讯代码)；落库代码与
+# regime 的基准代码**逐字一致**(测试盯着,防止两处漂移)。
+#
+# ⚠ **必须显式映射,不许拿 `_tencent_symbol` 的前缀猜**:
+#   · 它要求美股是**纯字母数字**,`.INX` 会被 `.split(".")[0]` 截掉整个代码
+#     (实测拼成 `us`,不是 `us.INX`);
+#   · 实测 `usINX` / `usDJI` / `usIXIC` **只返回 1 根(当天)** ——
+#     **必须用带点的 `us.INX` 前缀**;
+#   · A 股 / 港股指数也用 `sh000300` / `hkHSI`,不是股票那套前缀。
+BENCHMARKS: dict[str, tuple[str, str]] = {
+    "cn": ("000300", "sh000300"),   # 沪深300
+    "hk": ("HSI", "hkHSI"),         # 恒生指数
+    "us": (".INX", "us.INX"),       # 标普500（带点前缀 —— 见上）
+}
+
+
+def benchmark_of(market: str) -> tuple[str, str] | None:
+    """ETL 市场键 → `(落库代码, 腾讯代码)`；未配置 → `None`。"""
+    return BENCHMARKS.get(str(market).lower())
+
+
+def run_benchmark(market: str, bars: int = MAX_BARS) -> dict:
+    """取某市场的**基准指数**日线并落 `klines`(`period='daily'`)。返回统计。
+
+    **独立于股票池** —— 演示站 / 新库的 `stock_universe` 常常是空的,
+    但 regime 判定只需要这一条基准日线,所以 `run_market` 把它放在
+    「股票池是空的」那个提前返回**之前**调用(`run_market` 里)。
+
+    取不到就如实返回 `ok=0` + `error`,**不编数字**(回测 / regime 都按「没数据」处理)。
+    """
+    spec = benchmark_of(market)
+    if spec is None:
+        return {"market": market, "error": "该市场没有配置基准指数"}
+    code, sym = spec
+    rows = _fetch_tencent_bars(sym, bars)
+    if not rows:
+        return {"market": market, "code": code, "ok": 0,
+                "error": f"腾讯没有返回 {sym} 的日线"}
+    n = save(code, rows)
+    return {"market": market, "code": code, "ok": n,
+            "first": rows[0]["ts"], "last": rows[-1]["ts"],
+            "last_close": rows[-1]["close"]}
+
+
+# ═══════════════════════════════════════════════════════════
 # 落库
 # ═══════════════════════════════════════════════════════════
 
@@ -298,9 +356,19 @@ def run_market(market: str = "cn", bars: int = MAX_BARS,
     (要么全成要么全败,而且会自己恢复),硬打只会延长被掐的时间。
     """
     t0 = time.time()
+    # 基准指数**先取** —— 不依赖股票池。演示站 / 新库的 stock_universe 常常是空的,
+    # 但 regime 判定只等这一条基准日线(`R11`)。放在「股票池为空即返回」之前,
+    # 否则空池的部署永远取不到基准。取数失败不挡股票池那一轮,只记进返回体。
+    try:
+        bench = run_benchmark(market, bars=bars)
+    except Exception as e:                                    # noqa: BLE001
+        log.warning("[etl] 基准取数失败 %s · %s", market, e)
+        bench = {"market": market, "error": f"{type(e).__name__}: {e}"}
+
     codes = universe(market, max_priority, limit)
     if not codes:
-        return {"market": market, "error": "股票池是空的 —— 先跑 seed_universe"}
+        return {"market": market, "error": "股票池是空的 —— 先跑 seed_universe",
+                "benchmark": bench}
 
     ok = failed = skipped = fallback = 0
     miss_streak = 0
@@ -354,7 +422,8 @@ def run_market(market: str = "cn", bars: int = MAX_BARS,
 
     return {"market": market, "total": len(codes), "ok": ok,
             "failed": failed, "skipped": skipped, "fallback": fallback,
-            "success_rate": round(rate, 4), "duration_ms": ms}
+            "success_rate": round(rate, 4), "duration_ms": ms,
+            "benchmark": bench}
 
 
 def health() -> dict:

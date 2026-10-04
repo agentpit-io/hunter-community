@@ -133,11 +133,16 @@ def test_tags_for_and_is_available():
     assert R.is_available({"label": "unknown"}) is False
 
 
-# ── ⑦ 取数：本部署没有基准快照 ⇒ unknown（集成入口）─────────────────────
+# ── ⑦ 取数：`observe()` 从 `klines` 取基准日线（`R11` 换的数据源）──────────
+#
+# 这些用例只验**取数那一段**（SQL 打的代码对不对、结果怎么组装、失败怎么 fail-closed），
+# 判定与四元组形状仍由上面 ①–⑥ 盯着。
 
 class _FakeCursor:
-    def __init__(self, rows):
+    def __init__(self, rows, raises=None):
         self._rows = rows
+        self._raises = raises
+        self.executed = []
 
     def __enter__(self):
         return self
@@ -145,32 +150,75 @@ class _FakeCursor:
     def __exit__(self, *a):
         return False
 
-    def execute(self, *a, **k):
-        pass
+    def execute(self, sql, args=None):
+        self.executed.append((sql, args))
+        if self._raises is not None:
+            raise self._raises
 
     def fetchall(self):
         return self._rows
 
 
 class _FakeConn:
-    def __init__(self, rows):
-        self._rows = rows
+    """最小假连接：记录每次 execute 的 SQL / 参数，可模拟查库异常。"""
+
+    def __init__(self, rows, raises=None):
+        self._cur = _FakeCursor(rows, raises)
 
     def cursor(self, **k):
-        return _FakeCursor(self._rows)
+        return self._cur
+
+
+def _klines_rows(closes, code_dates_from="2026-01-01"):
+    from datetime import date, timedelta
+    y, m, d = (int(x) for x in code_dates_from.split("-"))
+    start = date(y, m, d)
+    return [{"ts": (start + timedelta(days=i)).isoformat(), "close": c}
+            for i, c in enumerate(closes)]
 
 
 def test_detect_for_market_without_benchmark_is_unknown():
-    """库里没有基准快照 → `observe` 返回 None → `unknown`（不是编一个 regime）。"""
+    """`klines` 里没有该基准 → `observe` 返回 None → `unknown`（不是编一个 regime）。"""
     out = R.detect_for_market(market="CN_A", conn=_FakeConn([]), as_of=AS_OF)
     assert out["label"] == "unknown" and out["source_snapshot_id"] is None
 
 
-def test_detect_for_market_reads_benchmark_series():
-    """有基准快照序列时，走真实取数路径判定。"""
-    rows = [{"snapshot_id": f"SNAP-{i}", "last_price": 100.0,
-             "day": f"2026-01-{i:02d}"} for i in range(1, LEN)]
-    rows.append({"snapshot_id": "SNAP-last", "last_price": 120.0, "day": "2026-09-30"})
-    out = R.detect_for_market(market="CN_A", conn=_FakeConn(rows), as_of=AS_OF)
+def test_observe_uses_configured_benchmark_code():
+    """obs 查的是 `RULES[…]` 里的基准代码，不是别的。"""
+    for market, code in (("CN_A", "000300"), ("HK", "HSI"), ("US", ".INX")):
+        conn = _FakeConn(_klines_rows([100.0] * LEN))
+        obs = R.observe(market=market, conn=conn)
+        assert obs is not None and obs["code"] == code
+        sql, args = conn._cur.executed[-1]
+        assert "klines" in sql and "period = 'daily'" in sql
+        assert args == (code,)
+        assert len(obs["closes"]) == LEN and len(obs["dates"]) == LEN
+
+
+def test_detect_for_market_reads_klines_benchmark():
+    """有基准日线窗口时走真实取数路径判定；来源身份用确定性回退 `SNAP-BENCH-…`。"""
+    closes = [100.0] * (LEN - 1) + [120.0]     # 站上均线 + 半年 +20% → bull
+    out = R.detect_for_market(market="CN_A", conn=_FakeConn(_klines_rows(closes)), as_of=AS_OF)
     assert out["label"] == "bull"
-    assert out["source_snapshot_id"] == "SNAP-last"
+    last_day = _klines_rows(closes)[-1]["ts"]
+    assert out["source_snapshot_id"] == f"SNAP-BENCH-CN_A-000300-{last_day}"
+
+
+def test_observe_too_few_rows_is_unknown():
+    """行数不足 `min_bars` → 判定 `unknown`（窗口不够长，不拿短窗口冒充）。"""
+    out = R.detect_for_market(market="CN_A", conn=_FakeConn(_klines_rows([100.0] * 3)), as_of=AS_OF)
+    assert out["label"] == "unknown" and R.is_available(out) is False
+
+
+def test_observe_db_error_is_unknown():
+    """查库抛异常 = 没有行情 → None → `unknown`，不许抛、不许兜底一个值。"""
+    conn = _FakeConn([], raises=RuntimeError("boom"))
+    out = R.detect_for_market(market="CN_A", conn=conn, as_of=AS_OF)
+    assert out["label"] == "unknown" and out["source_snapshot_id"] is None
+
+
+def test_observe_conn_none_is_unknown():
+    """没有连接就拿不到行情 → `unknown`（fail-closed）。"""
+    assert R.observe(market="CN_A", conn=None) is None
+    out = R.detect_for_market(market="CN_A", conn=None, as_of=AS_OF)
+    assert out["label"] == "unknown"
