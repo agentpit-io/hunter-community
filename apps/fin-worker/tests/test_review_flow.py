@@ -179,7 +179,7 @@ def _install(monkeypatch):
     transport = httpx.MockTransport(handler)
 
     def factory(*a, **kw):
-        return HunterApiClient(base_url="http://api.test", internal_key="k",
+        return HunterApiClient(base_url="http://api.test", key="k",
                                client=httpx.Client(transport=transport))
 
     monkeypatch.setattr(activities, "HunterApiClient", factory)
@@ -220,7 +220,7 @@ def test_review_append_skips_candidates_already_stored(monkeypatch):
     transport = httpx.MockTransport(handler)
 
     def factory(*a, **kw):
-        return HunterApiClient(base_url="http://api.test", internal_key="k",
+        return HunterApiClient(base_url="http://api.test", key="k",
                                client=httpx.Client(transport=transport))
 
     monkeypatch.setattr(activities, "HunterApiClient", factory)

@@ -11,6 +11,11 @@
 要么一起回滚**（`01方案 §11.1`：幂等记录与账本变更必须原子关联）。
 
 **没有任何分支读 `source`**（`09 §六-10`）：AI 的单与人下的单走完全同一条路。
+
+**L06 · 执行允许名单（默认拒绝）**：这四个会改账本的端点，入口先查 `app/allowlist.py`
+的名单 —— 项目不在名单上（或标的 / 工具维度已启用却不含本次）就 **403**。这是
+「服务端鉴权」之外的第二层：口令对 ≠ 被授权执行（`plan/L06.md` §1.2）。鉴权（401）
+由 `app/security.py` 在进路由之前完成，这里只管授权（403）。
 """
 
 from __future__ import annotations
@@ -19,7 +24,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 
-from app import db, idempotency, ledger
+from app import allowlist, db, idempotency, ledger
 from app.matching import engine
 from app.schemas import CancelIn, ExpireIn, OrderIn
 
@@ -49,7 +54,13 @@ def _require_project(cur, project_id: str, market: str | None = None) -> dict:
 def place_order(body: OrderIn) -> dict:
     try:
         with db.cursor(commit=True) as cur:
+            # 执行允许名单（默认拒绝）：项目 / 标的 / 工具三维都过才放行。
+            allowlist.check(cur, project_id=body.project_id, code=body.code,
+                            tool=allowlist.TOOL_PLACE_ORDER)
             return engine.execute(cur, body.model_dump())
+    except allowlist.AllowanceDenied as exc:
+        # 403：口令对了，但这次执行没被授权（与 401「没钥匙」分清）。
+        raise HTTPException(403, str(exc)) from exc
     except idempotency.IdempotencyConflict as exc:
         # 409：同一键、不同内容。**不覆盖**旧记录（`01方案 §11.1`）。
         raise HTTPException(409, str(exc)) from exc
@@ -66,6 +77,11 @@ def cancel_order(order_id: str, body: Optional[CancelIn] = None) -> dict:
         order = ledger.get_order(cur, order_id)
         if not order:
             raise HTTPException(404, f"委托不存在：{order_id}")
+        try:
+            allowlist.check(cur, project_id=order["project_id"], code=order.get("code"),
+                            tool=allowlist.TOOL_CANCEL_ORDER)
+        except allowlist.AllowanceDenied as exc:
+            raise HTTPException(403, str(exc)) from exc
         return engine.cancel_order(cur, order["project_id"], order_id, memo)
 
 
@@ -80,6 +96,10 @@ def expire_orders(project_id: str, body: ExpireIn, market: str | None = None) ->
     """
     with db.cursor(commit=True) as cur:
         _require_project(cur, project_id, market)
+        try:
+            allowlist.check(cur, project_id=project_id, tool=allowlist.TOOL_EXPIRE_ORDERS)
+        except allowlist.AllowanceDenied as exc:
+            raise HTTPException(403, str(exc)) from exc
         return engine.expire_open_orders(cur, project_id, body.at, reason=body.reason,
                                          market=market)
 
@@ -89,6 +109,9 @@ def match_open(project_id: str, market: str | None = None) -> dict:
     try:
         with db.cursor(commit=True) as cur:
             _require_project(cur, project_id, market)
+            allowlist.check(cur, project_id=project_id, tool=allowlist.TOOL_MATCH_OPEN)
             return engine.match_open_orders(cur, project_id, market=market)
+    except allowlist.AllowanceDenied as exc:
+        raise HTTPException(403, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc

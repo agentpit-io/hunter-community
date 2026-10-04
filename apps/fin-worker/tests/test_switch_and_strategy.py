@@ -38,7 +38,7 @@ def _install(monkeypatch, project: dict, param: dict):
 
     transport = httpx.MockTransport(handler)
     monkeypatch.setattr(activities, "PaperClient", lambda *a, **kw: PaperClient(
-        base_url="http://paper.test", internal_key="k",
+        base_url="http://paper.test", key="k",
         client=httpx.Client(transport=transport)))
 
 

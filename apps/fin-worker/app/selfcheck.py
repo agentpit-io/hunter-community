@@ -4,8 +4,10 @@
 留在原地退避重试（Worker 内建重试），而不是「起不来 → 重启 → 再起不来」的循环 ——
 后者会让 `docker compose ps` 一直看到 Restarting，排障反而更难。
 
-致命项只有一个：`HUNTER_INTERNAL_KEY` 缺失（缺口令时所有内网调用都会 401，
-对着一个「活着但什么都做不了」的实例打日志没有意义）。
+致命项：**两把钥匙都要在**（L06）—— 行情读取凭证 `HUNTER_INTERNAL_KEY` 与下单
+执行凭证 `HUNTER_EXEC_KEY`，**缺任一都拒绝启动**（缺口令时所有内网调用都会 401，
+对着一个「活着但什么都做不了」的实例打日志没有意义；只配一把则是「能拉数据却下不了单」
+或反过来，同样是坏的）。
 """
 
 from __future__ import annotations
@@ -47,8 +49,11 @@ def main() -> int:
     logger.info("  api           : {}", config.api_base_url())
     logger.info("  示例标的      : {}", config.sample_code())
 
-    if not config.internal_key():
-        logger.error("  HUNTER_INTERNAL_KEY 未设置 —— 内网接口会一律 401，拒绝启动")
+    if not config.read_key():
+        logger.error("  {} 未设置 —— 打 api 数据面会一律 401，拒绝启动", config.READ_KEY_ENV)
+        return 1
+    if not config.exec_key():
+        logger.error("  {} 未设置 —— 打 paper 下单会一律 401，拒绝启动", config.EXEC_KEY_ENV)
         return 1
 
     logger.info("  paper 连通    : {}", _check_paper())

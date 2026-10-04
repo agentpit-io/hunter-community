@@ -187,12 +187,13 @@ def test_control_no_longer_defines_ddl():
 
 
 def test_paper_aux_ddl_single_source():
-    """paper 的 fin_data_gap / fin_alert_log DDL 只有一份模块常量，且与 `0028` 一致。"""
+    """paper 的辅助表 DDL 只有一份模块常量，且与迁移一致
+    （`fin_data_gap`/`fin_alert_log` ↔ 0028；`fin_exec_allowance` ↔ 0051，L06）。"""
     aux = os.path.join(_REPO, "apps", "paper", "app", "aux_ddl.py")
     assert os.path.exists(aux), "paper 应有一份 aux_ddl.py 作为 DDL 单一来源"
     with open(aux, encoding="utf-8") as fh:
         src = fh.read()
-    for table in ("fin_data_gap", "fin_alert_log"):
+    for table in ("fin_data_gap", "fin_alert_log", "fin_exec_allowance"):
         assert f"CREATE TABLE IF NOT EXISTS {table}" in src
     # 与迁移 0028 的关键结构一致（同一列集）
     with open(os.path.join(_REPO, "db", "migrations", "0028_fin_data_gap.sql"),
@@ -201,6 +202,17 @@ def test_paper_aux_ddl_single_source():
     for frag in ("kind TEXT NOT NULL CHECK (kind IN ('no_data','no_timestamp','no_price'))",
                  "fin_alert_log_ref ON fin_alert_log (kind, ref_id)"):
         assert re.sub(r"\s+", " ", frag) in mig
+
+    # L06 · 0051 与 aux_ddl 的 fin_exec_allowance 列集 / 约束逐字一致。
+    with open(os.path.join(_REPO, "db", "migrations", "0051_exec_allowance.sql"),
+              encoding="utf-8") as fh:
+        mig051 = re.sub(r"\s+", " ", fh.read())
+    for frag in ("scope TEXT NOT NULL CHECK (scope IN ('project', 'instrument', 'tool'))",
+                 "status TEXT NOT NULL CHECK (status IN ('active', 'revoked'))",
+                 "GRANT SELECT, INSERT ON fin_exec_allowance TO fin_paper_rw"):
+        norm = re.sub(r"\s+", " ", frag)
+        assert norm in mig051, f"0051 里缺片段：{frag}"
+        assert norm in re.sub(r"\s+", " ", src), f"aux_ddl 里缺片段：{frag}"
 
 
 # ── 4 · 真库：fin_market_rule.sessions 与常量一致（要 TEST_DATABASE_URL）───

@@ -31,9 +31,51 @@ if _DSN:
 # 自己用 `helpers.relax_staleness(60)` 临时收紧。
 os.environ.setdefault("PAPER_SNAPSHOT_STALE_SECONDS", str(100 * 365 * 24 * 3600))
 
+# L06 · 两把钥匙都要在（paper 的启动自检缺任一就拒绝启动）。用例里让两个测试值
+# **取相同的字符串**：既有的用例把 `X-Hunter-Internal-Key: test-internal-key` 写死在
+# header 里，而执行门现在校验的是 `HUNTER_EXEC_KEY` —— 同值就不用逐条改 header。
+# 「两把钥匙确实不同变量」由 `test_keys.py` 用**不同值**单独证明（不靠这两个默认）。
+os.environ.setdefault("HUNTER_INTERNAL_KEY", "test-internal-key")
+os.environ.setdefault("HUNTER_EXEC_KEY", "test-internal-key")
+
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "db: 需要真实账本库（PAPER_TEST_DSN）")
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _register_test_exec_allowance():
+    """L06 · 执行允许名单默认拒绝 —— **给老测试补登记**（**不是**把默认改成放行）。
+
+    升到 L06 后空名单 = 谁都不许下单，既有的下单类用例会全被 403 挡下。正确做法是
+    **在测试环境里登记**（与真实部署同一个动作），而不是给代码加一个「测试模式放行」
+    的口子 —— 那种口子迟早会在生产被打开。
+
+    测试库上补一条**项目通配** `(project, '*')` 的 active 登记，只追加表、`WHERE NOT
+    EXISTS` 去重，重复跑不会堆行。**没有 `PAPER_TEST_DSN` 时不写库**（纯逻辑用例照旧）。
+
+    判据本身（空表拒绝 / 维度收窄 / 撤销）由 `tests/test_allowlist.py` 的纯逻辑用例
+    与成果文档里的真库端到端（curl）证明，不靠这条 fixture。
+    """
+    if not _DSN:
+        yield
+        return
+    import psycopg2
+
+    conn = psycopg2.connect(_DSN)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO fin_exec_allowance (scope, subject, status, granted_by, note) "
+                "SELECT 'project', '*', 'active', 'pytest-conftest', "
+                "'L06 测试环境补登记（执行允许名单默认拒绝）' "
+                "WHERE NOT EXISTS (SELECT 1 FROM fin_exec_allowance "
+                "                  WHERE scope='project' AND subject='*' AND status='active')"
+            )
+        conn.commit()
+    finally:
+        conn.close()
+    yield
 
 
 @pytest.fixture(autouse=True)

@@ -29,10 +29,12 @@ class ApiError(RuntimeError):
 
 
 class HunterApiClient:
-    def __init__(self, base_url: Optional[str] = None, internal_key: Optional[str] = None,
+    def __init__(self, base_url: Optional[str] = None, key: Optional[str] = None,
                  client: Optional[httpx.Client] = None):
         self._base = (base_url or config.api_base_url()).rstrip("/")
-        self._key = internal_key if internal_key is not None else config.internal_key()
+        # **行情 / 数据读取凭证**（`HUNTER_INTERNAL_KEY`）—— 打 api 的数据面走这一把
+        # （L06：与打 paper 的执行凭证分开）。api 的内网数据面校验的正是它。
+        self._key = key if key is not None else config.read_key()
         self._client = client or httpx.Client(timeout=TIMEOUT)
 
     def _headers(self) -> dict[str, str]:

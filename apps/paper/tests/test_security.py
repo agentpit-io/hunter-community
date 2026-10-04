@@ -7,7 +7,8 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
-os.environ["HUNTER_INTERNAL_KEY"] = "test-internal-key"
+os.environ["HUNTER_INTERNAL_KEY"] = "test-internal-key"  # 行情读取凭证
+os.environ["HUNTER_EXEC_KEY"] = "test-internal-key"      # 下单执行凭证（执行门校验它）
 os.environ.setdefault("PAPER_MODE", "PAPER")
 
 from app.main import app  # noqa: E402  须在设置 env 之后导入

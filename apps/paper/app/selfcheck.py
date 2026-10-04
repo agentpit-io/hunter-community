@@ -1,10 +1,12 @@
 """启动自检：不通过就**起不来**。
 
 「缺表的实例看着是健康的、一点就 500」比「直接起不来」难排查得多
-（`apps/api/boot.sh` 里同一条理由）。这里把三件事挡在进程起来之前：
+（`apps/api/boot.sh` 里同一条理由）。这里把几件事挡在进程起来之前：
 
 1. `PAPER_MODE` 必须是 `PAPER`；
-2. `HUNTER_INTERNAL_KEY` 必须非空（否则服务间鉴权形同虚设）；
+2. **两把钥匙都要非空**（L06）：行情读取凭证 `HUNTER_INTERNAL_KEY` 与下单执行凭证
+   `HUNTER_EXEC_KEY` —— **缺任一 = 拒绝启动**（`plan/L06.md` §1.1）。只配一把的话，
+   要么拉不到行情、要么下不了单，两种都是「看着起来了、其实不能用」；
 3. 账本库必须连得上、**必需的表都在**、而且连的角色**恰好只有该有的权限**——
    追加表上不能有 `UPDATE`/`DELETE`。这一条是「唯一账本」在技术上的兑现：
    如果谁把 DSN 指到了管理员连接，自检直接拒绝启动，而不是「先跑起来再说」。
@@ -43,6 +45,8 @@ REQUIRED_TABLES = (
     # M7 新增（数据面）。DDL 随代码走，启动时补建 —— 见 `_ensure_aux_tables`。
     "fin_data_gap",
     "fin_alert_log",
+    # L06 新增：执行允许名单（只追加）。缺它就下不了单（默认拒绝）。
+    "fin_exec_allowance",
 )
 
 # 追加式表：运行期角色**只能** INSERT / SELECT，不许 UPDATE / DELETE（`09 §一`）。
@@ -54,6 +58,8 @@ APPEND_ONLY_TABLES = (
     "fin_recon_log",
     "fin_param_change_log",
     "fin_data_gap",
+    # L06：执行允许名单 —— 只 SELECT / INSERT（撤销 = 追加一条 revoked，不 UPDATE / DELETE）。
+    "fin_exec_allowance",
 )
 
 # 状态会变的表：需要 INSERT + UPDATE，但**任何表都不给 DELETE**。
@@ -65,15 +71,15 @@ STATEFUL_TABLES = (
     "fin_alert_log",
 )
 
-# ── M7 新增表的 DDL ────────────────────────────────────────────────────────
+# ── 随代码走的辅助表 DDL（M7 + L06）────────────────────────────────────────
 # **随代码走**：启动时补一次，让「缺表的实例看着健康、一点就 500」这件事不会发生。
 # L02 起 DDL 的**单一来源**是 `app/aux_ddl.py`（原来这里与 `data_gap.py` / `recon.py`
-# 各写一遍，三份文本一漂就出「自检过了、调用点报缺列」）。
+# 各写一遍，三份文本一漂就出「自检过了、调用点报缺列」）。L06 加了执行允许名单。
 from app.aux_ddl import AUX_DDL as _AUX_DDL
 
 
 def _ensure_aux_tables(conn) -> None:
-    """建 M7 的两张表并授权。**失败不抛** —— 后面的检查会把缺失如实报出来。"""
+    """建辅助表（M7 两张 + L06 允许名单）并授权。**失败不抛** —— 后面的检查会把缺失如实报出来。"""
     try:
         with conn.cursor() as cur:
             cur.execute("SET lock_timeout = '5s'")
@@ -97,9 +103,15 @@ def check(conn) -> list[str]:
             f"{config.paper_mode()!r}（01方案 §7.4：不接受请求参数切换）"
         )
 
-    # ② 内部口令
-    if not config.internal_key():
-        problems.append("HUNTER_INTERNAL_KEY 为空 —— 服务间鉴权会形同虚设，拒绝启动")
+    # ② 两把钥匙（L06）：行情读取 + 下单执行，**缺任一都拒绝启动**
+    if not config.read_key():
+        problems.append(
+            f"{config.READ_KEY_ENV} 为空 —— 行情读取凭证缺失，拉行情会一律 401，拒绝启动"
+        )
+    if not config.exec_key():
+        problems.append(
+            f"{config.EXEC_KEY_ENV} 为空 —— 下单执行凭证缺失，服务间鉴权会形同虚设，拒绝启动"
+        )
 
     # ③ 库
     try:

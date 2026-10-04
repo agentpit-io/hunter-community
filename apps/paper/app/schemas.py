@@ -197,3 +197,16 @@ class CorporateActionIn(BaseModel):
             if self.cash_per_share is not None:
                 raise ValueError("拆合股 / 送股不接受 cash_per_share（那是分红的每股现金）")
         return self
+
+
+class AllowanceIn(BaseModel):
+    """执行允许名单的一条登记（L06）—— 放行或撤销。
+
+    `scope` / `subject` 的取值与语义见 `app/allowlist.py`（判据的唯一实现）。
+    `granted_by` 必填 —— 谁给的权限要留痕（只追加表，撤销也是再追加一条）。
+    """
+
+    scope: Literal["project", "instrument", "tool"]
+    subject: str = Field(min_length=1, max_length=200)
+    granted_by: str = Field(min_length=1, max_length=200)
+    note: Optional[str] = Field(default=None, max_length=500)

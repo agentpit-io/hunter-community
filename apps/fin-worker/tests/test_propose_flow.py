@@ -31,7 +31,7 @@ def _install_api(monkeypatch, handler):
     transport = httpx.MockTransport(wrapped)
 
     def factory(*a, **kw):
-        return HunterApiClient(base_url="http://api.test", internal_key="k",
+        return HunterApiClient(base_url="http://api.test", key="k",
                                client=httpx.Client(transport=transport))
 
     monkeypatch.setattr(activities, "HunterApiClient", factory)

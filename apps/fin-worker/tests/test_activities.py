@@ -21,11 +21,11 @@ def _install(monkeypatch, handler):
     transport = httpx.MockTransport(wrapped)
 
     def paper_factory(*a, **kw):
-        return PaperClient(base_url="http://paper.test", internal_key="k",
+        return PaperClient(base_url="http://paper.test", key="k",
                            client=httpx.Client(transport=transport))
 
     def api_factory(*a, **kw):
-        return HunterApiClient(base_url="http://api.test", internal_key="k",
+        return HunterApiClient(base_url="http://api.test", key="k",
                                client=httpx.Client(transport=transport))
 
     monkeypatch.setattr(activities, "PaperClient", paper_factory)

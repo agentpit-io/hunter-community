@@ -31,9 +31,9 @@ def _serve_http() -> None:
 def main() -> None:
     logger.info("[fin-worker] 启动 · paper={} api={} temporal={}",
                 config.paper_base_url(), config.api_base_url(), config.temporal_address())
-    if not config.internal_key():
+    if not config.read_key():
         # 不退出：健康检查与只读端点照常；但触发端点会一律 401（缺口令 = 没人能过）。
-        logger.warning("[fin-worker] HUNTER_INTERNAL_KEY 未设置 —— /internal/* 将一律 401")
+        logger.warning("[fin-worker] {} 未设置 —— /internal/* 将一律 401", config.READ_KEY_ENV)
 
     http_thread = threading.Thread(target=_serve_http, name="fin-worker-http", daemon=True)
     http_thread.start()

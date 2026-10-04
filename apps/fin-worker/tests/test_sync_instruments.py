@@ -24,9 +24,9 @@ def _install(monkeypatch, handler):
     transport = httpx.MockTransport(wrapped)
 
     monkeypatch.setattr(activities, "PaperClient", lambda *a, **kw: PaperClient(
-        base_url="http://paper.test", internal_key="k", client=httpx.Client(transport=transport)))
+        base_url="http://paper.test", key="k", client=httpx.Client(transport=transport)))
     monkeypatch.setattr(activities, "HunterApiClient", lambda *a, **kw: HunterApiClient(
-        base_url="http://api.test", internal_key="k", client=httpx.Client(transport=transport)))
+        base_url="http://api.test", key="k", client=httpx.Client(transport=transport)))
     return seen
 
 

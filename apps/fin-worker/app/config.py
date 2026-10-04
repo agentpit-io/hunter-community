@@ -41,8 +41,24 @@ def api_base_url() -> str:
     return (os.getenv("API_BASE_URL") or "http://api:8000").rstrip("/")
 
 
-def internal_key() -> str:
-    return (os.getenv("HUNTER_INTERNAL_KEY") or "").strip()
+# ── 两把钥匙（L06）────────────────────────────────────────────────────────
+#   行情 / 数据读取：打 api 的**数据面**（日历 / ETL / 行情 / 经验 …）带它 —— 见
+#     `bridge/hunter_api.py`。名字沿用既有的内网口令（api 数据面读的是同一个变量）。
+#   下单执行：打 paper 的**执行接口**（下单 / 撤单 …）带它 —— 见 `bridge/paper.py`。
+#     paper 的执行门校验的正是这把（`apps/paper/app/security.py`）。
+#   ⚠️ 两个常量是「钥匙取自哪个环境变量」的**唯一事实**；改这里要连 paper 那侧一起想。
+READ_KEY_ENV = "HUNTER_INTERNAL_KEY"
+EXEC_KEY_ENV = "HUNTER_EXEC_KEY"
+
+
+def read_key() -> str:
+    """行情 / 数据读取凭证（`READ_KEY_ENV`）。**没有默认值**。"""
+    return (os.getenv(READ_KEY_ENV) or "").strip()
+
+
+def exec_key() -> str:
+    """下单执行凭证（`EXEC_KEY_ENV`）。**没有默认值** —— 与 `read_key()` 取自不同变量。"""
+    return (os.getenv(EXEC_KEY_ENV) or "").strip()
 
 
 # ── 内部 HTTP 端点（给 api / 运维触发）────────────────────────────────────

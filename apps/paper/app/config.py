@@ -1,10 +1,14 @@
 """Paper Service 配置。
 
-三条**必须在启动时成立**的前置（不成立就起不来，见 `selfcheck.py`）：
+四条**必须在启动时成立**的前置（不成立就起不来，见 `selfcheck.py`）：
 
 1. `PAPER_MODE == "PAPER"` —— 模式固定，不接受请求参数切换（`01方案 §7.4`）。
-2. `HUNTER_INTERNAL_KEY` 非空 —— 服务间鉴权的唯一口令（`08 §3.1`）。
-3. 能连上账本库、且连的是**只增不改**的运行期角色（`fin_paper_rw`）。
+2. **行情读取凭证**（`READ_KEY_ENV`）非空 —— 拉行情打 api 时用（`snapshot/source.py`）。
+3. **下单执行凭证**（`EXEC_KEY_ENV`）非空 —— 服务间鉴权的口令（`08 §3.1`）。
+4. 能连上账本库、且连的是**只增不改**的运行期角色（`fin_paper_rw`）。
+
+**两把钥匙分开（L06 · `plan/L06.md` §1.1）**：行情读取与下单执行用的是**两个不同的
+环境变量**（`READ_KEY_ENV` ≠ `EXEC_KEY_ENV`）。见下面两个常量。
 
 账本库连接串的优先级：`PAPER_DATABASE_URL` → `FIN_DATABASE_URL` → `DATABASE_URL`。
 单独给一个变量名，是为了让 `paper` 容器与 `api` 容器指向不同的角色时互不污染。
@@ -20,13 +24,32 @@ PAPER_MODE_REQUIRED = "PAPER"
 # 服务间鉴权头。与 `apps/api` 的 `app/routers/internal_*.py` 同一把口令、同一个头名。
 INTERNAL_KEY_HEADER = "X-Hunter-Internal-Key"
 
+# ── 两把钥匙（L06）。**只有这两个常量是「钥匙取自哪个环境变量」的单一事实** ────
+#   行情 / 数据读取：paper 打 api 的行情端点时带它（`snapshot/source.py`）。
+#     ⚠️ 这个名字**沿用既有的内网口令**：api 的内网数据面 / 工具通道（opencode、web、
+#     部署向导）读的是同一个变量。把它整仓改名要牵动 opencode 的 MCP 副本、web 入口、
+#     部署向导与所有既有部署 —— 不在本段范围（见成果文档「偏离方案的决策与原因」）。
+#   下单执行：paper 的**执行门**校验它（`security.require_internal_key`）。
+READ_KEY_ENV = "HUNTER_INTERNAL_KEY"
+EXEC_KEY_ENV = "HUNTER_EXEC_KEY"
+
 
 def paper_mode() -> str:
     return (os.getenv("PAPER_MODE") or "").strip()
 
 
-def internal_key() -> str:
-    return (os.getenv("HUNTER_INTERNAL_KEY") or "").strip()
+def read_key() -> str:
+    """行情 / 数据读取凭证（`READ_KEY_ENV`）。**没有默认值**（缺 = 拒绝启动）。"""
+    return (os.getenv(READ_KEY_ENV) or "").strip()
+
+
+def exec_key() -> str:
+    """下单执行凭证（`EXEC_KEY_ENV`）。**没有默认值**（缺 = 拒绝启动）。
+
+    与 `read_key()` **取自不同的环境变量** —— 这是 L06「两把钥匙分开」的落点：
+    拿得到行情读取凭证 ≠ 能下单。
+    """
+    return (os.getenv(EXEC_KEY_ENV) or "").strip()
 
 
 def database_url() -> str:

@@ -14,7 +14,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 # 默认环境：让 config 的取值确定，不受本机 env 影响。
+# L06 · 两把钥匙分开：读 api 数据面用 HUNTER_INTERNAL_KEY，打 paper 下单用 HUNTER_EXEC_KEY。
 os.environ.setdefault("HUNTER_INTERNAL_KEY", "test-internal-key")
+os.environ.setdefault("HUNTER_EXEC_KEY", "test-exec-key")
 os.environ.setdefault("PAPER_BASE_URL", "http://paper.test")
 os.environ.setdefault("API_BASE_URL", "http://api.test")
 os.environ.setdefault("TEMPORAL_ADDRESS", "temporal.test:7233")

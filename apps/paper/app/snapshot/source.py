@@ -38,6 +38,7 @@ from zoneinfo import ZoneInfo
 
 from loguru import logger
 
+from app import config
 from app.market_time import UnknownMarket, canonical_market, market_of
 
 # 裸格式（无偏移）时间戳的兜底时区 = A 股 / 港股共同的 +08:00（两地均无夏令时）。
@@ -168,10 +169,13 @@ class HttpQuoteSource:
     name = "http"
 
     def __init__(self, base_url: str, timeout: float = DEFAULT_TIMEOUT_S,
-                 internal_key: Optional[str] = None, quote_path: Optional[str] = None):
+                 read_key: Optional[str] = None, quote_path: Optional[str] = None):
         self._base = base_url.rstrip("/")
         self._timeout = timeout
-        self._key = internal_key if internal_key is not None else _internal_key()
+        # 行情读取凭证（`HUNTER_INTERNAL_KEY`）—— 打 api 的行情端点用**这一把**。
+        # 下单执行是**另一把**（`HUNTER_EXEC_KEY`，见 `app/config.py`）：拉行情与下单
+        # 各用各的钥匙（L06）。api 的行情端点校验的正是这把读取凭证。
+        self._key = read_key if read_key is not None else config.read_key()
         self._path = (quote_path or os.getenv("PAPER_QUOTE_PATH") or DEFAULT_QUOTE_PATH).strip()
 
     def _get(self, path: str) -> Optional[dict]:
@@ -260,11 +264,6 @@ def _has_price(payload: Optional[dict]) -> bool:
 
 def code_hint(path: str) -> str:
     return path.rsplit("/", 1)[-1]
-
-
-def _internal_key() -> str:
-    """内网口令。**只读 env**，不 import `app.config`（避免把配置模块拖进纯函数测试）。"""
-    return (os.getenv("HUNTER_INTERNAL_KEY") or "").strip()
 
 
 # ── 进程级单例（env 决定；测试可以 set_source 换掉）─────────────────────

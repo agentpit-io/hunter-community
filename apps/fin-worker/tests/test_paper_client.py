@@ -16,7 +16,7 @@ def make(handler) -> tuple[PaperClient, list[httpx.Request]]:
         return handler(request)
 
     client = httpx.Client(transport=httpx.MockTransport(wrapped))
-    return PaperClient(base_url="http://paper.test", internal_key="k", client=client), seen
+    return PaperClient(base_url="http://paper.test", key="k", client=client), seen
 
 
 def test_place_order_sends_internal_key_and_body():

@@ -4,7 +4,9 @@
 - `GET /healthz` —— 存活 + 与 Temporal 的连通性 + 六个时点清单（免密钥，容器健康检查用）。
 - `POST /internal/trigger/{point}` —— **手工**触发某个时点的工作流（排障 / 补跑）。
 
-鉴权：`X-Hunter-Internal-Key` == `HUNTER_INTERNAL_KEY`，与 `paper` / api 的内网接口同一把口令。
+鉴权：`X-Hunter-Internal-Key` == **读取凭证** `HUNTER_INTERNAL_KEY`（与 api 的数据面
+同一把）。**不是** paper 的执行凭证 `HUNTER_EXEC_KEY` —— 这里不执行下单，只是触发工作流；
+下单那一步在 paper 侧还要过执行门 + 执行允许名单（L06）。
 """
 
 from __future__ import annotations
@@ -45,7 +47,9 @@ async def _get_client():
 
 
 def _require_key(request: Request) -> None:
-    expected = config.internal_key()
+    # fin-worker 自己的控制通道（手工触发工作流）走**读取凭证**；下单走 paper 的
+    # 执行凭证 + 允许名单（L06）。这里不改成 exec_key —— 这不是执行接口。
+    expected = config.read_key()
     got = request.headers.get("X-Hunter-Internal-Key", "")
     if not expected or got != expected:
         raise HTTPException(status_code=401, detail="internal auth failed")

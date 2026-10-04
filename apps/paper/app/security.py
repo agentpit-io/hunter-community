@@ -1,12 +1,20 @@
 """两道**只做拒绝、不做放行**的守卫。
 
-1. **服务间鉴权**：`X-Hunter-Internal-Key` 必须等于 `HUNTER_INTERNAL_KEY`，否则 401。
-   这是 `paper` 唯一的门 —— 它绑 `127.0.0.1`、只由 `api` / `fin-worker` 在 docker
-   网络内调用（`08 §3.2`）。
+1. **服务间鉴权（执行门）**：`X-Hunter-Internal-Key` 必须等于**下单执行凭证**
+   （`HUNTER_EXEC_KEY`，见 `config.exec_key()`），否则 401。这是 `paper` 唯一的门 ——
+   它绑 `127.0.0.1`、只由 `api` / `fin-worker` 在 docker 网络内调用（`08 §3.2`）。
+
+   ⚠️ **L06 起这扇门认的是「执行钥匙」，不再是「行情读取钥匙」**：拉行情用的
+   `HUNTER_INTERNAL_KEY`（`config.read_key()`）**打不开这扇门** —— 行情凭证与执行
+   权限分开（`plan/L06.md` §1.1）。改这一行前先想清楚「谁该能下单」。
 
 2. **实盘字段守卫**：请求（body 或 query）里出现 `live` / `real` / `broker` /
    `account_no` 之类字段就 **报错**，不是忽略（`08 §八-1`）。忽略等于「用户以为切到
    实盘了、系统当作没看见」，比报错危险得多。
+
+**第三道（L06）**：执行允许名单 —— 在 `allowlist.py`，由**执行类路由**逐条查
+（默认拒绝）。它是「哪些项目 / 标的 / 工具可以下单」的正面清单，与上面的实盘字段
+**拒绝名单**两道都在（`plan/L06.md` §1.2）。
 
 `/healthz` 是唯一豁免鉴权的路径：容器健康检查跑在容器内、拿不到密钥，而它只回
 「进程活着 + 模式是不是 PAPER」，不含任何账本数据。
@@ -26,12 +34,15 @@ PUBLIC_PATHS = frozenset({"/healthz"})
 
 
 def require_internal_key(request: Request) -> None:
-    """FastAPI 依赖：挂在 app 上，对所有路由生效（`/healthz` 除外）。"""
+    """FastAPI 依赖：挂在 app 上，对所有路由生效（`/healthz` 除外）。
+
+    校验的是**执行凭证** `config.exec_key()`（L06）。口令没配时**一律拒绝**：
+    没配 = 没人能通过，而不是「谁都能过」。
+    """
     if request.url.path in PUBLIC_PATHS:
         return
-    expected = config.internal_key()
+    expected = config.exec_key()
     got = request.headers.get(config.INTERNAL_KEY_HEADER, "")
-    # 口令没配时**一律拒绝**：没配 = 没人能通过，而不是「谁都能过」。
     if not expected or got != expected:
         raise HTTPException(status_code=401, detail="internal auth failed")
 

@@ -5,6 +5,8 @@
 
 调用约定：
 - 每个请求都带 `X-Hunter-Internal-Key`（`paper` 除 `/healthz` 外一律要它，见 `app/security.py`）。
+  **L06 起这个头带的是「执行凭证」`HUNTER_EXEC_KEY`**（不是行情读取凭证）——
+  paper 的执行门校验的正是它，且过了门还要过执行允许名单（默认拒绝）。
 - 非 2xx 一律抛 `PaperError`（带状态码与原文），**不吞**。Activity 让 Temporal 重试；
   重试用的还是同一个幂等键，所以「重试」不会变成「重复下单」。
 - **404 是语义**：`get_calendar` 的 404 表示「这一天没有日历」——
@@ -36,10 +38,11 @@ class IdempotencyConflict(PaperError):
 
 
 class PaperClient:
-    def __init__(self, base_url: Optional[str] = None, internal_key: Optional[str] = None,
+    def __init__(self, base_url: Optional[str] = None, key: Optional[str] = None,
                  client: Optional[httpx.Client] = None):
         self._base = (base_url or config.paper_base_url()).rstrip("/")
-        self._key = internal_key if internal_key is not None else config.internal_key()
+        # **执行凭证**（`HUNTER_EXEC_KEY`）—— 打 paper 走这一把（L06）。
+        self._key = key if key is not None else config.exec_key()
         self._client = client or httpx.Client(timeout=TIMEOUT)
 
     # ── 底层 ──────────────────────────────────────────────────────────────

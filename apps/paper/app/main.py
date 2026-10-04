@@ -3,8 +3,12 @@
 三道全局防线，按请求进入的顺序：
 
 1. `LiveFieldGuard`（中间件）—— 实盘字段出现即 400；
-2. `require_internal_key`（依赖）—— 无内部口令即 401（`/healthz` 除外）；
+2. `require_internal_key`（依赖）—— 无**执行凭证**（`HUNTER_EXEC_KEY`）即 401
+   （`/healthz` 除外，L06 起这扇门认的是执行钥匙，不再是行情读取钥匙）；
 3. `LedgerJSONResponse` —— 金额 `Decimal` 原样写成字符串，不落浮点。
+
+执行类路由（下单 / 撤单 / 批量撤单 / 再撮）另外过**执行允许名单**（`allowlist.py`，
+默认拒绝）—— 那是授权（403），与上面第 2 条的鉴权（401）是两件事。
 
 **没有第四道**：账本表在库层就只有 `INSERT`/`SELECT`（启动自检强制校验），
 所以就算有一条路由想改历史，库也不让——这是「唯一账本」的最终保证。
@@ -17,8 +21,8 @@ from fastapi.responses import JSONResponse
 
 from app import ledger
 from app.jsonresp import LedgerJSONResponse
-from app.routers import (corporate_actions, data_ops, health, jobs, orders, projects,
-                         reference, shadow, snapshots)
+from app.routers import (corporate_actions, data_ops, exec_allowances, health, jobs, orders,
+                         projects, reference, shadow, snapshots)
 from app.security import LiveFieldGuard, require_internal_key
 
 app = FastAPI(
@@ -45,6 +49,7 @@ app.include_router(jobs.router)
 app.include_router(data_ops.router)
 app.include_router(shadow.router)     # R7 · 影子臂模拟撮合（只算不记、绝不下单）
 app.include_router(corporate_actions.router)   # L05 · 公司行为人工登记口
+app.include_router(exec_allowances.router)     # L06 · 执行允许名单登记口
 
 
 @app.exception_handler(ledger.MarketRequired)

@@ -31,6 +31,15 @@ def test_empty_internal_key_is_a_problem(monkeypatch):
     assert any("HUNTER_INTERNAL_KEY" in p for p in problems)
 
 
+def test_empty_exec_key_is_a_problem(monkeypatch):
+    """L06 · **缺任一钥匙都拒绝启动**：只有读取凭证、没有执行凭证也不行。"""
+    monkeypatch.setenv("PAPER_MODE", "PAPER")
+    monkeypatch.setenv("HUNTER_INTERNAL_KEY", "k")
+    monkeypatch.delenv("HUNTER_EXEC_KEY", raising=False)
+    problems = selfcheck.check(_BoomConn())
+    assert any("HUNTER_EXEC_KEY" in p for p in problems)
+
+
 def test_unreachable_db_is_a_problem(monkeypatch):
     monkeypatch.setenv("PAPER_MODE", "PAPER")
     monkeypatch.setenv("HUNTER_INTERNAL_KEY", "k")
