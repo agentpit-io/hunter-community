@@ -297,7 +297,7 @@ def _hk_handler(seen=None):
                 "project": {"project_id": "prj_hk", "tier": "manage", "version": 0,
                             "market_scope": "HK"},
                 "param": {"max_position_pct": "0.25", "max_positions": 4},
-                "cash": {"available": "100000.0000", "frozen": "0.0000"},
+                "cash": {"available": "500000.0000", "frozen": "0.0000"},
                 "positions": [], "market": "HK", "currency": "HKD",
             })
         if p == "/api/v1/market-rules":
@@ -327,7 +327,8 @@ def test_build_decision_hk_emits_limit_order_at_real_quote(monkeypatch):
     assert body["code"] == "00700"
     assert body["price_type"] == "limit"
     assert body["limit_price"] == "421.2"
-    assert body["qty"] == 200                    # 100000 × 0.995 ÷ (421.2 × 100) → 2 手
+    # R12：数量按 max_position_pct 定量 —— 500000 × 0.25 × 0.995 ÷ (421.2 × 100) → 2 手 = 200 股
+    assert body["qty"] == 200
 
 
 def test_build_decision_hk_without_budget_halts(monkeypatch):

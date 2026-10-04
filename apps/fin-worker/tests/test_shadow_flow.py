@@ -23,10 +23,17 @@ from app.strategy import shadow as sh  # noqa: E402
 
 # ── 纯函数 ────────────────────────────────────────────────────────────────
 
-def test_param_of_takes_only_real_values():
+def test_param_of_matches_strategy_read_fields():
+    """`param_of` 只取策略**真正读**的白名单字段（口径 = `sample.STRATEGY_READ_FIELDS`）。
+
+    两处共用同一份清单：少搬一个字段，影子臂就读不到刚接上的参数
+    （表现是「接线做完了但 delta 还是 0」）。
+    """
+    from app.strategy.sample import STRATEGY_READ_FIELDS
     assert sh.param_of({"max_position_pct": 0.2, "stop_loss_pct": 0.05}) == {
-        "max_position_pct": 0.2, "max_positions": None}
-    assert sh.param_of(None) == {"max_position_pct": None, "max_positions": None}
+        "max_position_pct": 0.2}
+    assert sh.param_of(None) == {"max_position_pct": None}
+    assert set(sh.param_of({})) == set(STRATEGY_READ_FIELDS)
 
 
 def test_arm_order_projects_intent():
@@ -58,6 +65,29 @@ def test_build_for_arm_market_order_uses_tier_lot():
         strategy_key="sample-fixed", strategy_version="1.0", ttl_seconds=1800,
         market="CN_A", market_order_supported=True)
     assert order == {"side": "buy", "qty": 1000, "price_type": "market", "limit_price": None}
+
+
+def test_two_arms_diverge_when_pct_differs():
+    """`R12` · 两臂**同行情 / 同现金 / 同每手**，只在 `max_position_pct` 上不同
+    → 委托数量不同、其余字段相同（这就是「两臂真的分叉」的最小可执行形态）。"""
+    from datetime import datetime, timezone
+    common = dict(
+        project={"project_id": "p", "tier": "manage", "version": 0},
+        trade_date="2026-10-08", point="HK-0930",
+        now=datetime(2026, 10, 8, 9, 30, tzinfo=timezone.utc), code="00700",
+        strategy_key="sample-fixed", strategy_version="1.0", ttl_seconds=1800,
+        market="HK", market_order_supported=False, reference_price="421.2",
+        lot_size=100, available_cash="1000000",
+    )
+    incumbent = sh.build_for_arm(config={"max_position_pct": 0.5}, **common)
+    candidate = sh.build_for_arm(config={"max_position_pct": 0.25}, **common)
+    # 价型 / 限价完全相同（同行情、同参考价）
+    assert incumbent["price_type"] == candidate["price_type"] == "limit"
+    assert incumbent["limit_price"] == candidate["limit_price"] == "421.2"
+    # 只有数量不同：1000000×0.5×0.995→封顶 1000；×0.25→500
+    assert incumbent["qty"] == 1000
+    assert candidate["qty"] == 500
+    assert incumbent["qty"] != candidate["qty"]
 
 
 # ── shadow_step 编排（假客户端）───────────────────────────────────────────

@@ -7,10 +7,10 @@
 候选配置是 **api 侧 `evolution.shadow_prepare` 算好的**（base + 服务端机器算的 `param_diff`），
 这一层只**搬运**，不重算 diff、不猜口径（方向与取值都由服务端定，见 `services/fin/evolution.py`）。
 
-**当前示例策略只读 `fin_param` 的留痕字段**（`max_position_pct` / `max_positions`），
-所以两臂在现金相同、都没持仓时产出的决策是**同一份**（除定量随现金变）——
-这是示例策略的性质，不是影子框架的缺陷；框架已把「候选配置」接进决策入参，
-策略将来真读这些参数时无需改这里。见成果文档「交给 R8」一节。
+**`R12` 起示例策略真读白名单参数**（`max_position_pct`，走 `sample.STRATEGY_READ_FIELDS`）——
+所以只要两臂的配置在这个字段上不同，产出的委托数量就会不同、两臂真的分叉。
+`param_of()` 的字段清单与策略读的清单**同一份**（从 `sample.STRATEGY_READ_FIELDS` 推导）：
+少搬一个字段，影子臂就读不到它、两臂不分化（表现是「接线做完了但 `delta` 还是 0」）。
 """
 
 from __future__ import annotations
@@ -18,19 +18,17 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Optional
 
-from app.strategy.sample import SampleNoBudget, build_decision
+from app.strategy.sample import STRATEGY_READ_FIELDS, SampleNoBudget, build_decision
 
 
 def param_of(config: Optional[dict[str, Any]]) -> dict[str, Any]:
-    """从影子配置里取出示例策略**会用到**的字段（供 `data_snapshot` 留痕）。
+    """从影子配置里取出示例策略**会读到**的白名单字段。
 
-    **只取真值**：配置里没有的字段就是 `None`（不填一个「看起来正常」的默认）。
+    口径 = `sample.STRATEGY_READ_FIELDS`（策略读了哪些，这里就搬哪些）。**只取真值**：
+    配置里没有的字段就是 `None`（不填一个「看起来正常」的默认）。
     """
     cfg = config or {}
-    return {
-        "max_position_pct": cfg.get("max_position_pct"),
-        "max_positions": None,
-    }
+    return {name: cfg.get(name) for name in STRATEGY_READ_FIELDS}
 
 
 def arm_order(decision: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
