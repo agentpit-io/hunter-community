@@ -494,6 +494,10 @@ services:
       JWT_SECRET: ${JWT_SECRET:-}
       # MCP subprocesses reach the api container via internal docker network
       HERMES_API_URL: http://api:8000
+      # L08 · 控制类 MCP(runtime_mcp.py)把四个 runtime.workflow_* 工具转发到 fin-worker 的
+      # /internal/runtime/*。fin-worker 在 `fin` profile 下;没启用该 profile 时这里连不上,
+      # 控制工具会**如实报连不上**(不是崩)。同网络用服务名即可。
+      FIN_WORKER_URL: ${FIN_WORKER_URL:-http://fin-worker:8300}
       # Shared secret for /api/internal/* calls
       HUNTER_INTERNAL_KEY: ${HUNTER_INTERNAL_KEY:-}
       # LLM · same source of truth as api container

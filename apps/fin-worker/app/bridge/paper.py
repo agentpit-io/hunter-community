@@ -232,3 +232,12 @@ class PaperClient:
 
     def fail_job(self, job_id: str) -> Optional[dict]:
         return self._json("POST", f"/api/v1/jobs/{job_id}/fail", allow=(404, 409))
+
+    def cancel_job(self, job_id: str) -> Optional[dict]:
+        """请求取消一个长任务（L08 · `§10.4` 的「可请求取消」）。
+
+        paper 的 `request_cancel` 是**幂等**的：已经终态的任务原样返回（`changed:false`），
+        不会报错；RUNNING → `CANCEL_REQUESTED`，ACCEPTED → `CANCELLED`。
+        404 吞掉（工作流已撤回、job 不存在也是「没什么可取消的」）。
+        """
+        return self._json("POST", f"/api/v1/jobs/{job_id}/cancel", allow=(404,))

@@ -341,14 +341,24 @@ def _project_config(cfg: dict, source: str) -> dict:
     # 在这里重复写会让同一个脚本被起两次(2026-08-14 踩过,见 cd427bf)。
     extra = os.environ.get("HUNTER_EXTRA_MCP_DIR", "/opt/hunter-mcp")
     # (注册名, 文件名, timeout_ms)
+    #
+    # ── 数据类 MCP ──（行情 / 选股 / 自选 / 能力库…，只读或写用户自己的数据）
     #   hunter_cap · kpred 是 GPU 推理、scout 是 30-60s 主动采集,30s 默认会被掐断
     #   screener   · 全市场扫描 · 拉全市场实测 1~3s,60s 足够(留上游抖动余量)
-    _EXTRA_MCP = [
+    _DATA_MCP = [
         ("hunter_cap", "hunter_capability_mcp.py", 180000),
         ("screener",   "screener_mcp.py",           60000),
     ]
+    # ── 控制类 MCP ──（L08 · 五期方案 §6.3「控制通道与数据通道分离」）
+    #   单独一个 server（`runtime_mcp.py`），四个工具 = runtime.workflow_start/get/pause/cancel。
+    #   **与上面数据类分开登记**：它只操作 Temporal（启动 / 查询 / 暂停 / 取消工作流），
+    #   不返回任何行情数据；注册名以 `runtime_` 起头，在生成的配置里一眼与数据类区分。
+    #   它转发到 fin-worker 的 `/internal/runtime/*`（白名单模板 + 类型化参数，不是后门）。
+    _CONTROL_MCP = [
+        ("runtime_control", "runtime_mcp.py", 60000),
+    ]
     mcp_cfg = {}
-    for reg_name, fname, timeout_ms in _EXTRA_MCP:
+    for reg_name, fname, timeout_ms in (_DATA_MCP + _CONTROL_MCP):
         path = os.path.join(extra, fname)
         if os.path.exists(path):
             mcp_cfg[reg_name] = {

@@ -38,6 +38,55 @@ with workflow.unsafe.imports_passed_through():
 
 _ROLE_KIND: dict[str, str] = {role: kind for role, kind in POINT_SHAPE}
 
+
+class _PausableWorkflow:
+    """给工作流加「暂停 / 恢复信号 + 状态查询」与「当前长任务」两样东西（L08 · 控制通道）。
+
+    **为什么是协作式的**：Temporal 没有原生的「暂停一个正在跑的 workflow」；唯一能动的
+    状态变化是 `cancel`（终态）。所以暂停 = 往工作流发 `pause` 信号，工作流在下一个
+    **检查点**（`_gate`）停下并 `wait_condition` 等 `resume`（`runtime_control.pause_impl`）。
+    这与 Temporal 官方「信号改变工作流状态」的用法一致，且 `pause` 期间工作流停在
+    `RUNNING`、不再往下走 —— 是真的停住了，不是挂个标记。
+
+    **两处保证**：
+
+    1. **不加命令、不改历史**：`_gate` 在未暂停时 `wait_condition` 立刻返回（谓词为真时不发命令），
+       所以既有历史 replay 逐字节不变（新增的只是信号 / 查询处理器，它们不产生命令）。
+    2. **长任务可取消**：`_track_job` 把「当前 `fin_job`」记在实例上，经 `current_job` 查询
+       暴露给控制通道 —— `cancel` 据此把那个 job 一并取消（`§10.4` 的「可请求取消」）。
+    """
+
+    def __init__(self) -> None:
+        self._paused = False
+        self._current_job_id: str | None = None
+
+    @workflow.signal(name="pause")
+    def _on_pause(self) -> None:
+        self._paused = True
+
+    @workflow.signal(name="resume")
+    def _on_resume(self) -> None:
+        self._paused = False
+
+    @workflow.query(name="paused")
+    def _query_paused(self) -> bool:
+        return self._paused
+
+    @workflow.query(name="current_job")
+    def _query_current_job(self) -> dict | None:
+        if self._current_job_id is None:
+            return None
+        return {"job_id": self._current_job_id}
+
+    async def _gate(self) -> None:
+        """暂停检查点：暂停时停在这里等 `resume`。未暂停时**零开销、零命令**。"""
+        if self._paused:
+            await workflow.wait_condition(lambda: not self._paused)
+
+    def _track_job(self, job_id: str | None) -> None:
+        self._current_job_id = job_id
+
+
 # Activity 重试：at-least-once。幂等由业务键保证（见模块文档）。
 RETRY = RetryPolicy(
     initial_interval=timedelta(seconds=2),
@@ -108,8 +157,11 @@ async def _market_clock(market: str) -> dict:
     return await _exec(activities.market_clock, {"market": market})
 
 
-async def _run_point(role: str, req: dict) -> dict:
-    """六个角色共用的执行体。返回一份可读的摘要（进 Temporal 历史，也进 job checkpoint）。"""
+async def _run_point(role: str, req: dict, ctl: "_PausableWorkflow") -> dict:
+    """六个角色共用的执行体。返回一份可读的摘要（进 Temporal 历史，也进 job checkpoint）。
+
+    `ctl` 是所属工作流实例（L08）：`_gate` 是暂停检查点，`_track_job` 记当前长任务。
+    """
     market = canonical(req.get("market") or "CN_A")
     kind = _ROLE_KIND[role]
     # 市场当地日期 / 时刻：补跑可显式给；调度路径不给 → 经 Activity 现取（沙箱外才有时区数据）。
@@ -126,6 +178,7 @@ async def _run_point(role: str, req: dict) -> dict:
 
     # ① 交易日历（preopen 先同步一次，其余时点直接读）—— **按该市场**
     if kind == "preopen":
+        await ctl._gate()
         summary["calendar_sync"] = await _exec(
             activities.sync_calendar,
             {"trade_date": trade_date, "market": market,
@@ -133,6 +186,7 @@ async def _run_point(role: str, req: dict) -> dict:
              "lookahead_days": req.get("lookahead_days", 12)},
         )
 
+    await ctl._gate()
     cal = await _exec(activities.read_calendar, {"trade_date": trade_date, "market": market})
     summary["calendar"] = cal
     action, why = gating.gate(cal)
@@ -149,6 +203,7 @@ async def _run_point(role: str, req: dict) -> dict:
         return summary
 
     # ② 对该市场进行中的项目跑这个时点
+    await ctl._gate()
     projects = await _exec(activities.list_active_projects, {})
     projects = projects_for_market(projects, market)
     # 只跑指定项目：**补跑 / 故障注入验收**用（调度永远不带这个字段，
@@ -160,25 +215,31 @@ async def _run_point(role: str, req: dict) -> dict:
     summary["projects"] = []
     for project in projects:
         summary["projects"].append(
-            await _run_for_project(kind, point_key, at, market, project, trade_date, now_iso, req)
+            await _run_for_project(kind, point_key, at, market, project,
+                                   trade_date, now_iso, req, ctl)
         )
     summary["status"] = "ok"
     summary["active_projects"] = len(projects)
     return summary
 
 
-async def _run_for_project(kind, point_key, at, market, project, trade_date, now_iso, req) -> dict:
+async def _run_for_project(kind, point_key, at, market, project, trade_date, now_iso, req,
+                           ctl: "_PausableWorkflow") -> dict:
     project_id = project["project_id"]
     out: dict = {"project_id": project_id, "point": point_key, "market": market}
 
     # 业务检查点：登记 + 标 RUNNING（同键幂等，重启重放拿到同一个 job_id）
+    await ctl._gate()
     job = await _exec(activities.begin_point_job, {
         "project_id": project_id, "trade_date": trade_date,
         "point": point_key, "at": at, "now": now_iso,
     })
     job_id = job["job_id"]
+    # L08：把「当前长任务」记在工作流实例上 —— 控制通道 `cancel` 会先查它、再一并取消（§10.4）。
+    ctl._track_job(job_id)
     out["job_id"] = job_id
 
+    await ctl._gate()                       # 暂停检查点：暂停时停在这里（工作流仍 RUNNING）
     if kind == "preopen":
         out["confirm_t1"] = await _exec(activities.confirm_t1, {
             "project_id": project_id, "market": market,
@@ -228,10 +289,12 @@ async def _run_for_project(kind, point_key, at, market, project, trade_date, now
                                "memory_snapshot_id": mem.get("memory_snapshot_id"),
                                "memory_blocked_by": (built.get("memory") or {}).get("blocked_by")},
             })
+            ctl._track_job(None)
             return out
         out["decision"] = built["decision"]
         out["idempotency_key"] = built["idempotency_key"]
         # ② 提交（有副作用的 Activity）。命令是冻结的，重试逐字节相同 → 幂等重放。
+        await ctl._gate()
         submitted = await _exec(activities.submit_decision, {
             "command": built["command"], "idempotency_key": built["idempotency_key"],
             "project_id": project_id, "point": point_key,
@@ -250,10 +313,12 @@ async def _run_for_project(kind, point_key, at, market, project, trade_date, now
                            "memory_experience_count": len(mem.get("items") or [])},
         })
     elif kind == "match":
+        await ctl._gate()
         out["match_open"] = await _exec(activities.match_open_orders, {
             "project_id": project_id, "market": market,
         })
     elif kind == "close":
+        await ctl._gate()
         out["close"] = await _exec(activities.close_day, {
             "project_id": project_id, "now": now_iso, "market": market,
         })
@@ -267,56 +332,58 @@ async def _run_for_project(kind, point_key, at, market, project, trade_date, now
                 timeout=REPORT_TIMEOUT,
             )
 
+    await ctl._gate()
     out["finish"] = await _exec(activities.finish_point_job, {
         "job_id": job_id,
         "result_ref": f"point:{point_key}:{trade_date}:{project_id}",
         "checkpoint": {"point": point_key, "trade_date": trade_date, "phase": "done",
                        "result": out},
     })
+    ctl._track_job(None)
     return out
 
 
 # ── 六个角色（六个 Workflow 类型；市场经 args 传入）─────────────────────────
 @workflow.defn(name="fin.point_preopen")
-class PointPreopenWorkflow:
+class PointPreopenWorkflow(_PausableWorkflow):
     @workflow.run
     async def run(self, req: dict | None = None) -> dict:
-        return await _run_point("preopen", req or {})
+        return await _run_point("preopen", req or {}, self)
 
 
 @workflow.defn(name="fin.point_decide")
-class PointDecideWorkflow:
+class PointDecideWorkflow(_PausableWorkflow):
     @workflow.run
     async def run(self, req: dict | None = None) -> dict:
-        return await _run_point("decide", req or {})
+        return await _run_point("decide", req or {}, self)
 
 
 @workflow.defn(name="fin.point_match_a")
-class PointMatchAWorkflow:
+class PointMatchAWorkflow(_PausableWorkflow):
     @workflow.run
     async def run(self, req: dict | None = None) -> dict:
-        return await _run_point("match_a", req or {})
+        return await _run_point("match_a", req or {}, self)
 
 
 @workflow.defn(name="fin.point_match_b")
-class PointMatchBWorkflow:
+class PointMatchBWorkflow(_PausableWorkflow):
     @workflow.run
     async def run(self, req: dict | None = None) -> dict:
-        return await _run_point("match_b", req or {})
+        return await _run_point("match_b", req or {}, self)
 
 
 @workflow.defn(name="fin.point_match_c")
-class PointMatchCWorkflow:
+class PointMatchCWorkflow(_PausableWorkflow):
     @workflow.run
     async def run(self, req: dict | None = None) -> dict:
-        return await _run_point("match_c", req or {})
+        return await _run_point("match_c", req or {}, self)
 
 
 @workflow.defn(name="fin.point_close")
-class PointCloseWorkflow:
+class PointCloseWorkflow(_PausableWorkflow):
     @workflow.run
     async def run(self, req: dict | None = None) -> dict:
-        return await _run_point("close", req or {})
+        return await _run_point("close", req or {}, self)
 
 
 POINT_WORKFLOWS = (
@@ -383,7 +450,7 @@ async def _review_for_project(project: dict, market: str, trade_date: str,
 
 
 @workflow.defn(name="fin.review")
-class ReviewWorkflow:
+class ReviewWorkflow(_PausableWorkflow):
     """收盘后复核工作流（第四段 R3 · 方案 §8 的复盘回路）。
 
     **市场经 Schedule 的 `args` 传进来**（同六个时点角色，见模块头）：
@@ -418,6 +485,7 @@ class ReviewWorkflow:
             workflow.logger.info(summary["note"])
             return summary
 
+        await self._gate()
         projects = await _exec(activities.list_active_projects, {})
         projects = projects_for_market(projects, market)
         only = req.get("project_id")
@@ -436,7 +504,7 @@ class ReviewWorkflow:
 
 # ── K 线 ETL 触发（「谁决定什么时候拉数据」）────────────────────────────────
 @workflow.defn(name="fin.market_etl")
-class MarketEtlWorkflow:
+class MarketEtlWorkflow(_PausableWorkflow):
     """由 Temporal 决定「什么时候拉 K 线」。**取数实现原样不动**（api 侧复用）。
 
     **触发前先查该市场自己的交易日历**（N4）：`cron` 只表达「周一到周五」，
@@ -447,6 +515,7 @@ class MarketEtlWorkflow:
 
     @workflow.run
     async def run(self, req: dict) -> dict:
+        await self._gate()                               # L08 暂停检查点
         market_key = req["market"]                       # cn / hk / us（ETL 通道写法）
         market = canonical(market_key)                   # CN_A / HK / US
         if req.get("trade_date") and req.get("now"):
@@ -473,7 +542,7 @@ class MarketEtlWorkflow:
 
 # ── 标的元数据同步（M7 · M-20）────────────────────────────────────────────
 @workflow.defn(name="fin.instrument_sync")
-class InstrumentSyncWorkflow:
+class InstrumentSyncWorkflow(_PausableWorkflow):
     """每晚把某市场标的的元数据同步进 `fin_instrument`。
 
     独立成一个工作流类型（不是塞进某个时点）：它是**参考数据**的刷新，
@@ -485,6 +554,7 @@ class InstrumentSyncWorkflow:
     @workflow.run
     async def run(self, req: dict | None = None) -> dict:
         req = req or {}
+        await self._gate()                               # L08 暂停检查点
         return await _exec(
             activities.sync_instruments,
             {"market": req.get("market", "cn"), "codes": req.get("codes")},
@@ -510,7 +580,7 @@ SHADOW_TIMEOUT = timedelta(minutes=5)
 
 
 @workflow.defn(name="fin.shadow")
-class ShadowWorkflow:
+class ShadowWorkflow(_PausableWorkflow):
     """影子验证工作流（第四段 R7 · 方案 §4-C）。
 
     **市场经 Schedule 的 `args` 传进来**（同六个时点角色 / `fin.review`）：
@@ -547,6 +617,7 @@ class ShadowWorkflow:
 
         points = await _exec(activities.market_points, {"market": market})
         summary["points"] = [p["point"] for p in points]
+        await self._gate()
         projects = await _exec(activities.list_active_projects, {})
         projects = projects_for_market(projects, market)
         only = req.get("project_id")
@@ -645,7 +716,7 @@ async def _observe_for_project(project: dict, market: str, trade_date: str,
 
 
 @workflow.defn(name="fin.observe")
-class ObserveWorkflow:
+class ObserveWorkflow(_PausableWorkflow):
     """自动盯盘工作流（第四段 R13 · 方案 §A）。
 
     **市场经 Schedule 的 `args` 传进来**（同六个时点角色 / `fin.review` / `fin.shadow`）：
@@ -685,6 +756,7 @@ class ObserveWorkflow:
             workflow.logger.info(summary["note"])
             return summary
 
+        await self._gate()
         projects = await _exec(activities.list_active_projects, {})
         projects = projects_for_market(projects, market)
         only = req.get("project_id")
@@ -757,7 +829,7 @@ async def _propose_for_project(project: dict, market: str, trade_date: str,
 
 
 @workflow.defn(name="fin.propose")
-class ProposeWorkflow:
+class ProposeWorkflow(_PausableWorkflow):
     """自动提案工作流（L01 · 把「经验 → 提案」这一节接上）。
 
     **市场经 Schedule 的 `args` 传进来**（同 `fin.review` / `fin.shadow` / `fin.observe`）：
@@ -796,6 +868,7 @@ class ProposeWorkflow:
             workflow.logger.info(summary["note"])
             return summary
 
+        await self._gate()
         projects = await _exec(activities.list_active_projects, {})
         projects = projects_for_market(projects, market)
         only = req.get("project_id")

@@ -1,11 +1,14 @@
-"""内部最小 HTTP 端点 —— 给 `api` / 运维用。
+"""内部最小 HTTP 端点 —— 给 `api` / 运维 / OpenCode 控制 MCP 用。
 
-它不是账本入口（账本入口只有 `paper`），只做两件事：
-- `GET /healthz` —— 存活 + 与 Temporal 的连通性 + 六个时点清单（免密钥，容器健康检查用）。
+它不是账本入口（账本入口只有 `paper`），只做两类事：
+- `GET /healthz` —— 存活 + 与 Temporal 的连通性 + 时点清单（免密钥，容器健康检查用）。
 - `POST /internal/trigger/{point}` —— **手工**触发某个时点的工作流（排障 / 补跑）。
+- `POST|GET /internal/runtime/workflow_start|get|pause|cancel` —— **运行时控制通道**（L08）：
+  启动 / 查询 / 暂停 / 取消工作流。只认**白名单模板 + 类型化参数**（`runtime_control.TEMPLATES`），
+  不是「执行任意代码 / 任意工作流名」的后门。
 
 鉴权：`X-Hunter-Internal-Key` == **读取凭证** `HUNTER_INTERNAL_KEY`（与 api 的数据面
-同一把）。**不是** paper 的执行凭证 `HUNTER_EXEC_KEY` —— 这里不执行下单，只是触发工作流；
+同一把）。**不是** paper 的执行凭证 `HUNTER_EXEC_KEY` —— 这里不执行下单，只是触发 / 控制工作流；
 下单那一步在 paper 侧还要过执行门 + 执行允许名单（L06）。
 """
 
@@ -23,7 +26,7 @@ from temporalio.common import WorkflowIDReusePolicy
 from temporalio.exceptions import WorkflowAlreadyStartedError
 from temporalio.service import RPCError
 
-from app import config
+from app import config, runtime_control
 from app.points import ALL_POINTS, BY_KEY as BY_KEYS, resolve_point_key
 
 app = FastAPI(
@@ -128,3 +131,75 @@ def _today_shanghai() -> str:
     from zoneinfo import ZoneInfo
 
     return datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
+
+
+# ── 运行时控制通道（L08 · `§5.1` / `§10.1`）──────────────────────────────────
+# 四个入口 = `runtime.workflow_start/get/pause/cancel`。它们是**操作 Temporal 的手**，
+# 不另起调度、不另存状态（红线：Temporal 是唯一调度权威）。
+#
+# 三个写入口（start / pause / cancel）都要过内部口令（`_require_key`）；`get` 是只读也一样要 ——
+# 「谁在跑什么」也是内部信息，不放公网。端口只绑 127.0.0.1（见 docker-compose.yml）。
+def _to_http(exc: runtime_control.ControlError) -> HTTPException:
+    return HTTPException(status_code=exc.status, detail=exc.detail)
+
+
+@app.post("/internal/runtime/workflow_start")
+async def workflow_start(request: Request, body: dict) -> dict:
+    """启动一个**白名单模板**的工作流。只认模板名 + 类型化参数，不接受任意工作流名 / 代码。"""
+    _require_key(request)
+    template = (body or {}).get("template")
+    if not isinstance(template, str):
+        raise HTTPException(400, "缺 template")
+    try:
+        params = runtime_control.validate_start(template, (body or {}).get("params"))
+        wf_id = runtime_control.derive_workflow_id(template, params, (body or {}).get("workflow_id"))
+    except runtime_control.ControlError as exc:
+        raise _to_http(exc) from exc
+    client = await _get_client()
+    try:
+        return await runtime_control.start_impl(client, template, params, wf_id)
+    except runtime_control.ControlError as exc:
+        raise _to_http(exc) from exc
+
+
+@app.get("/internal/runtime/workflow_get")
+async def workflow_get(request: Request, workflow_id: Optional[str] = None,
+                       run_id: Optional[str] = None, schedule_id: Optional[str] = None) -> dict:
+    """查状态（从 Temporal 现查）。给 `workflow_id` 查执行，给 `schedule_id` 查调度。"""
+    _require_key(request)
+    client = await _get_client()
+    try:
+        return await runtime_control.get_impl(
+            client, workflow_id=workflow_id, run_id=run_id, schedule_id=schedule_id)
+    except runtime_control.ControlError as exc:
+        raise _to_http(exc) from exc
+
+
+@app.post("/internal/runtime/workflow_pause")
+async def workflow_pause(request: Request, body: dict) -> dict:
+    """暂停 / 恢复（`resume=true`）。幂等：重复暂停不报错。"""
+    _require_key(request)
+    b = body or {}
+    client = await _get_client()
+    try:
+        return await runtime_control.pause_impl(
+            client, schedule_id=b.get("schedule_id"), workflow_id=b.get("workflow_id"),
+            run_id=b.get("run_id"), resume=bool(b.get("resume")))
+    except runtime_control.ControlError as exc:
+        raise _to_http(exc) from exc
+
+
+@app.post("/internal/runtime/workflow_cancel")
+async def workflow_cancel(request: Request, body: dict) -> dict:
+    """取消工作流及其长任务（`fin_job`）。幂等：已结束的工作流返回 `already_ended`，不报错。"""
+    _require_key(request)
+    b = body or {}
+    workflow_id = b.get("workflow_id")
+    if not isinstance(workflow_id, str) or not workflow_id:
+        raise HTTPException(400, "缺 workflow_id")
+    client = await _get_client()
+    try:
+        return await runtime_control.cancel_impl(
+            client, workflow_id=workflow_id, run_id=b.get("run_id"), job_id=b.get("job_id"))
+    except runtime_control.ControlError as exc:
+        raise _to_http(exc) from exc

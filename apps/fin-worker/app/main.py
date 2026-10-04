@@ -35,6 +35,14 @@ def main() -> None:
         # 不退出：健康检查与只读端点照常；但触发端点会一律 401（缺口令 = 没人能过）。
         logger.warning("[fin-worker] {} 未设置 —— /internal/* 将一律 401", config.READ_KEY_ENV)
 
+    # **先把 temporalio 在主线程里导完，再起 HTTP 线程**（L08 稳定化）。
+    # 两个线程各 import 一次 temporalio 会撞上「partially initialized module 'temporalio'
+    # has no attribute 'common'」—— 包的初始化不是线程安全的，谁先谁赢；输的那个线程
+    # （HTTP 或 Worker 主线程）当场抛 AttributeError，容器进入 Restarting 循环。
+    # 这是一条既有竞态（`app.api` 与 `app.worker` 都在模块顶层 import temporalio），
+    # 只是平时 window 很窄。先导一次，后面两个线程读的都是完成态，竞态消失。
+    from app import api as _api  # noqa: F401 —— 只为在主线程完成 temporalio 的导入
+
     http_thread = threading.Thread(target=_serve_http, name="fin-worker-http", daemon=True)
     http_thread.start()
 
