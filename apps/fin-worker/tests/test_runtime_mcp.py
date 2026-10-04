@@ -106,7 +106,7 @@ def test_template_list_matches_fin_worker_whitelist():
 
     mod, _ = _load()
     assert set(mod._TEMPLATES) == set(rc.TEMPLATES)
-    assert len(mod._TEMPLATES) == 12
+    assert len(mod._TEMPLATES) == 14
 
 
 def test_call_tool_routes_to_right_endpoints(monkeypatch):

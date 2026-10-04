@@ -19,6 +19,10 @@ import httpx
 from app import config
 
 TIMEOUT = httpx.Timeout(120.0, connect=10.0)  # ETL 是长任务，给足预算
+# 采集（L09）：新闻按标的逐个取、财报每只约 8.6 秒 —— 一轮几十只票，单次调用给足预算。
+# 与活动侧的 `workflows.COLLECT_TIMEOUT` 配套（HTTP 超时要**大于**活动里愿意等的时间，
+# 否则活动还没跑完，HTTP 先断了）。
+COLLECT_TIMEOUT = httpx.Timeout(1200.0, connect=10.0)
 
 
 class ApiError(RuntimeError):
@@ -350,6 +354,44 @@ class HunterApiClient:
         if as_of is not None:
             body["as_of"] = as_of
         resp = self._request("POST", "/api/internal/fin/evolution/observe", json=body)
+        if resp.status_code >= 400:
+            raise ApiError(resp.status_code, resp.text)
+        return resp.json()
+
+    # ── L09 · 采集补齐（新闻 / 基本面；走内网口令通道）─────────────────────────
+    #
+    # 取数**全在 api 侧**（`services/fin/collection.py`）—— fin-worker 不碰数据库
+    # （`test_no_ledger_access.py` 盯着）。这里只负责「触发」与把读数带回来。
+    # 采集可能慢（新闻按标的逐个取、财报每只约 8.6 秒）——**单次调用的超时给足**
+    # （`COLLECT_TIMEOUT`），别用默认的 `TIMEOUT`。
+    def collect_news(self, market: str, *, limit: Optional[int] = None,
+                     per_code: Optional[int] = None,
+                     codes: Optional[list[str]] = None) -> dict[str, Any]:
+        """抓该市场的标的新闻进 `news`（增量去重）。数据源不通 → api 记缺口、不写假行。"""
+        body: dict[str, Any] = {"market": market}
+        if limit is not None:
+            body["limit"] = limit
+        if per_code is not None:
+            body["per_code"] = per_code
+        if codes is not None:
+            body["codes"] = codes
+        resp = self._request("POST", "/api/internal/fin/collect/news", json=body,
+                             timeout=COLLECT_TIMEOUT)
+        if resp.status_code >= 400:
+            raise ApiError(resp.status_code, resp.text)
+        return resp.json()
+
+    def collect_fundamentals(self, market: str, *, limit: Optional[int] = None,
+                             keep_raw: bool = False,
+                             codes: Optional[list[str]] = None) -> dict[str, Any]:
+        """抓该市场标的的财报进 `financial_metric`。**只有 A 股有已接数据源**，其余如实返回未接。"""
+        body: dict[str, Any] = {"market": market, "keep_raw": bool(keep_raw)}
+        if limit is not None:
+            body["limit"] = limit
+        if codes is not None:
+            body["codes"] = codes
+        resp = self._request("POST", "/api/internal/fin/collect/fundamental", json=body,
+                             timeout=COLLECT_TIMEOUT)
         if resp.status_code >= 400:
             raise ApiError(resp.status_code, resp.text)
         return resp.json()

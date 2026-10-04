@@ -262,10 +262,71 @@ def propose_specs(market_rules: Optional[list[dict]] = None) -> list[ScheduleSpe
     return specs
 
 
+def _news_fundamental_specs(workflow: str, delay_minutes: int, key: str,
+                            label: str, market_rules: Optional[list[dict]] = None,
+                            only_markets: Optional[tuple[str, ...]] = None,
+                            ) -> list[ScheduleSpecDef]:
+    """采集 Schedule 的共用构造（新闻 / 基本面只差工作流名、延迟、标的范围）。
+
+    时点 = 该市场**时段末点 + 延迟**（`_session_close` 取该市场时段里最晚的收盘时刻，
+    香港是收市竞价那一段的 16:10）—— 排在收盘、当天数据已就绪之后。
+    `args.market` 用 **ETL 那套小写三字母**（`cn` / `hk` / `us`），因为采集工作流按它走
+    `collection._MARKETS` 映射（与 `fin.market_etl` 同口径）。
+    """
+    specs: list[ScheduleSpecDef] = []
+    for rule in _rules_by_market(market_rules):
+        market = rule["market"]
+        if only_markets is not None and market not in only_markets:
+            continue
+        tz = rule.get("timezone") or MARKET_TZ.get(market)
+        sessions = list(rule.get("sessions") or [])
+        if not sessions:
+            sessions = next((r.get("sessions") or [] for r in fallback_market_rules()
+                             if r.get("market") == market), [])
+        at = _hhmm_plus(_session_close(sessions), delay_minutes)
+        specs.append(ScheduleSpecDef(
+            schedule_id=f"fin-{key}-{market}",
+            workflow=workflow,
+            cron=cron_of(at),
+            args={"market": _ETL_MARKET.get(market, "cn"), "at": at, "point": f"{market}-{key}"},
+            title=f"{market} · {label}（时段末点 + {delay_minutes} 分钟）",
+            timezone=tz,
+        ))
+    return specs
+
+
+# 采集通道工作流用的是 ETL 的小写三字母市场写法（见 `fin.market_etl`）。
+_ETL_MARKET = {"CN_A": "cn", "HK": "hk", "US": "us"}
+
+
+def news_specs(market_rules: Optional[list[dict]] = None) -> list[ScheduleSpecDef]:
+    """每个市场一条**新闻采集** Schedule（L09 · 方案 §2.1「新闻接入」）。
+
+    时点 = 该市场**时段末点 + `FIN_NEWS_DELAY_MINUTES`**（默认 90）。**新闻三个市场都接**
+    （官方源三市场都返回）。**现有 Schedule 一条都不改。**
+    """
+    return _news_fundamental_specs("fin.news_collect", config.news_delay_minutes(),
+                                   "news", "新闻采集", market_rules=market_rules)
+
+
+def fundamental_specs(market_rules: Optional[list[dict]] = None) -> list[ScheduleSpecDef]:
+    """**A 股**一条**基本面采集** Schedule（L09 · 方案 §2.1「基本面接入」）。
+
+    时点 = 时段末点 + `FIN_FUNDAMENTAL_DELAY_MINUTES`（默认 120）。**只排 `cn`** ——
+    `financial_metric` 目前只有 A 股数据源（akshare 财务指标）；港 / 美股财报**未接**，
+    排了也只是空跑（见 `docs/开发文档/L09-采集补齐.md`「未接数据源清单」）。
+    **现有 Schedule 一条都不改。**
+    """
+    return _news_fundamental_specs("fin.fundamental_collect", config.fundamental_delay_minutes(),
+                                   "fundamental", "基本面采集（仅 A 股）",
+                                   market_rules=market_rules, only_markets=("CN_A",))
+
+
 def all_specs(market_rules: Optional[list[dict]] = None) -> list[ScheduleSpecDef]:
     return (point_specs(market_rules) + list(ETL_SCHEDULES) + list(INSTRUMENT_SCHEDULES)
             + review_specs(market_rules) + propose_specs(market_rules)
-            + shadow_specs(market_rules) + observe_specs(market_rules))
+            + shadow_specs(market_rules) + observe_specs(market_rules)
+            + news_specs(market_rules) + fundamental_specs(market_rules))
 
 
 def build_schedule(spec: ScheduleSpecDef):

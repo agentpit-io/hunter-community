@@ -89,6 +89,17 @@ TEMPLATES: dict[str, dict[str, tuple[str, bool]]] = {
         "trade_date": ("date", False), "at": ("hhmm", False), "point": ("str", False),
         "now": ("str", False), "project_id": ("str", False),
     },
+    # L09 · 采集补齐。市场用 ETL 那套小写三字母（`etl_market`）；`codes` 留空 = api 按
+    # 「自选股 ∪ 系统标的」算清单，显式给用于排障 / 补采（**这是控制通道的正当用法**：
+    # 只认模板名 + 类型化参数，不是「任意执行」）。
+    "fin.news_collect": {
+        "market": ("etl_market", False), "limit": ("int", False),
+        "per_code": ("int", False), "codes": ("str_list", False),
+    },
+    "fin.fundamental_collect": {
+        "market": ("etl_market", False), "limit": ("int", False),
+        "keep_raw": ("bool", False), "codes": ("str_list", False),
+    },
 }
 
 # 启动出来的工作流 id 前缀 —— 与调度（`fin-point-…`）/ 手工补跑（`fin-…`）一眼可分。

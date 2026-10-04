@@ -245,3 +245,43 @@ def propose_delay_minutes() -> int:
                        value, DEFAULT_PROPOSE_DELAY_MINUTES)
         return DEFAULT_PROPOSE_DELAY_MINUTES
     return value
+
+
+# ── 采集补齐（L09 · 新闻 / 基本面）─────────────────────────────────────────
+# `fin-news-<market>` / `fin-fundamental-<market>` 的触发时点 = 该市场**时段末点** +
+# 这个采集延迟（排在收盘之后，当天数据已就绪）。**可配** —— 具体分钟数不许硬编码进
+# 调度代码，这里只给默认值。
+#
+# 默认值取「时段末点之后一段合理余量」：新闻 90 分钟（收盘后媒体稿基本沉淀）、
+# 财报 120 分钟（A 股财报是季度数据、akshare 按年逐个请求，晚一点更稳）。
+DEFAULT_NEWS_DELAY_MINUTES = 90
+DEFAULT_FUNDAMENTAL_DELAY_MINUTES = 120
+
+
+def _delay_minutes(env: str, default: int) -> int:
+    """读一个「延迟分钟数」env：缺省 / 非数字 / 负数 → 默认值，并**在日志里写明用了默认**。
+
+    与 `review_delay_minutes` 等同口径：配置写错不该让保护悄悄变（缺值按默认，不按 0）。
+    """
+    raw = (os.getenv(env) or "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("[config] {}={!r} 不是整数，用默认 {} 分钟", env, raw, default)
+        return default
+    if value < 0:
+        logger.warning("[config] {}={} 为负数，用默认 {} 分钟", env, value, default)
+        return default
+    return value
+
+
+def news_delay_minutes() -> int:
+    """新闻采集相对「时段末点」再往后推多少分钟。**默认 90**（`FIN_NEWS_DELAY_MINUTES`）。"""
+    return _delay_minutes("FIN_NEWS_DELAY_MINUTES", DEFAULT_NEWS_DELAY_MINUTES)
+
+
+def fundamental_delay_minutes() -> int:
+    """财报采集相对「时段末点」再往后推多少分钟。**默认 120**（`FIN_FUNDAMENTAL_DELAY_MINUTES`）。"""
+    return _delay_minutes("FIN_FUNDAMENTAL_DELAY_MINUTES", DEFAULT_FUNDAMENTAL_DELAY_MINUTES)

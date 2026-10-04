@@ -36,12 +36,14 @@ INTERNAL_KEY = os.getenv("HUNTER_INTERNAL_KEY", "")
 
 server = Server("runtime-mcp")
 
-# 六个时点模板 + ETL / 标的同步 + 四条回路 —— 与 fin-worker 的 `runtime_control.TEMPLATES` 一致。
+# 六个时点模板 + ETL / 标的同步 + 四条回路 + 两条采集 —— 与 fin-worker 的
+# `runtime_control.TEMPLATES` 一致（`apps/fin-worker/tests/test_runtime_mcp.py` 盯着，写歪了就红）。
 # 这里列出只是为了给模型「写得出模板名」；**判定仍在 fin-worker**（这里写死也不会放宽白名单）。
 _TEMPLATES = [
     "fin.point_preopen", "fin.point_decide", "fin.point_match_a", "fin.point_match_b",
     "fin.point_match_c", "fin.point_close", "fin.market_etl", "fin.instrument_sync",
     "fin.review", "fin.shadow", "fin.observe", "fin.propose",
+    "fin.news_collect", "fin.fundamental_collect",
 ]
 
 
@@ -55,9 +57,9 @@ async def list_tools():
                 "用户说『跑一次今天的开盘决策 / 触发一下港股收盘 / 手动跑一次复盘 / "
                 "启动标的同步』时用。\n\n"
                 f"template 只能是这几个之一：{_TEMPLATES}\n\n"
-                "params 按模板选：时点类要 market（CN_A/HK/US）；market_etl / instrument_sync "
-                "的 market 用小写 cn/hk/us。可选 trade_date(YYYY-MM-DD) / at(HH:MM) / "
-                "project_id / code / hold_seconds 等。\n\n"
+                "params 按模板选：时点类要 market（CN_A/HK/US）；market_etl / instrument_sync / "
+                "两条采集（news_collect / fundamental_collect）的 market 用小写 cn/hk/us。"
+                "可选 trade_date(YYYY-MM-DD) / at(HH:MM) / project_id / code / hold_seconds 等。\n\n"
                 "**不接受任意工作流名、不接受代码或命令** —— 传别的名字会被拒绝，"
                 "把拒绝原文转述给用户即可，不要换别的名字硬试。"
             ),

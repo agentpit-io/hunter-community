@@ -1,13 +1,19 @@
 """内网 · 智能炒股的数据面入口（`配置/paper` 与 `fin-worker` 调它）。
 
-两条路径，都是**只读**：
-
 | 路径 | 谁调 | 干什么 |
 |---|---|---|
-| `GET /internal/fin/quote/{code}` | paper 的行情适配层 | 统一行情结构（最新价 + 买一/卖一盘口 + 数据源时刻） |
-| `GET /internal/fin/instruments` | fin-worker 的同步任务 | 解析涨跌停（代码形态）/ ST（腾讯通道简称）元数据 |
+| `GET  /internal/fin/quote/{code}` | paper 的行情适配层 | 统一行情结构（最新价 + 买一/卖一盘口 + 数据源时刻） |
+| `GET  /internal/fin/instruments` | fin-worker 的同步任务 | 解析涨跌停（代码形态）/ ST（腾讯通道简称）元数据 |
+| `POST /internal/fin/data/snapshot` · `GET …/{id}` | L03 · 策略 / 研究工作流 | `DataSnapshot` 对象（只追加） |
+| `POST /internal/fin/collect/news` | L09 · `fin.news_collect` | 新闻接进 fin 侧定时采集（写 `news`） |
+| `POST /internal/fin/collect/fundamental` | L09 · `fin.fundamental_collect` | 基本面接进 fin 侧定时采集（写 `financial_metric`） |
+| `POST /internal/fin/sentiment` · `GET …/{code}` | L09 · 情绪登记口 | 情绪**只追加**登记 / 读回（**数据源未接**） |
 
 鉴权与 `/api/internal/*` 其余端点同一把口令（`X-Hunter-Internal-Key`）。
+
+**采集（L09）**：`POST …/collect/*` 是**写**接口（写 `news` / `financial_metric` /
+`fin_data_gap`）—— 它们在 `/internal/*` 前缀下（**要口令**），与面向用户的免登录前缀
+`/api/catalog/*` 无关（`CLAUDE.md` 铁律）。数据源不通时**记缺口、不写假行**（红线 5）。
 
 **为什么不让 paper 直接打 `/api/quote/{code}`**：那条路径先查用户的股票表
 （`get_stocks()`），代码不在表里就 404 —— 它是给**用户看自己的自选**用的。
@@ -292,3 +298,94 @@ def data_snapshot_get(request: Request, data_snapshot_id: str) -> dict:
     if row is None:
         raise HTTPException(404, f"没有这张数据快照：{data_snapshot_id}")
     return row
+
+
+# ── 采集补齐（五期 L09 · 新闻 / 基本面 / 情绪）──────────────────────────────
+#
+# 三条链路都挂**已有**内网数据面（同一个 `X-Hunter-Internal-Key`），不另起一套：
+#   · `POST /internal/fin/collect/news`         —— 新闻接进 fin 侧定时采集
+#   · `POST /internal/fin/collect/fundamental`  —— 基本面接进 fin 侧定时采集
+#   · `POST /internal/fin/sentiment`            —— 情绪**登记口**（写）
+#   · `GET  /internal/fin/sentiment/{code}`     —— 读回；`GET /internal/fin/sentiment` = 新鲜度
+#
+# **调度权威仍是 Temporal**（`fin-worker` 的 `fin.news_collect` / `fin.fundamental_collect`
+# 工作流打这里）。**数据源不通 → 记缺口（`fin_data_gap`），不写假行**（红线 5）。
+
+class CollectNewsIn(BaseModel):
+    market: str = "cn"
+    limit: int = 30
+    per_code: int = 20
+    codes: Optional[list[str]] = None     # 显式标的（排障 / 测试）；省略 = 自选股 ∪ 系统标的
+
+
+@router.post("/collect/news")
+def collect_news(request: Request, body: CollectNewsIn) -> dict:
+    """抓该市场的标的新闻进 `news` 表（增量、去重）。**数据源不通 → 记缺口，不写假行。**"""
+    _auth(request)
+    from app.services.fin import collection as coll
+    return coll.collect_news(body.market, limit=body.limit, codes=body.codes,
+                             per_code=body.per_code)
+
+
+class CollectFundamentalIn(BaseModel):
+    market: str = "cn"
+    limit: int = 50
+    keep_raw: bool = False
+    codes: Optional[list[str]] = None
+
+
+@router.post("/collect/fundamental")
+def collect_fundamental(request: Request, body: CollectFundamentalIn) -> dict:
+    """抓该市场标的的财报进 `financial_metric`。**只有 A 股有已接数据源**（见服务模块）。"""
+    _auth(request)
+    from app.services.fin import collection as coll
+    return coll.collect_fundamentals(body.market, limit=body.limit, codes=body.codes,
+                                     keep_raw=body.keep_raw)
+
+
+class SentimentIn(BaseModel):
+    """情绪登记口请求体。必填：`code` / `as_of` / `model_version` / `quality` / `source` /
+    `generated_at`（§6.2）；`sentiment` 拿不到就省略（→ `NULL`，**别填 0**）。"""
+
+    code: str = ""
+    market: Optional[str] = None
+    as_of: str = ""
+    sentiment: Optional[float] = None
+    sentiment_label: Optional[str] = None
+    model_version: str = ""
+    evidence_ref: Optional[str] = None
+    generated_at: str = ""
+    quality: str = ""
+    source: str = ""
+    note: Optional[str] = None
+
+
+@router.post("/sentiment")
+def sentiment_register(request: Request, body: SentimentIn) -> dict:
+    """登记一条情绪（**只追加 · 留痕**）。入参不合法 → 400（不猜、不填默认值）。"""
+    _auth(request)
+    from app.services.fin import sentiment as sent
+    try:
+        return sent.register_sentiment(body.model_dump())
+    except sent.SentimentError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/sentiment")
+def sentiment_freshness(request: Request, limit: int = Query(1, ge=1, le=50)) -> dict:
+    """情绪表新鲜度读数（行数 + 最新一行）。**没有行就如实返回 0 / null。**"""
+    _auth(request)
+    from app.services.fin import sentiment as sent
+    return sent.freshness(limit=limit)
+
+
+@router.get("/sentiment/{code}")
+def sentiment_read(request: Request, code: str, limit: int = Query(20, ge=1, le=500)) -> dict:
+    """按标的读回最近的情绪（`as_of` 倒序）。"""
+    _auth(request)
+    from app.services.fin import sentiment as sent
+    try:
+        rows = sent.read_sentiment(code, limit=limit)
+    except sent.SentimentError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"code": code, "count": len(rows), "items": rows}

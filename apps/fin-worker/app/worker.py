@@ -52,6 +52,9 @@ def activity_list() -> list:
         # L01 · 自动提案（fin.propose）。同上，**必须显式登记**。
         activities.propose_candidates,
         activities.propose_submit,
+        # L09 · 采集补齐（fin.news_collect / fin.fundamental_collect）。同上，**必须显式登记**。
+        activities.collect_news,
+        activities.collect_fundamentals,
     ]
 
 

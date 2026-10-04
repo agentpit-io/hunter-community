@@ -98,6 +98,9 @@ ACT_TIMEOUT = timedelta(seconds=120)
 # 带故障注入（hold_seconds）的 decide 要睡够，否则会被超时打断 —— 给它更长的预算。
 DECIDE_TIMEOUT = timedelta(minutes=10)
 ETL_TIMEOUT = timedelta(minutes=60)
+# 采集（L09）：新闻按标的逐个取、财报每只数秒 —— 一轮几十只票，给足预算。
+# 与 HTTP 侧 `hunter_api.COLLECT_TIMEOUT` 配套（HTTP 超时要 ≥ 这里愿意等的时间）。
+COLLECT_TIMEOUT = timedelta(minutes=20)
 # 报告生成要读账本 + 调模型（可能十几秒到几分钟），给足预算。
 REPORT_TIMEOUT = timedelta(minutes=5)
 # 下单 Activity 会打心跳（`activities._heartbeat`）。心跳超时是**检测 Worker 崩溃**
@@ -886,6 +889,63 @@ class ProposeWorkflow(_PausableWorkflow):
         return summary
 
 
+# ── 采集补齐（L09 · 方案 §2.1「24 小时自动采集」）─────────────────────────
+#
+# 两个新工作流类型（**不塞进时点**）：新闻 / 财报是「数据刷新」，与「今天开不开市」无关，
+# 也不该因为某市场非交易日就跳过（同 `fin.instrument_sync`）。调度是「每个市场一天一次」，
+# 时点 = 该市场**时段末点 + 采集延迟**（`schedules.news_specs` / `fundamental_specs`）。
+#
+# 取数实现**全在 api 侧**（`services/fin/collection.py`）—— 这里只触发并带回读数。
+# **数据源不通 → api 记缺口（`fin_data_gap`）、不写假行**（红线 5）；本工作流如实返回
+# `ok` / `gaps` 读数，**不把失败伪装成成功**。
+#
+# 市场经 Schedule 的 `args` 传进来，用 ETL 那套小写三字母（`cn` / `hk` / `us`）。
+# `codes` 留空 = api 按「自选股 ∪ 系统标的」算清单；显式给 `codes` 用于排障 / 补采。
+
+@workflow.defn(name="fin.news_collect")
+class NewsCollectWorkflow(_PausableWorkflow):
+    """新闻采集工作流（L09）。抓该市场标的新闻进 `news` 表（增量去重）。"""
+
+    @workflow.run
+    async def run(self, req: dict | None = None) -> dict:
+        req = req or {}
+        await self._gate()                               # L08 暂停检查点
+        market = (req.get("market") or "cn").strip().lower()
+        result = await _exec(
+            activities.collect_news,
+            {"market": market, "limit": req.get("limit"),
+             "per_code": req.get("per_code"), "codes": req.get("codes")},
+            timeout=COLLECT_TIMEOUT,
+        )
+        result = dict(result or {})
+        result["status"] = "collected" if result.get("ok") else "failed"
+        return result
+
+
+@workflow.defn(name="fin.fundamental_collect")
+class FundamentalCollectWorkflow(_PausableWorkflow):
+    """基本面采集工作流（L09）。抓该市场标的财报进 `financial_metric`（增量）。
+
+    ⚠️ **只有 A 股有已接数据源**；港 / 美股如实返回「数据源未接」（不记缺口）。
+    """
+
+    @workflow.run
+    async def run(self, req: dict | None = None) -> dict:
+        req = req or {}
+        await self._gate()                               # L08 暂停检查点
+        market = (req.get("market") or "cn").strip().lower()
+        result = await _exec(
+            activities.collect_fundamentals,
+            {"market": market, "limit": req.get("limit"),
+             "keep_raw": req.get("keep_raw"), "codes": req.get("codes")},
+            timeout=COLLECT_TIMEOUT,
+        )
+        result = dict(result or {})
+        result["status"] = "collected" if result.get("ok") else "failed"
+        return result
+
+
 ALL_WORKFLOWS = POINT_WORKFLOWS + (MarketEtlWorkflow, InstrumentSyncWorkflow,
                                    ReviewWorkflow, ShadowWorkflow, ObserveWorkflow,
-                                   ProposeWorkflow)
+                                   ProposeWorkflow,
+                                   NewsCollectWorkflow, FundamentalCollectWorkflow)

@@ -717,6 +717,47 @@ def trigger_market_etl(req: dict[str, Any]) -> dict[str, Any]:
     return {"market": market, "result": result}
 
 
+# ── L09 · 采集补齐（新闻 / 基本面）────────────────────────────────────────
+#
+# 取数**全在 api 侧**（`services/fin/collection.py`），这里只「触发」并把读数带回来 ——
+# fin-worker 不碰数据库（`test_no_ledger_access.py` 盯着）。**数据源不通 → api 记缺口、
+# 不写假行**（红线 5），本活动如实把 `ok=False` / `gaps` 带回来，**不吞**。
+#
+# 失败**不 catch**：`ApiError` 交给 Temporal 的重试策略（at-least-once，采集幂等可重跑）——
+# 与 `trigger_market_etl` 同口径。api 真挂了会让工作流失败，这是**如实**，不是把错误藏起来。
+
+@activity.defn
+def collect_news(req: dict[str, Any]) -> dict[str, Any]:
+    """抓该市场标的新闻进 api 的 `news` 表（增量去重；L09）。"""
+    req = req or {}
+    market = (req.get("market") or "cn").strip().lower()
+    out = HunterApiClient().collect_news(
+        market, limit=req.get("limit"), per_code=req.get("per_code"),
+        codes=req.get("codes"))
+    logger.info("[collect.news] market={} → 采到 {} 条 · 新增 {} · 缺口 {}",
+                market, out.get("fetched"), out.get("inserted"), out.get("gaps"))
+    return out
+
+
+@activity.defn
+def collect_fundamentals(req: dict[str, Any]) -> dict[str, Any]:
+    """抓该市场标的财报进 api 的 `financial_metric`（L09）。
+
+    ⚠️ **只有 A 股（`cn`）有已接数据源**；港 / 美股如实返回「数据源未接」
+    （`plan/L09.md` §一.2 / 方案 §6.1 的缩小范围），**不记缺口**（缺的是「没有源」，
+    不是「这一轮没采到」）。
+    """
+    req = req or {}
+    market = (req.get("market") or "cn").strip().lower()
+    out = HunterApiClient().collect_fundamentals(
+        market, limit=req.get("limit"), keep_raw=bool(req.get("keep_raw")),
+        codes=req.get("codes"))
+    logger.info("[collect.fundamental] market={} → 候选 {} · 入库 {} 只 / {} 条指标 · 失败 {}",
+                market, out.get("candidates"), out.get("downloaded"),
+                out.get("metrics"), out.get("failed"))
+    return out
+
+
 # ── R3 · 决策上下文注入经验集（`freeze_memory`）────────────────────────────
 #
 # **只能读 `memory.query` 的结果**（§一.5 的不变量）：这里一行 SQL 都没有，

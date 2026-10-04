@@ -120,13 +120,15 @@ class _FakeClient:
 
 # ── A · 白名单 + 类型化参数（纯函数，不碰 Temporal）────────────────────────
 def test_whitelist_lists_only_registered_workflows():
-    # 白名单就是允许启动的全部；六个时点 + ETL + 同步 + 四条回路 = 12
+    # 白名单就是允许启动的全部；六个时点 + ETL + 同步 + 四条回路 + 两条采集 = 14
     assert set(rc.TEMPLATES) == {
         "fin.point_preopen", "fin.point_decide", "fin.point_match_a", "fin.point_match_b",
         "fin.point_match_c", "fin.point_close", "fin.market_etl", "fin.instrument_sync",
         "fin.review", "fin.shadow", "fin.observe", "fin.propose",
+        # L09：采集补齐（新闻 / 基本面）
+        "fin.news_collect", "fin.fundamental_collect",
     }
-    assert len(rc.TEMPLATES) == 12
+    assert len(rc.TEMPLATES) == 14
 
 
 def test_unknown_template_is_rejected():

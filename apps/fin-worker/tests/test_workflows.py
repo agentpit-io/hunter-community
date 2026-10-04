@@ -49,6 +49,8 @@ def test_all_workflows_registered():
         "fin.observe",
         # L01：自动提案（经验 → 提案这一节接上；只自动「提」不自动「生效」）
         "fin.propose",
+        # L09：采集补齐（新闻 / 基本面接进 fin 侧定时采集）
+        "fin.news_collect", "fin.fundamental_collect",
     }
 
 
@@ -92,6 +94,8 @@ def test_activity_list_covers_workflow_calls():
         "observe_proposals", "observe_applied",
         # L01：自动提案的两个活动
         "propose_candidates", "propose_submit",
+        # L09：采集补齐的两个活动
+        "collect_news", "collect_fundamentals",
     } == names
 
 
