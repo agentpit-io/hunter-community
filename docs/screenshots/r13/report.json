@@ -1,0 +1,91 @@
+{
+  "results": [
+    {
+      "n": "页面加载（非空白）",
+      "ok": true,
+      "detail": "3254 字"
+    },
+    {
+      "n": "成长页根容器存在",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": "④ 经验库",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": "⑤ 四条底线",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": "⑥ 提案与验证",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": "⑥ 提案列表块存在",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": "⑥ 冻结计划块存在",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": "⑥ 两臂对照块存在",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": "⑥ 事件链块存在",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": "运行模式横幅存在",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": "冻结计划 hash 出现",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": "事件链含「已应用到模拟盘」",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": "事件链含「观察期告警」",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": "事件链含「已回滚到上一个已验证版本」",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": "冻结计划含观察期回滚线",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": "界面没有「自动生效」开关",
+      "ok": true,
+      "detail": "autoBox=0 switch=0"
+    },
+    {
+      "n": "无页面报错",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "pageErrors": [],
+  "url": "https://hunter-community.agentpit.io/finance/growth"
+}
