@@ -240,6 +240,10 @@ def simulate_arms(cur, req: dict[str, Any], *, recorder: DecisionRecorder) -> di
     model = load_execution_model(cur)
     local_date = market_local_date(snap["snapshot_time"], market)
     calendar = ledger.get_calendar(cur, local_date, market=market)
+    # 成交量参与率（L05）：**两臂共用同一个值**（项目级参数）—— 与真实下单路径
+    # `matching.engine.execute` 读的是同一列，于是「成交量约束」这条撮合假设在两臂上
+    # 完全一致（红线 11）。
+    participation = ledger.liquidity_participation(cur, project_id)
 
     results: list[dict[str, Any]] = []
     for arm in (req.get("arms") or []):
@@ -248,6 +252,7 @@ def simulate_arms(cur, req: dict[str, Any], *, recorder: DecisionRecorder) -> di
             market_rule=market_rule, instrument=instrument, fee_model=fee_model,
             model=model, calendar=calendar, trade_date=trade_date, point=point,
             initial_capital=initial_capital, recorder=recorder,
+            participation=participation,
         ))
     return {
         "quote_as_of": snap["snapshot_time"].isoformat(),
@@ -261,7 +266,7 @@ def simulate_arms(cur, req: dict[str, Any], *, recorder: DecisionRecorder) -> di
 
 def _simulate_one(*, arm, snap, symbol, market, currency, market_rule, instrument,
                   fee_model, model, calendar, trade_date, point, initial_capital,
-                  recorder) -> dict[str, Any]:
+                  recorder, participation=None) -> dict[str, Any]:
     """一个臂在**已取好的那张快照**上的一次模拟。"""
     state = _state_view(arm.get("state"))
     side = str(arm.get("side") or "buy")
@@ -277,7 +282,8 @@ def _simulate_one(*, arm, snap, symbol, market, currency, market_rule, instrumen
                           price_type=price_type, limit_price=limit_price)
 
     spec = OrderSpec(side=side, qty=qty, price_type=price_type, limit_price=limit_price)
-    trial = match(spec, snap, model)
+    # 与真实撮合**同一个纯函数**、同一份参与率（红线 11：两臂同条件）。
+    trial = match(spec, snap, model, participation=participation)
 
     # ── 过规则（**同一套六条风控**，用该臂自己的现金 / 持仓）─────────────────
     price_for_risk = limit_price if (price_type == "limit" and limit_price is not None) else (

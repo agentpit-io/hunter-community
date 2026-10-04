@@ -42,7 +42,7 @@ from loguru import logger
 from app import idempotency, ledger, snapshot
 from app.market_time import DEFAULT_MARKET, market_local_date, market_of
 from app.matching.model import load_execution_model
-from app.matching.pricing import FILLED, MatchResult, OrderSpec, match
+from app.matching.pricing import MatchResult, OrderSpec, match
 from app.risk import RiskInputs, evaluate
 from app.risk import t1 as t1_mod
 
@@ -67,7 +67,8 @@ def take_snapshot(cur, code: str, *, now: Optional[datetime] = None) -> dict:
 # ── ④ 记账 ────────────────────────────────────────────────────────────────
 
 def _book_fill(cur, project, order_id, req, snap, match, fee, amount, source, fee_version,
-               *, market="CN_A", currency="CNY", exec_model_version=None) -> str:
+               *, market="CN_A", currency="CNY", exec_model_version=None,
+               fill_qty=None, partial=False) -> str:
     """成交记账：委托 → 成交（绑快照）→ 现金 → 持仓 → 版本。返回 `trade_id`。
 
     **按该市场子账户落账**：成交 / 流水 / 持仓都带 `market` 与 `currency`（本币原值，
@@ -77,13 +78,30 @@ def _book_fill(cur, project, order_id, req, snap, match, fee, amount, source, fe
     撮合时已从 `load_execution_model` 拿到）、显式模式 `PAPER`、以及本笔应用在的
     账户版本（`project["version"]`，`bump_version` **之前**的取值）落进成交行 ——
     出事时这三样能直接答「用什么模型算的、是不是模拟、站在哪一版账本上」。
+
+    **部分成交（L05）**：`partial=True` 时 `fill_qty` 是本次成交股数，委托状态写
+    `partially_filled`（**不是** `filled`，剩余仍挂着），买入的 **剩余冻结额**留给
+    还没成交的那部分（`fin_order.frozen_amount` 相应减少）—— 否则对账的
+    `frozen_matches_open`（冻结额 = 未成交买单占用之和）会不平。
     """
     project_id = project["project_id"]
     side = req["side"]
     code = req["code"]
-    qty = int(req["qty"])
+    qty = int(req["qty"]) if fill_qty is None else int(fill_qty)
 
-    ledger.update_order_filled(cur, order_id, "filled", qty)
+    if partial:
+        status = "partially_filled"
+        # 买入：本次从冻结里付出的部分 = 成交额 + 费用；剩余冻结额 = 原冻结 − 本次付出。
+        # 卖出没有现金冻结（券由 `open_sell_committed` 按未成交数量算），无需调整。
+        remaining_frozen = None
+        if side == "buy":
+            order = ledger.get_order(cur, order_id)
+            consumed = (Decimal(str(amount)) + fee.total).quantize(Decimal("0.0001"))
+            remaining_frozen = (Decimal(str(order["frozen_amount"])) - consumed).quantize(
+                Decimal("0.0001"))
+        ledger.update_order_filled(cur, order_id, status, qty, frozen_amount=remaining_frozen)
+    else:
+        ledger.update_order_filled(cur, order_id, "filled", qty)
 
     trade_id = ledger.new_id("trd")
     ledger.insert_trade(
@@ -96,8 +114,11 @@ def _book_fill(cur, project, order_id, req, snap, match, fee, amount, source, fe
     )
     if side == "buy":
         order = ledger.get_order(cur, order_id)
+        # 部分成交：只结算本次成交的那一份（`frozen_amount=本次付出`），**不退回**剩余冻结。
+        frozen_arg = ((Decimal(str(amount)) + fee.total).quantize(Decimal("0.0001"))
+                      if partial else order["frozen_amount"])
         ledger.settle_buy(cur, project_id, order_id, trade_id, amount, fee,
-                          order["frozen_amount"], market=market, currency=currency)
+                          frozen_arg, market=market, currency=currency)
     else:
         ledger.settle_sell(cur, project_id, order_id, trade_id, amount, fee,
                            market=market, currency=currency)
@@ -278,7 +299,11 @@ def execute(cur, req: dict, *, now: Optional[datetime] = None) -> dict:
         side=side, qty=qty, price_type=price_type,
         limit_price=None if req.get("limit_price") is None else Decimal(str(req["limit_price"])),
     )
-    trial = match(spec, snap, model)
+    # 成交量约束（L05）：`fin_param.liquidity_max_participation` 真的被读到 ——
+    # 成交股数不许超过「盘口量 × 参与率」。`None`（没配）时 `match` 不加约束，
+    # 与加约束之前逐字节一致。
+    participation = ledger.liquidity_participation(cur, project_id)
+    trial = match(spec, snap, model, participation=participation)
 
     # 市价单能力**按市场取表**（`fin_market_rule.market_order_supported`，0037 落列）——
     # 不是散在这里的 `market != "CN_A"`（P2 任务书 §一.4：按 A 股写死的要参数化）。
@@ -362,9 +387,12 @@ def execute(cur, req: dict, *, now: Optional[datetime] = None) -> dict:
     fee = outcome.fee
 
     # ── 落委托（成交 / 挂单都在这一步之前先把委托写下来：fin_trade 有 FK）──
+    # 成交量约束（L05）下有三种结果：整笔 `filled`、部分成交 `partial`（`filled_qty` = 上限）、
+    # 挂单 `pending`。`frozen_amount` 按**整笔**委托量冻（剩余部分还要接着撮）。
+    filled_qty = qty if trial.filled else (int(trial.qty) if trial.partial else 0)
     fill_amount = None
-    if trial.filled:
-        fill_amount = (Decimal(qty) * Decimal(str(trial.price))).quantize(Decimal("0.0001"))
+    if trial.matched:
+        fill_amount = (Decimal(filled_qty) * Decimal(str(trial.price))).quantize(Decimal("0.0001"))
         fill_fee = _recompute_fee(side, fill_amount, fee_model)
     else:
         fill_fee = fee
@@ -385,22 +413,26 @@ def execute(cur, req: dict, *, now: Optional[datetime] = None) -> dict:
                            market=market, currency=currency)
 
     # ── ④ 记账 ───────────────────────────────────────────────────────────
-    if trial.filled:
+    if trial.matched:
         trade_id = _book_fill(cur, project, order_id, req, snap,
-                              MatchResult(FILLED, Decimal(str(trial.price)), trial.basis),
+                              MatchResult(trial.outcome, Decimal(str(trial.price)), trial.basis),
                               fill_fee, fill_amount, source, fee_model["version"],
                               market=market, currency=currency,
-                              exec_model_version=model.version)
+                              exec_model_version=model.version,
+                              fill_qty=filled_qty, partial=trial.partial)
         receipt = {
             "order_id": order_id,
-            "status": "filled",
+            "status": "partially_filled" if trial.partial else "filled",
             "trade_id": trade_id,
-            "filled_qty": qty,
+            "filled_qty": filled_qty,
             "price": Decimal(str(trial.price)),
             "amount": fill_amount,
             "fee": _fee_view(fill_fee),
             "decline_reason": None,
-            "pending_reason": None,
+            # 部分成交：剩余股数仍挂着，理由里点名「还剩多少、为什么」
+            "pending_reason": (
+                f"{trial.cap_reason}；本次成交 {filled_qty} 股，剩余 "
+                f"{qty - filled_qty} 股仍挂着" if trial.partial else None),
             "price_basis": trial.basis,
             "market": market,
             "currency": currency,
@@ -595,18 +627,25 @@ def match_open_orders(cur, project_id: str, *, now: Optional[datetime] = None,
     model = load_execution_model(cur)
     if model is None:
         raise ValueError("账本里没有执行模型（fin_execution_model 为空），拒绝撮合")
+    # 成交量约束（L05）与 `execute` 同一份参与率 —— 再撮合走的是同一套撮合假设。
+    participation = ledger.liquidity_participation(cur, project_id)
 
     filled: list[dict] = []
     for order in orders:
         snap = snapshot.capture(cur, order["code"], now=now)
         if snap is None:
             continue
+        # 再撮合的是**还没成交的那部分**（部分成交过的单只剩 `qty − filled_qty`）——
+        # 拿整笔去再撮会重复卖出/买入已经成交过的股数。
+        remaining = int(order["qty"]) - int(order["filled_qty"] or 0)
+        if remaining <= 0:
+            continue
         spec = OrderSpec(
-            side=order["side"], qty=int(order["qty"]), price_type=order["price_type"],
+            side=order["side"], qty=remaining, price_type=order["price_type"],
             limit_price=order["limit_price"],
         )
-        result = match(spec, snap, model)
-        if not result.filled:
+        result = match(spec, snap, model, participation=participation)
+        if not result.matched:
             continue
         project = ledger.get_project(cur, project_id)
         # 费用模型**按该委托所属市场**取（挂单再撮合时按实际成交额重算费用）——
@@ -619,20 +658,21 @@ def match_open_orders(cur, project_id: str, *, now: Optional[datetime] = None,
         )
         if fee_model is None:
             raise ValueError(f"{market} 没有可用的费用模型（fin_fee_model 无该市场行），拒绝撮合挂单")
-        qty = int(order["qty"])
+        qty = remaining if result.filled else int(result.qty)
         fill_amount = (Decimal(qty) * Decimal(str(result.price))).quantize(Decimal("0.0001"))
         fee = _recompute_fee(order["side"], fill_amount, fee_model)
         currency = ((market_rule.get("currency")
                      if isinstance(market_rule, dict) else None)
                     or fee_model.get("currency")
                     or ledger.MARKET_CURRENCY.get(market) or "CNY")
-        req = {"side": order["side"], "code": order["code"], "qty": qty}
+        req = {"side": order["side"], "code": order["code"], "qty": remaining}
         trade_id = _book_fill(cur, project, order["order_id"], req, snap,
-                              MatchResult(FILLED, Decimal(str(result.price)),
-                                                  result.basis),
+                              MatchResult(result.outcome, Decimal(str(result.price)),
+                                          result.basis),
                               fee, fill_amount, order["source"], fee_model["version"],
                               market=market, currency=currency,
-                              exec_model_version=model.version)
+                              exec_model_version=model.version,
+                              fill_qty=qty, partial=result.partial)
         filled.append({"order_id": order["order_id"], "trade_id": trade_id,
                        "price": Decimal(str(result.price)), "qty": qty,
                        "market": market,

@@ -38,12 +38,16 @@ def at(text: str) -> datetime:
 
 
 def quote(code="600519", *, price="10.00", prev_close="10.00", bid1=None, ask1=None,
+          bid1_volume=None, ask1_volume=None,
           when: Optional[str] = DEFAULT_AT, source="test",
           market=None, quote_quality=None) -> Quote:
     """一张固定报价。`when=None` → 数据源**没给时间戳**（用来测「不落快照」）。
 
     `market` / `quote_quality` 缺省 `None`（老端点的形状）—— `capture` 会按代码
     形态补市场、按盘口补质量（N3）。要测透传就显式传。
+
+    `bid1_volume` / `ask1_volume` = 盘口挂量（L05 成交量约束用它算「盘口量 × 参与率」）。
+    缺省 `None`（老报价的形状，算不出 → 不加约束）。
     """
     return Quote(
         code=code,
@@ -54,7 +58,9 @@ def quote(code="600519", *, price="10.00", prev_close="10.00", bid1=None, ask1=N
         last_price=Decimal(price),
         prev_close=None if prev_close is None else Decimal(prev_close),
         bid1_price=None if bid1 is None else Decimal(bid1),
+        bid1_volume=None if bid1_volume is None else int(bid1_volume),
         ask1_price=None if ask1 is None else Decimal(ask1),
+        ask1_volume=None if ask1_volume is None else int(ask1_volume),
         raw={"price": price},
     )
 

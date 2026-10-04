@@ -80,6 +80,22 @@ def get_param(cur, project_id: str) -> Optional[dict]:
     return _fetchone(cur, "SELECT * FROM fin_param WHERE project_id = %s", (project_id,))
 
 
+def liquidity_participation(cur, project_id: str) -> Optional[Decimal]:
+    """该项目的**成交量参与率**（`fin_param.liquidity_max_participation`）。
+
+    成交股数上限 = `floor(盘口量 × 这个数)`（`matching.pricing.liquidity_cap`）。
+    **没配（NULL）→ `None`**，撮合不加约束 —— 与加约束之前逐字节一致。
+    """
+    row = _fetchone(
+        cur,
+        "SELECT liquidity_max_participation AS p FROM fin_param WHERE project_id = %s",
+        (project_id,),
+    )
+    if not row or row["p"] is None:
+        return None
+    return Decimal(str(row["p"]))
+
+
 # ── 子账户（`(project_id, market)`）────────────────────────────────────────
 #
 # N4 起账本按**市场子账户**隔离：可用 / 冻结 / 持仓 / 委托 / 成交 / 估值都带
@@ -523,13 +539,27 @@ def insert_order(
 
 
 def update_order_filled(cur, order_id: str, status: str, filled_qty: int,
-                        decline_reason: Optional[str] = None) -> None:
-    """只动 `fin_order` 的**状态列**（0023 的 GRANT 注释：UPDATE 只用于状态列）。"""
+                        decline_reason: Optional[str] = None, *,
+                        frozen_amount=None) -> None:
+    """只动 `fin_order` 的**状态列**（0023 的 GRANT 注释：UPDATE 只用于状态列）。
+
+    `frozen_amount`（部分成交，L05）：本次成交后该买单**还剩多少冻着** —— 剩余仍要
+    为还没成交的那部分留着。部分成交时一并更新，否则对账的 `frozen_matches_open`
+    （冻结额 = 未成交买单占用之和）会不平。不传则不动这一列（整笔成交路径不改它）。
+    """
+    if frozen_amount is None:
+        cur.execute(
+            "UPDATE fin_order SET status = %s, filled_qty = %s, "
+            "decline_reason = COALESCE(%s, decline_reason), updated_at = now() "
+            "WHERE order_id = %s",
+            (status, filled_qty, decline_reason, order_id),
+        )
+        return
     cur.execute(
-        "UPDATE fin_order SET status = %s, filled_qty = %s, "
+        "UPDATE fin_order SET status = %s, filled_qty = %s, frozen_amount = %s, "
         "decline_reason = COALESCE(%s, decline_reason), updated_at = now() "
         "WHERE order_id = %s",
-        (status, filled_qty, decline_reason, order_id),
+        (status, filled_qty, _money(frozen_amount), decline_reason, order_id),
     )
 
 
