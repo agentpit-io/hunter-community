@@ -10,8 +10,10 @@
 --   1. `apps/api/app/services/fin/store.py::_insert_project()` 建项目时**同一事务**里
 --      自动追加一条 `(scope='project', subject=<新 project_id>, status='active')` 登记
 --      （`granted_by='auto:project-create'`）—— 从此**新项目开箱即可交易**。
---   2. **本迁移**：给**升级前就已经存在**的项目补登记 —— 它们在名单里没有现行 active 行，
---      升级后按老口径会被默认拒绝。补一条 `granted_by='auto:upgrade'` 的 active 行。
+--   2. **本迁移**：给**升级前就已经存在、且从未在名单里登记过**的项目补登记 ——
+--      它们按老口径会被默认拒绝。补一条 `granted_by='auto:upgrade'` 的 active 行。
+--      **已登记过的项目（无论现行状态是 active 还是人工 revoked）一行都不动** ——
+--      尊重已经发生的人工决定，绝不把人工的撤销悄悄救回来。
 --
 -- **不动判据**：放行只能靠表里真的有那条 active 行（`apps/paper/app/allowlist.py` 一字不改，
 --   仍是「空表 = 谁都不许」）。**人工想收紧仍收得紧** —— 登记一条 `status='revoked'`
@@ -20,9 +22,15 @@
 -- 口径（对照 §B）：
 --   · **只做加法**（纯 INSERT ... SELECT），不建表、不删、不改；
 --   · **不带 `BEGIN;` / `COMMIT;`**（`app/migrate.py` 已把每个文件包在独立事务里）；
---   · **可重复执行**：判据是「该 `(scope='project', subject)` 的最新一行不是 active」——
---     第一次跑补齐所有项目，**第二遍 0 条要执行**。已在名单里现行 active 的项目
---     （如 L10 演示站逐条登记的 16 个）**跳过，不重复登记**。
+--   · **可重复执行**：判据是「该 `(scope='project', subject)` **从来没有过任何一行**」——
+--     第一次跑只补齐「从没登记过」的项目，**第二遍 0 条要执行**。已经登记过的项目
+--     （无论现行状态是 active 还是人工 revoked）**一行都不动，不重复登记**。
+--     ⚠ 判据是「从来没登记过」，**不是**「最新一行不是 active」。后者会把**人工撤销**
+--     （登记过 `revoked`）的项目再补一条 active 悄悄救回来 —— 与「人工想收紧就收紧」的
+--     产品口径正相反。真实场景：客户在 `2.0.0` 上撤销了某项目 → 升级到含本迁移的版本 →
+--     无脑按「最新一行不是 active」补，撤销就被悄悄恢复。**`0054` 未随任何 tag 发布，
+--     故就地修正，不另加 `0055`** —— 这张表只追加（触发器挡 UPDATE/DELETE），
+--     追加式的新迁移救不回已经插进去的行，唯一正确的修法就是改本文件。
 --   · 表是**只追加**的（触发器挡 UPDATE / DELETE），所以这里是「再追加一条 active」，
 --     不是改写任何既有行。
 --
@@ -31,17 +39,15 @@
 -- ════════════════════════════════════════════════════════════════════════
 
 
--- ── 给「没有现行 active 行」的已有项目补一条放行 ─────────────────────────
---   判据 = 该 (scope='project', subject=<project_id>) 里 allowance_id 最大的那行的 status
---   不是 'active'（表里一行都没有时也成立 —— COALESCE 成空串，同样 != 'active'）。
+-- ── 给「从未在名单里登记过」的已有项目补一条放行 ─────────────────────────
+--   判据 = 该 (scope='project', subject=<project_id>) **一行都没有**（NOT EXISTS）。
+--   只要登记过（现行 active，或已被人工 revoked），就一行都不动。
 INSERT INTO fin_exec_allowance (scope, subject, status, granted_by, note)
 SELECT 'project', p.project_id, 'active', 'auto:upgrade',
-       'L11 升级补齐：历史项目自动放行（列表为空/已被撤销的补一条。要停：登记 revoked）'
+       'L11 升级补齐：从未登记过的历史项目自动放行（要停：登记 revoked）'
   FROM fin_project p
- WHERE COALESCE((
-         SELECT a.status
+ WHERE NOT EXISTS (
+         SELECT 1
            FROM fin_exec_allowance a
           WHERE a.scope = 'project' AND a.subject = p.project_id
-          ORDER BY a.allowance_id DESC
-          LIMIT 1
-       ), '') <> 'active';
+       );
