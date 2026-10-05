@@ -1,0 +1,64 @@
+
+════════════════════════════════════════════════════════════════════════════
+① 收紧（止损 -0.08 → -0.05）+ 验证通过 + 开关开 → 自动生效
+════════════════════════════════════════════════════════════════════════════
+验收项目 prj_l15verify_3f0c8f6532 · 初始 stop_loss_pct = -0.080000
+提案 evp_67f890f5455b482f934962ed · direction=tighten · target=strategy
+--- HTTP 200 返回体 ---
+{
+  "auto_applied": true,
+  "skipped": false,
+  "proposal_id": "evp_67f890f5455b482f934962ed",
+  "project_id": "prj_l15verify_3f0c8f6532",
+  "ok": true,
+  "from_key": "vb",
+  "to_key": "vb#67f890f545",
+  "base_config_hash": "f4fb1d69deab2cd26b8b51924fe78f7b03812b58cb70a079c4c9971ed8c3d40a",
+  "candidate_config_hash": "f79def302c6daea818e8cae4d031972060d0886bc8e84562506c6f76910d532a",
+  "active_config_hash": "1280eda05f4fb14f88971271322139ab15511b36bd4395634b7213703c56da21",
+  "changed_fields": [
+    {
+      "field": "stop_loss_pct",
+      "old": -0.08,
+      "new": -0.05
+    }
+  ],
+  "market": null
+}
+--- 库里的效果 ---
+stop_loss_pct now = -0.050000
+applied 事件 actor = system:auto-apply | payload.auto = True | payload.applied_by = system:auto-apply
+
+════════════════════════════════════════════════════════════════════════════
+② 放宽（止损 -0.08 → -0.12）+ 验证通过 + 开关开 → 被拒（不改配置）
+════════════════════════════════════════════════════════════════════════════
+验收项目 prj_l15verify_1ae100e661 · 初始 stop_loss_pct = -0.080000
+提案 evp_6dc505404faa469188c776b7 · direction=loosen · target=strategy
+--- HTTP 200 返回体 ---
+{
+  "auto_applied": false,
+  "skipped": true,
+  "proposal_id": "evp_6dc505404faa469188c776b7",
+  "project_id": "prj_l15verify_1ae100e661",
+  "reason": "自动生效只放行 direction='tighten'（收紧）方向的提案；本提案 direction='loosen'（放宽 / 混合仍要人工确认）"
+}
+--- 库里的效果 ---
+stop_loss_pct now = -0.080000 （放宽那条没生效）
+auto-apply 留痕条数 = 1 | actor = system:auto-apply | direction = loosen
+提案状态 = passed （被自动拒绝 ≠ 被驳回，仍等人确认）
+
+════════════════════════════════════════════════════════════════════════════
+③ 闸门没被绕过（没有 passed 事件）+ 开关开 → 自动也上不去
+════════════════════════════════════════════════════════════════════════════
+--- HTTP 200 返回体 ---
+{
+  "auto_applied": false,
+  "skipped": true,
+  "proposal_id": "evp_8ef6be891adc4b36ac2c6938",
+  "project_id": "prj_l15verify_ed3aa88367",
+  "reason": "提案没有 passed 事件 —— 只有验证通过的提案才能生效；inconclusive（不结论）与 failed（不达标）都不是通过（红线 10）",
+  "rejected": "EvolutionGateError"
+}
+stop_loss_pct now = -0.080000 （没生效）
+
+已清理验收项目 ['prj_l15verify_3f0c8f6532', 'prj_l15verify_1ae100e661', 'prj_l15verify_ed3aa88367']

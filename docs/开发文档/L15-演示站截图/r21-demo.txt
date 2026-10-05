@@ -1,0 +1,52 @@
+
+== A · 成长页 ④ ==
+  [OK  ] A0 项目已建（HK） — prj_ef3309da8f6944fbb6297b91
+  [OK  ] A0b 后端 runtime 三个新字段齐全 — {"ceiling":{"memory_enabled":true,"evolution_mode":"observe","auto_apply":false},"selected":{"memory_enabled":null,"evolution_mode":null,"auto_apply":null},"can_change":{"memory_enabled":true,"evolution_mode":true,"auto_apply":false}}
+  [OK  ] A1 页面加载（非空白） — 2000 字
+  [OK  ] A2 成长页根容器存在
+  [OK  ] A3 运行模式横幅存在
+  [OK  ] A4 横幅含「生效模式」 — 生效模式） 关闭 只观察 模拟验证 关闭（不复盘、不提案） 观察（拉行情 · 复盘 · 建经验 · 展示提案，没有委托发送能力） 模拟盘（独立模拟账本跑现行臂与候选臂） 部署侧允许的上限：只观察 —— 更高的选项界面上给不出来。 自动生效（AI 自己用上验证通过的改进） 关 开着：验证通过的「收紧」方向改进（调小仓位、收紧止损、减少持仓天数…）自动应用到模拟盘；关着：任何改进都要人点「确认」才生效。自动生效只对「收紧」方向的改进自动放行（放宽 / 混合方向仍要人工确认）。 ⚠️ 这不是「自动交易」开关 —— 它只改模拟盘的策略参数，不会下真单。 部署侧已锁死（环境变量 FIN_AUTO_APPLY=0）：界面开不出自动生效。要开，得先让部署侧把那一行改成 1 并重建 api。 实盘下单 无（本项目不接券商） 「实盘下单」本方案规定不许开，界面上没有入口（服务端也会直接拒绝）。 生效模式：观察（拉行情 · 复盘 · 建经验 · 展示提案，没有委托发送能力） 
+  [OK  ] A5 生效模式是「观察」（天花板 observe）
+  [FAIL] A6 自动生效开关显示为「开」（默认跟随天花板） — 自动生效：未启用
+  [OK  ] A6b 文案说清「只对收紧方向放行」 — 自动生效只对「收紧」方向的改进自动放行（放宽 / 混合方向仍要人工确认）。
+  [OK  ] A7 只读行「无（本项目不接券商）」仍在
+  [OK  ] A8 经验库 + 自动生效两个开关可点（aria-pressed 按钮 = 2） — count=2
+  [OK  ] A9 初始为「开」（天花板=1、未单独设置 → 生效=开） — aria-pressed=true
+  [OK  ] A9b 当前生效写「经验库：已启用」
+  [OK  ] A10 天花板 observe →「模拟验证」不可选
+  [OK  ] A11 实盘仍是只读（无 role=switch / 无实盘勾选框） — switch=0 liveBox=0
+  [OK  ] A12 点开关 → 出现确认条（理由必填）
+  [OK  ] A13 未填理由时「确认修改」禁用
+  [OK  ] A14 切完立刻变（不刷新）：「已改，立刻生效」 — 已改，立刻生效（变更已记入流水）
+  [OK  ] A15 当前生效变成「经验库：未启用」
+  [OK  ] A16 aria-pressed 变 false — aria-pressed=false
+  [OK  ] A16b 后端 memory_enabled 同步为 false — {"memory_enabled":false,"selected":{"memory_enabled":false,"evolution_mode":null,"auto_apply":null}}
+  [OK  ] A17 再开回来立刻生效
+  [FAIL] A19 自动生效开关默认为「开」 — aria-pressed=false
+node:internal/modules/run_main:123
+    triggerUncaughtException(
+    ^
+
+locator.click: Timeout 30000ms exceeded.
+Call log:
+  - waiting for locator('[data-r9="runtime-banner"]').locator('button[aria-pressed]').nth(1)
+    - locator resolved to <button disabled aria-pressed="false" class="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold whitespace-nowrap">…</button>
+  - attempting click action
+    2 × waiting for element to be visible, enabled and stable
+      - element is not enabled
+    - retrying click action
+    - waiting 20ms
+    2 × waiting for element to be visible, enabled and stable
+      - element is not enabled
+    - retrying click action
+      - waiting 100ms
+    58 × waiting for element to be visible, enabled and stable
+       - element is not enabled
+     - retrying click action
+       - waiting 500ms
+
+    at /mnt/mixplode/hunter-dev/stock-ai/hunter-community/scripts/r21_browser_check.mjs:164:15 {
+  name: 'TimeoutError'
+}
+
+Node.js v20.20.2

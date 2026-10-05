@@ -1,0 +1,44 @@
+
+== A · 成长页 ④ ==
+  [OK  ] A0 项目已建（HK） — prj_f3c7241e21914676b10d62f6
+  [OK  ] A0b 后端 runtime 三个新字段齐全 — {"ceiling":{"memory_enabled":true,"evolution_mode":"observe","auto_apply":true},"selected":{"memory_enabled":null,"evolution_mode":null,"auto_apply":null},"can_change":{"memory_enabled":true,"evolution_mode":true,"auto_apply":true}}
+  [OK  ] A1 页面加载（非空白） — 1927 字
+  [OK  ] A2 成长页根容器存在
+  [OK  ] A3 运行模式横幅存在
+  [OK  ] A4 横幅含「生效模式」 — 生效模式） 关闭 只观察 模拟验证 关闭（不复盘、不提案） 观察（拉行情 · 复盘 · 建经验 · 展示提案，没有委托发送能力） 模拟盘（独立模拟账本跑现行臂与候选臂） 部署侧允许的上限：只观察 —— 更高的选项界面上给不出来。 自动生效（AI 自己用上验证通过的改进） 开 开着：验证通过的「收紧」方向改进（调小仓位、收紧止损、减少持仓天数…）自动应用到模拟盘；关着：任何改进都要人点「确认」才生效。自动生效只对「收紧」方向的改进自动放行（放宽 / 混合方向仍要人工确认）。 ⚠️ 这不是「自动交易」开关 —— 它只改模拟盘的策略参数，不会下真单。 实盘下单 无（本项目不接券商） 「实盘下单」本方案规定不许开，界面上没有入口（服务端也会直接拒绝）。 生效模式：观察（拉行情 · 复盘 · 建经验 · 展示提案，没有委托发送能力） 
+  [OK  ] A5 生效模式是「观察」（天花板 observe）
+  [OK  ] A6 自动生效开关显示为「开」（默认跟随天花板） — 自动生效：已启用
+  [OK  ] A6b 文案说清「只对收紧方向放行」 — 自动生效只对「收紧」方向的改进自动放行（放宽 / 混合方向仍要人工确认）。
+  [OK  ] A7 只读行「无（本项目不接券商）」仍在
+  [OK  ] A8 经验库 + 自动生效两个开关可点（aria-pressed 按钮 = 2） — count=2
+  [OK  ] A9 初始为「开」（天花板=1、未单独设置 → 生效=开） — aria-pressed=true
+  [OK  ] A9b 当前生效写「经验库：已启用」
+  [OK  ] A10 天花板 observe →「模拟验证」不可选
+  [OK  ] A11 实盘仍是只读（无 role=switch / 无实盘勾选框） — switch=0 liveBox=0
+  [OK  ] A12 点开关 → 出现确认条（理由必填）
+  [OK  ] A13 未填理由时「确认修改」禁用
+  [OK  ] A14 切完立刻变（不刷新）：「已改，立刻生效」 — 已改，立刻生效（变更已记入流水）
+  [OK  ] A15 当前生效变成「经验库：未启用」
+  [OK  ] A16 aria-pressed 变 false — aria-pressed=false
+  [OK  ] A16b 后端 memory_enabled 同步为 false — {"memory_enabled":false,"selected":{"memory_enabled":false,"evolution_mode":null,"auto_apply":null}}
+  [OK  ] A17 再开回来立刻生效
+  [OK  ] A19 自动生效开关默认为「开」 — aria-pressed=true
+  [OK  ] A20 切完立刻变（不刷新）：「自动生效：未启用」 — 自动生效：未启用
+  [OK  ] A21 aria-pressed 变 false
+  [OK  ] A21b 后端 auto_apply 同步为 false — {"auto_apply":false,"selected":{"memory_enabled":true,"evolution_mode":null,"auto_apply":false}}
+  [OK  ] A22 自动生效再开回来立刻生效
+  [OK  ] A18 成长页 pageErrors = 0
+
+== B · 向导第 7 步 ==
+  [OK  ] B1 到达第 7 步（确认并开启）
+  [OK  ] B2 有「这台机器要不要学习」块
+  [OK  ] B3「与档位/项目无关、随时可改」（开户之前就能设置） — 这几项管的是「这台机器要不要攒经验、学到多深」，跟你要开的这个项目 （多少钱、哪些市场）没有关系。开完户后去「成长」页也能随时改，改完立刻生效、不用重启服务。
+  [OK  ] B4「这不是自动交易开关 —— 那个在「自动交易」页」
+  [OK  ] B5 经验库开关在开户之前可点 — count=2
+  [OK  ] B5b 向导第 7 步显示「自动生效」
+  [OK  ] B5c 自动生效默认「开」（跟随天花板）
+  [OK  ] B5d 向导里两个开关都可点（经验库 + 自动生效） — count=2
+  [OK  ] B6 向导页 pageErrors = 0
+  [OK  ] B7 全程 pageErrors = 0 — 0 → 0
+
+R21 browser: 38/38 OK · pageErrors 0 · consoleErrors 0
