@@ -4,11 +4,14 @@
 
 1. `PAPER_MODE == "PAPER"` —— 模式固定，不接受请求参数切换（`01方案 §7.4`）。
 2. **行情读取凭证**（`READ_KEY_ENV`）非空 —— 拉行情打 api 时用（`snapshot/source.py`）。
-3. **下单执行凭证**（`EXEC_KEY_ENV`）非空 —— 服务间鉴权的口令（`08 §3.1`）。
+3. **下单执行凭证**（`EXEC_KEY_ENV`）回退后非空 —— 服务间鉴权的口令（`08 §3.1`）。
+   `HUNTER_EXEC_KEY` **没配时自动沿用读取凭证**（老部署平滑升级，L11）；配了就用自己的。
 4. 能连上账本库、且连的是**只增不改**的运行期角色（`fin_paper_rw`）。
 
-**两把钥匙分开（L06 · `plan/L06.md` §1.1）**：行情读取与下单执行用的是**两个不同的
-环境变量**（`READ_KEY_ENV` ≠ `EXEC_KEY_ENV`）。见下面两个常量。
+**两把钥匙分开（L06 · `plan/L06.md` §1.1）**：行情读取与下单执行是**两个不同的
+环境变量**（`READ_KEY_ENV` ≠ `EXEC_KEY_ENV`）。但 L11 起，执行钥匙**没配时回退**
+到读取凭证 —— 老部署不必改 `.env` 就能升级；想真正分开（我们自己就是分开的）就配
+`HUNTER_EXEC_KEY`。见下面两个常量。
 
 账本库连接串的优先级：`PAPER_DATABASE_URL` → `FIN_DATABASE_URL` → `DATABASE_URL`。
 单独给一个变量名，是为了让 `paper` 容器与 `api` 容器指向不同的角色时互不污染。
@@ -44,12 +47,18 @@ def read_key() -> str:
 
 
 def exec_key() -> str:
-    """下单执行凭证（`EXEC_KEY_ENV`）。**没有默认值**（缺 = 拒绝启动）。
+    """下单执行凭证（`EXEC_KEY_ENV`）。
+
+    **老部署平滑升级（L11）**：`HUNTER_EXEC_KEY` **没配（或为空）时自动沿用**
+    `read_key()` —— 老 `.env` 一个字不用改就能升级，两把钥匙先当成同一把。
+    配了 `HUNTER_EXEC_KEY` 就**用自己的**（不被回退盖掉）：想让「行情读取」与
+    「下单执行」真正用两把不同的钥匙（我们自己就是这么跑的），照常配即可。
 
     与 `read_key()` **取自不同的环境变量** —— 这是 L06「两把钥匙分开」的落点：
-    拿得到行情读取凭证 ≠ 能下单。
+    配了执行钥匙时，拿得到行情读取凭证 ≠ 能下单。回退只是「没配时的默认 = 读取凭证」，
+    **不是**「谁都能下单」。
     """
-    return (os.getenv(EXEC_KEY_ENV) or "").strip()
+    return (os.getenv(EXEC_KEY_ENV) or "").strip() or read_key()
 
 
 def database_url() -> str:

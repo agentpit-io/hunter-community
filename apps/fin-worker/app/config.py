@@ -57,8 +57,15 @@ def read_key() -> str:
 
 
 def exec_key() -> str:
-    """下单执行凭证（`EXEC_KEY_ENV`）。**没有默认值** —— 与 `read_key()` 取自不同变量。"""
-    return (os.getenv(EXEC_KEY_ENV) or "").strip()
+    """下单执行凭证（`EXEC_KEY_ENV`）。
+
+    **老部署平滑升级（L11）**：`HUNTER_EXEC_KEY` **没配（或为空）时自动沿用**
+    `read_key()` —— 老 `.env` 一个字不用改就能升级，两把钥匙先当成同一把。
+    配了 `HUNTER_EXEC_KEY` 就**用自己的**（不被回退盖掉）：想真正分开两把钥匙
+    （我们自己就是这么跑的），照常配即可。与 `read_key()` 取自不同的环境变量这个
+    事实不变 —— 回退只是「没配时的默认 = 读取凭证」，不是「谁都能下单」。
+    """
+    return (os.getenv(EXEC_KEY_ENV) or "").strip() or read_key()
 
 
 # ── 内部 HTTP 端点（给 api / 运维触发）────────────────────────────────────

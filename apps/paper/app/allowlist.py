@@ -26,6 +26,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from loguru import logger
+
 # ── 三个维度 + 执行工具名（唯一的字面量来源；路由与用例都从这里取）──────────
 SCOPE_PROJECT = "project"
 SCOPE_INSTRUMENT = "instrument"
@@ -92,34 +94,50 @@ def check(cur, *, project_id: str, code: Optional[str] = None,
 
     查的是**整个表**一次（`_rows`），三维在同一份快照上判 —— 不会出现「项目这行读到了、
     标的那行读的是另一个时刻」的错位。
+
+    **被拒时一定出声**（L11）：抛出前打一条 `WARNING`，写清「哪个项目 / 哪个工具 / 哪个
+    维度被拒 / 现行都有谁」，并给出放行办法 —— 不让一次执行失败只留一个 403 数字。
     """
     status = current_status(_rows(cur))
 
     def registered(scope: str) -> set[str]:
         return {s for (sc, s), st in status.items() if sc == scope and st == "active"}
 
+    def deny(scope: str, subject: Optional[str], registered_: set[str], how: str):
+        # 出声：项目 + 工具 + 维度 + 现行清单 + 放行办法，一条日志把排查需要的都写全。
+        logger.warning(
+            "[paper.allow] 执行被拒 · 项目={} · 工具={} · 维度={} · 被拒目标={} · "
+            "该维度现行 active={} · 放行：{}",
+            project_id, tool, scope, subject, sorted(registered_), how,
+        )
+        raise AllowanceDenied(
+            f"执行被拒：项目 {project_id} 的 {tool or scope} 不在执行允许名单"
+            f"（scope={scope}，被拒目标 {subject}）—— 默认拒绝。放行：{how}",
+            scope=scope, subject=subject, registered=sorted(registered_),
+        )
+
     projects = registered(SCOPE_PROJECT)
     if not _hit(projects, project_id):
-        raise AllowanceDenied(
-            f"项目 {project_id} 不在执行允许名单（scope=project）—— 默认拒绝，"
-            "请先用 POST /api/v1/exec-allowances 登记（L06）。",
-            scope=SCOPE_PROJECT, subject=project_id, registered=sorted(projects),
+        deny(
+            SCOPE_PROJECT, project_id, projects,
+            "POST /api/v1/exec-allowances "
+            f'{{"scope":"project","subject":"{project_id}","granted_by":"<你>"}}',
         )
 
     instruments = registered(SCOPE_INSTRUMENT)
     if instruments and not _hit(instruments, code):
-        raise AllowanceDenied(
-            f"标的 {code} 不在执行允许名单（scope=instrument）—— 该维度已登记 "
-            f"{sorted(instruments)}，不含它（L06）。",
-            scope=SCOPE_INSTRUMENT, subject=code, registered=sorted(instruments),
+        deny(
+            SCOPE_INSTRUMENT, code, instruments,
+            f"该维度已登记 {sorted(instruments)}，不含它。POST /api/v1/exec-allowances "
+            f'{{"scope":"instrument","subject":"{code}","granted_by":"<你>"}}',
         )
 
     tools = registered(SCOPE_TOOL)
     if tools and not _hit(tools, tool):
-        raise AllowanceDenied(
-            f"工具 {tool} 不在执行允许名单（scope=tool）—— 该维度已登记 "
-            f"{sorted(tools)}，不含它（L06）。",
-            scope=SCOPE_TOOL, subject=tool, registered=sorted(tools),
+        deny(
+            SCOPE_TOOL, tool, tools,
+            f"该维度已登记 {sorted(tools)}，不含它。POST /api/v1/exec-allowances "
+            f'{{"scope":"tool","subject":"{tool}","granted_by":"<你>"}}',
         )
 
 

@@ -271,7 +271,8 @@ services:
       DATABASE_URL: postgresql://fin_paper_rw:${FIN_PAPER_PASSWORD:-}@postgres:5432/${POSTGRES_DB:-hunter}
       PAPER_MODE: PAPER                 # 固定，不接受请求参数切换（01方案 §7.4）
       # L06 · 两把钥匙分开：行情读取（HUNTER_INTERNAL_KEY）与下单执行（HUNTER_EXEC_KEY）
-      # 取自**不同的环境变量**，**都不给默认值**（缺任一 paper 拒绝启动）。
+      # 取自**不同的环境变量**。L11 起执行钥匙**不配也行** —— 为空时自动沿用读取凭证
+      # （老部署平滑升级）；想让下单用另一把钥匙（与拉行情的凭证分开）再配它。
       HUNTER_INTERNAL_KEY: ${HUNTER_INTERNAL_KEY:-}
       HUNTER_EXEC_KEY: ${HUNTER_EXEC_KEY:-}
       # 行情来源（M3 起快照由 paper 自己取）：打 api 的 `GET /api/quote/{code}`，
@@ -368,6 +369,7 @@ services:
       TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
       TEMPORAL_TASK_QUEUE: ${TEMPORAL_TASK_QUEUE:-fin-trading}
       # L06 · 两把钥匙分开：读 api 数据面用 HUNTER_INTERNAL_KEY，打 paper 下单用 HUNTER_EXEC_KEY。
+      # L11 起 HUNTER_EXEC_KEY 为空时自动沿用读取凭证（老部署平滑升级）。
       HUNTER_INTERNAL_KEY: ${HUNTER_INTERNAL_KEY:-}
       HUNTER_EXEC_KEY: ${HUNTER_EXEC_KEY:-}
       FIN_WORKER_HTTP_PORT: "8300"

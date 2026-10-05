@@ -1,11 +1,13 @@
-"""L06 · 两把钥匙分开 —— 证据用例。
+"""L06 · 两把钥匙分开 —— 证据用例（L11 补：执行钥匙缺省时回退到读取凭证）。
 
 **不读密钥值**（本文件里的都是占位串），只证明**来源不同**：
 
 - `config.read_key()` 与 `config.exec_key()` 取自**两个不同的环境变量**；
 - **行情读取凭证打不开执行门**（`security.require_internal_key` 校验的是执行凭证）；
 - 执行门认的是执行凭证（认 read 会 401，认 exec 才放行）；
-- 行情来源（`snapshot/source.py`）带的是**读取凭证**，与执行凭证无关。
+- 行情来源（`snapshot/source.py`）带的是**读取凭证**，与执行凭证无关；
+- **L11**：`HUNTER_EXEC_KEY` 没配时 `exec_key()` **回退**成读取凭证（老部署平滑升级）；
+  配了就用自己的，不被回退盖掉。
 """
 
 from __future__ import annotations
@@ -34,11 +36,29 @@ def test_read_and_exec_read_their_own_variables(monkeypatch):
 
 
 def test_no_default_value(monkeypatch):
-    """没配就是空串（没有兜底默认值），交给启动自检拒绝。"""
+    """两把都没配 → 都是空串（没有**写死的**兜底默认值），交给启动自检拒绝。
+
+    注意 L11 的回退是「执行钥匙回退到**读取环境变量**」，不是「回退到一个常量」——
+    读取也没有时，回退结果仍是空串（下面两条用例演示有读取时的回退）。
+    """
     monkeypatch.delenv("HUNTER_INTERNAL_KEY", raising=False)
     monkeypatch.delenv("HUNTER_EXEC_KEY", raising=False)
     assert config.read_key() == ""
     assert config.exec_key() == ""
+
+
+def test_missing_exec_key_falls_back_to_read_key(monkeypatch):
+    """L11 · 没配 `HUNTER_EXEC_KEY` → `exec_key() == read_key()`（老部署平滑升级）。"""
+    monkeypatch.setenv("HUNTER_INTERNAL_KEY", "read-only")
+    monkeypatch.delenv("HUNTER_EXEC_KEY", raising=False)
+    assert config.exec_key() == "read-only"
+
+
+def test_configured_exec_key_is_not_overridden_by_fallback(monkeypatch):
+    """L11 · 配了 `HUNTER_EXEC_KEY` → 用它自己，**不被回退盖掉**（想分开就分得开）。"""
+    monkeypatch.setenv("HUNTER_INTERNAL_KEY", "read-x")
+    monkeypatch.setenv("HUNTER_EXEC_KEY", "exec-y")
+    assert config.exec_key() == "exec-y"
 
 
 # ── 执行门只认执行凭证 ─────────────────────────────────────────────────────

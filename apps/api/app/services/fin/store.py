@@ -266,7 +266,36 @@ def _insert_project(
             template["account_drawdown_halt_pct"],
         ),
     )
+
+    # L11 · 建项目即自动放行执行允许名单：同一事务里追加一条 (project, active) 登记。
+    # 这是「AI 自己跑」这个产品定位的落点 —— 新客户建完项目开箱即可下单，不必再去登记。
+    # **不动判据**（`apps/paper/app/allowlist.py` 仍是「空表 = 谁都不许」）：放行靠的是
+    # 表里真的多出这条 active 行。要收紧就登记一条 status='revoked'（同样只追加，留痕）。
+    _auto_allow_project(cur, project_id)
     return project, _param_row(cur, project_id)
+
+
+# 自动登记的 granted_by 取值（留痕：谁放的、什么时候、为什么）。升级补齐的用
+# `auto:upgrade`（见迁移 0054），建项目时自动放的用下面这个。
+AUTO_GRANT_PROJECT_CREATE = "auto:project-create"
+
+
+def _auto_allow_project(cur, project_id: str) -> None:
+    """给新建项目追加一条执行放行（`scope='project'`/`status='active'`）。
+
+    **同一事务**：与项目行一起提交 / 一起回滚（`_insert_project` 不提交，由调用方决定
+    事务边界）。`granted_by` 固定 `auto:project-create`，`note` 写明怎么收紧 ——
+    只追加表（`fin_exec_allowance`）的触发器挡 UPDATE / DELETE，撤销 = 再追加一条 revoked。
+    """
+    cur.execute(
+        """
+        INSERT INTO fin_exec_allowance (scope, subject, status, granted_by, note)
+        VALUES ('project', %s, 'active', %s, %s)
+        """,
+        (project_id, AUTO_GRANT_PROJECT_CREATE,
+         "建项目时自动放行（L11：AI 开箱即交易）。要停掉这个项目：登记一条 "
+         "scope=project 的 revoked（POST /api/v1/exec-allowances/revoke）。"),
+    )
 
 
 def create_project(user_id: str, tier: str, markets: Any = None) -> dict[str, Any]:

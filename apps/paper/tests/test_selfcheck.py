@@ -31,13 +31,23 @@ def test_empty_internal_key_is_a_problem(monkeypatch):
     assert any("HUNTER_INTERNAL_KEY" in p for p in problems)
 
 
-def test_empty_exec_key_is_a_problem(monkeypatch):
-    """L06 · **缺任一钥匙都拒绝启动**：只有读取凭证、没有执行凭证也不行。"""
+def test_missing_exec_key_falls_back_to_read_key(monkeypatch):
+    """L11 · **老部署平滑升级**：只有读取凭证、没有执行凭证 → **不再拒绝启动**
+    （`exec_key()` 回退成读取凭证）。缺读取凭证才拒绝（见上一条）。"""
     monkeypatch.setenv("PAPER_MODE", "PAPER")
     monkeypatch.setenv("HUNTER_INTERNAL_KEY", "k")
     monkeypatch.delenv("HUNTER_EXEC_KEY", raising=False)
     problems = selfcheck.check(_BoomConn())
-    assert any("HUNTER_EXEC_KEY" in p for p in problems)
+    assert not any("HUNTER_EXEC_KEY" in p for p in problems)
+
+
+def test_both_keys_missing_still_a_problem(monkeypatch):
+    """两把都没有 → 读取凭证那条先报（回退也无处可回退），照旧拒绝启动。"""
+    monkeypatch.setenv("PAPER_MODE", "PAPER")
+    monkeypatch.delenv("HUNTER_INTERNAL_KEY", raising=False)
+    monkeypatch.delenv("HUNTER_EXEC_KEY", raising=False)
+    problems = selfcheck.check(_BoomConn())
+    assert any("HUNTER_INTERNAL_KEY" in p for p in problems)
 
 
 def test_unreachable_db_is_a_problem(monkeypatch):
