@@ -45,19 +45,24 @@ def _clean_switch_env(monkeypatch):
 # 一 · 默认值：全部取安全的一侧
 # ════════════════════════════════════════════════════════════════════════
 
-def test_defaults_are_fail_safe():
-    assert switches.memory_enabled() is False, "代码默认必须是 0（未显式开 = 关）"
-    assert switches.evolution_mode_requested() == "off"
-    assert switches.auto_apply() is False
-    assert switches.live_order_enabled() is False
+def test_defaults_open_but_live_order_stays_off():
+    """L12 起代码默认 = 产品定位那一侧（会学习 / 会自己用上）；**实盘恒为关**。
+
+    旧名 `test_defaults_are_fail_safe`（断言默认全关）与新口径不符，故改名 ——
+    默认不再「fail-safe 全关」，唯一保留的安全默认是**实盘订单出口 = 关**。
+    """
+    assert switches.memory_enabled() is True, "代码默认必须是 1（默认开）"
+    assert switches.evolution_mode_requested() == "paper"
+    assert switches.auto_apply_effective() is True
+    assert switches.live_order_enabled() is False, "实盘是唯一的硬开关，默认必须为关"
     assert switches.hard_config_errors() == []
 
 
 @pytest.mark.parametrize("raw,expected", [
     ("1", True),
     ("0", False),
-    ("", False),          # 空串（compose 的 ${X:-}）→ 回落默认 0
-    ("true", False),      # 非法值 → fail-safe 关
+    ("", True),           # 空串（compose 的 ${X:-}）→ 回落默认 1
+    ("true", False),      # 非法值 → 保守一侧（关）
     ("2", False),
     ("yes", False),
 ])
@@ -71,8 +76,8 @@ def test_memory_enabled_parsing(monkeypatch, raw, expected):
     ("observe", "observe"),
     ("paper", "paper"),
     ("PAPER", "paper"),   # 大小写不敏感
-    ("", "off"),          # 空 → 默认 off
-    ("live", "off"),      # 非法 → fail-safe off
+    ("", "paper"),        # 空 → 默认 paper
+    ("live", "off"),      # 非法 → 保守一侧 off
     ("auto", "off"),
 ])
 def test_evolution_mode_parsing(monkeypatch, raw, expected):
@@ -81,22 +86,56 @@ def test_evolution_mode_parsing(monkeypatch, raw, expected):
 
 
 # ════════════════════════════════════════════════════════════════════════
-# 二 · 硬开关：只允许 0，非 0 一律拒绝
+# 二 · 硬开关：L12 起只剩「实盘下单」一条；`FIN_AUTO_APPLY` 是真开关
 # ════════════════════════════════════════════════════════════════════════
 
-def test_auto_apply_zero_is_ok():
+def test_auto_apply_is_no_longer_a_hard_switch():
+    """L12：`FIN_AUTO_APPLY` 移出硬开关名单 —— 默认（未设置 = 1）不再报违规、不抛。"""
     assert switches.hard_config_errors() == []
     switches.assert_hard_ok()          # 不抛
 
 
-@pytest.mark.parametrize("raw", ["1", "true", "yes", "2"])
-def test_auto_apply_nonzero_rejected(monkeypatch, raw):
+@pytest.mark.parametrize("raw,expected", [
+    ("0", False),
+    ("1", True),
+    ("", True),           # 空串（compose 的 ${X:-}）→ 回落默认 1（开）
+    ("true", False),      # 非法值 → 保守一侧（关）
+    ("2", False),
+    ("yes", False),
+])
+def test_auto_apply_parsing_and_not_hard(monkeypatch, raw, expected):
+    """`FIN_AUTO_APPLY` 现在是真开关：解析成布尔；**非法值一律 fail-safe 关**。
+
+    旧用例 `test_auto_apply_nonzero_rejected`（非 0 → `SwitchConfigError`）与新口径相反，
+    故改写：它**不再**被拒；改为验「解析正确 + 填 1 不报违规」。
+    """
     monkeypatch.setenv(switches.AUTO_APPLY_ENV, raw)
-    errors = switches.hard_config_errors()
-    assert errors and "本方案恒为 0，自动生效未交付" in errors[0]
-    with pytest.raises(switches.SwitchConfigError) as exc:
-        switches.assert_hard_ok()
-    assert switches.AUTO_APPLY_ENV in str(exc.value)
+    assert switches.ceiling_auto_apply() is expected
+    assert switches.hard_config_errors() == []      # 不再是硬开关
+    switches.assert_hard_ok()                       # 不抛
+
+
+def test_auto_apply_effective_is_conservative_intersection(monkeypatch):
+    """生效值 = 天花板 ∩ 项目选择，**取更保守**（两者都为真才为真）。"""
+    # 天花板关 → 一律关（哪怕这个项目写了 true）—— 界面开不出部署者不允许的东西
+    monkeypatch.setenv(switches.AUTO_APPLY_ENV, "0")
+    monkeypatch.setattr(switches, "_read_override",
+                        lambda pid: {switches.SWITCH_AUTO_APPLY: True})
+    assert switches.auto_apply_effective("prj-x") is False
+
+    # 天花板开 + 这个项目显式关 → 关
+    monkeypatch.setenv(switches.AUTO_APPLY_ENV, "1")
+    monkeypatch.setattr(switches, "_read_override",
+                        lambda pid: {switches.SWITCH_AUTO_APPLY: False})
+    assert switches.auto_apply_effective("prj-x") is False
+
+    # 天花板开 + 这个项目没设过（None） → 跟随天花板 = 开
+    monkeypatch.setattr(switches, "_read_override",
+                        lambda pid: {switches.SWITCH_AUTO_APPLY: None})
+    assert switches.auto_apply_effective("prj-x") is True
+
+    # 不带 project_id → 就是天花板
+    assert switches.auto_apply_effective() is True
 
 
 @pytest.mark.parametrize("raw", ["1", "true", "yes"])
@@ -108,13 +147,14 @@ def test_live_order_nonzero_rejected(monkeypatch, raw):
         switches.assert_hard_ok()
 
 
-def test_both_hard_switches_listed(monkeypatch):
+def test_only_live_order_is_a_hard_switch(monkeypatch):
+    """L12：硬开关只剩实盘那一条 —— 就算 `FIN_AUTO_APPLY=1`，违规清单里也只有它。"""
     monkeypatch.setenv(switches.AUTO_APPLY_ENV, "1")
     monkeypatch.setenv(switches.LIVE_ORDER_ENV, "1")
     errors = switches.hard_config_errors()
-    assert len(errors) == 2
-    joined = "；".join(errors)
-    assert "本方案恒为 0" in joined and "没有实盘订单出口" in joined
+    assert len(errors) == 1
+    assert "没有实盘订单出口" in errors[0]
+    assert switches.AUTO_APPLY_ENV not in "；".join(errors)
 
 
 # ════════════════════════════════════════════════════════════════════════

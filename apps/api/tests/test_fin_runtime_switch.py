@@ -218,7 +218,8 @@ def test_db_down_falls_back_to_env(monkeypatch):
     assert switches.memory_enabled("prj-anyone") is True          # 回落天花板（开）
     assert switches.evolution_mode_requested("prj-anyone") == "observe"
     assert switches.selected_switch("prj-anyone") == {
-        switches.SWITCH_MEMORY: None, switches.SWITCH_MODE: None}
+        switches.SWITCH_MEMORY: None, switches.SWITCH_MODE: None,
+        switches.SWITCH_AUTO_APPLY: None}
     # 连不上库时「能不能改」仍由天花板回答（不崩）
     assert switches.can_change()["memory_enabled"] is True
 
@@ -261,15 +262,22 @@ def test_meta_has_all_display_names():
         assert o["label"] and o["full"] and o["value"] in switches.EVOLUTION_MODES
     assert meta[switches.SWITCH_MEMORY]["on_text"] == "已启用"
     assert meta[switches.SWITCH_MEMORY]["off_text"] == "未启用"
-    assert meta["auto_apply"]["off_text"] == "关（本方案恒为关闭）"
+    # L12：auto_apply 从只读文字变成可改的真条目（带开/关标签与说明）。
+    # 旧断言 `off_text == "关（本方案恒为关闭）"` 与新口径不符，故改。
+    assert meta["auto_apply"]["on_label"] == "开"
+    assert meta["auto_apply"]["off_label"] == "关"
+    assert meta["auto_apply"]["off_text"] == "未启用"
+    assert "收紧" in meta["auto_apply"]["desc"], "文案要说清「只对收紧方向放行」"
 
 
 def test_runtime_state_carries_meta_and_ceiling(monkeypatch):
     monkeypatch.setenv(switches.EVOLUTION_MODE_ENV, "observe")
     monkeypatch.setenv(switches.MEMORY_ENABLED_ENV, "1")
     state = switches.runtime_state()
-    assert state["ceiling"] == {"memory_enabled": True, "evolution_mode": "observe"}
-    assert state["can_change"] == {"memory_enabled": True, "evolution_mode": True}
+    assert state["ceiling"] == {"memory_enabled": True, "evolution_mode": "observe",
+                                "auto_apply": True}
+    assert state["can_change"] == {"memory_enabled": True, "evolution_mode": True,
+                                   "auto_apply": True}
     assert state["meta"]["evolution_mode"]["options"][2]["allowed"] is False
 
 
@@ -284,7 +292,8 @@ def test_ceiling_one_no_row_is_true(monkeypatch, db):
     switches.invalidate_switch_cache()
     assert switches.memory_enabled(db["pid"]) is True
     assert switches.selected_switch(db["pid"]) == {
-        switches.SWITCH_MEMORY: None, switches.SWITCH_MODE: None}
+        switches.SWITCH_MEMORY: None, switches.SWITCH_MODE: None,
+        switches.SWITCH_AUTO_APPLY: None}
 
 
 @_needs_db
@@ -316,15 +325,61 @@ def test_cache_invalidated_immediately_no_sleep(monkeypatch, db):
 
 
 @_needs_db
-def test_hard_switch_keys_rejected_and_no_rows(monkeypatch, db):
-    """⑤ 硬开关 key → ValueError，且库里一行都没写（现值表与流水表都是 0）。"""
+def test_hard_switch_key_rejected_and_no_rows(monkeypatch, db):
+    """⑤ 硬开关 key → ValueError，且库里一行都没写（现值表与流水表都是 0）。
+
+    L12：硬开关**只剩实盘那一条**（`auto_apply` 已移出名单，成为可改的真开关）。
+    旧用例的 `for key in ("auto_apply", "live_order_enabled")` 与新口径不符，故只留实盘。
+    """
     monkeypatch.setenv(switches.MEMORY_ENABLED_ENV, "1")
     switches.invalidate_switch_cache()
-    for key in ("auto_apply", "live_order_enabled"):
-        with pytest.raises(ValueError) as ei:
-            switches.set_project_switch(
-                db["conn"], db["pid"], switch_key=key, value=True, actor=db["uid"], reason="r")
-        assert "硬开关" in str(ei.value)
+    with pytest.raises(ValueError) as ei:
+        switches.set_project_switch(
+            db["conn"], db["pid"], switch_key="live_order_enabled", value=True,
+            actor=db["uid"], reason="r")
+    assert "硬开关" in str(ei.value)
+    assert _count("fin_memory_switch", db["pid"]) == 0
+    assert _count("fin_memory_switch_log", db["pid"]) == 0
+
+
+@_needs_db
+def test_auto_apply_override_written_and_read_back(monkeypatch, db):
+    """L12：`auto_apply` 现在是可改的真开关 —— 写 false 落库、跨连接读回、流水如实追加。
+
+    同时验「按项目关掉 → 该项目生效值为假、**全局（不带 project_id）仍为真**」。
+    """
+    monkeypatch.setenv(switches.MEMORY_ENABLED_ENV, "1")
+    monkeypatch.setenv(switches.AUTO_APPLY_ENV, "1")          # 天花板开
+    switches.invalidate_switch_cache()
+    assert switches.auto_apply_effective(db["pid"]) is True   # 未设置 → 跟随天花板
+    out = switches.set_project_switch(
+        db["conn"], db["pid"], switch_key="auto_apply", value=False,
+        actor=db["uid"], reason="这个项目先别自动生效")
+    assert out["changed"] is True and out["new_value"] is False
+    assert out["auto_apply"] is False
+    # 跨连接读回（真落库，不是内存里改了个数）
+    assert switches.auto_apply_effective(db["pid"]) is False
+    assert switches.selected_switch(db["pid"])[switches.SWITCH_AUTO_APPLY] is False
+    # 流水恰好多一行，key 是 auto_apply
+    rows = _logs(db["pid"])
+    assert [r["switch_key"] for r in rows] == ["auto_apply"]
+    assert rows[0]["old_value"] is None and rows[0]["new_value"] is False
+    assert rows[0]["actor"] == db["uid"] and rows[0]["reason"] == "这个项目先别自动生效"
+    # 全局（不带 project_id）不受影响，仍是天花板 = 开
+    assert switches.auto_apply_effective() is True
+
+
+@_needs_db
+def test_auto_apply_over_ceiling_rejected(monkeypatch, db):
+    """天花板 `FIN_AUTO_APPLY=0` → 界面写 true 被 400（`ValueError`），且**零写入**。"""
+    monkeypatch.setenv(switches.MEMORY_ENABLED_ENV, "1")
+    monkeypatch.setenv(switches.AUTO_APPLY_ENV, "0")
+    switches.invalidate_switch_cache()
+    with pytest.raises(ValueError) as ei:
+        switches.set_project_switch(
+            db["conn"], db["pid"], switch_key="auto_apply", value=True,
+            actor=db["uid"], reason="想开")
+    assert "部署侧已锁死" in str(ei.value) and switches.AUTO_APPLY_ENV in str(ei.value)
     assert _count("fin_memory_switch", db["pid"]) == 0
     assert _count("fin_memory_switch_log", db["pid"]) == 0
 
@@ -425,3 +480,45 @@ def test_migration_0046_runs_twice_without_error():
         conn.close()
     assert _to_regclass("fin_memory_switch") == "fin_memory_switch"
     assert _to_regclass("fin_memory_switch_log") == "fin_memory_switch_log"
+
+
+# ════════════════════════════════════════════════════════════════════════
+# 六 · 迁移 0055（`auto_apply` 列 + 流水 CHECK）本身
+# ════════════════════════════════════════════════════════════════════════
+
+_MIGRATION_0055 = (Path(__file__).resolve().parents[3]
+                   / "db" / "migrations" / "0055_auto_apply_switch.sql")
+
+
+def test_migration_0055_source_properties():
+    sql = _MIGRATION_0055.read_text(encoding="utf-8")
+    code = "\n".join(ln.split("--", 1)[0] for ln in sql.splitlines())
+    low = code.lower()
+    assert "begin;" not in low and "commit;" not in low, "迁移自带事务边界会破坏 migrate.apply_one"
+    assert "drop table" not in low, "只做加法，不许删表"
+    assert "add column if not exists auto_apply" in low, "加列要幂等（IF NOT EXISTS）"
+    assert "'auto_apply'" in code, "流水账的 CHECK 要放行 auto_apply"
+
+
+@_needs_db
+def test_migration_0055_runs_twice_without_error():
+    """L12：迁移 `0055` 连跑两遍不报错（幂等）—— 列存在、CHECK 已放宽。"""
+    sql = _MIGRATION_0055.read_text(encoding="utf-8")
+    conn = psycopg2.connect(_URL)
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql)      # 第一遍
+            cur.execute(sql)      # 第二遍（必须同样成功）
+        conn.commit()
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM information_schema.columns "
+                        "WHERE table_name = 'fin_memory_switch' AND column_name = 'auto_apply'")
+            assert cur.fetchone(), "fin_memory_switch.auto_apply 列不存在"
+            # CHECK 已放宽：插一行 switch_key='auto_apply' 的流水不该被拒
+            cur.execute("SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+                        "WHERE conname = 'fin_memory_switch_log_key_chk'")
+            row = cur.fetchone()
+            assert row and "auto_apply" in row[0], "流水账 CHECK 没放行 auto_apply"
+        conn.rollback()
+    finally:
+        conn.close()

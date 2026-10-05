@@ -72,7 +72,7 @@ async def lifespan(app: FastAPI):
             "[fin.switches] memory_enabled={} · evolution_mode={} · auto_apply={} · live_order_enabled={}",
             _fin_switches.memory_enabled(),
             _fin_switches.evolution_mode_requested(),
-            _fin_switches.auto_apply(),
+            _fin_switches.ceiling_auto_apply(),
             _fin_switches.live_order_enabled(),
         )
     except Exception as e:      # noqa: BLE001 — 开关状态打印失败不该挡住启动
