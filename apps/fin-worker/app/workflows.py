@@ -656,6 +656,15 @@ async def _shadow_for_project(project: dict, market: str, trade_date: str, now_i
         rec["evaluate"] = await _exec(activities.shadow_evaluate, {
             "proposal_id": proposal_id, "market": market, "trade_date": trade_date,
         }, timeout=SHADOW_TIMEOUT)
+        # L13 · 验证**通过**之后接一步「自动应用」（不改上面任何采集 / 判定逻辑）。
+        # 只对「收紧」方向放行、且只在该项目自动生效开着时 —— 两条都在 api 侧判
+        # （`services/fin/evolution.py:auto_apply_proposal`）：被拒时如实返回原因、什么都不改，
+        # 工作流照常收尾。**失败不炸**：`activities.auto_apply` 永不抛（也不重试），
+        # 所以这里不需要 try。verdict 为 None（窗口未结束）/ failed / inconclusive 一律不触发。
+        if (rec["evaluate"] or {}).get("verdict") == "passed":
+            rec["auto_apply"] = await _exec(activities.auto_apply, {
+                "proposal_id": proposal_id, "market": market,
+            }, timeout=SHADOW_TIMEOUT)
         out["proposals"].append(rec)
     return out
 
@@ -788,7 +797,8 @@ class ObserveWorkflow(_PausableWorkflow):
 #
 # **确定性编排，零 LLM**（方案 §5.2）：工作流只负责「到点、按市场、逐项目」地调用与留痕；
 # 聚什么经验、提哪个字段全在 api 的 `services/fin/evolution.py`。
-# **不自动生效**：`FIN_AUTO_APPLY` 恒 0 —— 这一步只产出 `draft` 提案，生效仍要人工 `confirm`。
+# **这一步不自动生效**：只产出 `draft` 提案。自动生效在 `fin.shadow` 判定 `passed` 之后接
+# （`L13`，只对「收紧」方向；见 `_shadow_for_project` 的 `activities.auto_apply` 一步）。
 PROPOSE_TIMEOUT = timedelta(minutes=5)
 
 
@@ -841,7 +851,7 @@ class ProposeWorkflow(_PausableWorkflow):
     某市场非交易日 / 日历缺失 → 空跑并记明原因，**其他市场照常**。
 
     内层对「该市场**所有进行中的项目**」各读一次候选、逐条经唯一写入口落库。
-    **只自动「提」，不自动「生效」**（`FIN_AUTO_APPLY` 恒 0）。
+    **这一步只自动「提」**；「生效」在 `fin.shadow` 判定 `passed` 之后接（`L13`，只对收紧方向）。
     """
 
     @workflow.run

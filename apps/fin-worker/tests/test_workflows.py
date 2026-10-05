@@ -96,6 +96,8 @@ def test_activity_list_covers_workflow_calls():
         "propose_candidates", "propose_submit",
         # L09：采集补齐的两个活动
         "collect_news", "collect_fundamentals",
+        # L13：验证通过 → 自动生效（一个活动；`fin.shadow` 在 verdict=passed 后调）
+        "auto_apply",
     } == names
 
 

@@ -300,6 +300,23 @@ class HunterApiClient:
             raise ApiError(resp.status_code, resp.text)
         return resp.json()
 
+    def evolution_auto_apply(self, proposal_id: str,
+                             market: Optional[str] = None) -> dict[str, Any]:
+        """**验证通过后由系统自动生效**（`L13`）。只对「收紧」方向放行，纪律在服务端。
+
+        返回 `{auto_applied, skipped, proposal_id, project_id, reason?}`：
+        `auto_applied=True` = 已生效；`skipped=True` = 没自动生效（开关关 / 方向不是收紧 /
+        闸门没过）—— **这不是错误**，`reason` 写明为什么。提案不存在 → 404（抛 `ApiError`）。
+        """
+        body: dict[str, Any] = {}
+        if market is not None:
+            body["market"] = market
+        resp = self._request("POST", f"/api/internal/fin/evolution/{proposal_id}/auto-apply",
+                             json=body)
+        if resp.status_code >= 400:
+            raise ApiError(resp.status_code, resp.text)
+        return resp.json()
+
     # ── L01 · 自动提案（内网口令通道；唯一服务模块是 api 的 evolution.propose_candidates → propose）──
     def evolution_propose_candidates(self, project_id: str,
                                      market: Optional[str] = None) -> dict[str, Any]:

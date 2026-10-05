@@ -383,7 +383,8 @@ def submit(conn, *, project_id: str, strategy_key: str, name: str, source_ref: s
     """`strategy.submit`：登记一个候选版本（**未生效**）+ 追加 `submitted` 事件。
 
     **未生效是真的**：本函数**不碰 `fin_param`**、不切换 active —— 生效走 `control.py`
-    那个唯一写入口（红线 7）。`FIN_AUTO_APPLY` 恒 0 不动（提交候选 ≠ 自动生效）。
+    那个唯一写入口（红线 7）。**提交候选 ≠ 自动生效**：自动生效是 `L13` 的另一条路
+    （`system:auto-apply`，只对「收紧」方向；见 `evolution.auto_apply_proposal`）。
 
     放风控的提交（`target != 'strategy'`）**一律拒绝并记拒绝事件**（红线 8）。
     """

@@ -1690,9 +1690,10 @@ def shadow_summary(*, proposal_id: str, conn=None) -> dict[str, Any]:
 # 这是**全系统唯一会自主改 `fin_param` 的地方**（`记忆系统追加规则.md` §五 第 7、9 条）。
 # 三条纪律，改这一段之前先读：
 #
-#   1. **生效只人工确认**（`03 §7.5`）：不做自动生效（`FIN_AUTO_APPLY` 恒 0）；接口必须带
-#      `confirm` 显式标志；放行依据**不止**一个收益阈值（passed 事件 / 计划未过期 /
-#      样本足够 / 不触及风控上限 / 成本滑点模型一致）。
+#   1. **生效要显式确认**（`03 §7.5`）：接口必须带 `confirm=true`（`L13` 起自动路径也照传，
+#      只是由系统代按，`actor='system:auto-apply'`）；放行依据**不止**一个收益阈值
+#      （passed 事件 / 计划未过期 / 样本足够 / 不触及风控上限 / 成本滑点模型一致）。
+#      **自动路径只对「收紧」方向放行**（见 `auto_apply_proposal`），放宽 / 混合仍要人工确认。
 #   2. **参数只能经唯一写入口**：真正改 `fin_param` 的是 `control.activate_candidate` /
 #      `control.restore_base_config`（四步同事务）。本模块**一行都不直改** `fin_param`
 #      （`test_fin_evolution_apply.py` 的 grep 守护盯着）。
@@ -1828,12 +1829,20 @@ def _gate_reject(cur, proposal_id: str, project_id: str, reason: str, actor: str
 # ── 生效（人工确认）────────────────────────────────────────────────────────
 
 def apply_proposal(*, proposal_id: str, expected_base_config_hash: Any, actor: Any,
-                   confirm: bool = False, market: Any = None,
+                   confirm: bool = False, market: Any = None, auto: bool = False,
                    conn=None) -> dict[str, Any]:
-    """**人工确认后把提案应用到模拟盘**（`03 §4-D` / §7.5）。
+    """**确认后把提案应用到模拟盘**（`03 §4-D` / §7.5）。
 
-    不做自动生效：`FIN_AUTO_APPLY` 必须为 0，`confirm` 必须显式为真。放行五条见
-    `_apply_gate_reason`；任一不过 → 追加 `rejected_by_gate` 并抛 `EvolutionGateError`（→400）。
+    这是**唯一会改生效配置**的入口，两条调用路各自留痕：
+
+    - **人走的入口**（`/v1/…/apply` 与 `/internal/…/apply`）：`actor` 由登录身份派生，
+      **必须显式 `confirm=true`** —— 少了它就抛 `EvolutionValidationError`（→400）。
+    - **自动入口**（`/internal/fin/evolution/{id}/auto-apply`，`L13`）：`auto=True`、
+      `actor='system:auto-apply'`、同样**显式传 `confirm=True`**（自动路径不绕开 `confirm` 语义，
+      只是「谁按的确认键」变了）。生效事件 payload 里多标一句 `auto: true`，别让人误以为是手点的。
+
+    放行闸门见 `_apply_gate_reason`；任一不过 → 追加 `rejected_by_gate` 并抛
+    `EvolutionGateError`（→400）。**自动路径也走同一套闸门，一条不减。**
 
     通过与生效**写在同一笔事务里**：`control.activate_candidate` 做完
     「CAS → 注册候选版本 → 写 change_log → 切 active」四步后，`within_txn` 回调在同一事务内
@@ -1842,10 +1851,11 @@ def apply_proposal(*, proposal_id: str, expected_base_config_hash: Any, actor: A
     """
     if not switches.evolution_enabled():
         raise EvolutionDisabledError("进化未启用（FIN_EVOLUTION_MODE=off）：本部署当前不接受生效")
-    switches.assert_hard_ok()                                    # FIN_AUTO_APPLY 必须为 0
+    switches.assert_hard_ok()                                    # 只剩实盘硬锁死（FIN_AUTO_APPLY 自 L12 起是软开关）
     if not confirm:
         raise EvolutionValidationError(
-            "必须显式人工确认（confirm=true）才生效 —— 本方案不做自动生效（FIN_AUTO_APPLY 恒 0）")
+            "必须显式确认（confirm=true）才生效 —— 人走的入口必须显式确认；"
+            "自动路径（actor=system:auto-apply）也走同一个标志，只是由系统代按")
 
     proposal_id = str(proposal_id or "").strip()
     if not proposal_id:
@@ -1894,6 +1904,9 @@ def apply_proposal(*, proposal_id: str, expected_base_config_hash: Any, actor: A
                 "base_config": base_config, "candidate_config": candidate_config,
                 "active_config_hash": receipt["active_config_hash"],
                 "market": market, "applied_by": actor,
+                # L13：`True` = 系统自动生效（不是人点的）—— 与 `actor='system:auto-apply'` 同义，
+                # 单独一个布尔是为了让界面 / 查询不必去解析 actor 字符串。
+                "auto": bool(auto),
             }, actor=actor)
 
         receipt = _control().activate_candidate(
@@ -1909,6 +1922,122 @@ def apply_proposal(*, proposal_id: str, expected_base_config_hash: Any, actor: A
     finally:
         if own:
             conn.close()
+
+
+# ── 自动生效（L13 · 验证通过 → 自动应用）────────────────────────────────────
+#
+# `fin.shadow` 判定 `passed` 之后调这里（经内网入口 `POST /internal/fin/evolution/{id}/auto-apply`）。
+# **它不是「另一条生效路」** —— 放行闸门、CAS、版本链核验、唯一写入口全在 `apply_proposal`
+# 与 `control`，本段只是**代按确认键**，并且只对「收紧」方向代按。三条纪律：
+#
+#   1. **只对收紧**：`direction == 'tighten'` 且 `target == 'strategy'` 才放行；
+#      `loosen` / `mixed`（放宽 / 混合）一律拒绝，仍要人工确认。风控（`target='risk'`）
+#      **一律不走此路**（红线 8 / 9：风控只经 `apply_risk_tier` 人工棘轮）。
+#   2. **开关在天花板之上**：还要该项目 `switches.auto_apply_effective(project_id)` 为真；
+#      为假时**什么都不做**（不写事件、不改配置），照实返回原因。
+#   3. **拒绝留痕、失败不炸**：方向 / 风控被拒 → 追加 `rejected_by_gate`（`stage='auto-apply'`，
+#      **不改提案投影状态** —— 被自动拒绝 ≠ 提案被驳回，人仍可确认）；闸门拒绝由
+#      `apply_proposal` 自己留痕。**任何一步失败都不抛穿调用链**，返回可读的结构化结果。
+
+AUTO_APPLY_ACTOR = "system:auto-apply"
+
+
+def _record_auto_skip(proposal_id: str, project_id: str, reason: str, **extra: Any) -> None:
+    """自动生效**拒绝留痕** —— 追加一条 `rejected_by_gate`，`stage='auto-apply'`。
+
+    **不改提案投影状态**（`update_status=False`）：自动路径拒绝只说明「机器没代按」，
+    提案本身没被驳回 —— 人仍可在界面上确认（`L13` §四.3 的「状态仍是等人确认」）。
+    写失败只记日志，**不让留痕把主流程带崩**。
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            _append_event(cur, proposal_id, "rejected_by_gate",
+                          {"reason": reason, "project_id": project_id,
+                           "stage": "auto-apply", **extra},
+                          actor=AUTO_APPLY_ACTOR, update_status=False)
+        conn.commit()
+    except Exception as exc:                                    # noqa: BLE001
+        logger.warning("[fin.evolution] 自动生效拒绝留痕失败（不影响返回）：{}", exc)
+    finally:
+        conn.close()
+
+
+def auto_apply_proposal(*, proposal_id: str, market: Any = None,
+                        conn=None) -> dict[str, Any]:
+    """**验证通过后由系统自动生效**（`L13` · 方案 §三.C–D）。**只对收紧方向放行。**
+
+    前置检查逐条（每条都有明确的拒绝理由）：
+
+    1. 该项目「自动生效」开着 —— `switches.auto_apply_effective(project_id)`（`L12` 的生效值 =
+       天花板 ∩ 天窗）。关着 ⇒ **什么都不做**（不写事件、不改配置）。
+    2. 提案方向是 `tighten` 且目标是 `strategy` —— 否则拒绝并留痕（本段核心纪律）。
+    3. 提案存在 / 未过期 / 状态可生效 / 放行闸门 —— **交给现成的 `apply_proposal` 去判**
+       （不在这里重复实现判据）。
+    4. 通过 → `apply_proposal(confirm=True, actor='system:auto-apply', auto=True)`。
+
+    返回 `{auto_applied: bool, skipped: bool, proposal_id, project_id, reason?}`；
+    `auto_applied=True` 时另含 `apply_proposal` 的返回字段（`from_key`/`to_key`/…）。
+    `proposal_id` 不存在 → 抛 `LookupError`（路由翻 404）。
+    """
+    proposal_id = str(proposal_id or "").strip()
+    if not proposal_id:
+        raise EvolutionValidationError("proposal_id 不能为空")
+
+    own = conn is None
+    conn = conn or get_conn()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            prop = get_proposal_inner(cur, proposal_id)         # 不存在 → LookupError
+        conn.rollback()
+    finally:
+        if own:
+            conn.close()
+    project_id = str(prop["project_id"])
+    direction = str(prop.get("direction") or "")
+    target = str(prop.get("target") or "")
+    base_hash = str(prop.get("base_config_hash") or "")
+
+    # ① 这个项目的自动生效开着吗？关着 ⇒ 什么都不做（不写事件、不改配置）。
+    if not switches.auto_apply_effective(project_id):
+        reason = ("该项目未开启自动生效（FIN_AUTO_APPLY 天花板或按项目开关为关）—— "
+                  "不做任何动作，等人工确认")
+        logger.info("[fin.evolution] auto-apply 跳过 pid={} project={}：{}",
+                    proposal_id, project_id, reason)
+        return {"auto_applied": False, "skipped": True, "proposal_id": proposal_id,
+                "project_id": project_id, "reason": reason}
+
+    # ② 只对收紧放行（本段核心纪律）；风控一律不走此路。
+    if target != "strategy" or direction != "tighten":
+        if target != "strategy":
+            reason = (f"自动生效只放行 target='strategy' 的收紧提案；本提案 target={target!r}"
+                      "（风控只经 apply_risk_tier 人工棘轮）")
+        else:
+            reason = (f"自动生效只放行 direction='tighten'（收紧）方向的提案；"
+                      f"本提案 direction={direction!r}（放宽 / 混合仍要人工确认）")
+        _record_auto_skip(proposal_id, project_id, reason, direction=direction, target=target)
+        logger.info("[fin.evolution] auto-apply 拒绝 pid={} project={}：{}",
+                    proposal_id, project_id, reason)
+        return {"auto_applied": False, "skipped": True, "proposal_id": proposal_id,
+                "project_id": project_id, "reason": reason}
+
+    # ③④ 交给现成的 apply_proposal（放行闸门 / CAS / confirm 语义全在它那里）。
+    try:
+        out = apply_proposal(proposal_id=proposal_id, expected_base_config_hash=base_hash,
+                             actor=AUTO_APPLY_ACTOR, confirm=True, market=market, auto=True)
+    except (EvolutionError, switches.SwitchConfigError) as exc:
+        # 闸门拒绝（`apply_proposal` 已自行留痕）、进化未启用、硬开关违规等 ——
+        # **不抛穿链路**，老实返回「没生效 + 为什么」，由调用方（工作流）记日志、不重试。
+        logger.info("[fin.evolution] auto-apply 未生效 pid={} project={}：{}",
+                    proposal_id, project_id, exc)
+        return {"auto_applied": False, "skipped": True, "proposal_id": proposal_id,
+                "project_id": project_id, "reason": str(exc),
+                "rejected": type(exc).__name__}
+    logger.warning("[fin.evolution] auto-apply 生效 pid={} project={} {} → {}（by {}）",
+                   proposal_id, project_id, out.get("from_key"), out.get("to_key"),
+                   AUTO_APPLY_ACTOR)
+    return {"auto_applied": True, "skipped": False, "proposal_id": proposal_id,
+            "project_id": project_id, **out}
 
 
 # ── 观察（按原 plan 计算）──────────────────────────────────────────────────
@@ -2306,7 +2435,8 @@ def retry_reinject(*, proposal_id: Optional[str] = None, conn=None) -> dict[str,
 #   查有没有可用经验 → 判经验库开关 → 判预算 → 产出候选（draft）→ 交给 `propose()` 落库
 #
 # **口径边界（红线，改之前先读）**：
-#   1. 本段只自动**提**提案，**不自动生效**（`FIN_AUTO_APPLY` 恒 0；生效仍要 `confirm=true`）。
+#   1. 本段只自动**提**提案，**不自动生效** —— 生效在 `L13`（`auto_apply_proposal`），
+#      且只对「收紧」方向放行；本段产出的候选方向恒为 `tighten`（见本条下方第 3 点）。
 #   2. **不放宽证据要求**：候选的证据就是走 `propose()` 的同一套校验（冻结快照 / 同项目 /
 #      非 holdout / 时间边界）。这里**只挑哪些经验可用**，不替它开后门。
 #   3. **只收紧、不放宽**：候选方向恒为 `tighten`，改动幅度取白名单里已登记的 `max_step`

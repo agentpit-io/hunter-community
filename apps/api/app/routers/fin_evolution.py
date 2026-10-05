@@ -318,6 +318,39 @@ async def apply_proposal(body: ApplyIn, request: Request):
     return out
 
 
+# ── L13 · 自动生效（内网口令通道；调用方 = `fin.shadow` 工作流）────────────────
+#
+# **只对「收紧」方向放行**，且只在该项目自动生效开着时。它不是「另一条生效路」——
+# 放行闸门 / CAS / 版本链核验 / 唯一写入口全在 `services/fin/evolution.py`，
+# 本端点只判通道 + 把服务层异常翻成 HTTP 码（与 R6/R7/R8 同口径）。
+# **人走的 `/internal/fin/evolution/apply` 一个字没改**（仍要求显式 `confirm`）。
+
+
+class AutoApplyIn(BaseModel):
+    """自动生效入参（`L13`）。**没有 `actor` / `confirm` / `direction` 字段** ——
+    `actor` 固定 `system:auto-apply`、内部传 `confirm=True`、方向纪律在服务端，
+    调用方（`fin.shadow`）传不进来、也就无从绕过。"""
+
+    market: Optional[str] = None
+
+
+@router.post("/internal/fin/evolution/{proposal_id}/auto-apply")
+async def auto_apply_proposal_route(proposal_id: str, request: Request,
+                                    body: Optional[AutoApplyIn] = None):
+    """**验证通过后由系统自动生效**（`L13`）—— 逐条前置检查见 `evolution.auto_apply_proposal`。
+
+    拒绝（开关关 / 方向不是收紧 / 闸门没过）**照实返回 200 + 结构化原因**，不抛 4xx ——
+    工作流据此记日志、**不重试**（`_exec` 的 at-least-once 重试会把 `rejected_by_gate`
+    事件刷屏）。提案不存在 → 404（走 `_apply_errors`）。
+    """
+    _auth_internal(request)
+    out = _apply_errors(lambda: evolution_svc.auto_apply_proposal(
+        proposal_id=proposal_id, market=(body.market if body else None)))
+    logger.info("[fin.evolution] auto-apply id={} applied={}（{}）",
+                proposal_id, out.get("auto_applied"), out.get("reason") or "已生效")
+    return out
+
+
 @router.post("/internal/fin/evolution/observe")
 async def observe_applied(body: ObserveIn, request: Request):
     """观察一次已生效的提案：**只有冻结的 rollback_line 会自动回滚**，其余只告警。"""

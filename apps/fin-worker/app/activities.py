@@ -1023,6 +1023,36 @@ def shadow_evaluate(req: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+# ── L13 · 自动生效（`fin.shadow` 判定 passed 之后调）──────────────────────────
+#
+# **只对「收紧」方向放行**、且只在该项目自动生效开着时 —— 判断全在 api 侧
+# （`services/fin/evolution.py:auto_apply_proposal`），工作流只负责「验证过了就调一下」。
+
+@activity.defn
+def auto_apply(req: dict[str, Any]) -> dict[str, Any]:
+    """验证通过后由系统自动生效（`L13`）。**本活动不抛异常。**
+
+    无论 api 返回「没自动生效」（开关关 / 方向不是收紧 / 闸门没过，HTTP 200）还是
+    调用失败（404 / 401 / 连不上），都返回带 `auto_applied` / `reason` / `error` 的
+    结构化结果并记日志。两个理由：
+
+    1. 自动生效是**尽力而为**：失败不该让 `fin.shadow` 崩（任务书 §三.B「失败不炸」）；
+    2. 活动抛异常会被 Temporal 按 at-least-once **重试 6 次**，而闸门拒绝每次都写一条
+       `rejected_by_gate` 事件 —— 重试会把事件刷屏。**「不重试」由「永不抛」保证。**
+    """
+    proposal_id = req["proposal_id"]
+    try:
+        out = HunterApiClient().evolution_auto_apply(proposal_id, req.get("market"))
+    except Exception as exc:                                    # noqa: BLE001 —— 不抛穿工作流
+        logger.warning("[shadow] auto-apply {} 调用失败（不重试）：{}: {}",
+                       proposal_id, type(exc).__name__, exc)
+        return {"auto_applied": False, "skipped": True, "proposal_id": proposal_id,
+                "error": f"{type(exc).__name__}: {exc}"}
+    logger.info("[shadow] auto-apply {} → applied={}（{}）", proposal_id,
+                out.get("auto_applied"), out.get("reason") or "已生效")
+    return out
+
+
 # ── R13 · 自动盯盘 · 观察（`fin.observe`）──────────────────────────────────
 #
 # 与 `fin.shadow` 同构：一次触发对**该市场所有进行中的项目**下每个**已生效**的提案
