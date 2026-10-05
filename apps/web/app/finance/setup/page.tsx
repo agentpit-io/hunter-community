@@ -139,7 +139,8 @@ export default function SetupWizardPage() {
   const [rt, setRt] = useState<RuntimeState | null>(null)
   const [swMem, setSwMem] = useState(false)
   const [swMode, setSwMode] = useState('off')
-  const [swPick, setSwPick] = useState<{ memory_enabled?: boolean; evolution_mode?: string }>({})
+  const [swAuto, setSwAuto] = useState(false)   // L14 · 「自动生效」（默认跟随天花板 = 开）
+  const [swPick, setSwPick] = useState<{ memory_enabled?: boolean; evolution_mode?: string; auto_apply?: boolean }>({})
   const [swReason, setSwReason] = useState('')
   const [swErr, setSwErr] = useState('')
   const [rtErr, setRtErr] = useState('')   // 运行设置**读取失败**（与「还在加载」分开）
@@ -189,6 +190,7 @@ export default function SetupWizardPage() {
         setRt(d)
         setSwMem(d.memory_enabled)
         setSwMode(d.evolution_mode_requested)
+        setSwAuto(d.auto_apply)
       })
       .catch(e => {
         if (!alive) return
@@ -215,6 +217,7 @@ export default function SetupWizardPage() {
         const want: [string, any][] = []
         if (swMem !== rt.memory_enabled) want.push(['memory_enabled', swMem])
         if (swMode !== rt.evolution_mode_requested) want.push(['evolution_mode', swMode])
+        if (swAuto !== rt.auto_apply) want.push(['auto_apply', swAuto])
         for (const [key, value] of want) {
           try {
             await finFetch('/runtime/switch', {
@@ -682,14 +685,17 @@ export default function SetupWizardPage() {
                   </div>
                 </div>
                 <RuntimeSwitchPanel
-                  rt={rt} memoryOn={swMem} mode={swMode} editable busy={submitting} loadFailed={!!rtErr}
+                  rt={rt} memoryOn={swMem} mode={swMode} autoApplyOn={swAuto}
+                  editable busy={submitting} loadFailed={!!rtErr}
                   onChange={(k, v, reason) => {
                     setSwPick(p => ({ ...p, [k]: v }))
                     setSwReason(reason)
                     if (k === 'memory_enabled') setSwMem(!!v)
+                    else if (k === 'auto_apply') setSwAuto(!!v)
                     else setSwMode(String(v))
                   }}
-                  extra={(swPick.memory_enabled !== undefined || swPick.evolution_mode !== undefined) ? (
+                  extra={(swPick.memory_enabled !== undefined || swPick.evolution_mode !== undefined
+                    || swPick.auto_apply !== undefined) ? (
                     <Note tone="copper">
                       这些改动会在<b>点「立即开启」之后</b>应用到新项目上（现在还没有项目可挂）。
                     </Note>

@@ -6,8 +6,9 @@
 //   node scripts/r21_browser_check.mjs
 //
 // 验收对象（`10` §四 出口 / `R21.md` §3.2）：
-//   A · 成长页 ④ —— 经验库开关**可点**、切完**页面上的「当前生效」立刻变**（不许刷新才变）、
-//       硬开关两行仍是只读；每一条都对着后端 `GET /v1/fin/runtime` 的真值。
+//   A · 成长页 ④ —— 经验库**与「自动生效」**两个开关**可点**、切完**页面上的「当前生效」立刻变**
+//       （不许刷新才变）、实盘只读行仍在；每一条都对着后端 `GET /v1/fin/runtime` 的真值。
+//       L14 起「自动生效」不再是只读文字（旧的只读死断言已按新口径替换）。
 //   B · 向导第 7 步 —— 那块「这台机器要不要学习」在**开户之前**就能设置，且写着
 //       「跟项目没有关系、随时可改」与「这不是自动交易开关」。
 //
@@ -98,13 +99,17 @@ let bt = norm(await banner().innerText())
 await page.screenshot({ path: `${OUT}/A-growth-4-switch.png`, fullPage: true })
 check('A4 横幅含「生效模式」', bt.includes('生效模式'), bt.match(/生效模式[^请]*/)?.[0] || '')
 check('A5 生效模式是「观察」（天花板 observe）', /观察/.test(bt))
-check('A6 只读行「关（本方案恒为关闭）」', bt.includes('关（本方案恒为关闭）'))
-check('A7 只读行「无（本项目不接券商）」', bt.includes('无（本项目不接券商）'))
+// L14 · 「自动生效」不再是只读死文字 —— 默认开，且写明「只对收紧放行」
+check('A6 自动生效开关显示为「开」（默认跟随天花板）', bt.includes('自动生效：已启用'),
+  bt.match(/自动生效：[^\s]*/)?.[0] || '')
+check('A6b 文案说清「只对收紧方向放行」', bt.includes('只对') && bt.includes('收紧'),
+  bt.match(/[^。]*只对[^。]*。/)?.[0] || '')
+check('A7 只读行「无（本项目不接券商）」仍在', bt.includes('无（本项目不接券商）'))
 
-// 经验库开关：可点的 Toggle（button[aria-pressed]）
+// 两个可点的 Toggle（经验库 + 自动生效）都是 button[aria-pressed]；实盘只读行没有按钮
 const tog = banner().locator('button[aria-pressed]')
 const toggleCount = await tog.count()
-check('A8 经验库开关可点（aria-pressed 按钮存在）', toggleCount === 1, `count=${toggleCount}`)
+check('A8 经验库 + 自动生效两个开关可点（aria-pressed 按钮 = 2）', toggleCount === 2, `count=${toggleCount}`)
 const pressed0 = toggleCount ? await tog.first().getAttribute('aria-pressed') : null
 check('A9 初始为「开」（天花板=1、未单独设置 → 生效=开）', pressed0 === 'true', `aria-pressed=${pressed0}`)
 check('A9b 当前生效写「经验库：已启用」', bt.includes('经验库：已启用'))
@@ -114,11 +119,11 @@ const paperBtn = banner().getByRole('button', { name: '模拟验证' })
 check('A10 天花板 observe →「模拟验证」不可选',
   (await paperBtn.count()) === 1 && !(await paperBtn.first().isEnabled().catch(() => false)))
 
-// 硬开关：没有 switch / 没有「自动生效」勾选框
+// 实盘仍是只读：界面上没有 role=switch / 没有实盘勾选框（硬开关连入口都没有）
 const swCount = await page.getByRole('switch').count()
-const autoCb = await page.getByRole('checkbox', { name: /自动生效/ }).count()
-check('A11 界面没有「自动生效」开关（也无 role=switch）', swCount === 0 && autoCb === 0,
-  `switch=${swCount} autoBox=${autoCb}`)
+const liveCb = await page.getByRole('checkbox', { name: /实盘/ }).count()
+check('A11 实盘仍是只读（无 role=switch / 无实盘勾选框）', swCount === 0 && liveCb === 0,
+  `switch=${swCount} liveBox=${liveCb}`)
 
 // ── 切换：开 → 关，立刻生效 ──
 await tog.first().click()
@@ -151,6 +156,33 @@ await banner().getByRole('button', { name: '确认修改' }).first().click()
 await page.waitForTimeout(2500)
 const after2 = norm(await banner().innerText())
 check('A17 再开回来立刻生效', after2.includes('已改，立刻生效') && after2.includes('经验库：已启用'))
+
+// ── L14 · 「自动生效」开关：可点、切完立刻生效、后端真变（原只读死文案已改为开关）──
+const togAuto = banner().locator('button[aria-pressed]').nth(1)
+const autoPressed0 = await togAuto.getAttribute('aria-pressed')
+check('A19 自动生效开关默认为「开」', autoPressed0 === 'true', `aria-pressed=${autoPressed0}`)
+await togAuto.click()
+await page.waitForTimeout(500)
+await banner().locator('input[placeholder*="为什么改"]').fill('L14 真浏览器验收：先关掉自动生效')
+await banner().getByRole('button', { name: '确认修改' }).first().click()
+await page.waitForTimeout(2500)   // 只等接口往返，**不刷新页面**
+const afterAuto = norm(await banner().innerText())
+await page.screenshot({ path: `${OUT}/A-growth-5-auto-off.png`, fullPage: true })
+check('A20 切完立刻变（不刷新）：「自动生效：未启用」', afterAuto.includes('自动生效：未启用'),
+  afterAuto.match(/自动生效：[^\s]*/)?.[0] || '')
+check('A21 aria-pressed 变 false', (await togAuto.getAttribute('aria-pressed')) === 'false')
+const rtAutoOff = (await api(`/api/v1/fin/runtime?project_id=${pid}`, { token: tokA })).data
+check('A21b 后端 auto_apply 同步为 false', rtAutoOff?.auto_apply === false,
+  JSON.stringify({ auto_apply: rtAutoOff?.auto_apply, selected: rtAutoOff?.selected }))
+
+// 切回开（复位）
+await togAuto.click()
+await page.waitForTimeout(500)
+await banner().locator('input[placeholder*="为什么改"]').fill('L14 真浏览器验收：再开回来')
+await banner().getByRole('button', { name: '确认修改' }).first().click()
+await page.waitForTimeout(2500)
+const afterAuto2 = norm(await banner().innerText())
+check('A22 自动生效再开回来立刻生效', afterAuto2.includes('自动生效：已启用'))
 
 check('A18 成长页 pageErrors = 0', pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '))
 
@@ -209,6 +241,11 @@ check('B4「这不是自动交易开关 —— 那个在「自动交易」页」
   step7.includes('这不是') && step7.includes('自动交易') && step7.includes('那个在'))
 const memTogB = p2.locator('[data-r9] button[aria-pressed], button[aria-pressed]')
 check('B5 经验库开关在开户之前可点', (await memTogB.count()) >= 1, `count=${await memTogB.count()}`)
+// L14 · 向导第 7 步也要显示「自动生效」（默认开），开户前就能看见并能关
+check('B5b 向导第 7 步显示「自动生效」', step7.includes('自动生效'), '')
+check('B5c 自动生效默认「开」（跟随天花板）', step7.includes('自动生效：已启用'), '')
+check('B5d 向导里两个开关都可点（经验库 + 自动生效）', (await memTogB.count()) >= 2,
+  `count=${await memTogB.count()}`)
 check('B6 向导页 pageErrors = 0', peB.length === 0, peB.slice(0, 3).join(' | '))
 check('B7 全程 pageErrors = 0', pageErrors.length === errB0, `${errB0} → ${pageErrors.length}`)
 

@@ -259,7 +259,10 @@ def _project_of(proposal_id: str) -> str:
 
 
 class ApplyIn(BaseModel):
-    """生效入参。`confirm` **必须显式为真** —— 本方案不做自动生效（`FIN_AUTO_APPLY` 恒 0）。"""
+    """生效入参。`confirm` **必须显式为真** —— 人走的这条路没有自动确认。
+
+    系统自己的自动生效走另一条内网入口（`L13`，`actor='system:auto-apply'`），只对收紧方向放行。
+    """
 
     proposal_id: str
     expected_base_config_hash: str
@@ -472,7 +475,7 @@ class RollbackUserIn(BaseModel):
 async def apply_proposal_user(body: ApplyUserIn, request: Request):
     """**人工确认后把提案应用到模拟盘**（JWT 通道）—— 逐字复用 R8 的服务函数。
 
-    `confirm` 必须显式为真（本方案不做自动生效，`FIN_AUTO_APPLY` 恒 0）。
+    `confirm` 必须显式为真（人走的这条路要显式确认；系统自动生效是另一条内网入口，见 `L13`）。
     """
     uid = _uid(request)
     _owned_proposal(body.proposal_id, uid)

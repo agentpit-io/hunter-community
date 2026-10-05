@@ -263,7 +263,6 @@ def test_meta_has_all_display_names():
     assert meta[switches.SWITCH_MEMORY]["on_text"] == "已启用"
     assert meta[switches.SWITCH_MEMORY]["off_text"] == "未启用"
     # L12：auto_apply 从只读文字变成可改的真条目（带开/关标签与说明）。
-    # 旧断言 `off_text == "关（本方案恒为关闭）"` 与新口径不符，故改。
     assert meta["auto_apply"]["on_label"] == "开"
     assert meta["auto_apply"]["off_label"] == "关"
     assert meta["auto_apply"]["off_text"] == "未启用"

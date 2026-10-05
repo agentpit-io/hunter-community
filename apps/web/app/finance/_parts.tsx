@@ -259,7 +259,9 @@ export function RowKV({ k, v, mono }: { k: ReactNode; v: ReactNode; mono?: boole
 //   2. **灰 = 有原因**：天花板为关时把开关画灰，旁边写清**为什么灰**；
 //   3. **每次改动必填理由** —— 它要进服务端的流水账，界面不许绕过。
 //
-// 「自动生效 / 实盘下单」两项**永远只读**（硬开关连界面入口都没有，服务端会 400）。
+// 「实盘下单」**永远只读**（硬开关连界面入口都没有，服务端会 400）。
+// 「自动生效」自 L14（2026-10-05）起**是可点的真开关**（与经验库同款），不再是只读行 ——
+// 文案必须说清「只对收紧方向自动放行；放宽仍要人点确认」（`meta.auto_apply.desc` 由后端给）。
 
 export type ModeOption = { value: string; label: string; full: string; allowed: boolean }
 /** 后端的**展示表**（`GET /v1/fin/runtime` 的 `meta`）—— 枚举与中文名全在这里，前端不写死。 */
@@ -271,7 +273,10 @@ export type SwitchMeta = {
   evolution_mode: {
     label: string; options: ModeOption[]; locked: string; ceiling_note: string | null
   }
-  auto_apply: { label: string; on_text: string; off_text: string }
+  auto_apply: {
+    label: string; on_label: string; off_label: string; on_text: string; off_text: string
+    desc: string; not_auto_trade: string; locked: string
+  }
   live_order_enabled: { label: string; on_text: string; off_text: string }
   hard_note: string
 }
@@ -284,9 +289,9 @@ export type RuntimeState = {
   auto_apply: boolean
   live_order_enabled: boolean
   project_id?: string | null
-  ceiling?: { memory_enabled: boolean; evolution_mode: string }
-  selected?: { memory_enabled: boolean | null; evolution_mode: string | null }
-  can_change?: { memory_enabled: boolean; evolution_mode: boolean }
+  ceiling?: { memory_enabled: boolean; evolution_mode: string; auto_apply: boolean }
+  selected?: { memory_enabled: boolean | null; evolution_mode: string | null; auto_apply: boolean | null }
+  can_change?: { memory_enabled: boolean; evolution_mode: boolean; auto_apply: boolean }
   meta?: SwitchMeta
 }
 
@@ -321,14 +326,16 @@ function Toggle({ on, disabled, busy, onClick, labelOn, labelOff }: {
 }
 
 export function RuntimeSwitchPanel({
-  rt, memoryOn, mode, onChange, editable, busy, loadFailed, extra,
+  rt, memoryOn, mode, autoApplyOn, onChange, editable, busy, loadFailed, extra,
 }: {
   rt: RuntimeState | null
   /** 界面上的当前取值（页面持有；初值来自 `rt`）。 */
   memoryOn: boolean
   mode: string
+  /** 「自动生效」在界面上的当前取值（初值来自 `rt`）。 */
+  autoApplyOn: boolean
   /** 用户确认改动时回调（**理由必填**，由面板收集）。 */
-  onChange: (key: 'memory_enabled' | 'evolution_mode', value: any, reason: string) => void
+  onChange: (key: 'memory_enabled' | 'evolution_mode' | 'auto_apply', value: any, reason: string) => void
   /** 允许操作吗（天花板为关时传 `false`，开关画灰）。 */
   editable: boolean
   busy?: boolean
@@ -336,7 +343,7 @@ export function RuntimeSwitchPanel({
   loadFailed?: boolean
   extra?: ReactNode
 }) {
-  const [pending, setPending] = useState<{ key: 'memory_enabled' | 'evolution_mode'; value: any; label: string } | null>(null)
+  const [pending, setPending] = useState<{ key: 'memory_enabled' | 'evolution_mode' | 'auto_apply'; value: any; label: string } | null>(null)
   const [reason, setReason] = useState('')
 
   if (!rt) {
@@ -356,9 +363,10 @@ export function RuntimeSwitchPanel({
 
   const canMem = rt.can_change?.memory_enabled !== false
   const canMode = rt.can_change?.evolution_mode !== false
+  const canAuto = rt.can_change?.auto_apply !== false
   const notAllowed = meta.evolution_mode.options.filter(o => !o.allowed).map(o => o.value)
 
-  const ask = (key: 'memory_enabled' | 'evolution_mode', value: any, label: string) => {
+  const ask = (key: 'memory_enabled' | 'evolution_mode' | 'auto_apply', value: any, label: string) => {
     setReason('')
     setPending({ key, value, label })
   }
@@ -368,6 +376,10 @@ export function RuntimeSwitchPanel({
     setPending(null)
     setReason('')
   }
+  const labelOf = (key: 'memory_enabled' | 'evolution_mode' | 'auto_apply') =>
+    key === 'memory_enabled' ? meta.memory_enabled.label
+      : key === 'evolution_mode' ? meta.evolution_mode.label
+        : meta.auto_apply.label
 
   return (
     <div className="p-4 flex flex-col gap-4">
@@ -407,12 +419,27 @@ export function RuntimeSwitchPanel({
         )}
       </div>
 
+      {/* ③ 自动生效（AI 自己用上验证通过的改进）—— 与经验库同款的可点开关（L14）；
+             文案里的「只对收紧方向放行」由后端 `meta.auto_apply.desc` 给，前端不写死。 */}
+      <div className="flex flex-col gap-1.5">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="text-sm font-semibold" style={{ color: 'var(--text)' }}>{meta.auto_apply.label}</div>
+          <Toggle on={autoApplyOn} disabled={!editable || !canAuto} busy={busy}
+            labelOn={meta.auto_apply.on_label} labelOff={meta.auto_apply.off_label}
+            onClick={() => ask('auto_apply', !autoApplyOn,
+              !autoApplyOn ? meta.auto_apply.on_label : meta.auto_apply.off_label)} />
+        </div>
+        <div className="text-xs leading-relaxed" style={{ color: 'var(--text-muted)' }}>{meta.auto_apply.desc}</div>
+        <div className="text-xs" style={{ color: 'var(--text-muted)' }}>{meta.auto_apply.not_auto_trade}</div>
+        {!canAuto && <Note tone="warn">{meta.auto_apply.locked}</Note>}
+      </div>
+
       {/* 确认条：理由必填（要进服务端流水账） */}
       {pending && (
         <div className="rounded-xl px-3.5 py-3 flex flex-col gap-2"
           style={{ background: 'rgba(176,106,50,.06)', border: '1px solid rgba(176,106,50,.2)' }}>
           <div className="text-xs" style={{ color: '#6B5334' }}>
-            把 <b>{pending.key === 'memory_enabled' ? meta.memory_enabled.label : meta.evolution_mode.label}</b> 改成 <b>{pending.label}</b>？
+            把 <b>{labelOf(pending.key)}</b> 改成 <b>{pending.label}</b>？
             改完<b>立刻生效</b>（不用重启服务）。理由必填，会记进变更流水。
           </div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -426,14 +453,8 @@ export function RuntimeSwitchPanel({
         </div>
       )}
 
-      {/* 只读：本方案规定永远是关的两项 */}
+      {/* 只读：本方案规定永远是关的那一项（实盘下单，硬开关连入口都没有） */}
       <div className="pt-1" style={{ borderTop: '1px dashed rgba(216,205,186,.75)' }}>
-        <div className="flex items-baseline justify-between gap-3 py-2 text-sm">
-          <span style={{ color: 'var(--text-muted)' }}>{meta.auto_apply.label}</span>
-          <span className="text-right font-semibold" style={{ color: 'var(--text)' }}>
-            {rt.auto_apply ? meta.auto_apply.on_text : meta.auto_apply.off_text}
-          </span>
-        </div>
         <div className="flex items-baseline justify-between gap-3 py-2 text-sm">
           <span style={{ color: 'var(--text-muted)' }}>{meta.live_order_enabled.label}</span>
           <span className="text-right font-semibold" style={{ color: 'var(--text)' }}>
@@ -449,6 +470,7 @@ export function RuntimeSwitchPanel({
         <span>生效模式：<b style={{ color: 'var(--text)' }}>{modeFull(meta, rt.evolution_mode)}</b></span>
         <span>请求模式：<b style={{ color: 'var(--text)' }}>{modeFull(meta, rt.evolution_mode_requested)}</b></span>
         <span>经验库：<b style={{ color: 'var(--text)' }}>{rt.memory_enabled ? meta.memory_enabled.on_text : meta.memory_enabled.off_text}</b></span>
+        <span>自动生效：<b style={{ color: 'var(--text)' }}>{rt.auto_apply ? meta.auto_apply.on_text : meta.auto_apply.off_text}</b></span>
       </div>
 
       {rt.degraded_reason && (

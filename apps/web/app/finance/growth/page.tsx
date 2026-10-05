@@ -13,8 +13,9 @@
  *   1. **状态只有三种**（待验证 / 已确认 / 已推翻）—— 取自后端枚举，前端不自己拼；
  *      「需重验」是**角标不是状态值**；
  *   2. **筛选值全部来自后端**（`GET /v1/fin/memory/filters`），前端不写死任何枚举；
- *   3. ⑥ 块**只读 + 两个人工动作**：生效与回滚都走同一个服务端闸门，
- *      **界面上没有任何「自动生效」开关**（`FIN_AUTO_APPLY` 恒 0）。
+ *   3. ⑥ 块**只读 + 两个人工动作**：生效与回滚都走同一个服务端闸门。
+ *      运行模式横幅上的「自动生效」自 L14（2026-10-05）起是**可点的真开关**
+ *      （按项目，与经验库同款）；它只对**收紧**方向自动放行，放宽仍要人点确认。
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -127,6 +128,7 @@ export default function FinanceGrowthPage() {
   // R21 · 面板上的「界面取值」（初值来自 rt；改完以后端回来的新快照为准）
   const [memOn, setMemOn] = useState(false)
   const [mode, setMode] = useState('off')
+  const [autoOn, setAutoOn] = useState(false)   // L14 · 「自动生效」开关的界面取值
   const [swBusy, setSwBusy] = useState(false)
   const [swMsg, setSwMsg] = useState('')
   const [props, setProps] = useState<Proposal[] | null>(null)
@@ -188,6 +190,7 @@ export default function FinanceGrowthPage() {
         setRt(d)
         setMemOn(d.memory_enabled)
         setMode(d.evolution_mode_requested)
+        setAutoOn(d.auto_apply)
       })
       .catch(e => { if (alive && !guard(e)) setRtErr(e?.message || '读不到运行设置') })
     return () => { alive = false }
@@ -195,7 +198,7 @@ export default function FinanceGrowthPage() {
 
   // ── R21 · 改一个开关（理由必填；服务端写流水 + 立刻生效）────────────────────
   const changeSwitch = useCallback(async (
-    key: 'memory_enabled' | 'evolution_mode', value: any, reason: string) => {
+    key: 'memory_enabled' | 'evolution_mode' | 'auto_apply', value: any, reason: string) => {
     if (!pid) return
     setSwBusy(true); setSwMsg('')
     try {
@@ -205,6 +208,7 @@ export default function FinanceGrowthPage() {
       setRt(r.runtime)
       setMemOn(r.runtime.memory_enabled)
       setMode(r.runtime.evolution_mode_requested)
+      setAutoOn(r.runtime.auto_apply)
       setSwMsg(r.changed ? '已改，立刻生效（变更已记入流水）' : '没有变化，未写入流水')
     } catch (e: any) {
       if (guard(e)) return
@@ -443,7 +447,8 @@ export default function FinanceGrowthPage() {
             <CardHead icon={<Activity className="w-4 h-4" />} title="这台项目要不要学习"
               sub="改完立刻生效 · 不用重启服务 · 每次改动都记进变更流水" />
             <RuntimeSwitchPanel
-              rt={rt} memoryOn={memOn} mode={mode} editable busy={swBusy} loadFailed={!!rtErr}
+              rt={rt} memoryOn={memOn} mode={mode} autoApplyOn={autoOn}
+              editable busy={swBusy} loadFailed={!!rtErr}
               onChange={(k, v, reason) => { void changeSwitch(k, v, reason) }}
               extra={swMsg ? (
                 <div className="text-xs" style={{ color: 'var(--text-muted)' }} data-r9="switch-msg">{swMsg}</div>
@@ -1012,7 +1017,7 @@ function ButtonsRow({ p, events, reinject, busy, setBusy, onDone, onErr }: {
 
   return (
     <Card>
-      <CardHead title="人工动作" sub="只有人能改配置 · 界面上没有任何「自动生效」开关（FIN_AUTO_APPLY 恒 0）" />
+      <CardHead title="人工动作" sub="生效 / 回滚都要人点确认；「自动生效」开关只对收紧方向自动放行（见上方运行模式横幅）" />
       <div className="p-4 flex flex-col gap-3">
         {p.reinject_pending && (
           <Note tone="warn">

@@ -180,7 +180,10 @@ if (PHASE === 'degraded') {
   record('横幅 · 生效模式 = 降级后的 observe', banner.includes('观察'), norm(banner).slice(0, 120))
   record('横幅 · 降级原因显著显示', !!rt.degraded_reason && /已降级运行/.test(banner) && banner.includes('模拟账本未就绪'),
     norm(banner).match(/已降级运行[^）]*）?/)?.[0] || '未见降级条')
-  record('横幅 · 自动生效恒为关闭', rt.auto_apply === false && banner.includes('关（本方案恒为关闭）'), '')
+  // L14（2026-10-05）起「自动生效」是可点的真开关（跟天花板算生效值），不再是只读死文字。
+  // 旧只读行渲染的是「自动生效 + 一段固定说明」，没有「自动生效：」这个带冒号的生效值行 —— 用它区分新旧。
+  record('横幅 · 自动生效是可点开关（非只读文字）',
+    banner.includes('自动生效：'), `auto_apply=${rt.auto_apply}`)
 }
 
 // ════════════════════════════════════════════════════════════════════════

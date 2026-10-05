@@ -1,0 +1,197 @@
+{
+  "base": "http://127.0.0.1:3450",
+  "results": [
+    {
+      "n": "A0 项目已建（HK）",
+      "ok": true,
+      "detail": "prj_45c62ef93caf429a8da2e00c"
+    },
+    {
+      "n": "A0b 后端 runtime 三个新字段齐全",
+      "ok": true,
+      "detail": "{\"ceiling\":{\"memory_enabled\":true,\"evolution_mode\":\"observe\",\"auto_apply\":true},\"selected\":{\"memory_enabled\":null,\"evolution_mode\":null,\"auto_apply\":null},\"can_change\":{\"memory_enabled\":true,\"evolution_mode\":true,\"auto_apply\":true}}"
+    },
+    {
+      "n": "A1 页面加载（非空白）",
+      "ok": true,
+      "detail": "1933 字"
+    },
+    {
+      "n": "A2 成长页根容器存在",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": "A3 运行模式横幅存在",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": "A4 横幅含「生效模式」",
+      "ok": true,
+      "detail": "生效模式） 关闭 只观察 模拟验证 关闭（不复盘、不提案） 观察（拉行情 · 复盘 · 建经验 · 展示提案，没有委托发送能力） 模拟盘（独立模拟账本跑现行臂与候选臂） 部署侧允许的上限：只观察 —— 更高的选项界面上给不出来。 自动生效（AI 自己用上验证通过的改进） 开 开着：验证通过的「收紧」方向改进（调小仓位、收紧止损、减少持仓天数…）自动应用到模拟盘；关着：任何改进都要人点「确认」才生效。自动生效只对「收紧」方向的改进自动放行（放宽 / 混合方向仍要人工确认）。 ⚠️ 这不是「自动交易」开关 —— 它只改模拟盘的策略参数，不会下真单。 实盘下单 无（本项目不接券商） 「实盘下单」本方案规定不许开，界面上没有入口（服务端也会直接拒绝）。 生效模式：观察（拉行情 · 复盘 · 建经验 · 展示提案，没有委托发送能力） "
+    },
+    {
+      "n": "A5 生效模式是「观察」（天花板 observe）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": "A6 自动生效开关显示为「开」（默认跟随天花板）",
+      "ok": true,
+      "detail": "自动生效：已启用"
+    },
+    {
+      "n": "A6b 文案说清「只对收紧方向放行」",
+      "ok": true,
+      "detail": "自动生效只对「收紧」方向的改进自动放行（放宽 / 混合方向仍要人工确认）。"
+    },
+    {
+      "n": "A7 只读行「无（本项目不接券商）」仍在",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": "A8 经验库 + 自动生效两个开关可点（aria-pressed 按钮 = 2）",
+      "ok": true,
+      "detail": "count=2"
+    },
+    {
+      "n": "A9 初始为「开」（天花板=1、未单独设置 → 生效=开）",
+      "ok": true,
+      "detail": "aria-pressed=true"
+    },
+    {
+      "n": "A9b 当前生效写「经验库：已启用」",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": "A10 天花板 observe →「模拟验证」不可选",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": "A11 实盘仍是只读（无 role=switch / 无实盘勾选框）",
+      "ok": true,
+      "detail": "switch=0 liveBox=0"
+    },
+    {
+      "n": "A12 点开关 → 出现确认条（理由必填）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": "A13 未填理由时「确认修改」禁用",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": "A14 切完立刻变（不刷新）：「已改，立刻生效」",
+      "ok": true,
+      "detail": "已改，立刻生效（变更已记入流水）"
+    },
+    {
+      "n": "A15 当前生效变成「经验库：未启用」",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": "A16 aria-pressed 变 false",
+      "ok": true,
+      "detail": "aria-pressed=false"
+    },
+    {
+      "n": "A16b 后端 memory_enabled 同步为 false",
+      "ok": true,
+      "detail": "{\"memory_enabled\":false,\"selected\":{\"memory_enabled\":false,\"evolution_mode\":null,\"auto_apply\":null}}"
+    },
+    {
+      "n": "A17 再开回来立刻生效",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": "A19 自动生效开关默认为「开」",
+      "ok": true,
+      "detail": "aria-pressed=true"
+    },
+    {
+      "n": "A20 切完立刻变（不刷新）：「自动生效：未启用」",
+      "ok": true,
+      "detail": "自动生效：未启用"
+    },
+    {
+      "n": "A21 aria-pressed 变 false",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": "A21b 后端 auto_apply 同步为 false",
+      "ok": true,
+      "detail": "{\"auto_apply\":false,\"selected\":{\"memory_enabled\":true,\"evolution_mode\":null,\"auto_apply\":false}}"
+    },
+    {
+      "n": "A22 自动生效再开回来立刻生效",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": "A18 成长页 pageErrors = 0",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": "B1 到达第 7 步（确认并开启）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": "B2 有「这台机器要不要学习」块",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": "B3「与档位/项目无关、随时可改」（开户之前就能设置）",
+      "ok": true,
+      "detail": "这几项管的是「这台机器要不要攒经验、学到多深」，跟你要开的这个项目 （多少钱、哪些市场）没有关系。开完户后去「成长」页也能随时改，改完立刻生效、不用重启服务。"
+    },
+    {
+      "n": "B4「这不是自动交易开关 —— 那个在「自动交易」页」",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": "B5 经验库开关在开户之前可点",
+      "ok": true,
+      "detail": "count=2"
+    },
+    {
+      "n": "B5b 向导第 7 步显示「自动生效」",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": "B5c 自动生效默认「开」（跟随天花板）",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": "B5d 向导里两个开关都可点（经验库 + 自动生效）",
+      "ok": true,
+      "detail": "count=2"
+    },
+    {
+      "n": "B6 向导页 pageErrors = 0",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "n": "B7 全程 pageErrors = 0",
+      "ok": true,
+      "detail": "0 → 0"
+    }
+  ],
+  "pageErrors": [],
+  "consoleErrors": []
+}
