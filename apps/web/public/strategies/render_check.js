@@ -1615,7 +1615,7 @@ try {
     ['app.js:0 天命中也写进图例', /mark\.alwaysScan/.test(appJs)],
     ['app.js:算不出的天数单独写', /天算不出/.test(appJs)],
     // 换票时不清头部,新票加载中会顶着上一只的现价和命中天数(2026-09-13 截图实测)
-    ['app.js:换票先清上一只的现价 / 图例 / 区间,再去拉日线', /px0\.textContent = ''[\s\S]{0,200}lg0\.textContent = kcHint\(\)[\s\S]{0,120}rg0\.textContent = ''[\s\S]{0,600}await kcFetch\(code\)/.test(appJs)],
+    ['app.js:换票先清上一只的现价 / 图例 / 区间,再去拉日线', /px0\.textContent = ''[\s\S]{0,200}lg0\.textContent = kcHint\(\)[\s\S]{0,120}rg0\.textContent = ''[\s\S]{0,600}await kcFetch\(code, td\.dataset\.kmarket\)/.test(appJs)],
   ]
   for (const [name, ok] of hk) {
     if (ok) console.log('PASS 筛选器命中日 ·', name)

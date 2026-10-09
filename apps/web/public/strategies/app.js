@@ -1377,7 +1377,16 @@ function kcWatchSize(box) {
   KC.ro.observe(box)
 }
 
-async function kcFetch(code) {
+function kcSymbol(code, market) {
+  // 扫描市场是明确输入，不能依赖自选股缓存猜市场；保留 BRK.B 这类代码。
+  const m = String(market || '').toLowerCase()
+  const suffix = m === 'us' ? '.US' : m === 'hk' ? '.HK' : ''
+  return suffix && !/\.(US|HK|SH|SZ|BJ|OF)$/i.test(code)
+    ? String(code).toUpperCase() + suffix : code
+}
+
+async function kcFetch(code, market) {
+  code = kcSymbol(code, market)
   const key = code + '@' + kcLimit()     // 根数不同就是两份数据(看板三年 / 筛选器一年),缓存别串
   if (KC.cache.has(key)) return KC.cache.get(key)
   let out
@@ -1408,7 +1417,7 @@ function kcShow(td) {
   const code = td.dataset.kchart
   // 同一只票、同一组标记才算「没变」—— 历史记录里一只票可能有两笔,
   // 标记不同,只比代码的话第二笔会沿用第一笔的标记
-  const key = code + '|' + (td.dataset.kmark || '')
+  const key = kcSymbol(code, td.dataset.kmarket) + '|' + (td.dataset.kmark || '')
   if (!code || key === KC.cur) { clearTimeout(KC.hideT); return }
   clearTimeout(KC.hideT)
   clearTimeout(KC.showT)
@@ -1436,7 +1445,7 @@ function kcShow(td) {
     }
     el.classList.add('on')
     kcPlace(el._rect)
-    const payload = await kcFetch(code)
+    const payload = await kcFetch(code, td.dataset.kmarket)
     // 竞态:鼠标已经划到别的票上了,这次的响应直接丢掉
     if (seq !== KC.seq) return
     const own = kcMarkOf(td)

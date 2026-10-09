@@ -274,7 +274,7 @@
   </style>
 </head>
 <body>
-<script src="app.js"></script>
+<script src="app.js?v=20261009-kline-market"></script>
 <script>
 // ═══════════════════════════════════════════════════════════════════
 // 魔法筛选器 · 对齐 chartink 的「魔法筛选 + 可视条件行」交互
@@ -1334,7 +1334,7 @@ function vTable(r) {
     // data-kchart 是悬停日K 的钩子(见 §悬停日K)。没有 code 就不挂,
     // 免得弹出一个必然失败的空图。
     const kc = p.code
-      ? ' data-kchart="' + esc(p.code) + '" data-kname="' + esc(String(p.name || '').slice(0, 34)) + '"'
+      ? ' data-kchart="' + esc(p.code) + '" data-kmarket="' + esc((S.resultScan && S.resultScan.market) || S.market) + '" data-kname="' + esc(String(p.name || '').slice(0, 34)) + '"'
       : ''
     return '<tr><td class="cd2"' + kc + '>' + esc(p.code || '') + '</td>' +
       '<td>' + (p.name ? esc(String(p.name).slice(0, 34)) : NA) + '</td>' +
@@ -2195,7 +2195,7 @@ async function hitDaysOf(code) {
     // 一天都没回算、也没有扫描当日可标 → 才是「算不出」;有扫描当日就照常画(note 进悬停说明)
     if (d.note && !d.evaluated && !(Array.isArray(d.hits) && d.hits.length)) out = { error: d.note }
     else if (d.note) out.noteShow = d.note
-    if (!out.error && inResult && d.scan_day) await pinLastBar(out, d, code)
+    if (!out.error && inResult && d.scan_day) await pinLastBar(out, d, code, sc.market)
   } else {
     out = { error: r.status === 401 ? '登录后才能看这份脚本的历史命中日'
       : '命中日没算出来:' + errOf(r, 'HTTP ' + r.status) }
@@ -2209,8 +2209,8 @@ async function hitDaysOf(code) {
 // 冷门票 / SPAC 在扫描源快照里的最新日K 常停在前一两天(之后没成交),日K 源却补了零成交或一字线的一根,
 // 后端按快照日补标就落在倒数第二根。日K 最后一根比快照日新、且快照日是补标的(scan_pinned,不是回算真命中),
 // 就把补标挪到最后一根;日K 还没到快照日则如实写明。日K 走 kcFetch 的缓存,和画图同一份,不多发请求。
-async function pinLastBar(out, d, code) {
-  const kp = (typeof kcFetch === 'function') ? await kcFetch(code) : null
+async function pinLastBar(out, d, code, market) {
+  const kp = (typeof kcFetch === 'function') ? await kcFetch(code, market) : null
   const rows = (kp && kp.rows) || []
   const last = rows.length ? String(rows[rows.length - 1].ts || '').slice(0, 10) : ''
   if (last && last > d.scan_day) {
