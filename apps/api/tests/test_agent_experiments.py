@@ -59,6 +59,13 @@ def test_dates_and_owner_keys():
     with pytest.raises(ValueError): e.key_for("alice","../../config")
 
 
+def test_dates_use_shared_market_timezone():
+    from app.services import market_time
+    with patch.object(market_time,'market_tz',wraps=market_time.market_tz) as lookup:
+        e.dates(dict(start='2025-01-01',end='2025-01-02'))
+    lookup.assert_called_once_with('a')
+
+
 def test_snapshot_roundtrip_hash_and_real_engine_reproducibility(tmp_path):
     days=[date(2025,1,1)+timedelta(days=i) for i in range(9)]
     prices=[20,10,11,11.1,11.2,11.3,11.4,11.5,11.6]

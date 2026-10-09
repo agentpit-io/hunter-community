@@ -14,7 +14,6 @@ import sys
 import time
 import uuid
 from datetime import date, datetime
-from zoneinfo import ZoneInfo
 
 BRANCH = "limitup"
 MAX_CANDIDATES = 3
@@ -93,7 +92,8 @@ def dates(body):
         start, end = date.fromisoformat(body["start"]), date.fromisoformat(body["end"])
     except (KeyError, ValueError, TypeError):
         raise ValueError("请填写有效的开始、结束日期")
-    today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+    from app.services.market_time import market_tz
+    today = datetime.now(market_tz("a")).date()
     if start > end or (end-start).days > 366 or end > today:
         raise ValueError("研究区间须为过去的一年以内")
     return start, end
