@@ -55,6 +55,19 @@ def get_quote(request: Request, code: str) -> dict:
     return q
 
 
+@router.get("/stock-strategy/inputs")
+def stock_strategy_inputs(request: Request, project_id: str, market: str, key: str, now: datetime) -> dict:
+    """只读完整日线信号；同一个计算器用于研究与模拟盘。"""
+    _auth(request)
+    if now.tzinfo is None:
+        raise HTTPException(400, "决策时刻必须带时区")
+    from app.services.stock_signal_io import read_inputs
+    try:
+        return read_inputs(project_id, market, key, now)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
 @router.get("/instruments")
 def get_instruments(
     request: Request,

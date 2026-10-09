@@ -421,6 +421,19 @@ def build_decision(req: dict[str, Any]) -> dict[str, Any]:
     code = req.get("code") or config.sample_code(market)
     # 市价单能力**按市场取表**（`fin_market_rule.market_order_supported`，0037）。
     mos = _market_order_supported(paper, market)
+    from app.strategy.stock_rules import family_for
+    if strategy_key.startswith("tq_daily_") or (active.get("params") or {}).get("rule_fingerprint"):
+        from app.strategy.tq_daily import build as build_tq_daily
+        result = build_tq_daily(req=req, view=view, api=HunterApiClient(), paper=paper,
+            strategy_key=strategy_key, strategy_version=strategy_version,
+            now=_parse_iso(req["now"]), market=market, mos=mos,
+            ttl=config.contract_timeout_seconds())
+        if result.get("halted"):
+            return result
+        decision = StrategyDecision.from_dict(result)
+        key = order_key(project_id, req["trade_date"], req["point"], decision.decision_id)
+        return {"decision": decision.to_dict(), "idempotency_key": key,
+                "command": decision.to_paper_command(project_id=project_id, idempotency_key=key)}
     reference_price: Optional[str] = None
     lot_size: Any = None
     available_cash: Any = None

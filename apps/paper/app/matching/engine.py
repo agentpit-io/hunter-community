@@ -258,6 +258,17 @@ def execute(cur, req: dict, *, now: Optional[datetime] = None) -> dict:
     currency = ((market_rule or {}).get("currency")
                 or ledger.MARKET_CURRENCY.get(market) or "CNY")
 
+    from app.risk.stock_occupancy import reject_reason
+    reason = reject_reason(cur, req, market)
+    if reason:
+        ledger.insert_order(cur,order_id,project_id,code,side,qty,price_type,req.get("limit_price"),
+            status="rejected",filled_qty=0,source=source,actor=actor,decline_reason=reason,
+            intent_ref=req.get("intent_ref"),decision_ref=req.get("decision_ref"),
+            valid_until=req.get("valid_until"),market=market,currency=currency)
+        receipt = _reject(order_id,reason,market=market,currency=currency)
+        _remember(cur,key,req_hash,project_id,receipt,order_id)
+        return receipt
+
     # ── ① 取快照 ─────────────────────────────────────────────────────────
     try:
         snap = take_snapshot(cur, code, now=now)
