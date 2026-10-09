@@ -730,7 +730,7 @@ function renderResearch(r, notice) {
     '<span>共同口径:<b>' + txt(cm.start) + ' → ' + txt(cm.end) + '</b> · ' + (Number.isFinite(cm.days) ? int(cm.days) : NA) + ' 个交易日</span>' +
     '<span>基准 <b>' + txt(cm.bench_label, '标普500') + ' <span class="' + dir(cm.bench_pct) + '">' + pct(cm.bench_pct, 2, true) + '</span></b></span>' +
     '<span>手续费 <b>阶梯式</b>(与历史交易记录同口径)</span>' +
-    '<span class="rs-acts"><button type="button" class="btn small primary" id="rs-new">' + (RS.form ? '收起创建' : '＋ 创建策略') + '</button></span></div>'
+    '<span class="rs-acts"><button type="button" class="btn small" data-experiment-assistant>实验助手</button><button type="button" class="btn small primary" id="rs-new">' + (RS.form ? '收起创建' : '＋ 创建策略') + '</button></span></div>'
   const cols = RS_STAGES.map(function (sg) {
     const items = byStage[sg[0]] || []
     return '<div class="rs-col" data-stage="' + sg[0] + '"><div class="rs-colhd"><b>' + sg[1] + '</b> ' +
@@ -1834,5 +1834,6 @@ boot()
 </script>
 <script src="agent-rules.js"></script>
 <script src="agent-create.js"></script>
+<script src="agent-experiments.js"></script>
 </body>
 </html>

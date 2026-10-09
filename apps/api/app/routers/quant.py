@@ -1627,6 +1627,8 @@ async def agent_research_unarchive(key: str, request: Request):
 from app.services.quant import agent_manual as _manual
 from app.routers.agent_builder import router as _builder_router
 router.include_router(_builder_router)
+from app.routers.agent_experiments import router as _experiments_router
+router.include_router(_experiments_router)
 
 
 @router.get("/agent/rules/{branch}")

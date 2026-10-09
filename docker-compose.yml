@@ -235,6 +235,8 @@ services:
       # 这是本地 compose 下两个容器共享同一把密钥的唯一途径(云平台靠模板注入
       # 环境变量)。生成逻辑由 M1 子任务 C 实现。
       - hunter_secrets:/opt/hunter-secrets
+      # 个人实验的实际行情输入快照，容器重建后仍可追溯。
+      - hunter_experiments:/var/lib/hunter/experiments
     ports:
       - "${API_HOST_PORT:-8100}:8000"
 
@@ -556,6 +558,7 @@ services:
       - "${OPENCODE_HOST_PORT:-3921}:3901"
 
 volumes:
+  hunter_experiments:
   hunter_pg_data:
   hunter_redis_data:
   # opencode 会话正文(见 opencode 服务里那段注释)· 2026-09-07 补
