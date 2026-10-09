@@ -344,8 +344,10 @@ def get_store(market_key: str, perf: dict) -> dict:
     t0 = time.time()
     store = _load_store(market_key, perf)
     log.info("[screen_asof] %s 日线整窗载入 %d 只 · %.1fs", market_key, len(store["codes"]), time.time() - t0)
-    with _cache_lock:
-        _cache[market_key] = (now, store)
+    # 首次部署空库不能缓存20分钟，否则补数后“立即跑一次”仍看不到日线。
+    if store.get("last"):
+        with _cache_lock:
+            _cache[market_key] = (now, store)
     return store
 
 
