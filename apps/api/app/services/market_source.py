@@ -85,7 +85,7 @@ def _hk_symbol(code: str) -> str:
 
 
 def _us_symbol(code: str) -> str:
-    return code.split(".")[0].strip().upper()
+    return str(code).strip().upper().removesuffix(".US")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -230,9 +230,11 @@ def us_daily(code: str, limit: int = 800) -> list[dict]:
         df = ak.stock_us_daily(symbol=sym)
     except Exception as e:                                    # noqa: BLE001
         log.warning("[market_source] 美股日线失败 {} · {}", code, e)
-        return []
+        from app.services.us_daily_fallback import daily
+        return daily(code, limit)
     if df is None or len(df) == 0:
-        return []
+        from app.services.us_daily_fallback import daily
+        return daily(code, limit)
     if limit:
         df = df.tail(limit)
     out = []
@@ -246,7 +248,9 @@ def us_daily(code: str, limit: int = 800) -> list[dict]:
                         "volume": int(float(r.get("volume") or 0))})
         except (ValueError, TypeError):
             continue
-    return out
+    from app.services.us_daily_fallback import valid_bar, daily as fallback
+    valid = [row for row in out if valid_bar(row)]
+    return valid or fallback(code, limit)
 
 
 def daily(code: str, limit: int = 800) -> list[dict]:
