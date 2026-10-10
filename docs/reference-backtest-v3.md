@@ -48,3 +48,10 @@
 复现入口：api/scripts/backtest_reference_year.py，参数--prices（daily_snapshot/report/fees/lots）、--reference（normalized-reference.jsonl.gz）、--supplement、--output。轻量图导出使用export_reference_backtest.py，不允许为无结果账户补现金线。数据源收集脚本supplement_cn_annual.py与supplement_reference_for_backtest.py，解析依赖requests及pymupdf，仅装隔离环境。
 
 源代码镜像到hunter-community；竞技场图表仅在SaaS。生产交易服务没有切换到v3，后续启用需要单独登记、版本指纹与风控验证。
+
+
+## 曲线上线验收
+
+2026-10-10：SaaS提交575e3b4，开源镜像ef0c6c0，完整结果归档3ac028f5。隔离next build编译、类型检查成功；112个详情逐页HTTP、SVG、收益/回撤数字检查112/112通过。发布后五个选手中英文10个公网页面全部通过，大厅HTTP200。只重启hermes-web，API/fin-worker/fin-paper PID2545107/2542041/2542016不变。旧构建web/.next.before-referencev3-20261010可回滚。日志尾部存在此前Server Action x错误，本次GET验收未触发。未进行截图及移动端视觉验收。
+
+研究回测曲线已在选手详情页替换原42个数据等待曲线。生产交易仍为原运行版本，v3未激活。开源服务器因已记录的SSH主机密钥不匹配未部署，本次只镜像GitHub代码。
