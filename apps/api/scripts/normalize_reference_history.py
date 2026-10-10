@@ -60,7 +60,7 @@ for path in sorted((work/'batch').glob('*.json.gz')):
             rows = data
         for row in rows:
             normalized = r.dividend(market,code,row)
-            normalized['split_adjusted'] = data.get('splitAdjusted',False) if kind.startswith('dividend_supplement') else None
+            normalized['split_adjusted'] = data.get('splitAdjusted') if kind.startswith('dividend_supplement') else None
             put('dividend',market,code,normalized,source,path.name)
     elif kind == 'filings':
         if market == 'HK':
