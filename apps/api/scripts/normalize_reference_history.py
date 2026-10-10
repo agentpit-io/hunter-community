@@ -115,4 +115,3 @@ for market in universe:
 (out/'summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2),encoding='utf-8')
 print(json.dumps(summary,indent=2))
 print('total normalized records',len(records))
-

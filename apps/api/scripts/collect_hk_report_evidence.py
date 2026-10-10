@@ -75,8 +75,8 @@ def main():
                             break
                 response.raise_for_status()
                 raw = response.content
-                if not raw.startswith(b'%PDF') or len(raw)>30_000_000:
-                    raise ValueError('Not a supported PDF or report exceeds 30 MB')
+                if not raw.startswith(b'%PDF') or len(raw)>50_000_000:
+                    raise ValueError('Not a supported PDF or report exceeds 50 MB')
                 temporary = path.with_suffix('.pdf.part')
                 temporary.write_bytes(raw)
                 temporary.replace(path)
