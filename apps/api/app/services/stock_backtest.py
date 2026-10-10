@@ -52,9 +52,9 @@ def equal_weight_baseline(histories,*,capital,lot_sizes,fee_model,start,slippage
 
 
 def run(family,histories,*,capital,lot_sizes,fee_model,param,start=None,slippage=.001,stress=1,
-        market="CN_A",research_minimum=None):
+        market="CN_A",research_minimum=None,reference_engine=None):
     """t完整收盘信号→t+1实际日线开盘。模拟不填缺失价格，不强行补足订单下限。"""
-    spec=rules.SPECS[family]
+    spec=(reference_engine.SPECS if reference_engine else rules.SPECS)[family]
     if 'blocked' in spec:
         return dict(status='data_pending',reason=spec['blocked'],trades=[],metrics=None)
     prepared={}
@@ -116,7 +116,8 @@ def run(family,histories,*,capital,lot_sizes,fee_model,param,start=None,slippage
             else:
                 continue
             trades.append(dict(code=code,side=side,qty=qty,price=px,fee=charge,
-                               signal_date=signal['signal_date'],fill_date=day,reason=signal['reason']))
+                               signal_date=signal['signal_date'],fill_date=day,reason=signal['reason'],
+                               reference_evidence=signal.get('reference_evidence')))
         pending=[]
         values={}
         signals={}
@@ -127,7 +128,8 @@ def run(family,histories,*,capital,lot_sizes,fee_model,param,start=None,slippage
             values[code]=float(bars[i]['close'])
             if i<130:
                 continue
-            signal=rules.evaluate(family,bars[:i+1],positions.get(code),ind=x)
+            signal=(reference_engine.evaluate(family,bars[:i+1],positions.get(code),ind=x,code=code)
+                    if reference_engine else rules.evaluate(family,bars[:i+1],positions.get(code),ind=x))
             signals[code]=signal
         # 无当天估值的持仓使这一轮不能交易；净值明确缺失。
         if any(code not in values for code in positions):
@@ -205,4 +207,5 @@ def run(family,histories,*,capital,lot_sizes,fee_model,param,start=None,slippage
                 assumptions=dict(slippage=slippage,fee_stress=stress,fee_version=fee_model['version'],
                     universe='current_sector_snapshot',fills='next_open_daily_approximation',
                     corporate_actions='not_independently_reconciled',occupancy='isolated_account',
-                    intraday_protective_exit='not_modelled',fingerprint=rules.FINGERPRINT))
+                    intraday_protective_exit='not_modelled',fingerprint=rules.FINGERPRINT,
+                    reference_fingerprint=reference_engine.fingerprint if reference_engine else None))

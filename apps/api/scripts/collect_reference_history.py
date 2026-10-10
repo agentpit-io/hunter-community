@@ -55,9 +55,9 @@ def sec_submissions(cik, start, end):
             'supplementalFiles': files, 'records': list(records.values())}
 
 
-def hk_submissions(code, start, end):
+def hk_submissions(code, start, end, language='zh'):
     response = requests.get('https://www1.hkexnews.hk/search/prefix.do',
-        params={'callback':'cb','lang':'ZH','type':'A','name':code,'market':'SEHK'},
+        params={'callback':'cb','lang':language.upper(),'type':'A','name':code,'market':'SEHK'},
         headers=NASDAQ_HEADERS, timeout=(8,25))
     response.raise_for_status()
     text = response.text
@@ -69,7 +69,7 @@ def hk_submissions(code, start, end):
               'stockId':match[0]['stockId'],'documentType':'-1',
               'fromDate':start.replace('-',''),'toDate':end.replace('-',''),
               'title':'','searchType':'1','t1code':'-2','t2Gcode':'-2','t2code':'-2',
-              'rowRange':'200','lang':'zh'}
+              'rowRange':'200','lang':language}
     data = get_json('https://www1.hkexnews.hk/search/titleSearchServlet.do',
                     params=params,headers=NASDAQ_HEADERS)
     if str(data.get('hasNextRow','false')).lower() == 'true':
