@@ -270,14 +270,26 @@ def check_chat(base_url: str, api_key: str, model: str, known_models: list) -> d
 
     try:
         d = r.json()
-        msg0 = (d.get("choices") or [{}])[0].get("message") or {}
+        choice0 = (d.get("choices") or [{}])[0] or {}
+        msg0 = choice0.get("message") or {}
         text = (msg0.get("content") or "").strip()
+        finish_reason = str(choice0.get("finish_reason") or "").strip()
     except Exception:  # noqa: BLE001
         return {"name": "对话", "ok": False, "elapsed_ms": ms, "code": "bad_payload",
                 "message": f"上游返回的不是 OpenAI 兼容格式：{(r.text or '')[:200]}",
                 "reply": "", "warn": ""}
 
     if not text:
+        if finish_reason == "length":
+            # 正文为空是因为生成被 max_tokens 截断：推理模型的 reasoning token
+            # 也计入这个预算，先把它花光就写不到正文了。责任在探针自己的预算，
+            # 不是配置坏 —— 正式对话不设 max_tokens，不受影响，按通过处理。
+            return {"name": "对话", "ok": True, "elapsed_ms": ms, "code": "",
+                    "message": "上游被 max_tokens 截断（finish_reason=length），"
+                               "本次没拿到正文 —— 按通过处理。",
+                    "reply": "",
+                    "warn": "生成预算被思考过程用光了（推理型模型常见）。"
+                            "正式对话不设 max_tokens，通常不受影响。"}
         return {"name": "对话", "ok": False, "elapsed_ms": ms, "code": "empty",
                 "message": "上游返回了 200，但回复内容是空的。"
                            "常见原因是这个模型把内容放在了 reasoning 字段里，"

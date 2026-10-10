@@ -82,6 +82,15 @@ class Fake:
                         f"该令牌无权使用模型：{body.get('model')}"}})
                 if mode == "empty":
                     return self._send(200, {"choices": [{"message": {"content": ""}}]})
+                if mode == "empty_length":
+                    # 正文被 max_tokens 截断（推理模型的 reasoning 先吃光预算）
+                    return self._send(200, {"choices": [{"finish_reason": "length", "message": {
+                        "content": "",
+                        "reasoning_content": "The user is asking me to reply with only two characters..."}}]})
+                if mode == "empty_reasoning":
+                    # 模型正常结束，但只把内容写在 reasoning 字段里，正文为空
+                    return self._send(200, {"choices": [{"finish_reason": "stop", "message": {
+                        "content": "", "reasoning_content": "让我想想……"}}]})
                 if mode == "no_balance":
                     return self._send(402, {"error": {"message": "Insufficient Balance"}})
                 if mode == "rate":
@@ -207,6 +216,21 @@ def test_chat_real_bad_key_still_bad_key(fake):
 
 def test_chat_empty_reply(fake):
     r = P.check_chat(fake({"chat": "empty"}).base, "sk-1", "m-1", [])
+    assert not r["ok"] and r["code"] == "empty"
+
+
+def test_chat_truncated_by_max_tokens_passes(fake):
+    """正文为空但 finish_reason=length = 被探针自己的预算截断（推理模型的
+    reasoning token 也计入 max_tokens），责任在探针，不能据此判配置坏。"""
+    r = P.check_chat(fake({"chat": "empty_length"}).base, "sk-1", "m-1", [])
+    assert r["ok"], r
+    assert r["warn"]
+
+
+def test_chat_empty_reply_without_truncation_still_fails(fake):
+    """模型正常结束（stop）却没有正文 = 上游没产出内容（比如只写在 reasoning
+    字段里），必须判失败 —— opencode 读的是 content，这种配置就是空回复。"""
+    r = P.check_chat(fake({"chat": "empty_reasoning"}).base, "sk-1", "m-1", [])
     assert not r["ok"] and r["code"] == "empty"
 
 
