@@ -51,7 +51,8 @@ def equal_weight_baseline(histories,*,capital,lot_sizes,fee_model,start,slippage
                 note='同当前候选池整单位等权买入持有，末日按收盘估值未强平')
 
 
-def run(family,histories,*,capital,lot_sizes,fee_model,param,start=None,slippage=.001,stress=1):
+def run(family,histories,*,capital,lot_sizes,fee_model,param,start=None,slippage=.001,stress=1,
+        market="CN_A",research_minimum=None):
     """t完整收盘信号→t+1实际日线开盘。模拟不填缺失价格，不强行补足订单下限。"""
     spec=rules.SPECS[family]
     if 'blocked' in spec:
@@ -90,6 +91,21 @@ def run(family,histories,*,capital,lot_sizes,fee_model,param,start=None,slippage
             if side=='buy':
                 if cash<px*qty+charge or code in positions:
                     blocked['budget_or_duplicate']+=1
+                    continue
+                if px*qty<rules.effective_minimum(market,research_minimum=research_minimum):
+                    blocked['opening_min_order']+=1
+                    continue
+                opening_equity=cash
+                missing=False
+                for held,p in positions.items():
+                    hb,_,hi=prepared[held]
+                    if day not in hi:
+                        missing=True
+                        break
+                    opening_equity+=p['qty']*float(hb[hi[day]]['open'])
+                cap=min(.25,float(param['max_position_pct']))
+                if missing or px*qty>cap*(opening_equity-charge):
+                    blocked['opening_position_cap']+=1
                     continue
                 cash-=px*qty+charge
                 positions[code]=dict(qty=qty,avg_cost=px,opened_at=day)
@@ -169,7 +185,8 @@ def run(family,histories,*,capital,lot_sizes,fee_model,param,start=None,slippage
                 entry_spec={**spec,'weight':min(spec['weight'],spec['exposure']/s['volatility']/inv)}
             qty=rules.size_order(entry_spec,equity=equity,available=cash,exposure=exposure,
                                 symbol_value=0,price=values[code],distance=s['stop_distance'],
-                                lot=lot_sizes.get(code),param=param)
+                                lot=lot_sizes.get(code),param=param,market=market,
+                                research_minimum=research_minimum)
             if qty>0:
                 pending=[(code,'buy',qty,s)]
                 break

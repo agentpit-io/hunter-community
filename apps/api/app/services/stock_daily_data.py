@@ -72,7 +72,7 @@ def refresh_if_active(market):
         with conn.cursor() as cur:
             cur.execute("SELECT EXISTS(SELECT 1 FROM fin_horse h JOIN fin_param p ON p.project_id=h.project_id "
                         "WHERE h.market=%s AND EXISTS(SELECT 1 FROM jsonb_array_elements(p.strategies) s "
-                        "WHERE s->>'active'='true' AND s->>'key' LIKE 'tq_daily_v1_%%'))",(market,))
+                        "WHERE s->>'active'='true' AND s->>'key' LIKE 'tq_daily_v%%'))",(market,))
             enabled=cur.fetchone()[0]
     finally:
         conn.close()

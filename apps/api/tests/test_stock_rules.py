@@ -69,9 +69,23 @@ class RulesTest(unittest.TestCase):
                     distance=10,lot=1,param=dict(max_position_pct=.25,min_order_amount=0))
         self.assertEqual(r.size_order(spec,**kwargs),75)
         kwargs['param']['min_order_amount']=20000
-        self.assertEqual(r.size_order(spec,**kwargs),0)
+        self.assertEqual(r.size_order(spec,**kwargs),75)
+        self.assertEqual(r.size_order(spec,**kwargs,research_minimum=20000),0)
         kwargs['lot']=None
         self.assertEqual(r.size_order(spec,**kwargs),0)
+
+    def test_market_minimum_and_hard_cap(self):
+        k=dict(equity=15000,available=15000,exposure=0,symbol_value=0,price=100,
+               distance=1,lot=1,param=dict(max_position_pct=.8,min_order_amount=20000))
+        spec={**r.SPECS['trend_follow'],'weight':.8}
+        self.assertEqual(r.size_order(spec,**k,market='US'),37)
+        self.assertEqual(r.size_order(spec,**k,market='HK'),37)
+        self.assertEqual(r.size_order(spec,**k,market='CN_A'),0)
+        k.update(equity=100000,available=100000,lot=100,distance=5)
+        self.assertEqual(r.size_order(r.SPECS['mean_revert'],**k,market='CN_A'),100)
+        k['distance']=100
+        self.assertEqual(r.size_order(spec,**k,market='CN_A'),0)
+        with self.assertRaises(ValueError):r.size_order(spec,**k,market='MULTI')
 
     def test_fee_and_next_open(self):
         model=dict(version='test',commission_pct=.00025,commission_min=5,

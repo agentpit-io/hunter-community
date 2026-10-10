@@ -121,7 +121,7 @@ def build(*, req, view, api, paper, strategy_key, strategy_version, now, market,
                 entry_spec = {**spec,"weight":min(spec["weight"],spec["exposure"]/row["volatility"]/total)}
             qty = size_order(entry_spec,equity=equity,available=cash["available"],exposure=exposure,
                              symbol_value=0,price=px,distance=row.get("stop_distance"),
-                             lot=instrument.get("lot_size"),param=param)
+                             lot=instrument.get("lot_size"),param=param,market=market)
             if qty>0:
                 return _decision(req,project,strategy_key,strategy_version,now,ttl,market,
                                  code,"buy",qty,px,mos,row,data)

@@ -80,6 +80,19 @@ def get_param(cur, project_id: str) -> Optional[dict]:
     return _fetchone(cur, "SELECT * FROM fin_param WHERE project_id = %s", (project_id,))
 
 
+LIMITS_MARKETS = ('CN_A',)
+
+
+def order_limits(cur,project_id,market):
+    """按市场给订单下限；日线v2用5千元，旧策略保留账户值。"""
+    if market not in LIMITS_MARKETS:return None
+    row=_fetchone(cur,'SELECT min_order_amount,strategies FROM fin_param WHERE project_id=%s',(project_id,))
+    if row and any(s.get('active') and str(s.get('key','')).startswith('tq_daily_v2_')
+                   for s in (row.get('strategies') or [])):
+        return Decimal('5000')
+    return row['min_order_amount'] if row else None
+
+
 def liquidity_participation(cur, project_id: str) -> Optional[Decimal]:
     """该项目的**成交量参与率**（`fin_param.liquidity_max_participation`）。
 

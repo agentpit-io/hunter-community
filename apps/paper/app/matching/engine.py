@@ -367,6 +367,11 @@ def execute(cur, req: dict, *, now: Optional[datetime] = None) -> dict:
     )
     sellable_qty = max(0, effective_sellable - committed)
 
+    # 档位级两条金额约束（第 7、8 条）：单笔下限从 `fin_param` 取，**只对 A 股给值**
+    # （为什么见 `ledger.LIMITS_MARKETS` / `risk/limits.py` 的模块头）；
+    # 股价上限是它 ÷ 每手股数的**派生值**，在风控里现算，不落库。
+    min_order_amount = ledger.order_limits(cur, project_id, market)
+
     inputs = RiskInputs(
         at=snap["snapshot_time"],
         side=side,
@@ -382,8 +387,22 @@ def execute(cur, req: dict, *, now: Optional[datetime] = None) -> dict:
         market=market,
         market_rule=market_rule,
         tick=tick,
+        min_order_amount=min_order_amount,
     )
     outcome = evaluate(inputs)
+
+    if outcome.passed:
+        from app.risk.stock_budget import reject_reason as budget_reject
+        reason = budget_reject(cur,req,market,risk_price,outcome.fee.total,now)
+        if reason:
+            ledger.insert_order(cur,order_id,project_id,code,side,qty,price_type,req.get("limit_price"),
+                status="rejected",filled_qty=0,source=source,actor=actor,decline_reason=reason,
+                intent_ref=req.get("intent_ref"),decision_ref=req.get("decision_ref"),
+                valid_until=req.get("valid_until"),market=market,currency=currency)
+            receipt = _reject(order_id,reason,market=market,currency=currency)
+            receipt["failed_checks"] = ["stock_position_cap"]
+            _remember(cur,key,req_hash,project_id,receipt,order_id)
+            return receipt
 
     if not outcome.passed:
         ledger.insert_order(
@@ -688,6 +707,13 @@ def match_open_orders(cur, project_id: str, *, now: Optional[datetime] = None,
         qty = remaining if result.filled else int(result.qty)
         fill_amount = (Decimal(qty) * Decimal(str(result.price))).quantize(Decimal("0.0001"))
         fee = _recompute_fee(order["side"], fill_amount, fee_model)
+        from app.risk.stock_budget import reject_reason as budget_reject
+        reason = budget_reject(cur,dict(side=order['side'],code=order['code'],qty=qty,
+            project_id=project_id,intent_ref=order.get('intent_ref')),market,
+            Decimal(str(result.price)),fee.total,now)
+        if reason:
+            logger.info("[paper] 挂单等待仓位复核：{} {}",order['order_id'],reason)
+            continue
         currency = ((market_rule.get("currency")
                      if isinstance(market_rule, dict) else None)
                     or fee_model.get("currency")

@@ -10,7 +10,7 @@ import math
 from pathlib import Path
 from statistics import pstdev
 
-VERSION = "tq_daily_v1"
+VERSION = "tq_daily_v2"
 SPECS = {
     "trend_follow": dict(name="趋势跟随", stop=2.0, trail=3.0, days=0,
                          positions=4, weight=.20, exposure=.80, risk=.0075, cooldown=0),
@@ -30,7 +30,9 @@ SPECS = {
 PARAMETERS = dict(ema_fast=10, ema_slow=30, trend_ma=120, ma_mid=20,
                   ma_environment=60, atr=14, rsi=14, boll_std=2,
                   volume_ratio=1.5, breakout=20, exit_channel=10,
-                  rotation_lookback=60, rotation_skip=5, indicator="wilder_sma_seed_v1")
+                  rotation_lookback=60, rotation_skip=5, indicator="wilder_sma_seed_v1",
+                  hard_position_cap=.25, cn_min_order_amount=5000,
+                  foreign_min_order_amount=0)
 FINGERPRINT = hashlib.sha256(json.dumps(
     [VERSION, SPECS, PARAMETERS,Path(__file__).read_text(encoding="utf-8")],
     sort_keys=True).encode()).hexdigest()
@@ -171,7 +173,19 @@ def evaluate(family, bars, position=None, *, ind=None):
     return result
 
 
-def size_order(spec, *, equity, available, exposure, symbol_value, price, distance, lot, param):
+def effective_minimum(market, *, research_minimum=None):
+    if market not in ("CN_A", "HK", "US"):
+        raise ValueError("未知市场，不能猜订单下限")
+    floor = PARAMETERS["cn_min_order_amount"] if market == "CN_A" else 0
+    if research_minimum is not None:
+        if market != "CN_A" or not math.isfinite(float(research_minimum)) or float(research_minimum) < 0:
+            raise ValueError("研究下限只接受A股非负金额")
+        floor = float(research_minimum)
+    return floor
+
+
+def size_order(spec, *, equity, available, exposure, symbol_value, price, distance, lot, param,
+               market="CN_A", research_minimum=None):
     values = [equity, available, exposure, symbol_value, price, distance, lot]
     if any(v is None or not math.isfinite(float(v)) for v in values):
         return 0
@@ -180,13 +194,13 @@ def size_order(spec, *, equity, available, exposure, symbol_value, price, distan
         return 0
     # 缺失账户上限不猜值。费用安全垫只减少预算，实际费用仍由paper审核。
     cap = param.get("max_position_pct")
-    floor = param.get("min_order_amount")
-    if cap is None or floor is None:
+    floor = effective_minimum(market, research_minimum=research_minimum)
+    if cap is None:
         return 0
     if not math.isfinite(float(cap)) or not math.isfinite(float(floor)) or float(cap)<=0 or float(floor)<0:
         return 0
     quantity = min(equity*spec["risk"]/distance,
-                   max(0,equity*min(spec["weight"],float(cap))-symbol_value)/price,
+                   max(0,equity*min(spec["weight"],float(cap),PARAMETERS["hard_position_cap"])-symbol_value)/price,
                    max(0,equity*spec["exposure"]-exposure)/price, available*.99/price)
     qty = int(quantity/int(lot))*int(lot)
     return qty if qty*price >= float(floor) else 0

@@ -15,3 +15,5 @@ def test_occupancy_and_duplicate():
     assert reject_reason(Cursor(['p']),req,'US')
     assert reject_reason(Cursor(['a','b']),req,'US') is None
     assert reject_reason(Cursor(['a','b','c']),{**req,'side':'sell'},'US') is None
+    req['intent_ref']['strategy_key']='tq_daily_v2_trend_follow'
+    assert reject_reason(Cursor(['a','b','c']),req,'US')
