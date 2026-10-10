@@ -111,6 +111,23 @@ def supplementary_dividends(code):
             'announcementDateMissing':True,'publicRowsOnly':True}
 
 
+def yahoo_dividends(code):
+    url = f'https://query1.finance.yahoo.com/v8/finance/chart/{code}'
+    payload = get_json(url,params={'range':'5y','interval':'1d','events':'div,splits'},headers=NASDAQ_HEADERS)
+    result = (payload.get('chart',{}).get('result') or [])
+    if not result:
+        raise ValueError('No historical chart; not proof of zero dividends')
+    chart = result[0]
+    events = chart.get('events',{})
+    rows = [{'exOrEffDate':datetime.fromtimestamp(v['date'],timezone.utc).date().isoformat(),
+             'amount':v['amount'],'type':'Cash','paymentDate':None,'declarationDate':None}
+            for v in events.get('dividends',{}).values()]
+    return {'records':rows,'url':url,'rawEvents':events,'range':'5y',
+            'currency':chart.get('meta',{}).get('currency'),
+            'seriesStart':(chart.get('timestamp') or [None])[0],
+            'announcementDateMissing':True,'paymentDateMissing':True}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--universe', required=True)
@@ -119,6 +136,7 @@ def main():
     parser.add_argument('--end', default='2026-10-09')
     parser.add_argument('--workers', type=int, default=3)
     parser.add_argument('--supplement-dividends', action='store_true')
+    parser.add_argument('--fallback-dividends', action='store_true')
     args = parser.parse_args()
     universe = json.loads(Path(args.universe).read_text(encoding='utf-8'))
     output = Path(args.output)
@@ -165,6 +183,8 @@ def main():
                 if not (((previous.get('data') or {}).get('dividends') or {}).get('rows')):
                     add('US',code,'dividend_supplement','stockanalysis_public_spglobal',
                         lambda c=code:supplementary_dividends(c))
+                    if args.fallback_dividends and not (output/f'US-{code}-dividend_supplement.json.gz').exists():
+                        add('US',code,'dividend_supplement_yahoo','yahoo_chart',lambda c=code:yahoo_dividends(c))
     lock = threading.Lock()
     manifest = {}
     def run(job):

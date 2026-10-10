@@ -51,8 +51,8 @@ for path in sorted((work/'batch').glob('*.json.gz')):
         rows = r.sec_financials(code,data) if market == 'US' else r.vendor_financials(market,code,data)
         for row in rows:
             put('financial',market,code,row,source,path.name)
-    elif kind in ('dividend','dividend_supplement'):
-        if kind == 'dividend_supplement':
+    elif kind == 'dividend' or kind.startswith('dividend_supplement'):
+        if kind.startswith('dividend_supplement'):
             rows = data['records']
         elif market == 'US':
             rows = (((data.get('data') or {}).get('dividends') or {}).get('rows') or [])
@@ -60,7 +60,7 @@ for path in sorted((work/'batch').glob('*.json.gz')):
             rows = data
         for row in rows:
             normalized = r.dividend(market,code,row)
-            normalized['split_adjusted'] = data.get('splitAdjusted',False) if kind == 'dividend_supplement' else None
+            normalized['split_adjusted'] = data.get('splitAdjusted',False) if kind.startswith('dividend_supplement') else None
             put('dividend',market,code,normalized,source,path.name)
     elif kind == 'filings':
         if market == 'HK':
