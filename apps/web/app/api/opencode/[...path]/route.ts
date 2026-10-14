@@ -773,8 +773,16 @@ async function handle(req: Request, segs: string[]): Promise<Response> {
 - 找不到这个 skill 时,**如实告诉用户"没找到这个能力"**,不要假装按它做了。`
         }
 
+        const reqModelStr = body.model
+          ? `${body.model.providerID || ''}/${body.model.modelID || ''}`
+          : 'default'
+        const tMsg0 = Date.now()
+        console.info(`[llm-trace] chat_message session=${sid} model=${reqModelStr} status=start`)
         const patched = new TextEncoder().encode(JSON.stringify(body))
         const resp = await forward(req, segs, patched)
+        console.info(
+          `[llm-trace] chat_message session=${sid} model=${reqModelStr} status=${resp.status} latency_ms=${Date.now() - tMsg0}`,
+        )
         // 发过消息 = 会话活跃,刷新排序时间(失败不影响主流程)
         void hermes('PATCH', `/api/chat/sessions/${encodeURIComponent(sid)}`, token, {})
         return resp

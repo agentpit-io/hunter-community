@@ -2,7 +2,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { ChevronDown, Sparkles, Check } from 'lucide-react'
 import { HUNTER } from '../../lib/hunter-theme'
-import { listAgents, listProviders, type AgentInfo, type ProviderInfo } from '../lib/opencodeClient'
+import {
+  formatModelDisplayName,
+  listAgents,
+  listProviders,
+  type AgentInfo,
+  type ProviderInfo,
+} from '../lib/opencodeClient'
 
 // ═══ AgentPicker ═══════════════════════════════
 
@@ -185,7 +191,12 @@ export function ModelPicker({ value, onChange }: ModelPickerProps) {
 
   const currentKey = value
   const current = flat.find((m) => `${m.providerID}/${m.modelID}` === currentKey)
-  const label = current?.displayName || currentKey.split('/').pop() || '选模型'
+  const rawMid = currentKey.split('/').slice(1).join('/') || currentKey
+  const rawPid = currentKey.includes('/') ? currentKey.split('/')[0] : ''
+  const label =
+    current?.displayName ||
+    (rawMid ? formatModelDisplayName(rawPid, rawMid, rawMid) : '') ||
+    '选模型'
 
   return (
     <div ref={ref} style={{ position: 'relative' }}>
@@ -253,17 +264,23 @@ export function ModelPicker({ value, onChange }: ModelPickerProps) {
               </div>
               {Object.entries(p.models).map(([mid, m]) => {
                 const isCur = `${p.id}/${mid}` === currentKey
+                const disp = formatModelDisplayName(p.id, mid, m.name)
+                const isArgon =
+                  mid === 'hunter-chat' ||
+                  mid === 'hunter-deep' ||
+                  mid === 'gemini-4-argon' ||
+                  disp.includes('Gemini 4 Argon')
                 return (
                   <button
                     key={mid}
                     type="button"
                     onClick={() => {
-                      onChange(p.id, mid, m.name || mid)
+                      onChange(p.id, mid, disp)
                       setOpen(false)
                     }}
                     style={{
                       width: '100%',
-                      padding: '6px 12px',
+                      padding: '8px 12px',
                       background: isCur ? '#f8f6ef' : 'transparent',
                       border: 'none',
                       borderRadius: 6,
@@ -273,7 +290,7 @@ export function ModelPicker({ value, onChange }: ModelPickerProps) {
                       fontSize: 13,
                       color: HUNTER.INK,
                       display: 'flex',
-                      alignItems: 'center',
+                      alignItems: 'flex-start',
                       gap: 6,
                     }}
                     onMouseEnter={(e) => {
@@ -283,13 +300,42 @@ export function ModelPicker({ value, onChange }: ModelPickerProps) {
                       if (!isCur) e.currentTarget.style.background = 'transparent'
                     }}
                   >
-                    <span style={{ flex: 1 }}>{m.name || mid}</span>
-                    {isCur && <Check size={12} style={{ color: HUNTER.THEME }} />}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600 }}>{disp}</div>
+                      {isArgon && (
+                        <div style={{ fontSize: 11, color: HUNTER.INK_F, marginTop: 2 }}>
+                          底层模型：Google Gemini 4 Argon（谷歌 4.0 旗舰推理 · 100 万上下文）
+                        </div>
+                      )}
+                    </div>
+                    {isCur && <Check size={12} style={{ color: HUNTER.THEME, marginTop: 2 }} />}
                   </button>
                 )
               })}
             </div>
           ))}
+          <div
+            style={{
+              borderTop: `1px solid ${HUNTER.LINE}`,
+              marginTop: 4,
+              paddingTop: 4,
+            }}
+          >
+            <a
+              href="/settings?tab=llm"
+              style={{
+                display: 'block',
+                padding: '6px 10px',
+                fontSize: 11.5,
+                color: HUNTER.THEME,
+                textDecoration: 'none',
+                borderRadius: 6,
+                fontWeight: 500,
+              }}
+            >
+              📋 查看/下载大模型调用日志 →
+            </a>
+          </div>
         </div>
       )}
     </div>

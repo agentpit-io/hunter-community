@@ -13,11 +13,13 @@ import logging
 import time
 from datetime import date, timedelta
 
+from app.services import market_time
 from app.services.database import get_conn
 from app.services.quant import factor_engine
 from app.services.quant import universe as _uv
 
 log = logging.getLogger(__name__)
+_SHANGHAI_TZ = market_time.tz_name("CN_A")
 
 
 def _get_hs300_codes() -> list[str]:
@@ -292,12 +294,12 @@ def register_local(scheduler):
     from apscheduler.triggers.cron import CronTrigger
     scheduler.add_job(
         daily_local_pipeline,
-        CronTrigger(timezone="Asia/Shanghai", hour=17, minute=10),
+        CronTrigger(timezone=_SHANGHAI_TZ, hour=17, minute=10),
         id="quant_local_daily", replace_existing=True,
     )
     scheduler.add_job(
         weekly_akshare_factors,
-        CronTrigger(timezone="Asia/Shanghai", day_of_week="sat", hour=2, minute=0),
+        CronTrigger(timezone=_SHANGHAI_TZ, day_of_week="sat", hour=2, minute=0),
         id="quant_akshare_weekly", replace_existing=True,
     )
     # 美股(2026-09-11):只更新用户在数据页下过的美股,一只没下过就什么都不做。
@@ -307,7 +309,7 @@ def register_local(scheduler):
     from app.services.quant import us_kline
     scheduler.add_job(
         us_kline.nightly_refresh,
-        CronTrigger(timezone="Asia/Shanghai", day_of_week="tue-sat", hour=8, minute=0),
+        CronTrigger(timezone=_SHANGHAI_TZ, day_of_week="tue-sat", hour=8, minute=0),
         id="quant_us_nightly", replace_existing=True,
     )
 
@@ -385,10 +387,11 @@ def daily_index_kline() -> dict:
 
 def register(scheduler):
     """外部传入已有 AsyncIOScheduler · 我只加 job(不 start · 由 caller 决定)"""
+    import os
     from apscheduler.triggers.cron import CronTrigger
     scheduler.add_job(
         lambda: asyncio.create_task(asyncio.to_thread(daily_recompute)),
-        CronTrigger(timezone="Asia/Shanghai", hour=17, minute=0),   # 17:00 CST · 收盘后 30 分钟
+        CronTrigger(timezone=_SHANGHAI_TZ, hour=17, minute=0),   # 17:00 CST · 收盘后 30 分钟
         id="quant_daily_recompute",
         replace_existing=True,
     )
@@ -397,36 +400,50 @@ def register(scheduler):
     # 不依赖我们自己的任何计算,没必要排在后面。
     scheduler.add_job(
         lambda: asyncio.create_task(asyncio.to_thread(daily_index_kline)),
-        CronTrigger(timezone="Asia/Shanghai", hour=16, minute=30),
+        CronTrigger(timezone=_SHANGHAI_TZ, hour=16, minute=30),
         id="quant_daily_index_kline",
         replace_existing=True,
     )
     # D-2 · IC 30 分钟后跑(等 factor_value 写完)
     scheduler.add_job(
         lambda: asyncio.create_task(asyncio.to_thread(daily_ic_recompute)),
-        CronTrigger(timezone="Asia/Shanghai", hour=17, minute=30),
+        CronTrigger(timezone=_SHANGHAI_TZ, hour=17, minute=30),
         id="quant_daily_ic",
         replace_existing=True,
     )
     # E-4 · 每月 1 号 09:00 · 指数成分 reconcile
     scheduler.add_job(
         lambda: asyncio.create_task(asyncio.to_thread(monthly_index_refresh)),
-        CronTrigger(timezone="Asia/Shanghai", day=1, hour=9, minute=0),
+        CronTrigger(timezone=_SHANGHAI_TZ, day=1, hour=9, minute=0),
         id="quant_monthly_index_refresh",
         replace_existing=True,
     )
     # E-2 · 每周一 08:00 · 数据质量周报
     scheduler.add_job(
         lambda: asyncio.create_task(asyncio.to_thread(weekly_report_job)),
-        CronTrigger(timezone="Asia/Shanghai", day_of_week="mon", hour=8, minute=0),
+        CronTrigger(timezone=_SHANGHAI_TZ, day_of_week="mon", hour=8, minute=0),
         id="quant_weekly_report",
         replace_existing=True,
     )
     # E-1 · 每日 18:00 · sanity check
     scheduler.add_job(
         lambda: asyncio.create_task(asyncio.to_thread(daily_sanity_check)),
-        CronTrigger(timezone="Asia/Shanghai", hour=18, minute=0),
+        CronTrigger(timezone=_SHANGHAI_TZ, hour=18, minute=0),
         id="quant_daily_sanity",
         replace_existing=True,
     )
+    if (os.getenv("QUANT_RS_HISTORY_DISABLED") or "").strip().lower() not in ("1", "true", "yes"):
+        from app.services.quant import rs_history
+        scheduler.add_job(
+            lambda: asyncio.create_task(asyncio.to_thread(rs_history.run, ["a", "hk"])),
+            CronTrigger(timezone=_SHANGHAI_TZ, hour=17, minute=45),
+            id="quant_rs_history_ahk",
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            lambda: asyncio.create_task(asyncio.to_thread(rs_history.run, ["us"])),
+            CronTrigger(timezone=_SHANGHAI_TZ, hour=6, minute=30),
+            id="quant_rs_history_us",
+            replace_existing=True,
+        )
     log.info("[quant.scheduler] APScheduler 已注册:17:00 factor + 17:30 IC + 18:00 sanity + 每月 1 号 09:00 指数 + 每周一 08:00 周报")

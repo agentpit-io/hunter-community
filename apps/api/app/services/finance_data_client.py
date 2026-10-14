@@ -635,6 +635,8 @@ def _free_daily(code: str, limit: int = 120) -> list[dict]:
     """
     try:
         from app.services import market_source
+        if market_source.market_of(code) not in ("us", "hk") or str(code).upper().endswith(".OF"):
+            return []
         return market_source.daily(code, limit=limit or 800)
     except Exception as e:                                     # noqa: BLE001
         logger.warning("[finance_data_client] 免费日线通道失败 {}: {}", code, e)

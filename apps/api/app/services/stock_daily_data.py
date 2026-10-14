@@ -3,10 +3,10 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import psycopg2.extras
 from app.services.fin import store
-from app.services import stock_rules as rules
+from app.services import market_time, stock_rules as rules
 
 MARKETS={'CN_A':'a','HK':'hk','US':'us'}
-ZONES={'CN_A':'Asia/Shanghai','HK':'Asia/Hong_Kong','US':'America/New_York'}
+ZONES=market_time.MARKET_TZ
 
 
 def instruments():

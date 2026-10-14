@@ -280,6 +280,21 @@ class ChatOrchestrator:
         _tel.message_end(self.user_id, self.session_id, message_id,
                           model_router(), self._tokens_in, self._tokens_out,
                           cost, total_ms, len(tool_calls))
+        try:
+            from app.services import llm_trace
+            cfg = runtime_config.llm()
+            llm_trace.record_call(
+                caller="agent.orchestrator",
+                base_url=cfg.base_url,
+                req_model=model_router(),
+                resp_model=getattr(self, "_last_resp_model", "") or model_router(),
+                status=200,
+                latency_ms=total_ms,
+                tokens_in=self._tokens_in,
+                tokens_out=self._tokens_out,
+            )
+        except Exception:  # noqa: BLE001
+            pass
         yield self._emit("message_end", {
             "finish_reason": "stop",
             "usage": {
@@ -339,6 +354,7 @@ class ChatOrchestrator:
                 temperature=0.2, max_tokens=4096,
             )
         resp = await asyncio.to_thread(_do)
+        self._last_resp_model = getattr(resp, "model", None) or model_router()
 
         usage = resp.usage
         if usage:

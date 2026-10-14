@@ -63,6 +63,11 @@ PROVIDER_ID = "hunter-llm"
 # **不要改成一个真模型名** —— 那会让「没配置」看起来像「配错了」。
 PLACEHOLDER_MODEL = "hunter-unconfigured"
 
+BUILTIN_MODEL_LABELS = {
+    "hunter-chat": "Hunter-Gemini 4 Argon（谷歌 4.0）",
+    "hunter-deep": "Hunter-Gemini 4 Argon（谷歌 4.0 · 深度推理）",
+}
+
 SHIM_URL = os.environ.get("LLM_SHIM_URL", "http://llm-shim:3999/v1").rstrip("/")
 API_URL = (os.environ.get("HERMES_API_URL") or "http://api:8000").rstrip("/")
 
@@ -256,24 +261,38 @@ def _model_label(cfg: dict) -> str:
     """问网关要这个模型的展示名(内置额度下别名背后的真实模型),拿不到就用模型名。
 
     与 api 侧 opencode_admin.model_label() **必须同口径** —— 不然重启一次容器,
-    选择器里的名字就换了一副样子。超时 3 秒、失败即回退,标签不值得卡住启动。
+    选择器里的名字就换了一副样子。超时 8 秒、最多 2 次尝试、内置网关带谷歌 4.0 兜底。
     """
     model = cfg.get("model") or ""
     base = (cfg.get("base_url") or "").rstrip("/")
     if not base or not model or model == PLACEHOLDER_MODEL:
         return model
-    req = urllib.request.Request(f"{base}/models", method="GET")
-    if cfg.get("api_key"):
-        req.add_header("Authorization", f"Bearer {cfg['api_key']}")
-    try:
-        with urllib.request.urlopen(req, timeout=3.0) as r:
-            data = json.loads(r.read().decode("utf-8") or "{}")
-        for m in data.get("data") or []:
-            if m.get("id") == model:
-                return (m.get("display_name") or "").strip() or model
-    except Exception as e:  # noqa: BLE001
-        _log(f"取模型展示名失败(不影响功能): {type(e).__name__}")
-    return model
+    is_builtin_base = base.endswith("/api/saas/llm/v1")
+    for attempt in (1, 2):
+        req = urllib.request.Request(f"{base}/models", method="GET")
+        if cfg.get("api_key"):
+            req.add_header("Authorization", f"Bearer {cfg['api_key']}")
+        try:
+            with urllib.request.urlopen(req, timeout=8.0) as r:
+                data = json.loads(r.read().decode("utf-8") or "{}")
+            for m in data.get("data") or []:
+                if m.get("id") == model:
+                    disp = (m.get("display_name") or "").strip()
+                    if model in BUILTIN_MODEL_LABELS and (
+                        not disp or ("Gemini 4 Argon" in disp and "谷歌 4.0" not in disp)
+                    ):
+                        disp = BUILTIN_MODEL_LABELS[model]
+                    label = disp or model
+                    _log(f"model_label={label}")
+                    return label
+            break
+        except Exception as e:  # noqa: BLE001
+            _log(f"第 {attempt} 次取模型展示名失败(不影响功能): {type(e).__name__}")
+            if attempt == 1:
+                time.sleep(0.5)
+    fallback = BUILTIN_MODEL_LABELS[model] if (is_builtin_base and model in BUILTIN_MODEL_LABELS) else model
+    _log(f"model_label={fallback}(回退)")
+    return fallback
 
 
 def provider_block(cfg: dict, source: str) -> dict:

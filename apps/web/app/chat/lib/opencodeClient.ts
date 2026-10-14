@@ -194,6 +194,43 @@ const MANAGED_PROVIDER = 'hunter-llm'
 const providerOf = (key: string) => key.split('/')[0]
 const modelOf = (key: string) => key.split('/').slice(1).join('/')
 
+export function formatModelDisplayName(
+  providerId: string,
+  modelId: string,
+  rawName?: string,
+): string {
+  const name = (rawName || '').trim()
+  if (modelId === 'hunter-chat') {
+    if (
+      !name ||
+      name === 'hunter-chat' ||
+      name.includes('3.8') ||
+      name === 'Hunter-Gemini 4 Argon'
+    ) {
+      return 'Hunter-Gemini 4 Argon（谷歌 4.0）'
+    }
+    return name
+  }
+  if (modelId === 'hunter-deep') {
+    if (
+      !name ||
+      name === 'hunter-deep' ||
+      name.includes('3.8') ||
+      !name.includes('谷歌 4.0')
+    ) {
+      return 'Hunter-Gemini 4 Argon（谷歌 4.0 · 深度推理）'
+    }
+    return name
+  }
+  if (modelId === 'gemini-4-argon') {
+    if (!name || name === 'gemini-4-argon') {
+      return 'Gemini 4 Argon（谷歌 4.0）'
+    }
+    return name
+  }
+  return name || modelId
+}
+
 /**
  * opencode 自己声明的默认模型 · 形如 {"hunter-llm": "gemini-3-flash-preview"}。
  *
@@ -317,7 +354,15 @@ export async function listProviders(): Promise<ProviderInfo[]> {
           // models 里(M1 遗留问题 #3 的同一个根因),用户点中它只会得到
           // 一句「大模型尚未配置」。容器重启后 gen-config 整份重写才会真正清掉。
           models: Object.fromEntries(
-            Object.entries(p.models || {}).filter(([mid]) => mid !== PLACEHOLDER_MODEL),
+            Object.entries(p.models || {})
+              .filter(([mid]) => mid !== PLACEHOLDER_MODEL)
+              .map(([mid, m]: [string, any]) => [
+                mid,
+                {
+                  ...(m || {}),
+                  name: formatModelDisplayName(p.id, mid, m?.name),
+                },
+              ]),
           ),
         }))
       // 托管 provider 只留当前选定的那个(换模型后的 mergeDeep 残留不进选择器)。

@@ -272,6 +272,22 @@ def check_chat(base_url: str, api_key: str, model: str, known_models: list) -> d
         d = r.json()
         msg0 = (d.get("choices") or [{}])[0].get("message") or {}
         text = (msg0.get("content") or "").strip()
+        resp_model = str(d.get("model") or model)
+        usage = d.get("usage") or {}
+        try:
+            from app.services import llm_trace
+            llm_trace.record_call(
+                caller="setup.probe_chat",
+                base_url=base_url,
+                req_model=model,
+                resp_model=resp_model,
+                status=r.status_code,
+                latency_ms=ms,
+                tokens_in=int(usage.get("prompt_tokens") or 0),
+                tokens_out=int(usage.get("completion_tokens") or 0),
+            )
+        except Exception:  # noqa: BLE001
+            pass
     except Exception:  # noqa: BLE001
         return {"name": "对话", "ok": False, "elapsed_ms": ms, "code": "bad_payload",
                 "message": f"上游返回的不是 OpenAI 兼容格式：{(r.text or '')[:200]}",
@@ -324,7 +340,26 @@ def _tool_request(base_url: str, api_key: str, model: str, tools: list) -> tuple
         r = httpx.post(url, headers=_headers(api_key), json=body, timeout=TOOL_TIMEOUT)
     except Exception as e:  # noqa: BLE001
         return None, e, int((time.monotonic() - t0) * 1000)
-    return r, None, int((time.monotonic() - t0) * 1000)
+    ms = int((time.monotonic() - t0) * 1000)
+    try:
+        d = r.json() if r.content else {}
+        resp_model = str(d.get("model") or model) if isinstance(d, dict) else model
+        usage = (d.get("usage") or {}) if isinstance(d, dict) else {}
+        from app.services import llm_trace
+        llm_trace.record_call(
+            caller="setup.probe_tools",
+            base_url=base_url,
+            req_model=model,
+            resp_model=resp_model,
+            status=r.status_code,
+            latency_ms=ms,
+            tokens_in=int(usage.get("prompt_tokens") or 0),
+            tokens_out=int(usage.get("completion_tokens") or 0),
+            error=_err_text(r) if r.status_code >= 400 else "",
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    return r, None, ms
 
 
 def check_tools(base_url: str, api_key: str, model: str) -> dict:

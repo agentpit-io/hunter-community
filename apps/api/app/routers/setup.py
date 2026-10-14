@@ -28,6 +28,8 @@ M1 已经实现（`routers/internal_runtime.py` / `routers/internal_skills.py`�
 """
 from __future__ import annotations
 
+import base64
+from datetime import datetime
 import json
 import os
 import time
@@ -35,10 +37,20 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import Response
+import httpx
 from loguru import logger
 from pydantic import BaseModel
 
-from app.services import llm_probe, opencode_admin, runtime_config, setup_guard, setup_probe
+from app.services import (
+    llm_probe,
+    llm_trace,
+    market_time,
+    opencode_admin,
+    runtime_config,
+    setup_guard,
+    setup_probe,
+)
 from app.utils.crypto import mask
 
 router = APIRouter(prefix="/setup", tags=["setup-wizard"])
@@ -162,6 +174,7 @@ async def status(request: Request):
             "source": cfg.source,                 # env / db / none
             "base_url": cfg.base_url,
             "model": cfg.model,
+            "display_name": opencode_admin.BUILTIN_MODEL_LABELS.get(cfg.model, cfg.model),
             "sanitize": cfg.sanitize,
             "api_key_masked": mask(cfg.api_key) if cfg.api_key else "",
             "env_locked": runtime_config.env_locked(),
@@ -572,3 +585,221 @@ async def reopen(request: Request):
     await run_in_threadpool(runtime_config.set_str, runtime_config.K_SETUP_DONE, "")
     await run_in_threadpool(runtime_config.set_str, "setup.skipped", "")
     return {"ok": True}
+
+
+# ── 11. 大模型调用日志与问题跟踪（v2.2.1）───────────────────────────
+def _collect_llm_diagnostics(do_ping: bool = False) -> dict:
+    """收集全链路大模型配置、网关模型映射、opencode 快照、shim 转发日志与 api 调用日志。
+    **绝不回显任何明文 api_key**。
+    """
+    cfg = runtime_config.llm()
+    disp = opencode_admin.model_label(cfg.base_url, cfg.api_key, cfg.model) if cfg.configured else cfg.model
+
+    # 1. 实时查询网关 /models 映射列表
+    gateway_models: list[dict] = []
+    if cfg.base_url:
+        try:
+            r = httpx.get(
+                f"{cfg.base_url.rstrip('/')}/models",
+                headers={"Authorization": f"Bearer {cfg.api_key}"} if cfg.api_key else {},
+                timeout=8.0,
+            )
+            if r.status_code == 200:
+                for it in (r.json() or {}).get("data") or []:
+                    if isinstance(it, dict):
+                        gateway_models.append({
+                            "id": it.get("id") or "",
+                            "display_name": it.get("display_name") or "",
+                            "upstream_model": it.get("upstream_model") or it.get("owned_by") or "",
+                        })
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[setup] 诊断拉取网关 /models 失败: {}", exc)
+
+    # 2. 查询 opencode 当前生效 provider 与模型展示名（严格脱敏 options.apiKey）
+    opencode_snapshot: dict = {"reachable": False, "current_model": "", "providers": []}
+    oc_url = os.getenv("OPENCODE_URL", "http://opencode:3901").rstrip("/")
+    oc_u, oc_p = os.getenv("OPENCODE_SERVER_USERNAME", ""), os.getenv("OPENCODE_SERVER_PASSWORD", "")
+    oc_headers = {}
+    if oc_u or oc_p:
+        oc_headers["Authorization"] = "Basic " + base64.b64encode(f"{oc_u}:{oc_p}".encode()).decode()
+    try:
+        r_cfg = httpx.get(f"{oc_url}/config", headers=oc_headers, timeout=5.0)
+        if r_cfg.status_code == 200 and isinstance(r_cfg.json(), dict):
+            opencode_snapshot["reachable"] = True
+            opencode_snapshot["current_model"] = str(r_cfg.json().get("model") or "")
+        r_prov = httpx.get(f"{oc_url}/config/providers", headers=oc_headers, timeout=5.0)
+        if r_prov.status_code == 200 and isinstance(r_prov.json(), dict):
+            opencode_snapshot["reachable"] = True
+            for p in r_prov.json().get("providers") or []:
+                if not isinstance(p, dict) or p.get("id") == "opencode":
+                    continue
+                models_out = {}
+                for mid, mobj in (p.get("models") or {}).items():
+                    if mid == "hunter-unconfigured":
+                        continue
+                    mname = mobj.get("name") if isinstance(mobj, dict) else str(mobj)
+                    models_out[mid] = {"name": mname or mid}
+                opencode_snapshot["providers"].append({
+                    "id": p.get("id") or "",
+                    "name": p.get("name") or "",
+                    "models": models_out,
+                })
+    except Exception as exc:  # noqa: BLE001
+        opencode_snapshot["error"] = f"{type(exc).__name__}: {exc}"
+
+    # 3. 拉取 llm-shim 转发跟踪记录
+    shim_traces: list[dict] = []
+    shim_base = os.getenv("LLM_SHIM_URL", "http://llm-shim:3999/v1").rstrip("/")
+    if shim_base.endswith("/v1"):
+        shim_base = shim_base[:-3]
+    try:
+        r_shim = httpx.get(f"{shim_base}/trace", timeout=3.0)
+        if r_shim.status_code == 200 and isinstance(r_shim.json(), dict):
+            shim_traces = list(r_shim.json().get("traces") or [])[:50]
+    except Exception:  # noqa: BLE001
+        pass
+
+    # 4. 可选当场发一条极简探针请求（验证真实返回 model 如 gemini-4-argon）
+    probe_ping: dict | None = None
+    if do_ping and cfg.configured:
+        t0 = time.monotonic()
+        try:
+            r_ping = httpx.post(
+                f"{cfg.base_url.rstrip('/')}/chat/completions",
+                headers={"Authorization": f"Bearer {cfg.api_key}", "Content-Type": "application/json"},
+                json={
+                    "model": cfg.model,
+                    "messages": [{"role": "user", "content": "只回复两个字：正常"}],
+                    "max_tokens": 8,
+                },
+                timeout=20.0,
+            )
+            ms = int((time.monotonic() - t0) * 1000)
+            payload = r_ping.json() if r_ping.content else {}
+            resp_model = str(payload.get("model") or cfg.model) if isinstance(payload, dict) else cfg.model
+            usage = (payload.get("usage") or {}) if isinstance(payload, dict) else {}
+            reply_txt = ""
+            if isinstance(payload, dict):
+                choices = payload.get("choices") or []
+                if choices and isinstance(choices[0], dict):
+                    reply_txt = str((choices[0].get("message") or {}).get("content") or "").strip()
+            err_msg = "" if r_ping.status_code < 400 else (r_ping.text or "")[:200]
+            llm_trace.record_call(
+                caller="settings.diagnostic_ping",
+                base_url=cfg.base_url,
+                req_model=cfg.model,
+                resp_model=resp_model,
+                status=r_ping.status_code,
+                latency_ms=ms,
+                tokens_in=int(usage.get("prompt_tokens") or 0),
+                tokens_out=int(usage.get("completion_tokens") or 0),
+                error=err_msg,
+            )
+            probe_ping = {
+                "ok": r_ping.status_code < 400,
+                "status": r_ping.status_code,
+                "req_model": cfg.model,
+                "resp_model": resp_model,
+                "latency_ms": ms,
+                "reply": reply_txt[:80],
+                "error": err_msg,
+            }
+        except Exception as exc:  # noqa: BLE001
+            ms = int((time.monotonic() - t0) * 1000)
+            llm_trace.record_call(
+                caller="settings.diagnostic_ping",
+                base_url=cfg.base_url,
+                req_model=cfg.model,
+                status=502,
+                latency_ms=ms,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            probe_ping = {
+                "ok": False,
+                "status": 502,
+                "req_model": cfg.model,
+                "resp_model": "",
+                "latency_ms": ms,
+                "reply": "",
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+
+    now_str = datetime.now(market_time.market_tz("CN_A")).strftime("%Y-%m-%d %H:%M:%S")
+    return {
+        "generated_at": now_str,
+        "instance_version": (os.getenv("HUNTER_VERSION") or "2.2.1").strip(),
+        "llm_config": {
+            "configured": cfg.configured,
+            "source": cfg.source,
+            "base_url": llm_trace.sanitize_url(cfg.base_url),
+            "model": cfg.model,
+            "display_name": disp,
+            "builtin": runtime_config.builtin(),
+            "sanitize": cfg.sanitize,
+            "api_key_masked": mask(cfg.api_key) if cfg.api_key else "",
+            "agent_router_model": runtime_config.agent_model("AGENT_MODEL_ROUTER", "gemini-4-argon"),
+        },
+        "gateway_models": gateway_models,
+        "opencode_provider": opencode_snapshot,
+        "probe_ping": probe_ping,
+        "shim_traces": shim_traces,
+        "api_traces": llm_trace.recent_calls(limit=100),
+    }
+
+
+@router.get("/llm/logs")
+async def llm_logs(request: Request, ping: int = 0):
+    """查询大模型配置快照、网关映射与实时调用跟踪日志。"""
+    _guard(request)
+    return await run_in_threadpool(_collect_llm_diagnostics, bool(ping))
+
+
+@router.get("/llm/logs/download")
+async def llm_logs_download(request: Request, ping: int = 0):
+    """导出已脱敏的大模型诊断日志文件（.log），方便用户下载上传反馈。"""
+    _guard(request)
+    diag = await run_in_threadpool(_collect_llm_diagnostics, bool(ping))
+    ts_slug = datetime.now(market_time.market_tz("CN_A")).strftime("%Y%m%d-%H%M%S")
+    filename = f"hunter-llm-diagnostics-{ts_slug}.log"
+
+    lines = [
+        "# ====================================================================",
+        "# Hunter Community 大模型调用与配置诊断日志（已自动脱敏 API Key 与对话正文）",
+        f"# 导出时间（上海）: {diag['generated_at']}",
+        f"# 实例版本: v{diag['instance_version']}",
+        "# ====================================================================",
+        "",
+        "## 一、当前大模型配置快照",
+        json.dumps(diag["llm_config"], ensure_ascii=False, indent=2),
+        "",
+        "## 二、网关模型映射表（/models）",
+        json.dumps(diag["gateway_models"], ensure_ascii=False, indent=2),
+        "",
+        "## 三、对话引擎（opencode）生效 Provider 快照",
+        json.dumps(diag["opencode_provider"], ensure_ascii=False, indent=2),
+    ]
+    if diag.get("probe_ping") is not None:
+        lines.extend([
+            "",
+            "## 四、实时探针测试结果（ping=1）",
+            json.dumps(diag["probe_ping"], ensure_ascii=False, indent=2),
+        ])
+    lines.extend([
+        "",
+        f"## 五、API 侧大模型调用跟踪记录（最近 {len(diag['api_traces'])} 条）",
+        json.dumps(diag["api_traces"], ensure_ascii=False, indent=2),
+        "",
+        f"## 六、LLM-Shim 转发跟踪记录（最近 {len(diag['shim_traces'])} 条）",
+        json.dumps(diag["shim_traces"], ensure_ascii=False, indent=2),
+        "",
+    ])
+    content = "\n".join(lines)
+    return Response(
+        content=content.encode("utf-8"),
+        media_type="text/plain; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+        },
+    )
+

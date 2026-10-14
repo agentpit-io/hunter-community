@@ -80,7 +80,8 @@ def llm_json_call(system: str, user: str, *,
     if client is None:
         return None, {"error": "no_api_key", "tokens_in": 0, "tokens_out": 0}
 
-    use_model = model or default_model()
+    base_url, _, cfg_model = _resolve()
+    use_model = model or cfg_model
     t0 = time.time()
     try:
         completion = client.chat.completions.create(
@@ -107,13 +108,28 @@ def llm_json_call(system: str, user: str, *,
                 temperature=temperature,
             )
         except Exception as e2:
+            lat = int((time.time() - t0) * 1000)
+            try:
+                from app.services import llm_trace
+                llm_trace.record_call(
+                    caller="online_analysis.llm_json_call",
+                    base_url=base_url,
+                    req_model=use_model,
+                    status=502,
+                    latency_ms=lat,
+                    error=str(e2),
+                )
+            except Exception:  # noqa: BLE001
+                pass
             return None, {"error": str(e2), "tokens_in": 0, "tokens_out": 0,
-                          "latency_ms": int((time.time()-t0)*1000)}
+                          "latency_ms": lat}
 
     raw   = completion.choices[0].message.content or ""
     usage = completion.usage
+    resp_model = getattr(completion, "model", None) or use_model
     meta = {
         "model":      use_model,
+        "resp_model": resp_model,
         "tokens_in":  usage.prompt_tokens if usage else 0,
         "tokens_out": usage.completion_tokens if usage else 0,
         "latency_ms": int((time.time() - t0) * 1000),
@@ -164,6 +180,22 @@ def llm_json_call(system: str, user: str, *,
             parsed = sanitize_json_values(parsed, on_hit=_hit)
         except Exception as e:  # noqa: BLE001
             logger.warning("llm_json_call: 语言守卫失败 · 原样透传: {}", e)
+
+    try:
+        from app.services import llm_trace
+        llm_trace.record_call(
+            caller="online_analysis.llm_json_call",
+            base_url=base_url,
+            req_model=use_model,
+            resp_model=str(meta.get("resp_model") or ""),
+            status=200 if not meta.get("error") else 422,
+            latency_ms=int(meta.get("latency_ms") or 0),
+            tokens_in=int(meta.get("tokens_in") or 0),
+            tokens_out=int(meta.get("tokens_out") or 0),
+            error=str(meta.get("error") or ""),
+        )
+    except Exception:  # noqa: BLE001
+        pass
 
     return parsed, meta
 

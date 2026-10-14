@@ -29,6 +29,7 @@ M1(设计方案 3.3)又加了三件事:
     用户完全看不出发生了什么
 schema 清洗规则挪去了 schema_clean.py(向导的工具调用检测要用同一份)。
 """
+import collections
 import ipaddress
 import json
 import os
@@ -41,6 +42,39 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from schema_clean import clean, clean_tools, ensure_object_schema  # noqa: F401
+
+_TRACE_LOG: collections.deque = collections.deque(maxlen=100)
+
+
+def _record_trace(
+    *,
+    method: str,
+    path: str,
+    upstream: str,
+    req_model: str = "",
+    resp_model: str = "",
+    status: int = 200,
+    duration_ms: int = 0,
+    error: str = "",
+) -> None:
+    entry = {
+        "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "method": method,
+        "path": path,
+        "upstream": (upstream or "").split("?")[0],
+        "req_model": req_model or "",
+        "resp_model": resp_model or "",
+        "status": int(status or 0),
+        "duration_ms": int(duration_ms or 0),
+        "error": (error or "")[:200],
+    }
+    _TRACE_LOG.append(entry)
+    print(
+        f"[shim-trace] {method} {path} upstream={entry['upstream']} "
+        f"req_model={entry['req_model'] or '-'} resp_model={entry['resp_model'] or '-'} "
+        f"status={entry['status']} duration_ms={entry['duration_ms']}ms err={entry['error'] or '-'}",
+        flush=True,
+    )
 
 # 环境变量里的默认上游网关。**空着也能启动**(M1):配置可能存在数据库里,
 # 由 opencode 的 provider 通过 `X-Hunter-Upstream` 请求头逐次带过来。
@@ -410,8 +444,18 @@ class Handler(BaseHTTPRequestHandler):
         return upstream, "", stream, model
 
     def _proxy(self, body: bytes | None):
+        t0 = time.monotonic()
         upstream, reject, stream, model = self._precheck(body)
         if reject:
+            _record_trace(
+                method=self.command,
+                path=self.path,
+                upstream=upstream,
+                req_model=model,
+                status=400,
+                duration_ms=int((time.monotonic() - t0) * 1000),
+                error=reject,
+            )
             self._send_error(reject, stream=stream, model=model)
             return
         if body is not None and self.path.endswith("/chat/completions"):
@@ -438,15 +482,22 @@ class Handler(BaseHTTPRequestHandler):
                         is_sse = True
                     self.send_header(k, v)
                 self.end_headers()
+                resp_model = ""
                 # 非 SSE(整段 JSON)· 一次读 + 一次剥 think · 再吐出
                 # SSE 流式 · 走 line-buffered 逐行剥 think · 保持 tool_calls 增量边界
                 # stream 尾部 SSL EOF 不算失败(数据已到) · 静默吞掉
                 try:
                     if not is_sse:
-                        body = r.read()
+                        resp_bytes = r.read()
+                        try:
+                            parsed_resp = json.loads(resp_bytes.decode())
+                            if isinstance(parsed_resp, dict):
+                                resp_model = str(parsed_resp.get("model") or "")
+                        except Exception:
+                            pass
                         if STRIP_THINK:
-                            body = strip_think_nonstream(body)
-                        self.wfile.write(body); self.wfile.flush()
+                            resp_bytes = strip_think_nonstream(resp_bytes)
+                        self.wfile.write(resp_bytes); self.wfile.flush()
                     else:
                         stripper = ThinkStripper() if STRIP_THINK else None
                         buf = b""
@@ -469,11 +520,15 @@ class Handler(BaseHTTPRequestHandler):
                                     done_line = line
                                     continue
                                 self.wfile.write(rewrite_sse_line(line, stripper) + b"\n")
+                                if not resp_model and stripper and stripper._template:
+                                    resp_model = str(stripper._template.get("model") or "")
                             self.wfile.flush()
                         # 收尾:残帧 → 补发扣留的尾巴 → 最后才放行 [DONE]
                         if STRIP_THINK:
                             if buf:
                                 self.wfile.write(rewrite_sse_line(buf, stripper) + b"\n")
+                                if not resp_model and stripper and stripper._template:
+                                    resp_model = str(stripper._template.get("model") or "")
                             # 正常情况下 stripper 按需扣留 · 这里多半是空;
                             # 只有流恰好断在半个 <think> 上才非空。**不能写 pass** ——
                             # 2026-09-07 就是这行 pass 把每条回答的末尾吞了 7 个字符。
@@ -487,11 +542,30 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception as se:
                     print(f"[shim] stream tail eof (ignored · data delivered): {type(se).__name__}",
                           flush=True)
+                _record_trace(
+                    method=self.command,
+                    path=self.path,
+                    upstream=upstream,
+                    req_model=model,
+                    resp_model=resp_model,
+                    status=r.status,
+                    duration_ms=int((time.monotonic() - t0) * 1000),
+                )
                 return
             except urllib.error.HTTPError as e:
                 data = e.read()
-                print(f"[shim] upstream {e.code}: {data.decode(errors='replace')[:300]}",
+                err_txt = data.decode(errors="replace")[:300]
+                print(f"[shim] upstream {e.code}: {err_txt}",
                       flush=True)
+                _record_trace(
+                    method=self.command,
+                    path=self.path,
+                    upstream=upstream,
+                    req_model=model,
+                    status=e.code,
+                    duration_ms=int((time.monotonic() - t0) * 1000),
+                    error=err_txt,
+                )
                 self.send_response(e.code)
                 self.end_headers()
                 self.wfile.write(data)
@@ -502,6 +576,15 @@ class Handler(BaseHTTPRequestHandler):
                           flush=True)
                     continue
                 print(f"[shim] error after retry: {e}", flush=True)
+                _record_trace(
+                    method=self.command,
+                    path=self.path,
+                    upstream=upstream,
+                    req_model=model,
+                    status=502,
+                    duration_ms=int((time.monotonic() - t0) * 1000),
+                    error=str(e),
+                )
                 self.send_response(502)
                 self.end_headers()
                 return
@@ -516,6 +599,17 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b'{"ok":true}')
+            return
+        if self.path.startswith("/trace"):
+            payload = json.dumps(
+                {"ok": True, "traces": list(reversed(_TRACE_LOG))},
+                ensure_ascii=False,
+            ).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
             return
         self._proxy(None)
 
