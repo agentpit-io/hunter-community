@@ -88,7 +88,7 @@ REASON: 用2-3句中文说明影响机制和程度，不超过80字"""
 
     try:
         resp = client.chat.completions.create(
-            model=runtime_config.agent_model("SIGNAL_ANALYSIS_MODEL", "gemini-3.1-pro-preview"),
+            model=runtime_config.agent_model("SIGNAL_ANALYSIS_MODEL", "gemini-4-argon"),
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
             tools=[{"type": "google_search"}],

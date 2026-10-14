@@ -35,7 +35,7 @@ def _llm_json(prompt: str) -> dict | None:
     client = OpenAI(api_key=api_key,
                     base_url=runtime_config.one_api_base_url(),
                     timeout=60)
-    model = os.getenv("ONE_API_MODEL", "gemini-3.5-flash")
+    model = os.getenv("ONE_API_MODEL", "gemini-4-argon")
     try:
         resp = client.chat.completions.create(
             model=model,

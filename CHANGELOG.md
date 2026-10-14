@@ -3,6 +3,36 @@
 All notable changes to HunterCode · Community Edition follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-10-14
+
+> **次版本 · 内置与默认的谷歌模型升级到 `gemini-4-argon`。**
+> 谷歌 2026-10-13 正式发布 `gemini-4-argon`（旗舰推理模型，100 万上下文）。
+> 本版把开源版**代码里写死的默认模型名**从 `gemini-3.5-flash` 换成它。
+>
+> ⚠️ **谁受影响**：只在**没配环境变量、也没走首启向导**的部署上才看得出来 ——
+> 这两条路都会把模型名写进 `.env` / 数据库，而它们**优先级高于代码默认值**。
+> 已经按向导配好的实例**升级后行为不变**（除非你希望一起换，那就像下面那样手动改）。
+>
+> **改了什么（只改「默认值」，不改任何业务逻辑）**：
+> - `api` 里所有 `os.getenv("ONE_API_MODEL", ...)` 与 `runtime_config.agent_model(..., 兜底值)`
+>   的兜底值：`gemini-3.5-flash` → `gemini-4-argon`（深度档的兜底 `gemini-3.1-pro-preview` 一并改）。
+> - `quant/screen_nl.py` 的 `GEMINI_PIN`（选股脚本锁定模型）→ `gemini-4-argon`。
+>   原来的锁是为了绕开「恰好 2 条消息的短对话返 400」那个历史坑；已实测 `gemini-4-argon`
+>   在同样 2 条消息下正常返回，锁继续保留。
+> - `.env.example` / `.env.personal.example` 的说明文字、首启向导的 mock 网关、e2e 用例里的模型名。
+> - `HUNTER_VERSION` / `FIN_TAG` 默认值 `2.1.0` → `2.2.0`（`docker-compose*.yml` 的镜像 tag 同步）。
+>
+> **没动什么（有意为之）**：`data/llm-presets.json` 里那张 AIHubMix 预置卡
+> （`gemini-3.5-flash-aihubmix`）**保持原样** —— 它指向的是第三方网关 `aihubmix.com`，
+> 那边的模型目录由对方决定，跟我们无关。同理 `docs/env-samples/.env.aihubmix.example`。
+>
+> **没有数据库迁移**，**没有新增环境变量**。动到 `api` 镜像；其余镜像代码未改，版本号随发版一起走。
+>
+> 升级：`.env` 的 `HUNTER_VERSION` 与 `FIN_TAG` 一起改 `2.2.0`，再
+> `docker compose --profile fin pull && docker compose --profile fin up -d`。
+> 只想换模型、不想换镜像的：在 `.env` 里显式写 `LLM_DEFAULT_MODEL=gemini-4-argon`
+> （以及各 `AGENT_*` / `SIGNAL_ANALYSIS_MODEL`），`docker compose up -d api` 即可。
+
 ## [2.1.0] - 2026-10-05
 
 > **次版本 · 智能炒股「策略自动生效 + 默认自学习」（`L12`–`L15`）。**

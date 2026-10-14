@@ -43,15 +43,15 @@ def model_route() -> str:      # 意图分类主模型（快）
     # 惰性读取:环境变量非空 → 数据库(向导内置额度路径写入)→ 代码默认值。
     # **不要改回模块级常量** —— 向导热生效不重启容器,常量会一直是旧值;
     # 而且 compose 的 `${X:-}` 注进来的是空串,`os.getenv(名, 默认)` 拿不到默认值。
-    return runtime_config.agent_model("ASSISTANT_MODEL_ROUTE", "gemini-3.5-flash")
+    return runtime_config.agent_model("ASSISTANT_MODEL_ROUTE", "gemini-4-argon")
 
 
 def model_chat() -> str:       # 通用对话（更强推理）
-    return runtime_config.agent_model("ASSISTANT_MODEL_CHAT", "gemini-3.5-flash")
+    return runtime_config.agent_model("ASSISTANT_MODEL_CHAT", "gemini-4-argon")
 
 
 def model_compress() -> str:   # 摘要压缩（便宜）
-    return runtime_config.agent_model("ASSISTANT_MODEL_COMPRESS", "gemini-3.5-flash")
+    return runtime_config.agent_model("ASSISTANT_MODEL_COMPRESS", "gemini-4-argon")
 
 # chat reply 上限（字符），用户要求 1200 字以给出完整方案
 CHAT_REPLY_MAX_CHARS = 1200

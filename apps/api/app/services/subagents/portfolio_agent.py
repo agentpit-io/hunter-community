@@ -33,7 +33,7 @@ def _model() -> str:
     # 惰性读取:环境变量非空 → 数据库(向导内置额度路径写入)→ 代码默认值。
     # **不要改回模块级常量** —— 向导热生效不重启容器,常量会一直是旧值;
     # 而且 compose 的 `${X:-}` 注进来的是空串,`os.getenv(名, 默认)` 拿不到默认值。
-    return runtime_config.agent_model("AGENT_SUB_PORT_MODEL", "gemini-3.5-flash")
+    return runtime_config.agent_model("AGENT_SUB_PORT_MODEL", "gemini-4-argon")
 
 
 # ═════════════════════════════════════════════════════════════════

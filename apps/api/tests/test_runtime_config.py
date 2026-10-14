@@ -285,7 +285,7 @@ def test_agent_model_empty_env_falls_through(monkeypatch):
 def test_agent_model_falls_back_to_default(monkeypatch):
     """库里也没有时回到代码默认值 —— 这正是这个坑被踩之前本该有的行为。"""
     monkeypatch.delenv("ASSISTANT_MODEL_CHAT", raising=False)
-    assert rc.agent_model("ASSISTANT_MODEL_CHAT", "gemini-3.5-flash") == "gemini-3.5-flash"
+    assert rc.agent_model("ASSISTANT_MODEL_CHAT", "gemini-4-argon") == "gemini-4-argon"
     assert rc.agent_model("ASSISTANT_MODEL_CHAT") == ""
 
 

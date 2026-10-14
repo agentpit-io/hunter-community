@@ -9,7 +9,7 @@ import json
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 MODELS = ["deepseek-v4-pro", "qwen3.8-max", "claude-sonnet-5",
-          "gemini-3.5-flash", "gemini-3.8-flash", "gpt-5.6-sol"]
+          "gemini-4-argon", "gemini-3.8-flash", "gpt-5.6-sol"]
 
 
 class H(BaseHTTPRequestHandler):

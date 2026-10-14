@@ -160,7 +160,7 @@ watch_today: {json.dumps(ai['watch_today'], ensure_ascii=False)}
                             base_url=runtime_config.one_api_base_url(),
                             timeout=60)
             resp = client.chat.completions.create(
-                model=os.getenv("ONE_API_MODEL", "gemini-3.5-flash"),
+                model=os.getenv("ONE_API_MODEL", "gemini-4-argon"),
                 messages=[{"role": "user", "content": polish_prompt}],
                 response_format={"type": "json_object"}, temperature=0.2, max_tokens=800)
             polished = json.loads(resp.choices[0].message.content or "{}")

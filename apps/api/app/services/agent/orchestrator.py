@@ -42,11 +42,11 @@ def model_router() -> str:
     # 惰性读取:环境变量非空 → 数据库(向导内置额度路径写入)→ 代码默认值。
     # **不要改回模块级常量** —— 向导热生效不重启容器,常量会一直是旧值;
     # 而且 compose 的 `${X:-}` 注进来的是空串,`os.getenv(名, 默认)` 拿不到默认值。
-    return runtime_config.agent_model("AGENT_MODEL_ROUTER", "gemini-3.5-flash")
+    return runtime_config.agent_model("AGENT_MODEL_ROUTER", "gemini-4-argon")
 
 
 def model_route_lite() -> str:
-    return runtime_config.agent_model("AGENT_MODEL_ROUTE_LITE", "gemini-3.5-flash")
+    return runtime_config.agent_model("AGENT_MODEL_ROUTE_LITE", "gemini-4-argon")
 
 # 简易成本估算（¥/1k tokens，粗略；见 OneAPI 指南 v2026-08-02）
 _COST_PER_1K = 0.05
@@ -566,7 +566,7 @@ class ChatOrchestrator:
         """
         model = runtime_config.agent_model(
             "AGENT_MODEL_GENERAL_FINANCE",
-            runtime_config.agent_model("SIGNAL_ANALYSIS_MODEL", "gemini-3.5-flash"))
+            runtime_config.agent_model("SIGNAL_ANALYSIS_MODEL", "gemini-4-argon"))
         sys_prompt = SYSTEM_PROMPT + (
             "\n\n# 【本轮工作模式 · 通识 + 联网检索】\n"
             "- 这是**金融通识 / 背景解读**问题（公司治理、年报解读、公司战略、行业结构、宏观）\n"

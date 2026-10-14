@@ -1,4 +1,4 @@
-"""自然语言 → 筛选脚本(gemini-3.5-flash)。
+"""自然语言 → 筛选脚本(gemini-4-argon)。
 
 用户在生成框里写「成交量大于100万且站上50日线」这种大白话,这里把它翻译成
 `def`/`plot` 脚本,再交给 screen_dsl 解析成可视条件行。
@@ -78,10 +78,10 @@ def model_error_text(e: Exception) -> str:
         why = "模型服务没有正常返回。"
     return "调用模型失败:" + why + _NO_AI_TAIL
 
-# gemini 部署仍然锁死 gemini-3.5-flash(仓内铁律)。
+# gemini 部署仍然锁死 gemini-4-argon(仓内铁律)。
 # 3.6 / 3.8 对恰好 2 条 [system, user] 的短对话返 400,2026-09-04 上线 20+ 处全砸 500。
 # 这里正好就是 2 条消息的短对话,是那个 bug 的高危形态,**不要把这条锁去掉**。
-GEMINI_PIN = "gemini-3.5-flash"
+GEMINI_PIN = "gemini-4-argon"
 
 
 def model_name() -> str:
@@ -92,7 +92,7 @@ def model_name() -> str:
     这套部署根本没有的模型名发出去 —— 表现是「AI 识别」永远报 404 / UnknownModel。
 
     所以判据改成**按当前生效的模型是不是 gemini 分流**:
-      · 是 gemini(演示站、内部部署)→ 仍然锁 gemini-3.5-flash,行为与改造前逐位一致
+      · 是 gemini(演示站、内部部署)→ 仍然锁 gemini-4-argon,行为与改造前逐位一致
       · 不是 → 用用户自己配的模型
       · 一个都没配 → 空串(调用方在 get_client() 那一步就已经挡住了)
     需要显式指定时设环境变量 `SCREEN_NL_MODEL`。

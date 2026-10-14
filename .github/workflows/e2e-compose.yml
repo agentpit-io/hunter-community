@@ -50,7 +50,7 @@ jobs:
             echo "HUNTER_SINGLE_USER=1"
             echo "LLM_PROVIDER=openai_compat"
             echo "LLM_BASE_URL=https://oneapi.hermes.agentpit.io/v1"
-            echo "LLM_DEFAULT_MODEL=gemini-3.5-flash"
+            echo "LLM_DEFAULT_MODEL=gemini-4-argon"
             # M1 起 gen-config.py 缺大模型配置也照样启动(写占位 provider,见 3.3),
             # 所以这里给占位值只是为了让对话冒烟那一步有东西可用;
             # 「一项都不配也能起来」由下面的「冷启动」作业单独验。
