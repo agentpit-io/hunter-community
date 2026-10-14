@@ -26,6 +26,7 @@
 """
 from __future__ import annotations
 
+import argparse
 import re
 import sys
 from pathlib import Path
@@ -91,6 +92,13 @@ def check_coverage() -> None:
 
 
 def main() -> int:
+    argparse.ArgumentParser(
+        description="校验工具注册表(tool_catalog.py)的入口模板 prompt_tpl:中文占位符、不过短、internal_only 不写模板。",
+        epilog="前置条件:不联网、不连库;在仓库里直接跑,或\n"
+               "docker compose exec -T api python - < scripts/check_tool_prompts.py。\n"
+               "退出码:0 = 通过 · 1 = 有问题",
+        formatter_class=argparse.RawDescriptionHelpFormatter).parse_args()
+
     check_placeholder_style()
     check_not_too_short()
     check_internal_has_no_tpl()

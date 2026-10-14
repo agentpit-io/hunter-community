@@ -24,6 +24,7 @@
 """
 from __future__ import annotations
 
+import argparse
 import base64
 import json
 import os
@@ -148,9 +149,20 @@ def compare() -> int:
 
 
 def main() -> int:
+    ap = argparse.ArgumentParser(
+        description="比对磁盘上的 SKILL(skills/ 与 user-skills/)和 opencode 实际加载的是否一致。",
+        epilog="前置条件:opencode 在跑;OPENCODE_USER / OPENCODE_PASS / OPENCODE_PROBE_URL\n"
+               "(默认 http://127.0.0.1:3921)从环境变量或仓库根 .env 读;--fix 要本机 docker。\n"
+               "退出码:0 = 一致 · 1 = 不一致或读不到 opencode",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        allow_abbrev=False)     # 和原来的 `in sys.argv` 一样只认全名
+    ap.add_argument("--fix", action="store_true",
+                    help="不一致时 docker compose restart opencode(约 50 秒)并复查")
+    args = ap.parse_args()
+
     print("比对 SKILL 同步状态(磁盘 ↔ opencode)")
     rc = compare()
-    if rc and "--fix" in sys.argv:
+    if rc and args.fix:
         print()
         if restart_opencode():
             print("\n重启后复查:")

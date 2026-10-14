@@ -27,6 +27,7 @@
 """
 from __future__ import annotations
 
+import argparse
 import re
 import subprocess
 import sys
@@ -160,7 +161,16 @@ def check_prompt_tpl(skills: list[dict]) -> list[tuple[str, str, str]]:
 
 
 def main() -> int:
-    offline = "--offline" in sys.argv
+    ap = argparse.ArgumentParser(
+        description="校验 SKILL 的 needs_tools 引用的工具真实存在,prompt_tpl 是模型看得懂的自然语言。",
+        epilog="前置条件:不加 --offline 时用 docker compose exec 从运行中的 opencode 容器读工具名,\n"
+               "读不到自动退回离线清单(apps/api/app/services/tool_catalog.py)。\n"
+               "退出码:0 = 全部合法 · 1 = 有问题",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        allow_abbrev=False)     # 和原来的 `in sys.argv` 一样只认全名
+    ap.add_argument("--offline", action="store_true",
+                    help="不连容器,直接用离线清单(CI 用这个)")
+    offline = ap.parse_args().offline
     real = None if offline else tools_from_container()
     if real is None:
         real = KNOWN_TOOLS

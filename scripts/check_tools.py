@@ -19,6 +19,7 @@
 """
 from __future__ import annotations
 
+import argparse
 import re
 import subprocess
 import sys
@@ -127,8 +128,20 @@ def check_skill_needs_tools() -> None:
 
 
 def main() -> int:
+    ap = argparse.ArgumentParser(
+        description="校验工具注册表(tool_catalog.py)与数据源注册表、SKILL 的 needs_tools、容器里的 MCP 工具是否对得上。",
+        epilog="前置条件:第 3、4 项不联网,在仓库里直接跑,或\n"
+               "docker compose exec -T api python - < scripts/check_tools.py;\n"
+               "--live 要本机 docker 与运行中的 opencode 容器。\n"
+               "退出码:0 = 通过 · 1 = 有错误",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        allow_abbrev=False)     # 和原来的 `in sys.argv` 一样只认全名
+    ap.add_argument("--live", action="store_true",
+                    help="追加第 1-2 项:用 docker compose exec 读 opencode 容器里的 MCP 工具名对账")
+    args = ap.parse_args()
+
     print("检查工具箱注册表 (tool_catalog.py)")
-    if "--live" in sys.argv:
+    if args.live:
         live = tools_from_container()
         if live is None:
             warns.append("容器读取失败,跳过与容器对账(第 1-2 项)")
