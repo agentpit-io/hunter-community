@@ -23,6 +23,7 @@ finance-data 凭证解析、身份注入白名单,每一次都是"两个地方�
 """
 from __future__ import annotations
 
+import argparse
 import re
 import sys
 from pathlib import Path
@@ -170,11 +171,23 @@ def check_probe() -> None:
 
 
 def main() -> int:
+    ap = argparse.ArgumentParser(
+        description="校验数据源注册表(source_catalog.py)与代码是否对得上:key 唯一、记录的 key 都已注册、字段自洽。",
+        epilog="前置条件:前 3 项不联网,在仓库里直接跑,或\n"
+               "docker compose exec -T api python - < scripts/check_sources.py;\n"
+               "--probe 要联网、apps/api 的依赖与平台凭证(同 api 服务),建议在 api 容器里跑。\n"
+               "退出码:0 = 通过 · 1 = 有错误",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        allow_abbrev=False)     # 和原来的 `in sys.argv` 一样只认全名
+    ap.add_argument("--probe", action="store_true",
+                    help="追加第 4 项探活:对可用的 finance-data 源真打一次(会消耗上游配额)")
+    args = ap.parse_args()
+
     print("检查数据源注册表 (source_catalog.py)")
     check_unique_keys()
     check_recorded_keys()
     check_fields()
-    if "--probe" in sys.argv:
+    if args.probe:
         check_probe()
     else:
         print("  [4/4] 探活        跳过(加 --probe 启用 · 会消耗上游配额)")

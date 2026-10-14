@@ -26,6 +26,7 @@
 """
 from __future__ import annotations
 
+import argparse
 import re
 import sys
 from pathlib import Path
@@ -130,6 +131,14 @@ def check_user_group_placeholder() -> None:
 
 
 def main() -> int:
+    argparse.ArgumentParser(
+        description="校验数据源注册表(source_catalog.py)里每条 upstream 都已核实、带证据注释。",
+        epilog="前置条件:不联网;在仓库里直接跑,或\n"
+               "docker compose exec -T api python - < scripts/check_source_upstream.py。\n"
+               "连不上数据库时会打一条 WARNING(读用户自配的源),不影响结论。\n"
+               "退出码:0 = 通过 · 1 = 有问题",
+        formatter_class=argparse.RawDescriptionHelpFormatter).parse_args()
+
     check_every_source_has_upstream()
     check_upstream_is_known()
     check_order_covers_all()
