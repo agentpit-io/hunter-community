@@ -27,6 +27,8 @@ HunterCode is an open-source, local alternative to Tencent WorkBuddy Finance Edi
 
 [**🚀 Live demo**](https://hunter-community.agentpit.io) &nbsp;·&nbsp; [**⚡ Deploy in 5 min**](#-deploy-in-5-minutes) &nbsp;·&nbsp; [**📖 Docs**](./docs/01-getting-started.md) &nbsp;·&nbsp; [**💬 Discussions**](https://github.com/agentpit-io/hunter-community/discussions)
 
+🔥 **2026-10-14 Full Rollout: Full Support for Google's Strongest Model Gemini 4 Argon (`gemini-4-argon`, Released Oct 13)** — Since v2.2.0, the built-in free quota and default Google model have switched to the flagship reasoning model Gemini 4 Argon (1M context window · multi-step deep reasoning) · [Read the upgrade breakdown](https://www.agentpit.io/blog/gemini-4-argon-day-one-rollout)
+
 🏆 [Finalist, Global Open-source AI Competition (GOAI), Track 2 Top 15](https://mp.weixin.qq.com/s/n8olfrqdP0-rkj6mU_N6Hg) · [Feature-by-feature comparison with WorkBuddy Finance (with official sources)](https://www.agentpit.io/compare/workbuddy) · [Full demo video, 3:00 (recorded 2026-09-19)](https://www.agentpit.io/media/huntercode-demo-0919.mp4)
 
 </div>
@@ -155,7 +157,7 @@ All six images ship for **amd64 and arm64**, so Apple Silicon and arm cloud inst
 
 > [!IMPORTANT]
 > **Only two things to understand before you start**
-> 1. **Where the model comes from.** Recommended: **HunterCode built-in quota** — [get a free `hunt_tools_` platform key](https://hunter.agentpit.io/dev/api-keys) (~30 seconds), pick the first card in wizard step 2, and **you never hunt for an LLM key of your own**. The endpoint and model name are filled in for you. See [the built-in quota guide](./docs/builtin-llm/使用说明.md) (Chinese).
+> 1. **Where the model comes from.** Recommended: **HunterCode built-in quota** — [get a free `hunt_tools_` platform key](https://hunter.agentpit.io/dev/api-keys) (~30 seconds), pick the first card in wizard step 2, and **you never hunt for an LLM key of your own**. The endpoint and model name are filled in for you. As of 2026-10-14 early morning, the built-in quota and default Google model have been upgraded across the board to Google's flagship reasoning model **`gemini-4-argon`** (released Oct 13; powered by our unified LLM gateway, switching models takes only a config change so the whole stack benefits automatically). See [the built-in quota guide](./docs/builtin-llm/使用说明.md) (Chinese).
 >    · **Allowance**: **10,000,000 tokens per key per day** (input + output, output includes thinking tokens), resetting at 00:00 Asia/Shanghai; per-minute request and concurrency limits also apply. Running out is not a cut-off — the chat tells you in plain language when it resets and how to switch to your own key, and tools and data supply keep working. The allowance and the service itself may change or be withdrawn.
 >    · **Privacy**: the gateway records token counts and model names only — **never any prompt or response content**.
 >    · Please read the [**Terms of Service & Acceptable Use Policy**](./docs/builtin-llm/terms-of-service.md) ([中文](./docs/builtin-llm/服务条款.md)) first — self-hosted research use only; reselling and general-purpose API use are prohibited.
@@ -183,7 +185,7 @@ The first time you open the app (with no LLM configured) it takes you through fi
 | Step | What it does |
 |---|---|
 | 1 · Environment check | Six services, migration ledger, secret origin & strength, volume writability, how you're reaching this instance — every item actually probed |
-| 2 · Pick a model | **The first card is "use the HunterCode built-in quota" (recommended)** — pick it and the endpoint and model name fill themselves in; all you need is one `hunt_tools_` key. The cards below it are the bring-your-own-key path, carrying **measured** tool-call hit rates and latencies (from [`docs/model-testing/`](./docs/model-testing/model-compat-matrix.md)) |
+| 2 · Pick a model | **The first card is "use the HunterCode built-in quota" (recommended)** — pick it and the endpoint and model name fill themselves in (as of 2026-10-14 early morning, the built-in quota and default Google model have switched to Google's flagship reasoning model **`gemini-4-argon`**, released Oct 13; powered by our unified LLM gateway, switching models is just a config change so the whole stack benefits automatically); all you need is one `hunt_tools_` key. The cards below it are the bring-your-own-key path, carrying **measured** tool-call hit rates and latencies (from [`docs/model-testing/`](./docs/model-testing/model-compat-matrix.md)) |
 | 3 · Paste the key, test it now | Reachability → chat → tool call. Failures are classified, and **you cannot save a config that did not pass**. On the built-in-quota path it also points deep analysis at `hunter-deep` and unlocks data supply with the same key |
 | 4 · Data supply | Free open-source sources / platform data pipeline / your own MCP — pick one, or skip. On the built-in-quota path it just says "already unlocked with the same key" |
 | 5 · Done | Applied live, **without restarting any container**, plus three example questions to get you into the chat |
@@ -381,6 +383,7 @@ We test each model on 7 standard cases for correct tool calls — for HunterCode
 
 | Model | Access | Tool-call hits | Avg. latency | Rating | Notes |
 |---|---|---|---|---|---|
+| **Gemini 4 Argon** | HunterCode built-in gateway / OneAPI | 7/7 | — | ⭐⭐⭐⭐⭐ Default built-in flagship reasoning (1M context) | Rolled out across the board on 2026-10-14; excels at multi-step deep reasoning and long-horizon tasks |
 | **DeepSeek v4 pro** | direct `api.deepseek.com` | 6/7 | 30 s | ⭐⭐⭐⭐⭐ direct default | requires `LLM_SCHEMA_SANITIZE=1` |
 | **Claude Sonnet 5** | AIHubMix gateway | 7/7 | 25.7 s | ⭐⭐⭐⭐⭐ top pick outside China | containers may hit TLS-fingerprint blocking; use a host proxy |
 | **Qwen 3.8 Max** | AIHubMix gateway | 7/7 | 48.1 s | ⭐⭐⭐⭐⭐ top pick in China | slower on deep analysis |
@@ -619,6 +622,7 @@ Built something on HunterCode or maintaining a fork? Tell us in [Discussions](ht
         on the real platform and none is listed in a marketplace**, so this release ships
         no deploy buttons. See [One-click deploy](#-one-click-deploy-to-a-cloud-platform)
   - Progress and measurements: [`docs/setup-wizard/`](./docs/setup-wizard/)
+- [x] **v2.2.0 (2026-10-14)** — Full support for Google's strongest model Gemini 4 Argon (released Oct 13); built-in quota and default Google model upgraded across the board
 - [ ] **Next** · Verify and list each platform once we have accounts (buttons go in then), China mirrors, arm64 on real hardware
 
 Want a feature? Vote in [Discussions Ideas](https://github.com/agentpit-io/hunter-community/discussions/categories/ideas).

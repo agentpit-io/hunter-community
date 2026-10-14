@@ -27,6 +27,8 @@ HunterCode 是腾讯 WorkBuddy 金融版的开源本地替代方案 · 面向私
 
 [**🚀 在线演示**](https://hunter-community.agentpit.io) &nbsp;·&nbsp; [**⚡ 5 分钟部署**](#-5-分钟跑起来) &nbsp;·&nbsp; [**📖 产品说明书**](./doc/产品说明书.md) &nbsp;·&nbsp; [**帮助中心**](https://hunter-community.agentpit.io/help/index.html) &nbsp;·&nbsp; [**快速开始**](./docs/01-getting-started.md) &nbsp;·&nbsp; [**💬 讨论区**](https://github.com/agentpit-io/hunter-community/discussions)
 
+🔥 **2026-10-14 全线升级：全面支持谷歌 10-13 发布最强模型 Gemini 4 Argon（`gemini-4-argon`）** —— 自 v2.2.0 起内置免费额度与默认谷歌模型已切换为旗舰推理模型 Gemini 4 Argon（百万级上下文 · 多步深度推理） · [阅读升级详解](https://www.agentpit.io/blog/gemini-4-argon-day-one-rollout)
+
 🏆 [入围世界人工智能开源大赛(GOAI)总决赛 · 赛道二 TOP 15](https://mp.weixin.qq.com/s/n8olfrqdP0-rkj6mU_N6Hg) · [与 WorkBuddy 金融版逐项对比(附官方来源)](https://www.agentpit.io/compare/workbuddy) · [完整演示视频 3 分钟(2026-09-19 录制)](https://www.agentpit.io/media/huntercode-demo-0919.mp4)
 
 </div>
@@ -139,7 +141,7 @@ HunterCode 是腾讯 WorkBuddy 金融版的开源本地替代方案 · 面向私
 
 > [!IMPORTANT]
 > **开始前只需要理解两件事**
-> 1. **模型从哪来**。推荐走 **HunterCode 内置额度**:[免费申请一把 `hunt_tools_` 平台 key](https://hunter.agentpit.io/dev/api-keys)(约 30 秒),在向导第 2 步选第一张卡,**不用自己去各家申请大模型 key**,地址和模型名向导自动填好。详见 [内置额度使用说明](./docs/builtin-llm/使用说明.md)。
+> 1. **模型从哪来**。推荐走 **HunterCode 内置额度**:[免费申请一把 `hunt_tools_` 平台 key](https://hunter.agentpit.io/dev/api-keys)(约 30 秒),在向导第 2 步选第一张卡,**不用自己去各家申请大模型 key**,地址和模型名向导自动填好。当前内置额度与默认谷歌模型已于 2026-10-14 凌晨全线升级为谷歌 10-13 发布的旗舰推理模型 **`gemini-4-argon`**（依托统一大模型网关，换模型仅改配置、全线自动受益）。详见 [内置额度使用说明](./docs/builtin-llm/使用说明.md)。
 >    · **额度**:每把 key **每天 1000 万 token**(输入 + 含 thinking 的输出),北京时间 0 点重置;另有每分钟请求数与并发上限。额度用完不是断服 —— 对话里会用中文说清几点重置、怎么改用自带 key,工具与数据供给照常。额度与服务可能调整或下线。
 >    · **隐私**:网关只记 token 数与模型名,**不记任何 prompt 与回复内容**。
 >    · 使用前请读一遍 [**服务条款与可接受使用政策**](./docs/builtin-llm/服务条款.md)([English](./docs/builtin-llm/terms-of-service.md)) —— 仅限自部署用户的研究用途,禁止转售、禁止当通用 API 用。
@@ -166,7 +168,7 @@ open http://localhost:3100          # 浏览器里完成首启向导,不用改�
 | 步骤 | 做什么 |
 |---|---|
 | 1 · 环境自检 | 六个服务连通、迁移账本、密钥来源与强度、卷可写、访问方式 —— 逐项真探测 |
-| 2 · 选大模型 | **第一张卡是「使用 HunterCode 内置额度」(推荐)**:选中即自动填好地址与模型名,你只要一把 `hunt_tools_` key。下面几张是自带 key 的高级路径,带**实测**的工具调用命中率与耗时(来自 [`docs/model-testing/`](./docs/model-testing/model-compat-matrix.md)) |
+| 2 · 选大模型 | **第一张卡是「使用 HunterCode 内置额度」(推荐)**:选中即自动填好地址与模型名(当前内置额度与默认谷歌模型已于 2026-10-14 凌晨全线升级为谷歌 10-13 发布的旗舰推理模型 **`gemini-4-argon`**,依托统一大模型网关,换模型仅改配置、全线自动受益),你只要一把 `hunt_tools_` key。下面几张是自带 key 的高级路径,带**实测**的工具调用命中率与耗时(来自 [`docs/model-testing/`](./docs/model-testing/model-compat-matrix.md)) |
 | 3 · 填 key 当场测 | 连通 → 对话 → 工具调用三项,失败分类报错,**测不通不让保存**;内置额度路径下还会顺带把深度分析指向 `hunter-deep`、用同一把 key 解锁数据供给 |
 | 4 · 数据供给 | 免费开源源 / 平台数据管道 / 自接 MCP,三选一,可以跳过。走内置额度的话这里会直接显示「同一把 key 已解锁」 |
 | 5 · 完成 | **不重启任何容器**热生效,给三个示例问题带你进对话 |
@@ -421,6 +423,7 @@ SKILL 是一段讲清「这类问题该怎么分析」的 Markdown,采用 **Anth
 
 | 模型 | 接入 | 工具调用命中 | 平均耗时 | 推荐 | 注意 |
 |---|---|---|---|---|---|
+| **Gemini 4 Argon** | HunterCode 内置网关 / OneAPI | 7/7 | — | ⭐⭐⭐⭐⭐ 默认内置旗舰推理（100 万上下文） | 2026-10-14 全线切换为默认模型，擅长多步深度推理与长任务 |
 | **DeepSeek v4 pro** | 直连 `api.deepseek.com` | 6/7 | 30 秒 | ⭐⭐⭐⭐⭐ 直连默认 | 必开 `LLM_SCHEMA_SANITIZE=1` |
 | **Claude Sonnet 5** | AIHubMix 网关 | 7/7 | 25.7 秒 | ⭐⭐⭐⭐⭐ 海外首推 | 容器直连可能被 TLS 指纹拦截,需宿主机代理 |
 | **Qwen 3.8 Max** | AIHubMix 网关 | 7/7 | 48.1 秒 | ⭐⭐⭐⭐⭐ 国内首推 | 深度分析较慢 |
@@ -664,6 +667,7 @@ python scripts/check_skill_sync.py       # 比对磁盘与 opencode 实际加载
   - [x] 报告三层分离:事实由代码算、文字由模型写、回读校验不过就不发布
   - [x] 前端五个正文页接真账本;`PAPER_MODE` 恒为 `PAPER`,请求带实盘字段即报错
   - [x] 新增两个镜像 `hunter-community-paper` / `hunter-community-fin-worker`(amd64 + arm64)
+- [x] **v2.2.0 (2026-10-14)** —— 全面支持谷歌 10-13 发布最强模型 Gemini 4 Argon，内置额度与默认谷歌模型全线升级
 - [ ] **下一步** · 拿到平台账号后逐个实测并上架(那时才加按钮)、国内镜像源、arm64 真机验证
 
 想要什么功能?到 [讨论区想法分区](https://github.com/agentpit-io/hunter-community/discussions/categories/ideas) 投票。
