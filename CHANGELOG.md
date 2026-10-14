@@ -3,6 +3,18 @@
 All notable changes to HunterCode · Community Edition follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.1] - 2026-10-14
+
+> **补丁版本 · 修复谷歌 4.0（Gemini 4 Argon）模型名称显示并新增全链路大模型调用日志跟踪与导出。**
+>
+> **改了什么**：
+> 1. 修复升级后聊天框右下角模型选择器仍显示别名 `hunter-chat` 的问题，现明确展示 `Hunter-Gemini 4 Argon（谷歌 4.0）`，且 `opencode`、`web`、`api`、`llm-shim` 镜像随版本同步重建；
+> 2. 新增全链路大模型调用过程日志输出与跟踪（`GET /api/setup/llm/logs` 及设置页「大模型」面板），支持一键实测模型并下载脱敏 `.log` 诊断文件用于问题排查上传。
+> 3. `HUNTER_VERSION` / `FIN_TAG` 默认值 `2.2.0` → `2.2.1`（`docker-compose*.yml` 的镜像 tag 同步）。
+>
+> **升级**：`.env` 的 `HUNTER_VERSION` 与 `FIN_TAG` 一起改 `2.2.1`，再
+> `docker compose --profile fin pull && docker compose --profile fin up -d`。
+
 ## [2.2.0] - 2026-10-14
 
 > **次版本 · 内置与默认的谷歌模型升级到 `gemini-4-argon`。**
