@@ -24,6 +24,7 @@
 """
 from __future__ import annotations
 
+import argparse
 import base64
 import json
 import os
@@ -147,10 +148,29 @@ def compare() -> int:
     return 1
 
 
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        prog="check_skill_sync.py",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="比对磁盘上的 SKILL 数量与 opencode 实际加载的数量是否一致。",
+        epilog="""\
+前置条件:
+  · opencode 容器在跑(默认探 http://127.0.0.1:3921,可用 OPENCODE_PROBE_URL 改)
+  · 凭证从仓库根 .env 读 OPENCODE_USER / OPENCODE_PASS(进程环境变量优先)
+  · --fix 需要本机能执行 docker compose
+  · 不需要平台 key
+
+退出码:0 = 一致 · 1 = 不一致或读不到 opencode""")
+    p.add_argument("--fix", action="store_true",
+                   help="不一致时自动 docker compose restart opencode 并复查(约 50 秒)")
+    return p.parse_args(argv)
+
+
 def main() -> int:
+    args = parse_args()
     print("比对 SKILL 同步状态(磁盘 ↔ opencode)")
     rc = compare()
-    if rc and "--fix" in sys.argv:
+    if rc and args.fix:
         print()
         if restart_opencode():
             print("\n重启后复查:")

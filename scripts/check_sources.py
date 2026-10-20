@@ -23,6 +23,7 @@ finance-data 凭证解析、身份注入白名单,每一次都是"两个地方�
 """
 from __future__ import annotations
 
+import argparse
 import re
 import sys
 from pathlib import Path
@@ -34,6 +35,30 @@ if hasattr(sys.stdout, "reconfigure"):      # 中文 Windows 控制台默认 GBK
 for cand in ("/app", str(Path(__file__).resolve().parent.parent / "apps" / "api")):
     if cand not in sys.path and Path(cand).is_dir():
         sys.path.insert(0, cand)
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    # 在 import app.* 之前解析:--help 不该依赖 api 代码能不能导入
+    p = argparse.ArgumentParser(
+        prog="check_sources.py",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="校验数据源注册表(source_catalog.py)与代码、字段是否对得上,可选探活。",
+        epilog="""\
+前置条件:
+  · 在仓库里直接跑(读 apps/api)或管道进 api 容器跑都行:
+    docker compose exec -T api python - < scripts/check_sources.py
+  · 只读源码里的注册表,不需要容器在跑
+  · 本机跑需要 apps/api 的 Python 依赖
+  · 默认离线,不需要平台 key
+  · --probe 要联网,并用 .env 里的 finance-data 凭证(会消耗上游配额)
+
+退出码:0 = 通过 · 1 = 有问题""")
+    p.add_argument("--probe", action="store_true",
+                   help="追加第 4 项:真打一次可用数据源的端点(要网络与平台 key)")
+    return p.parse_args(argv)
+
+
+ARGS = parse_args()
 
 from app.services import source_catalog as catalog     # noqa: E402
 
@@ -174,7 +199,7 @@ def main() -> int:
     check_unique_keys()
     check_recorded_keys()
     check_fields()
-    if "--probe" in sys.argv:
+    if ARGS.probe:
         check_probe()
     else:
         print("  [4/4] 探活        跳过(加 --probe 启用 · 会消耗上游配额)")

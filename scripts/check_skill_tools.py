@@ -27,6 +27,7 @@
 """
 from __future__ import annotations
 
+import argparse
 import re
 import subprocess
 import sys
@@ -159,8 +160,26 @@ def check_prompt_tpl(skills: list[dict]) -> list[tuple[str, str, str]]:
     return bad
 
 
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        prog="check_skill_tools.py",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="校验 SKILL.md 里引用的工具真实存在、prompt_tpl 是自然语言。",
+        epilog="""\
+前置条件:
+  · 默认通过 docker compose exec 从 opencode 容器读真实工具集;
+    容器没起时自动退回脚本内的离线清单
+  · --offline 不需要 docker,CI 与提 PR 前用这个
+  · 不需要平台 key
+
+退出码:0 = 全部合法 · 1 = 有问题""")
+    p.add_argument("--offline", action="store_true",
+                   help="不读容器,直接用脚本内的已知工具清单")
+    return p.parse_args(argv)
+
+
 def main() -> int:
-    offline = "--offline" in sys.argv
+    offline = parse_args().offline
     real = None if offline else tools_from_container()
     if real is None:
         real = KNOWN_TOOLS

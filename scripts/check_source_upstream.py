@@ -26,6 +26,7 @@
 """
 from __future__ import annotations
 
+import argparse
 import re
 import sys
 from pathlib import Path
@@ -36,6 +37,27 @@ if hasattr(sys.stdout, "reconfigure"):      # 中文 Windows 控制台默认 GBK
 for cand in ("/app", str(Path(__file__).resolve().parent.parent / "apps" / "api")):
     if cand not in sys.path and Path(cand).is_dir():
         sys.path.insert(0, cand)
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    # 在 import app.* 之前解析:--help 不该依赖 api 代码能不能导入
+    p = argparse.ArgumentParser(
+        prog="check_source_upstream.py",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="校验每条数据源的 upstream(真实上游)都已填写、已登记并带证据注释。",
+        epilog="""\
+前置条件:
+  · 在仓库里直接跑(读 apps/api)或管道进 api 容器跑都行:
+    docker compose exec -T api python - < scripts/check_source_upstream.py
+  · 只读源码里的注册表,不需要容器在跑
+  · 本机跑需要 apps/api 的 Python 依赖
+  · 不需要平台 key,不联网
+
+退出码:0 = 通过 · 1 = 有问题""")
+    return p.parse_args(argv)
+
+
+ARGS = parse_args()
 
 from app.services import source_catalog as catalog     # noqa: E402
 

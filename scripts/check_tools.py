@@ -19,6 +19,7 @@
 """
 from __future__ import annotations
 
+import argparse
 import re
 import subprocess
 import sys
@@ -31,6 +32,30 @@ REPO = Path(__file__).resolve().parent.parent
 for cand in ("/app", str(REPO / "apps" / "api")):
     if cand not in sys.path and Path(cand).is_dir():
         sys.path.insert(0, cand)
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    # 在 import app.* 之前解析:--help 不该依赖 api 代码能不能导入
+    p = argparse.ArgumentParser(
+        prog="check_tools.py",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="校验工具箱注册表(tool_catalog.py)与数据源、SKILL 引用及容器里的 MCP 工具是否对得上。",
+        epilog="""\
+前置条件:
+  · 在仓库里直接跑(读 apps/api)或管道进 api 容器跑都行:
+    docker compose exec -T api python - < scripts/check_tools.py
+  · 只读源码里的注册表,不需要容器在跑
+  · 本机跑需要 apps/api 的 Python 依赖
+  · --live 需要本机能 docker compose exec 进 opencode 容器
+  · 不需要平台 key
+
+退出码:0 = 通过 · 1 = 有问题""")
+    p.add_argument("--live", action="store_true",
+                   help="追加第 1-2 项:与 opencode 容器里的真实 MCP 工具对账(要 docker)")
+    return p.parse_args(argv)
+
+
+ARGS = parse_args()
 
 from app.services import source_catalog as sc     # noqa: E402
 from app.services import tool_catalog as tc       # noqa: E402
@@ -128,7 +153,7 @@ def check_skill_needs_tools() -> None:
 
 def main() -> int:
     print("检查工具箱注册表 (tool_catalog.py)")
-    if "--live" in sys.argv:
+    if ARGS.live:
         live = tools_from_container()
         if live is None:
             warns.append("容器读取失败,跳过与容器对账(第 1-2 项)")
