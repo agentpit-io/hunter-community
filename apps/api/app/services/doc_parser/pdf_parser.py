@@ -42,11 +42,27 @@ def _normalize_fin_text(text: str) -> str:
 
 
 def _clean_cell(val: Any) -> str:
-    """清洗 PDF 表格单元格：去掉内部换行与多余空格，转义管道符 |"""
+    """清洗 PDF 表格单元格：去掉内部换行与多余空格，修复 CJK 字体下被拆乱的小数点/负号，转义管道符 |"""
     if val is None:
         return ""
     s = str(val).replace("\r", " ").replace("\n", " ").strip()
     s = re.sub(r"\s+", " ", s)
+    # 修复部分 PDF 引擎（如 pymupdf_layout + CJK 混排字体）将单元格内负号/小数点拆到末尾的乱序现象：
+    # 例如 "1245% − ." -> "-12.45%"、"83451 ." -> "834.51"、"+1756% ." -> "+17.56%"
+    m_neg_pct = re.fullmatch(r"(\d{3,})%\s*[−－﹣—-]\s*\.", s)
+    if m_neg_pct:
+        digits = m_neg_pct.group(1)
+        s = f"-{digits[:-2]}.{digits[-2:]}%"
+    else:
+        m_pos_pct = re.fullmatch(r"([+-]?\d{3,})%\s*\.", s)
+        if m_pos_pct:
+            digits = m_pos_pct.group(1)
+            s = f"{digits[:-2]}.{digits[-2:]}%"
+        else:
+            m_dec = re.fullmatch(r"([+-]?\d{3,})\s*\.", s)
+            if m_dec:
+                digits = m_dec.group(1)
+                s = f"{digits[:-2]}.{digits[-2:]}"
     s = _normalize_fin_text(s)
     return s.replace("|", "｜")
 

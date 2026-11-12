@@ -3,6 +3,20 @@
 All notable changes to HunterCode · Community Edition follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.2] - 2026-11-12
+
+> **新增功能 · 对话框支持导入 PDF 财报/研报、Excel 交割单、Word 纪要与 Markdown 策略笔记进行深度投研分析。**
+>
+> **改了什么**：
+> 1. 聊天框左下角新增「📎 上传文档/PDF」按钮，支持点击选择、拖拽上传与 `Ctrl+V` 粘贴上传；
+> 2. 后端内置 PDF 三级解析引擎（精准还原 PDF 内财务报表为标准 Markdown 表格、修复特殊负号与断字、每页标注 `[来源：文件名 · 第X页]` 溯源钢印、扫描件自动 OCR 兜底，长年报自动提取黄金摘要并配发按页检索翻阅工具）；
+> 3. 自动识别文档中的 A 股 / 港股 / 美股代码并展示关联标的芯片与一键追问按钮，发送后自动联动实时行情卡片与财务工具做交叉核验，点击回复中的页码角标可在右侧面板核对原文与原始财务表；
+> 4. 支持 Excel / CSV 券商交割单自动识别并一键导入持仓诊断，支持 Word 内嵌表还原与 Markdown 策略规则识别；
+> 5. `HUNTER_VERSION` / `FIN_TAG` 默认值 `2.2.1` → `2.2.2`（`docker-compose*.yml` 的镜像 tag 同步，含增量迁移 `0056_chat_uploaded_files.sql` 自动执行）。
+>
+> **升级**：`.env` 的 `HUNTER_VERSION` 与 `FIN_TAG` 一起改 `2.2.2`，再
+> `docker compose --profile fin pull && docker compose --profile fin up -d`。
+
 ## [2.2.1] - 2026-10-14
 
 > **补丁版本 · 修复谷歌 4.0（Gemini 4 Argon）模型名称显示并新增全链路大模型调用日志跟踪与导出。**

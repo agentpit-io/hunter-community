@@ -276,8 +276,21 @@ def test_6_stock_entity_extractor_accuracy():
     assert "100000" not in codes
 
 
+def _ensure_postgres_or_skip() -> None:
+    """检查当前环境是否有可用的 PostgreSQL 数据库；若在无 DB 的 CI 轻量 job 中则优雅 skip。"""
+    import psycopg2
+    from app.services.database import get_conn
+
+    try:
+        conn = get_conn()
+        conn.close()
+    except psycopg2.OperationalError as e:
+        pytest.skip(f"需要可用的 PostgreSQL 数据库（当前环境未启动 Postgres: {e}）")
+
+
 def test_7_and_8_upload_api_isolation_search_and_read_pages():
     """断言 7 & 8：上传入库、多租户归属隔离（403）、关键词搜索与跨页读取（14KB 保护）。"""
+    _ensure_postgres_or_skip()
     app = _build_test_app()
     client = TestClient(app)
 
@@ -314,7 +327,7 @@ def test_7_and_8_upload_api_isolation_search_and_read_pages():
     )
     assert prev_bob.status_code == 403
 
-    internal_key = os.getenv("HUNTER_INTERNAL_KEY", "hunter-internal-2026")
+    internal_key = os.getenv("HUNTER_INTERNAL_KEY", "ci-test-secret")
     ctx_bob = client.post(
         "/api/internal/files/context_bundle",
         headers={"X-Hunter-Internal-Key": internal_key, "X-Hunter-User-Id": "user_bob"},

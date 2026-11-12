@@ -49,9 +49,11 @@ Pillow==11.0.0
 python-multipart==0.0.9
 
 # 对话框多格式文件导入（PDF / Excel / Word / Markdown）解析依赖
-PyMuPDF
-python-docx
-openpyxl
-pandas
-xlrd
+# 钉死 PyMuPDF<2.0：PyMuPDF 2.x 默认强拉 69MB wheel + onnxruntime + pymupdf-layout，
+# 不仅镜像暴涨且其 layout 引擎对 CJK 表格单元格会拆乱小数点/负号顺序
+PyMuPDF>=1.24.0,<2.0.0
+python-docx>=1.1.0,<2.0.0
+openpyxl>=3.1.0,<4.0.0
+pandas>=2.0.0,<3.0.0
+xlrd>=2.0.1,<3.0.0
 
