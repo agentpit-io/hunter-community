@@ -485,10 +485,28 @@ async function handle(req: Request, segs: string[]): Promise<Response> {
         const raw = await req.text()
         const body = raw ? JSON.parse(raw) : {}
 
+        // 0. 若包含上传的文档 file_ids，向 hermes-api 拉取文档结构化上下文包与关联股票清单
+        let docInstruction = ''
+        if (Array.isArray(body.file_ids) && body.file_ids.length > 0) {
+          const ctxRes = await hermes('POST', '/api/internal/files/context_bundle', token, {
+            session_id: sid,
+            file_ids: body.file_ids,
+          })
+          delete body.file_ids
+          if (ctxRes.ok && ctxRes.data?.context_md) {
+            const docContextBlock = ctxRes.data.context_md
+            let detectedStocksHint = ''
+            if (Array.isArray(ctxRes.data.detected_stocks) && ctxRes.data.detected_stocks.length > 0) {
+              const stocksStr = ctxRes.data.detected_stocks
+                .map((s: any) => `${s.name}(${s.code})`)
+                .join('、')
+              detectedStocksHint = `\n【文档关联股票识别】系统已从用户上传的文档中识别出关联标的：${stocksStr}。`
+            }
+            docInstruction = `<uploaded-documents>\n${docContextBlock}\n</uploaded-documents>${detectedStocksHint}\n【上传文档分析与交叉核验铁律（最高优先级）】\n1. **数字零编造与页码溯源**：凡引用上述上传文档中的财务数字、表格指标或原文观点，**必须原样引用表格数值**，并在句末附上角标 \`[来源：文件名 第X页]\`（例如：\`营业收入 834.51 亿元 [来源：贵州茅台2025半年报摘要.pdf 第2页]\`）。\n2. **长文档按需翻页**：若文档标注为 \`paged\`（超长文档摘要模式），当摘要和目录中未包含具体明细时，严禁凭空猜测未展开页面的数字！\n3. **文档观点 × 实时盘面交叉核验（Hunter 独有优势）**：当用户要求分析研报/财报、评估投资价值或对比盘面时，若文档中识别出了关联股票代码，请**主动调用内置金融工具**（如 \`watchlist_stock_quickview\` / \`uzi_stock_deep_analysis\`），将「文档内的历史/预测数据」与「最新实时股价、估值分位」进行对比分析！`
+          }
+        }
+
         // ① 先把 image parts OCR 成 text parts —— 必须在 hermes_token 注入之前:
-        //   image → text 会新造 part 对象,原来 parts[0] 的 metadata 就丢了,
-        //   下面 token 注入还是往新 parts[0] 塞,顺序对得上就没事。
-        //   跳过纯文本对话(全都不是 image · imagePartsToText 直接原样返回)。
         if (Array.isArray(body.parts) && body.parts.length > 0 &&
             body.parts.some((p: any) => p?.type === 'file' &&
                                         typeof p?.mime === 'string' &&
@@ -497,17 +515,18 @@ async function handle(req: Request, segs: string[]): Promise<Response> {
         }
 
         // ② token 必须塞进 **parts[0].metadata**,不能只放 body 顶层 ——
-        // opencode 的 PromptInput schema 没有顶层 metadata 字段,会被直接剥掉,
-        // hunter-auth plugin 因此永远读不到,日志刷"无 hermes_token",
-        // 下游所有 hunter tool 退化到 fallback_user_id(开源版没有这个值)→
-        // 自选股/持仓类工具全部拿不到用户身份。
-        // TextPartInput.metadata 是 Record<String, Any>,自定义键能活下来。
-        // (plugin 侧取值顺序见 huntercode plugins/hunter-auth.ts 的 chat.message)
         body.metadata = { ...(body.metadata || {}), hermes_token: token }
         if (Array.isArray(body.parts) && body.parts.length > 0) {
           body.parts = body.parts.map((p: any, i: number) =>
             i === 0 ? { ...p, metadata: { ...(p?.metadata || {}), hermes_token: token } } : p,
           )
+        }
+
+        if (docInstruction && Array.isArray(body.parts)) {
+          const textPartIdx = body.parts.findIndex((p: any) => p?.type === 'text')
+          if (textPartIdx >= 0) {
+            body.parts[textPartIdx].text = `${docInstruction}\n\n【用户问题】\n${body.parts[textPartIdx].text || ''}`
+          }
         }
 
         // 注入用户画像作 system prompt —— 这是"记忆体"真正起作用的地方。

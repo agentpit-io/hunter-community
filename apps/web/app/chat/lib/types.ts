@@ -34,6 +34,25 @@ export interface MessagePartTool {
 
 export type MessagePart = MessagePartText | MessagePartTool | { type: string; [k: string]: any }
 
+export interface UploadedAttachment {
+  id: string
+  fileId?: string
+  kind: 'document' | 'image'
+  filename: string
+  fileExt: 'pdf' | 'xlsx' | 'xls' | 'csv' | 'docx' | 'md' | 'txt' | 'image'
+  sizeBytes: number
+  status: 'uploading' | 'parsing' | 'ready' | 'error'
+  errorMsg?: string
+  totalPages?: number
+  totalChars?: number
+  tableCount?: number
+  injectMode?: 'full' | 'paged' | string
+  detectedStocks?: Array<{ code: string; name: string; market: string; mentions?: number }>
+  extraMeta?: Record<string, any>
+  dataUrl?: string
+  mime?: string
+}
+
 export interface Message {
   id: string
   sessionID: string
@@ -42,6 +61,8 @@ export interface Message {
   time?: { created: number; updated?: number }
   /** opencode 在 assistant 消息上记的失败(模型 402 / 401 / 用户中止…),见 lib/modelError.ts */
   error?: { name?: string; data?: any; message?: string }
+  /** 用户消息附带的已上传文档/图片列表 */
+  attachments?: UploadedAttachment[]
 }
 
 // SSE event 常见类型 (opencode 官方 event 系统)

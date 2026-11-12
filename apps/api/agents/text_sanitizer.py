@@ -274,6 +274,7 @@ NO_SANITIZE_KEYS = frozenset({
     "level", "action", "id", "tool_id", "model", "unit", "icon", "emoji",
     "url", "link", "source", "title", "date", "time", "author", "label",
     "finish_reason", "raw_text", "error",
+    "file_id", "filename", "file_ext", "sheet_name", "page_title",
 })
 
 

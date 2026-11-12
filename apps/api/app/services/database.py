@@ -822,6 +822,62 @@ async def init_db():
             ON CONFLICT (code, data_type) DO NOTHING
         """)
 
+        # ── 对话框多格式文件导入（PDF / Excel / Word / Markdown / TXT）存储表 · 幂等建表 ──
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS chat_uploaded_files (
+                file_id           VARCHAR(64) PRIMARY KEY,
+                user_id           TEXT NOT NULL DEFAULT '',
+                user_key          TEXT NOT NULL DEFAULT '',
+                session_id        VARCHAR(128) NOT NULL DEFAULT '',
+                filename          VARCHAR(512) NOT NULL,
+                file_ext          VARCHAR(16) NOT NULL,
+                mime_type         VARCHAR(128) NOT NULL DEFAULT '',
+                file_size_bytes   BIGINT NOT NULL DEFAULT 0,
+                file_size         BIGINT NOT NULL DEFAULT 0,
+                file_sha256       VARCHAR(64) NOT NULL DEFAULT '',
+                storage_path      TEXT NOT NULL DEFAULT '',
+                parse_status      VARCHAR(32) NOT NULL DEFAULT 'ready',
+                parse_error       TEXT,
+                error_message     TEXT,
+                total_pages       INT NOT NULL DEFAULT 0,
+                page_count        INT NOT NULL DEFAULT 0,
+                total_chars       INT NOT NULL DEFAULT 0,
+                char_count        INT NOT NULL DEFAULT 0,
+                table_count       INT NOT NULL DEFAULT 0,
+                ocr_page_count    INT NOT NULL DEFAULT 0,
+                inject_mode       VARCHAR(32) NOT NULL DEFAULT 'full',
+                toc_json          JSONB NOT NULL DEFAULT '[]'::jsonb,
+                detected_stocks   JSONB NOT NULL DEFAULT '[]'::jsonb,
+                related_stocks    JSONB NOT NULL DEFAULT '[]'::jsonb,
+                full_markdown     TEXT NOT NULL DEFAULT '',
+                summary_md        TEXT NOT NULL DEFAULT '',
+                summary_markdown  TEXT NOT NULL DEFAULT '',
+                extra_meta        JSONB NOT NULL DEFAULT '{}'::jsonb,
+                created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                expires_at        TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '7 days')
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_chat_files_session ON chat_uploaded_files(session_id, created_at)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_chat_files_user_sha ON chat_uploaded_files(user_id, file_sha256)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_chat_files_expires ON chat_uploaded_files(expires_at)")
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS chat_uploaded_file_pages (
+                id                BIGSERIAL PRIMARY KEY,
+                file_id           VARCHAR(64) NOT NULL REFERENCES chat_uploaded_files(file_id) ON DELETE CASCADE,
+                page_no           INT NOT NULL,
+                page_title        VARCHAR(256) NOT NULL DEFAULT '',
+                content_md        TEXT NOT NULL DEFAULT '',
+                page_markdown     TEXT NOT NULL DEFAULT '',
+                char_count        INT NOT NULL DEFAULT 0,
+                table_count       INT NOT NULL DEFAULT 0,
+                has_table         BOOLEAN NOT NULL DEFAULT FALSE,
+                used_ocr          BOOLEAN NOT NULL DEFAULT FALSE,
+                is_ocr            BOOLEAN NOT NULL DEFAULT FALSE,
+                UNIQUE(file_id, page_no)
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_chat_file_pages_lookup ON chat_uploaded_file_pages(file_id, page_no)")
+
         conn.commit()
         conn.close()
         logger.info("Database initialized")

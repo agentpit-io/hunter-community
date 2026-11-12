@@ -5,7 +5,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 import 'highlight.js/styles/github.css'
-import type { Message, MessagePart, MessagePartText, MessagePartTool } from '../lib/types'
+import type { Message, MessagePart, MessagePartText, MessagePartTool, UploadedAttachment } from '../lib/types'
 import ToolCallCard from './ToolCallCard'
 import FollowUpSuggestions from './FollowUpSuggestions'
 import ReportPreviewButton from './ReportPreviewButton'
@@ -40,11 +40,73 @@ interface Props {
   htmlArtifacts?: Record<string, { html: string; title: string }>
   /** 点消息底部 HTML 报告按钮时的 reopen 回调 */
   onReopenHtmlArtifact?: (msgId: string) => void
+  /** 点击回复中的 [来源：xxx.pdf 第18页] 角标或用户气泡上的文档卡片打开原文预览 */
+  onPreviewDocSource?: (fileIdOrName: string, pageNo: number) => void
 }
 
-function UserBubble({ text }: { text: string }) {
+function stripInjectedDocBlock(rawText: string): string {
+  if (!rawText) return ''
+  const marker = '【用户问题】\n'
+  if (rawText.includes('<uploaded-documents>') && rawText.includes(marker)) {
+    const idx = rawText.lastIndexOf(marker)
+    if (idx >= 0) return rawText.slice(idx + marker.length).trim()
+  }
+  return rawText
+}
+
+function UserBubble({
+  text,
+  attachments,
+  onPreviewDocSource,
+}: {
+  text: string
+  attachments?: UploadedAttachment[]
+  onPreviewDocSource?: (fileIdOrName: string, pageNo: number) => void
+}) {
+  const cleanText = stripInjectedDocBlock(text)
   return (
-    <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 20 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, marginBottom: 20 }}>
+      {attachments && attachments.length > 0 && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end', maxWidth: 680 }}>
+          {attachments.map((att) => (
+            <div
+              key={att.id}
+              onClick={() => {
+                if (att.fileId && onPreviewDocSource) onPreviewDocSource(att.fileId, 1)
+              }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '6px 10px',
+                borderRadius: 10,
+                background: '#faf7f0',
+                border: '1px solid #e2d6c3',
+                fontSize: 12,
+                color: HUNTER.INK,
+                cursor: att.fileId && onPreviewDocSource ? 'pointer' : 'default',
+              }}
+            >
+              <span
+                style={{
+                  padding: '2px 5px',
+                  borderRadius: 4,
+                  background: att.fileExt === 'pdf' ? '#d9483b' : '#217346',
+                  color: '#fff',
+                  fontSize: 10,
+                  fontWeight: 700,
+                }}
+              >
+                {(att.fileExt || 'DOC').toUpperCase()}
+              </span>
+              <span style={{ fontWeight: 600 }}>{att.filename}</span>
+              {att.totalPages ? (
+                <span style={{ color: HUNTER.INK_F, fontSize: 11 }}>{att.totalPages}页</span>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      )}
       <div
         style={{
           maxWidth: 680,
@@ -59,7 +121,7 @@ function UserBubble({ text }: { text: string }) {
           wordBreak: 'break-word',
         }}
       >
-        {text}
+        {cleanText}
       </div>
     </div>
   )
@@ -226,7 +288,74 @@ function extractSource(text: string): { body: string; source: string | null } {
   return { body: text, source: null }
 }
 
-function MdText({ text }: { text: string }) {
+function renderWithCitationChips(
+  children: React.ReactNode,
+  onPreviewDocSource?: (fileIdOrName: string, pageNo: number) => void,
+): React.ReactNode {
+  if (!onPreviewDocSource) return children
+  const CITATION_RE = /\[来源[：:]\s*([^\]]+?)\s*[·\s]*第\s*(\d+)(?:\/\d+)?\s*[页节]\]/g
+
+  const processNode = (node: React.ReactNode, keyPrefix: string): React.ReactNode => {
+    if (typeof node === 'string') {
+      const parts: React.ReactNode[] = []
+      let lastIdx = 0
+      let match: RegExpExecArray | null
+      CITATION_RE.lastIndex = 0
+      while ((match = CITATION_RE.exec(node)) !== null) {
+        if (match.index > lastIdx) {
+          parts.push(node.slice(lastIdx, match.index))
+        }
+        const fname = match[1].trim()
+        const pageNo = parseInt(match[2], 10) || 1
+        const fullLabel = match[0]
+        parts.push(
+          <button
+            key={`${keyPrefix}_cite_${match.index}`}
+            type="button"
+            data-testid="doc-source-citation-chip"
+            onClick={() => onPreviewDocSource(fname, pageNo)}
+            title={`点击在右侧预览《${fname}》第 ${pageNo} 页原始表格与正文`}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 3,
+              margin: '0 3px',
+              padding: '1px 7px',
+              borderRadius: 999,
+              border: '1px solid #dccbb2',
+              background: '#fcf6ec',
+              color: HUNTER.THEME,
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: 'pointer',
+              verticalAlign: 'baseline',
+            }}
+          >
+            📄 {fullLabel.slice(1, -1)}
+          </button>,
+        )
+        lastIdx = match.index + fullLabel.length
+      }
+      if (parts.length === 0) return node
+      if (lastIdx < node.length) parts.push(node.slice(lastIdx))
+      return parts
+    }
+    if (Array.isArray(node)) {
+      return node.map((child, idx) => processNode(child, `${keyPrefix}_${idx}`))
+    }
+    return node
+  }
+
+  return processNode(children, 'cite')
+}
+
+function MdText({
+  text,
+  onPreviewDocSource,
+}: {
+  text: string
+  onPreviewDocSource?: (fileIdOrName: string, pageNo: number) => void
+}) {
   const { body, source } = extractSource(text)
   return (
     <div className="hunter-md">
@@ -235,7 +364,9 @@ function MdText({ text }: { text: string }) {
         rehypePlugins={[rehypeHighlight]}
         components={{
           p: ({ children }) => (
-            <p style={{ margin: '0 0 12px 0', lineHeight: 1.75 }}>{children}</p>
+            <p style={{ margin: '0 0 12px 0', lineHeight: 1.75 }}>
+              {renderWithCitationChips(children, onPreviewDocSource)}
+            </p>
           ),
           h1: ({ children }) => (
             <h1 style={{ fontSize: 22, fontWeight: 700, margin: '20px 0 12px', color: HUNTER.INK, fontFamily: HUNTER.SERIF }}>{children}</h1>
@@ -253,7 +384,9 @@ function MdText({ text }: { text: string }) {
             <ol style={{ margin: '0 0 12px 0', paddingLeft: 22, lineHeight: 1.75 }}>{children}</ol>
           ),
           li: ({ children }) => (
-            <li style={{ margin: '2px 0' }}>{children}</li>
+            <li style={{ margin: '2px 0' }}>
+              {renderWithCitationChips(children, onPreviewDocSource)}
+            </li>
           ),
           strong: ({ children }) => (
             <strong style={{ fontWeight: 700, color: HUNTER.INK }}>{children}</strong>
@@ -524,7 +657,7 @@ function groupTurns(
   return out
 }
 
-export default function MessageList({ messages, onOpenArtifact, onPickSuggestion, busy, onOpenReport, extraBottom, onPickSkill, heroInput, htmlArtifacts, onReopenHtmlArtifact }: Props) {
+export default function MessageList({ messages, onOpenArtifact, onPickSuggestion, busy, onOpenReport, extraBottom, onPickSkill, heroInput, htmlArtifacts, onReopenHtmlArtifact, onPreviewDocSource }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   // 用户是否在底部 · 决定是否自动滚
@@ -598,7 +731,14 @@ export default function MessageList({ messages, onOpenArtifact, onPickSuggestion
           if (turn.role === 'user') {
             const m = turn.msgs[0]
             const text = (m.parts || []).filter(isText).map((p) => p.text).join('\n')
-            return <UserBubble key={m.id} text={text} />
+            return (
+              <UserBubble
+                key={m.id}
+                text={text}
+                attachments={m.attachments}
+                onPreviewDocSource={onPreviewDocSource}
+              />
+            )
           }
 
           // 这一轮里所有 assistant 消息的 parts 拼在一起(见 groupTurns 的说明)
@@ -651,7 +791,7 @@ export default function MessageList({ messages, onOpenArtifact, onPickSuggestion
                   // 没调工具时位置规则失效 —— 再按内容判一次(见 looksLikePlanning)
                   return looksLikePlanning(part.text)
                     ? <PlanningBlock key={i} text={part.text} />
-                    : <MdText key={i} text={part.text} />
+                    : <MdText key={i} text={part.text} onPreviewDocSource={onPreviewDocSource} />
                 }
                 if (isTool(part)) return <ToolCallCard key={i} part={part} onOpenArtifact={onOpenArtifact} turnText={turnText} />
                 return null

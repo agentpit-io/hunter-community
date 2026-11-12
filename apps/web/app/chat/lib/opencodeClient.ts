@@ -119,6 +119,8 @@ export interface SendMessageArgs {
   text: string
   agent?: string
   model?: { providerID: string; modelID: string }
+  /** 已上传解析完毕的文档 file_id 列表（PDF / Excel / Word / Markdown） */
+  fileIds?: string[]
   /** 图片附件 · 走 BFF 的 image → text OCR 拦截 · LLM 收到的还是纯文本 part */
   attachments?: SendAttachment[]
   /**
@@ -155,6 +157,7 @@ export async function sendMessage(args: SendMessageArgs): Promise<any> {
   const body: any = { parts }
   if (args.agent) body.agent = args.agent
   if (args.model) body.model = args.model
+  if (args.fileIds && args.fileIds.length > 0) body.file_ids = args.fileIds
   // 见 SendMessageArgs.skillKey 的说明 · BFF 用完即删,不会转发给 opencode
   if (args.skillKey) body.skillKey = args.skillKey
   return req(

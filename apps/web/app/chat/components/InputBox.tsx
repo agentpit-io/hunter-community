@@ -1,95 +1,43 @@
 'use client'
-import { useEffect, useRef, useState, useCallback, KeyboardEvent, DragEvent, ClipboardEvent } from 'react'
-import { fillTemplate, templateSlots } from '../lib/templateFill'
-import { Send, Paperclip, X, Image as ImageIcon, Square } from 'lucide-react'
+import {
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+  KeyboardEvent,
+  DragEvent,
+  ClipboardEvent,
+  RefObject,
+} from 'react'
+import { Send, Square, Paperclip, X, FileText, Loader2 } from 'lucide-react'
 import { HUNTER } from '../../lib/hunter-theme'
+import { fillTemplate, templateSlots } from '../lib/templateFill'
 import { ModelPicker } from './AgentModelPicker'
+import type { UploadedAttachment } from '../lib/types'
+import { uploadChatFile, deleteChatFile, importPortfolioFromFile } from '../lib/fileClient'
 
-/** 待发送的图片附件 · 内联 base64 · 由 BFF 拦截后走 tesseract OCR 抽文本 */
-export interface Attachment {
-  id: string
-  filename: string
-  mime: string
-  dataUrl: string        // "data:image/png;base64,..." · 直接传给 opencode file part
-  sizeKB: number
-}
+const ACCEPT_TYPES = [
+  '.pdf', 'application/pdf',
+  '.xlsx', '.xls', '.csv',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-excel', 'text/csv',
+  '.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.md', 'text/markdown', '.txt', 'text/plain',
+  'image/*',
+].join(',')
 
-interface InputBoxProps {
-  onSend: (text: string, attachments?: Attachment[]) => void
-  disabled?: boolean
-  /**
-   * 正在生成回答 —— 发送按钮变成方块的「停止」按钮。
-   *
-   * 和 `disabled` 分开传是因为这两件事只是碰巧都让输入框不可用,含义完全不同:
-   *   · `!sessionId` → 真的没法操作,按钮该是死的
-   *   · 正在生成    → 用户**恰恰需要**能点(把这一轮掐掉),按钮不能是死的
-   * 原来两者被揉进一个 `disabled`,所以生成中按钮是灰的、点不动。
-   */
-  generating?: boolean
-  /** 点方块按钮 · 掐掉这一轮生成 */
-  onAbort?: () => void
-  currentAgent: string
-  currentModelKey: string // "providerID/modelID"
-  onChangeAgent: (name: string) => void
-  onChangeModel: (providerID: string, modelID: string, displayName: string) => void
-  autoText?: string  // 从 URL ?q= 带来的首条 · 自动填入
-  autoSend?: boolean
-  /** 点能力卡填入的模板;seq 递增,连点同一个能力也能重复填入 */
-  draft?: { text: string; seq: number }
-  /**
-   * draft 已经填进输入框了 —— 请父层清掉它。
-   *
-   * ## 为什么"消费"这件事必须由父层记账
-   *
-   * 本组件在树里有**两个位置**:会话空的时候作为 `heroInput` 渲染在 MessageList
-   * 中央,有消息之后渲染在 ChatWorkspace 底部(见那边的 `isEmpty ? inputEl : null`
-   * 与 `{!isEmpty && inputEl}`)。发出第一条消息后 `isEmpty` 翻转,React 把这个
-   * 组件**卸载再挂载** —— `text` 归零、`autoSentRef` 也归零。
-   *
-   * 而 effect 在挂载时必定跑一次,于是:
-   *   · draft 还在 → 把模板原文又填回输入框(用户刚发完就看到一句没填占位符的模板)
-   *   · autoText + autoSend 还在 → **再发一次**,聊天里出现两条一模一样的用户消息
-   *
-   * 2026-09-08 用户两次报的就是这两个症状。记在组件自己的 ref 里救不了 ——
-   * ref 跟着组件一起没。所以填入/发出之后回调父层,把 draft / autoText 清掉,
-   * 重新挂载时它们是空的,effect 自然早返回。
-   */
-  onDraftConsumed?: () => void
-  /** autoText 已经**发出去**了 —— 请父层清掉,别在重新挂载时再发一遍 */
-  onAutoTextConsumed?: () => void
-  /**
-   * 换会话信号:这个数每 +1 一次,就把输入框里没发出去的内容清掉。
-   *
-   * ## 为什么不能靠"重新挂载"顺带清
-   *
-   * 输入框的 `text` 是本组件自己的 state,ChatWorkspace 那个「换会话清瞬时状态」
-   * 的 effect 够不着它。而**两个空会话之间切换时本组件根本不会重新挂载** ——
-   * hero / follow 的位置没变(都是 hero),React 复用同一个实例,text 原样留着。
-   *
-   * 2026-09-08 用户报的就是这个:在空会话点了快捷卡片把模板填进输入框、没发送,
-   * 直接点「新建对话」,新会话里那句模板还杵在输入框里。
-   *
-   * ## 为什么用信号而不是监听 sessionId
-   *
-   * 光看 sessionId 变化区分不了两件事:
-   *   · 用户**换会话**(该清)
-   *   · 会话**刚建好**(null → 新 id,不该清 —— 能力库跳转正是先建会话再填模板,
-   *     一清就把刚填进来的模板抹掉,等于把上一个 bug 修回去)
-   * 所以由 page 层在**明确知道用户在换会话**的那两个入口(点侧栏会话 /
-   * 点新建对话)递增这个数,不去猜 sessionId 变化的语义。
-   */
-  clearSeq?: number
-  /** hero: 首屏居中内联 · follow: 有消息时贴底悬浮 */
-  mode?: 'hero' | 'follow'
-}
-
-// 单张图上限 8MB · 后端 OCR 端点 10MB,留一点 base64 膨胀余量(~33%)
-// 大于这个后 tesseract 也没什么额外精度,反而序列化慢
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024
-const MAX_ATTACHMENTS = 4
+const MAX_DOC_BYTES = 50 * 1024 * 1024
+const MAX_ATTACHMENTS = 5
 
 function nanoid() {
   return Math.random().toString(36).slice(2, 10)
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
 }
 
 function readAsDataUrl(file: File): Promise<string> {
@@ -101,8 +49,49 @@ function readAsDataUrl(file: File): Promise<string> {
   })
 }
 
+function extBadgeStyle(ext: UploadedAttachment['fileExt']): { label: string; bg: string } {
+  switch (ext) {
+    case 'pdf':
+      return { label: 'PDF', bg: '#d9483b' }
+    case 'xlsx':
+    case 'xls':
+    case 'csv':
+      return { label: 'XLS', bg: '#217346' }
+    case 'docx':
+      return { label: 'DOC', bg: '#2b579a' }
+    case 'md':
+    case 'txt':
+      return { label: 'MD', bg: '#4a4a4a' }
+    default:
+      return { label: 'IMG', bg: '#8c6d46' }
+  }
+}
+
+interface InputBoxProps {
+  onSend: (text: string, attachments?: UploadedAttachment[]) => void
+  sessionId?: string | null
+  disabled?: boolean
+  generating?: boolean
+  onAbort?: () => void
+  currentAgent: string
+  currentModelKey: string
+  onChangeAgent: (name: string) => void
+  onChangeModel: (providerID: string, modelID: string, displayName: string) => void
+  autoText?: string
+  autoSend?: boolean
+  draft?: { text: string; seq: number }
+  onDraftConsumed?: () => void
+  onAutoTextConsumed?: () => void
+  clearSeq?: number
+  mode?: 'hero' | 'follow'
+  wrapperRef?: RefObject<HTMLDivElement | null>
+  /** 点击已上传文档卡片预览原文 */
+  onPreviewDocument?: (att: UploadedAttachment, pageNo?: number) => void
+}
+
 export default function InputBox({
   onSend,
+  sessionId,
   disabled,
   generating,
   onAbort,
@@ -115,29 +104,29 @@ export default function InputBox({
   onAutoTextConsumed,
   clearSeq,
   mode = 'follow',
+  wrapperRef,
+  onPreviewDocument,
 }: InputBoxProps) {
   const [text, setText] = useState('')
-  const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [attachments, setAttachments] = useState<UploadedAttachment[]>([])
   const [dragOver, setDragOver] = useState(false)
-  const [uploadError, setUploadError] = useState<string | null>(null)
+  const [hint, setHint] = useState<string | null>(null)
+  const [importingPortfolioId, setImportingPortfolioId] = useState<string | null>(null)
+
   const taRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const autoSentRef = useRef(false)
-  // 当前输入来自哪个模板的占位名(draft 填入时记下,发出 / 换会话时清掉)· 见 lib/templateFill.ts
   const tplSlotsRef = useRef<string[]>([])
 
-  // 换会话:把没发出去的内容丢掉 —— 它是写给上一个会话的(见 clearSeq 的说明)。
-  //
-  // ⚠️ 这个 effect 必须**声明在下面两个填入 effect 之前**。同一批更新里
-  // effect 按声明顺序跑,清空排在填入后面的话,会把刚填进来的模板又抹掉。
+  // 换会话时清空未发送文本和未发送附件
   const clearSeqRef = useRef(clearSeq)
   useEffect(() => {
-    // 首次挂载不清:此时输入框本来就是空的,而 draft 可能正要往里填
     if (clearSeqRef.current === clearSeq) return
     clearSeqRef.current = clearSeq
     setText('')
-    setAttachments([])   // 附件同理,也是给上一个会话准备的
+    setAttachments([])
     tplSlotsRef.current = []
+    setHint(null)
   }, [clearSeq])
 
   // 处理 URL ?q= 首条 · autoText 变化时填入
@@ -149,26 +138,18 @@ export default function InputBox({
         setTimeout(() => {
           onSend(autoText)
           setText('')
-          // 发出去了就请父层清掉 —— autoSentRef 挡不住重新挂载(见 onAutoTextConsumed
-          // 的说明),不清的话第一条消息发出、输入框换位置重挂之后会**再发一遍**
           onAutoTextConsumed?.()
         }, 200)
       }
-      // 只填入没发送(autoSend=false 或此刻 disabled)时**不消费** ——
-      // 还要等 disabled 变回 false 时由这个 effect 再跑一次把它发出去
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoText, autoSend, disabled])
 
-  // 能力卡填入:把模板放进输入框,并把光标选中第一个 {占位符}
+  // 能力卡填入
   useEffect(() => {
     if (!draft?.text) return
     setText(draft.text)
     tplSlotsRef.current = templateSlots(draft.text)
-    // **填进来就算用掉了**,立刻请父层清掉 draft。
-    // draft 的职责只是"把这段文字送进输入框"一次;留着它,等这个组件因为
-    // isEmpty 翻转而重新挂载时会被再填一遍(见 onDraftConsumed 的说明),
-    // 表现就是"消息已经发出去了,输入框里却还杵着那句没填占位符的模板"。
     onDraftConsumed?.()
     const ta = taRef.current
     if (!ta) return
@@ -190,62 +171,114 @@ export default function InputBox({
     ta.style.height = Math.min(ta.scrollHeight, 260) + 'px'
   }
 
-  // 把 File[] 转成 Attachment[] 加入队列 · 前置校验类型/大小/张数
-  const acceptFiles = useCallback(async (files: File[]) => {
-    setUploadError(null)
-    const room = MAX_ATTACHMENTS - attachments.length
-    if (room <= 0) {
-      setUploadError(`最多 ${MAX_ATTACHMENTS} 张图`)
-      return
-    }
-    const kept: Attachment[] = []
-    for (const f of files.slice(0, room)) {
-      if (!f.type.startsWith('image/')) {
-        setUploadError(`不支持的类型: ${f.type || f.name}`)
-        continue
+  // 统一处理用户选入/拖入/粘贴的文件（文档走后端实时解析，图片走内联预览+OCR）
+  const acceptFiles = useCallback(
+    async (files: File[]) => {
+      setHint(null)
+      const room = MAX_ATTACHMENTS - attachments.length
+      if (room <= 0) {
+        setHint(`单条消息最多同时挂载 ${MAX_ATTACHMENTS} 个文件`)
+        return
       }
-      if (f.size > MAX_IMAGE_BYTES) {
-        setUploadError(`图片超 ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)}MB: ${f.name}`)
-        continue
-      }
-      try {
-        const dataUrl = await readAsDataUrl(f)
-        kept.push({
-          id: nanoid(),
-          filename: f.name || 'clipboard-image.png',
-          mime: f.type || 'image/png',
-          dataUrl,
-          sizeKB: Math.round(f.size / 1024),
-        })
-      } catch (e) {
-        setUploadError(`读取失败: ${(e as Error).message}`)
-      }
-    }
-    if (kept.length) setAttachments((prev) => [...prev, ...kept])
-  }, [attachments.length])
 
-  // 回形针 · 打开文件选择器
+      for (const f of files.slice(0, room)) {
+        const ext = (f.name.split('.').pop() || '').toLowerCase()
+        const isImage = f.type.startsWith('image/')
+        const isDoc = ['pdf', 'xlsx', 'xls', 'csv', 'docx', 'md', 'txt'].includes(ext)
+
+        if (!isImage && !isDoc) {
+          setHint(
+            `暂不支持 "${f.name}" 的格式，请上传 PDF、Excel(.xlsx/.xls/.csv)、Word(.docx)、Markdown(.md) 或图片`,
+          )
+          continue
+        }
+
+        if (isImage) {
+          if (f.size > MAX_IMAGE_BYTES) {
+            setHint(`图片超过 ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)}MB 上限：${f.name}`)
+            continue
+          }
+          try {
+            const dataUrl = await readAsDataUrl(f)
+            setAttachments((prev) => [
+              ...prev,
+              {
+                id: nanoid(),
+                kind: 'image',
+                filename: f.name || 'clipboard-image.png',
+                fileExt: 'image',
+                sizeBytes: f.size,
+                status: 'ready',
+                dataUrl,
+                mime: f.type || 'image/png',
+              },
+            ])
+          } catch (e: any) {
+            setHint(`读取图片失败：${e?.message || e}`)
+          }
+          continue
+        }
+
+        // 文档类型（PDF / Excel / Word / Markdown）
+        if (f.size > MAX_DOC_BYTES) {
+          setHint(`文件 "${f.name}" 超过 50MB 上限，建议拆分或上传摘要版`)
+          continue
+        }
+
+        const tempId = `uploading_${nanoid()}`
+        const docExt = (ext || 'pdf') as UploadedAttachment['fileExt']
+        setAttachments((prev) => [
+          ...prev,
+          {
+            id: tempId,
+            kind: 'document',
+            filename: f.name,
+            fileExt: docExt,
+            sizeBytes: f.size,
+            status: 'parsing',
+          },
+        ])
+
+        try {
+          const uploaded = await uploadChatFile(f, sessionId || undefined)
+          setAttachments((prev) =>
+            prev.map((item) => (item.id === tempId ? uploaded : item)),
+          )
+        } catch (e: any) {
+          const errMsg = e?.message || '解析失败'
+          setAttachments((prev) =>
+            prev.map((item) =>
+              item.id === tempId
+                ? { ...item, status: 'error', errorMsg: errMsg }
+                : item,
+            ),
+          )
+        }
+      }
+    },
+    [attachments.length, sessionId],
+  )
+
   const openFilePicker = () => fileInputRef.current?.click()
 
   const onFileInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || [])
     if (files.length) await acceptFiles(files)
-    // 清 input value · 让用户下次能重选同一张图
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
-  // 粘贴 · Cmd+V 截图直接入队
+  // 支持 Ctrl+V 粘贴文件（PDF/Excel/Word/截图）
   const onPaste = async (e: ClipboardEvent<HTMLDivElement>) => {
     const items = Array.from(e.clipboardData?.items || [])
-    const imageItems = items.filter((it) => it.type.startsWith('image/'))
-    if (imageItems.length === 0) return
-    // 阻止图片被粘成文本(浏览器会尝试转 base64 塞进 textarea · 巨丑)
+    const fileItems = items.filter((it) => it.kind === 'file')
+    if (fileItems.length === 0) return
+    const files = fileItems.map((it) => it.getAsFile()).filter(Boolean) as File[]
+    if (files.length === 0) return
     e.preventDefault()
-    const files = imageItems.map((it) => it.getAsFile()).filter(Boolean) as File[]
     await acceptFiles(files)
   }
 
-  // 拖拽区 · 整个卡片都接
+  // 拖拽文件进入输入框
   const onDragOver = (e: DragEvent<HTMLDivElement>) => {
     if (Array.from(e.dataTransfer.types).includes('Files')) {
       e.preventDefault()
@@ -260,18 +293,37 @@ export default function InputBox({
     if (files.length) await acceptFiles(files)
   }
 
-  const removeAttachment = (id: string) =>
-    setAttachments((prev) => prev.filter((a) => a.id !== id))
+  const removeAttachment = (att: UploadedAttachment) => {
+    setAttachments((prev) => prev.filter((a) => a.id !== att.id))
+    if (att.fileId) {
+      void deleteChatFile(att.fileId).catch(() => {})
+    }
+  }
 
-  const handleSend = () => {
-    const trimmed = text.trim()
-    // 允许"仅图片"发送 · BFF 会把图片 OCR 成 text part 塞给 LLM
-    if (!trimmed && attachments.length === 0) return
-    if (disabled) return
-    // 模板占位符:没填的拦下并重新选中,填过的去掉花括号(`{goog}` → `goog`)
-    const filled = fillTemplate(trimmed, tplSlotsRef.current)
+  const hasParsingAttachment = attachments.some(
+    (a) => a.status === 'uploading' || a.status === 'parsing',
+  )
+  const readyAttachments = attachments.filter((a) => a.status === 'ready')
+
+  const handleSendWithPrompt = (overridePrompt?: string) => {
+    if (disabled || hasParsingAttachment) return
+    const rawText = (overridePrompt !== undefined ? overridePrompt : text).trim()
+
+    if (!rawText && readyAttachments.length === 0) return
+
+    let finalPrompt = rawText
+    if (!finalPrompt && readyAttachments.length > 0) {
+      const firstDoc = readyAttachments.find((a) => a.kind === 'document')
+      if (firstDoc) {
+        finalPrompt = `请精读我上传的这份《${firstDoc.filename}》文档，提炼核心财务数据、关键表格指标与投资结论，并结合关联股票的最新实时行情进行交叉分析。`
+      } else {
+        finalPrompt = '请识别并分析我上传的图片内容。'
+      }
+    }
+
+    const filled = fillTemplate(finalPrompt, tplSlotsRef.current)
     if (!filled.ok) {
-      setUploadError(`先把 ${filled.unfilled} 换成具体的股票名称或代码再发送`)
+      setHint(`先把 ${filled.unfilled} 换成具体的股票名称或代码再发送`)
       const ta = taRef.current
       if (ta) {
         const at = text.indexOf(filled.unfilled)
@@ -280,12 +332,30 @@ export default function InputBox({
       }
       return
     }
-    onSend(filled.text, attachments.length ? attachments : undefined)
+
+    onSend(filled.text, readyAttachments.length > 0 ? readyAttachments : undefined)
     tplSlotsRef.current = []
+    setHint(null)
     setText('')
     setAttachments([])
-    setUploadError(null)
     if (taRef.current) taRef.current.style.height = 'auto'
+  }
+
+  const handleSend = () => handleSendWithPrompt()
+
+  const handleImportPortfolioAndDiagnose = async (att: UploadedAttachment) => {
+    if (!att.fileId || importingPortfolioId) return
+    setImportingPortfolioId(att.fileId)
+    try {
+      const res = await importPortfolioFromFile(att.fileId)
+      handleSendWithPrompt(
+        `我刚从《${att.filename}》导入了 ${res.imported_count} 只持仓股票，请结合表格中的持仓股数与成本价，调用 portfolio_portfolio_rebalance 和 portfolio_portfolio_stress 帮我做持仓诊断与极端行情压力测试。`,
+      )
+    } catch (e: any) {
+      setHint(e?.message || '导入持仓失败')
+    } finally {
+      setImportingPortfolioId(null)
+    }
   }
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -295,22 +365,31 @@ export default function InputBox({
     }
   }
 
-  const canSend = (!!text.trim() || attachments.length > 0) && !disabled
-  // 正在生成 → 同一个位置换成方块的停止按钮(用户要求两者重叠)。
-  // 没给 onAbort 就不显示 —— 宁可按钮是灰的,也不要给一个点下去没反应的停止键
+  // 汇总当前已就绪文档中识别出的关联股票（去重，最多展示 6 只）
+  const aggregatedStocks: Array<{ code: string; name: string; market: string }> = []
+  const seenCodes = new Set<string>()
+  for (const att of readyAttachments) {
+    for (const s of att.detectedStocks || []) {
+      if (s?.code && !seenCodes.has(s.code)) {
+        seenCodes.add(s.code)
+        aggregatedStocks.push(s)
+      }
+    }
+  }
+
+  const canSend = (!!text.trim() || readyAttachments.length > 0) && !disabled && !hasParsingAttachment
   const showStop = !!generating && !!onAbort
   const btnActive = showStop || canSend
   const isHero = mode === 'hero'
   const placeholder = isHero
-    ? '向猎鹿人提问，或粘贴分析需求...'
+    ? '向猎鹿人提问，或拖拽 / 点击回形针上传 PDF 财报、研报、Excel 交割单...'
     : disabled
     ? '正在生成...'
-    : '继续提问，或补充你的分析需求...'
+    : '继续提问，或上传 PDF 财报/研报进行交叉分析...'
   const finePrint = isHero
-    ? '信息来自公开资料与联网检索 · 请独立判断并注意投资风险'
+    ? '信息来自公开资料与联网检索 · 支持导入 PDF 财报/研报、Excel、Word、Markdown 深度分析'
     : '内容由 AI 生成，仅供参考，不构成任何投资建议'
 
-  // hero 模式 · 内联居中；follow 模式 · fixed 底部悬浮
   const outerStyle: React.CSSProperties = isHero
     ? {
         width: '100%',
@@ -323,8 +402,9 @@ export default function InputBox({
         bottom: 0,
         left: 0,
         right: 0,
-        padding: '0 24px 24px',
-        background: 'linear-gradient(180deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.9) 30%, #ffffff 60%)',
+        padding: '0 24px max(24px, env(safe-area-inset-bottom))',
+        background:
+          'linear-gradient(180deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.9) 30%, #ffffff 60%)',
         pointerEvents: 'none',
       }
 
@@ -336,7 +416,7 @@ export default function InputBox({
   }
 
   return (
-    <div style={outerStyle}>
+    <div ref={wrapperRef} style={outerStyle}>
       <div style={innerStyle}>
         <div
           onPaste={onPaste}
@@ -355,63 +435,348 @@ export default function InputBox({
             position: 'relative',
           }}
         >
-          {/* 拖拽提示 · 只在拖入时显示 */}
+          {/* 拖拽高亮浮层 */}
           {dragOver && (
-            <div style={{
-              position: 'absolute', inset: 0, borderRadius: HUNTER.R_XL,
-              background: 'rgba(176,106,50,0.06)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              gap: 8, fontSize: 14, color: HUNTER.THEME, fontWeight: 600,
-              pointerEvents: 'none', zIndex: 2,
-            }}>
-              <ImageIcon size={18} /> 放开以上传图片
+            <div
+              style={{
+                position: 'absolute',
+                inset: 0,
+                borderRadius: HUNTER.R_XL,
+                background: 'rgba(176,106,50,0.07)',
+                border: `2px dashed ${HUNTER.THEME}`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+                fontSize: 14,
+                color: HUNTER.THEME,
+                fontWeight: 600,
+                pointerEvents: 'none',
+                zIndex: 5,
+              }}
+            >
+              <FileText size={18} /> 放开以上传文件（PDF 财报/研报、Excel、Word、Markdown）进行分析
             </div>
           )}
 
-          {/* 附件缩略图条 · 有附件才显示 */}
+          {/* 已挂载文件预览条（DocumentAttachmentCard + 图片缩略图） */}
           {attachments.length > 0 && (
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-              {attachments.map((a) => (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {attachments.map((att) => {
+                  if (att.kind === 'image' && att.dataUrl) {
+                    return (
+                      <div
+                        key={att.id}
+                        style={{
+                          position: 'relative',
+                          width: 72,
+                          height: 72,
+                          borderRadius: 10,
+                          border: `1px solid ${HUNTER.LINE_STRONG}`,
+                          overflow: 'hidden',
+                          background: '#f8f5f0',
+                        }}
+                        title={`${att.filename} · ${formatSize(att.sizeBytes)}`}
+                      >
+                        <img
+                          src={att.dataUrl}
+                          alt={att.filename}
+                          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeAttachment(att)}
+                          aria-label="移除附件"
+                          style={{
+                            position: 'absolute',
+                            top: 3,
+                            right: 3,
+                            width: 20,
+                            height: 20,
+                            borderRadius: '50%',
+                            background: 'rgba(0,0,0,0.62)',
+                            color: '#fff',
+                            border: 'none',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            padding: 0,
+                          }}
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    )
+                  }
+
+                  const badge = extBadgeStyle(att.fileExt)
+                  const isParsing = att.status === 'uploading' || att.status === 'parsing'
+                  const isErr = att.status === 'error'
+                  const isPortfolioSheet = !!att.extraMeta?.is_portfolio_sheet
+                  const hasStrategyDraft = !!att.extraMeta?.has_strategy_draft
+
+                  return (
+                    <div
+                      key={att.id}
+                      data-testid="uploaded-file-card"
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 6,
+                        padding: '10px 12px',
+                        borderRadius: 12,
+                        border: `1px solid ${isErr ? '#e29b90' : '#e3dacb'}`,
+                        background: isErr ? '#fdf4f2' : '#faf8f3',
+                        minWidth: 260,
+                        maxWidth: '100%',
+                        flex: '1 1 300px',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        {/* 格式徽标 */}
+                        <div
+                          style={{
+                            width: 36,
+                            height: 36,
+                            borderRadius: 8,
+                            background: badge.bg,
+                            color: '#fff',
+                            fontSize: 11,
+                            fontWeight: 700,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            flexShrink: 0,
+                            letterSpacing: 0.5,
+                          }}
+                        >
+                          {badge.label}
+                        </div>
+
+                        {/* 文件名 + 状态 */}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span
+                              onClick={() => {
+                                if (att.status === 'ready' && onPreviewDocument) {
+                                  onPreviewDocument(att, 1)
+                                }
+                              }}
+                              style={{
+                                fontSize: 13,
+                                fontWeight: 600,
+                                color: HUNTER.INK,
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                                cursor: att.status === 'ready' && onPreviewDocument ? 'pointer' : 'default',
+                              }}
+                              title={att.filename}
+                            >
+                              {att.filename}
+                            </span>
+                            <span style={{ fontSize: 11, color: HUNTER.INK_F, flexShrink: 0 }}>
+                              ({formatSize(att.sizeBytes)})
+                            </span>
+                          </div>
+
+                          <div style={{ fontSize: 12, marginTop: 2, display: 'flex', alignItems: 'center', gap: 6 }}>
+                            {isParsing && (
+                              <span style={{ color: HUNTER.THEME, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                <Loader2 size={12} className="animate-spin" />
+                                正在解析文字与财务表格...
+                              </span>
+                            )}
+                            {att.status === 'ready' && (
+                              <span
+                                data-testid="uploaded-file-ready-status"
+                                style={{ color: '#2b7a4b', fontWeight: 500 }}
+                              >
+                                ✅ 已就绪 · {att.totalPages || 1}页 · {att.tableCount || 0}张表
+                              </span>
+                            )}
+                            {isErr && (
+                              <span
+                                data-testid="uploaded-file-error-status"
+                                style={{ color: '#c0392b', fontWeight: 500 }}
+                              >
+                                ⚠️ {att.errorMsg || '文件解析失败'}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* 移除按钮 */}
+                        <button
+                          type="button"
+                          onClick={() => removeAttachment(att)}
+                          title="移除该文件"
+                          aria-label="移除该文件"
+                          style={{
+                            width: 24,
+                            height: 24,
+                            borderRadius: 6,
+                            border: 'none',
+                            background: 'transparent',
+                            color: HUNTER.INK_F,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            flexShrink: 0,
+                          }}
+                        >
+                          <X size={15} />
+                        </button>
+                      </div>
+
+                      {/* Excel 持仓单 / Markdown 策略草稿专属联动按钮 */}
+                      {att.status === 'ready' && (isPortfolioSheet || hasStrategyDraft) && (
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 2 }}>
+                          {isPortfolioSheet && (
+                            <button
+                              type="button"
+                              onClick={() => handleImportPortfolioAndDiagnose(att)}
+                              disabled={!!importingPortfolioId}
+                              style={{
+                                fontSize: 11,
+                                padding: '3px 9px',
+                                borderRadius: 999,
+                                border: `1px solid ${HUNTER.THEME}`,
+                                background: '#fff7ed',
+                                color: HUNTER.THEME,
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              💼 一键导入持仓并诊断 ({att.extraMeta?.portfolio_rows?.length || 0}只)
+                            </button>
+                          )}
+                          {hasStrategyDraft && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleSendWithPrompt(
+                                  `请提取《${att.filename}》中的量化选股与买卖条件规则，转化为结构化策略参数并评估历史回测要点。`,
+                                )
+                              }
+                              style={{
+                                fontSize: 11,
+                                padding: '3px 9px',
+                                borderRadius: 999,
+                                border: `1px solid ${HUNTER.THEME}`,
+                                background: '#fff7ed',
+                                color: HUNTER.THEME,
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              ⚡ 提取文中策略规则
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* 投研联动亮点：关联股票识别芯片 + 3 个快捷追问胶囊 */}
+              {readyAttachments.some((a) => a.kind === 'document') && (
                 <div
-                  key={a.id}
+                  data-testid="uploaded-file-actions-bar"
                   style={{
-                    position: 'relative',
-                    width: 72, height: 72,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 6,
+                    padding: '8px 10px',
                     borderRadius: 10,
-                    border: `1px solid ${HUNTER.LINE_STRONG}`,
-                    overflow: 'hidden',
-                    background: '#f8f5f0',
+                    background: '#f6f2ea',
+                    border: '1px solid #e7decb',
                   }}
-                  title={`${a.filename} · ${a.sizeKB}KB`}
                 >
-                  <img
-                    src={a.dataUrl} alt={a.filename}
-                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-                  />
-                  <button
-                    type="button" onClick={() => removeAttachment(a.id)}
-                    aria-label="移除"
-                    style={{
-                      position: 'absolute', top: 3, right: 3,
-                      width: 20, height: 20, borderRadius: '50%',
-                      background: 'rgba(0,0,0,0.62)', color: '#fff',
-                      border: 'none', cursor: 'pointer',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      padding: 0,
-                    }}
-                  >
-                    <X size={12} />
-                  </button>
+                  {aggregatedStocks.length > 0 && (
+                    <div
+                      data-testid="detected-stocks-bar"
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 12 }}
+                    >
+                      <span style={{ color: HUNTER.INK_S, fontWeight: 600 }}>🎯 识别到关联标的：</span>
+                      {aggregatedStocks.map((s) => (
+                        <span
+                          key={s.code}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            padding: '2px 8px',
+                            borderRadius: 999,
+                            background: '#fff',
+                            border: '1px solid #dccbb2',
+                            color: HUNTER.THEME,
+                            fontWeight: 600,
+                            fontSize: 11,
+                          }}
+                        >
+                          {s.code} {s.name}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 11, color: HUNTER.INK_F }}>快捷追问：</span>
+                    {[
+                      {
+                        label: '📊 提炼核心财务指标并与最新盘面对比',
+                        prompt:
+                          '请提炼我上传文档中的核心财务指标与关键表格数据（附准确页码来源），并自动调用实时行情工具与最新盘面走势进行交叉对比分析。',
+                      },
+                      {
+                        label: '🔍 核验研报核心逻辑与主力资金动向',
+                        prompt:
+                          '请梳理这份文档的核心投资逻辑与盈利预测（标注页码来源），并结合关联标的的最新实时股价、估值分位与近期新闻进行核验。',
+                      },
+                      {
+                        label: '⚠️ 排查财报隐藏风险点与异常科目',
+                        prompt:
+                          '请仔细排查上传文档中的潜在财务风险点、异常变动科目（如存货、应收、毛利率或现金流变动，注明具体页码），并给出客观风险评估。',
+                      },
+                    ].map((q) => (
+                      <button
+                        key={q.label}
+                        type="button"
+                        data-testid="quick-doc-prompt-chip"
+                        onClick={() => {
+                          setText(q.prompt)
+                          requestAnimationFrame(() => {
+                            taRef.current?.focus()
+                            autosize()
+                          })
+                        }}
+                        style={{
+                          fontSize: 11,
+                          padding: '3px 9px',
+                          borderRadius: 999,
+                          border: '1px solid #d9cbb5',
+                          background: '#ffffff',
+                          color: HUNTER.INK,
+                          cursor: 'pointer',
+                          transition: 'border-color 0.15s, background 0.15s',
+                        }}
+                      >
+                        {q.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              ))}
+              )}
             </div>
           )}
 
-          {uploadError && (
-            <div style={{
-              fontSize: 12, color: '#c05a4a', marginBottom: 8, paddingLeft: 6,
-            }}>
-              {uploadError}
+          {hint && (
+            <div style={{ fontSize: 12, color: '#c05a4a', marginBottom: 8, paddingLeft: 6 }}>
+              {hint}
             </div>
           )}
 
@@ -443,6 +808,16 @@ export default function InputBox({
             }}
           />
 
+          {/* 隐藏的文件选择器 */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept={ACCEPT_TYPES}
+            onChange={onFileInputChange}
+            style={{ display: 'none' }}
+          />
+
           <div
             style={{
               display: 'flex',
@@ -452,66 +827,53 @@ export default function InputBox({
               flexWrap: 'wrap',
             }}
           >
-            {/* 左侧 · 回形针 · 加图片 */}
+            {/* 左下角：回形针上传文件按钮 */}
             <button
               type="button"
+              data-testid="upload-file-btn"
               onClick={openFilePicker}
-              disabled={disabled || attachments.length >= MAX_ATTACHMENTS}
-              title={
-                attachments.length >= MAX_ATTACHMENTS
-                  ? `已达上限 ${MAX_ATTACHMENTS} 张`
-                  : '上传图片(支持粘贴/拖拽)'
-              }
-              aria-label="上传图片"
+              disabled={disabled}
+              title="导入 PDF 财报/研报进行分析（支持拖拽或粘贴文件）"
+              aria-label="导入 PDF 财报/研报进行分析"
               style={{
-                width: 34, height: 34,
-                borderRadius: 10,
-                background: 'transparent',
-                color: attachments.length >= MAX_ATTACHMENTS ? '#c9c3b6' : HUNTER.INK_S,
-                border: 'none',
-                cursor: disabled || attachments.length >= MAX_ATTACHMENTS ? 'not-allowed' : 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                transition: 'background 0.1s, color 0.1s',
-              }}
-              onMouseEnter={(e) => {
-                if (!disabled && attachments.length < MAX_ATTACHMENTS) {
-                  e.currentTarget.style.background = '#f4eee7'
-                  e.currentTarget.style.color = HUNTER.THEME
-                }
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'transparent'
-                e.currentTarget.style.color = attachments.length >= MAX_ATTACHMENTS ? '#c9c3b6' : HUNTER.INK_S
+                height: 32,
+                padding: '0 10px',
+                borderRadius: 8,
+                border: `1px solid ${HUNTER.LINE}`,
+                background: '#faf8f3',
+                color: HUNTER.INK_S,
+                cursor: disabled ? 'not-allowed' : 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                fontSize: 12,
+                fontWeight: 500,
+                transition: 'border-color 0.15s, color 0.15s',
               }}
             >
-              <Paperclip size={16} />
+              <Paperclip size={14} />
+              <span>上传文档/PDF</span>
             </button>
 
-            {/* 隐藏 file input · 由回形针触发 */}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              onChange={onFileInputChange}
-              style={{ display: 'none' }}
-            />
-
-            {/* 弹簧 · 把 ModelPicker + 发送按钮推到右边 */}
             <div style={{ flex: 1 }} />
 
-            {/* 中右 · Model picker(AgentPicker 已隐藏 · 走 opencode 默认 agent + BFF 注入的金融 system prompt) */}
             <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
               <ModelPicker value={currentModelKey} onChange={onChangeModel} />
             </div>
 
-            {/* 右侧 · 发送(语音输入未实现 · 已隐藏) */}
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               <button
                 type="button"
+                data-testid="chat-send-btn"
                 onClick={showStop ? onAbort : handleSend}
                 disabled={!btnActive}
-                title={showStop ? '停止生成' : '发送 (Enter)'}
+                title={
+                  showStop
+                    ? '停止生成'
+                    : hasParsingAttachment
+                    ? '正在解析文档，请稍候...'
+                    : '发送 (Enter)'
+                }
                 aria-label={showStop ? '停止生成' : '发送'}
                 style={{
                   width: 38,
@@ -534,7 +896,6 @@ export default function InputBox({
                   if (btnActive) e.currentTarget.style.background = HUNTER.THEME
                 }}
               >
-                {/* 实心方块 · fill 要跟着字色,否则只有一圈描边,看着像空心的"停止"不够明确 */}
                 {showStop ? <Square size={13} fill="currentColor" /> : <Send size={16} />}
               </button>
             </div>

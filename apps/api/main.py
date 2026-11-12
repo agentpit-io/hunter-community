@@ -221,11 +221,17 @@ async def lifespan(app: FastAPI):
         try:
             from apscheduler.schedulers.asyncio import AsyncIOScheduler
             from apscheduler.triggers.cron import CronTrigger
+            from app.routers.chat_files import cleanup_expired_chat_files as _cleanup_chat_files
             _catalog_sched = AsyncIOScheduler(timezone=tz_name("CN_A"))
             _catalog_sched.add_job(
                 lambda: asyncio.create_task(asyncio.to_thread(_seed_catalog)),
                 CronTrigger(hour=3, minute=0),
                 id="stocks_catalog_daily_seed", replace_existing=True,
+            )
+            _catalog_sched.add_job(
+                lambda: asyncio.create_task(asyncio.to_thread(_cleanup_chat_files)),
+                CronTrigger(hour=4, minute=15),
+                id="chat_uploaded_files_daily_cleanup", replace_existing=True,
             )
             # B4 · quant 每日 17:00 CST 重算 16 因子 · 复用同一 scheduler
             try:
@@ -379,6 +385,10 @@ app.include_router(quant_data_router.router, prefix="/api")
 # ── /chat 会话归属(用户隔离的权威数据源, 供 web BFF 调用) ──
 from app.routers import chat_session as chat_session_router
 app.include_router(chat_session_router.router, prefix="/api")
+
+# ── /chat 多格式文件导入(PDF / Excel / Word / Markdown)与翻页检索 ──
+from app.routers import chat_files as chat_files_router
+app.include_router(chat_files_router.router, prefix="/api")
 
 # ── /chat 能力面板(内置能力 + 用户自定义) ──
 from app.routers import chat_skill as chat_skill_router
