@@ -1,0 +1,239 @@
+# 构建并推送六个自家镜像到 GHCR，每个都是 linux/amd64 + linux/arm64 的多架构 manifest。
+# (api / web / daemon / llm-shim + 智能炒股的 paper / fin-worker)
+#
+# 其中 daemon 基于 AtomCode 5.1.0 Fork 提速二进制构建（通过 docs/fork-patch/apply.py 打入
+# system_prompt_file 与 tools.allow/deny 补丁后编译并校验），并在合成 manifest 时同时打标
+# hunter-community-daemon:{TAG} 与过渡兼容标签 hunter-community-opencode:{TAG}。
+#
+# 为什么不是一个 job 里 `platforms: linux/amd64,linux/arm64` + QEMU：
+# web 的 Next.js 构建和 api / daemon 的依赖编译在 QEMU 模拟下会慢一个数量级（几十分钟起，
+# 常常直接超时）。本仓是**公开仓库**，GitHub 免费提供原生 arm64 runner
+# (ubuntu-24.04-arm)，所以走官方推荐的「分平台构建 → push by digest →
+# 合成 manifest list」模式，两个平台各自在原生机器上跑、并行。
+#   https://docs.docker.com/build/ci/github-actions/multi-platform/
+#   ("Distribute build across multiple runners")
+#
+# ⚠️ build job **不能**给镜像打 tag：两个平台同时往同一个 tag 推会互相覆盖，
+#    最后 manifest 里只剩后到的那个架构。所以用 push-by-digest 只推 blob，
+#    tag 统一由 merge job 的 `docker buildx imagetools create` 一次性建出来。
+name: Docker publish
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  OWNER: agentpit-io
+
+jobs:
+  build:
+    # 6 个镜像 × 2 个平台 = 12 个并行 job
+    name: 构建 ${{ matrix.image.name }} · ${{ matrix.platform }}
+    runs-on: ${{ matrix.platform == 'linux/arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          # api / daemon / llm-shim 的构建上下文都是**仓库根**：
+          # api 镜像要 COPY skills/ data/ db/migrations/，daemon 要 COPY tools/ 与 distro/，
+          # 它们都不在各自 Dockerfile 所在的子目录下面。
+          - name: api
+            context: .
+            dockerfile: apps/api/Dockerfile
+          - name: web
+            context: apps/web
+            dockerfile: apps/web/Dockerfile
+          - name: daemon
+            context: .
+            dockerfile: deploy/Dockerfile.daemon
+          - name: llm-shim
+            context: .
+            dockerfile: deploy/llm-shim.Dockerfile
+          # 智能炒股 · 两个自包含服务，构建上下文就是各自的子目录
+          - name: paper
+            context: apps/paper
+            dockerfile: apps/paper/Dockerfile
+          - name: fin-worker
+            context: apps/fin-worker
+            dockerfile: apps/fin-worker/Dockerfile
+        platform:
+          - linux/amd64
+          - linux/arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 准备变量
+        run: |
+          platform=${{ matrix.platform }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
+          echo "REGISTRY_IMAGE=${{ env.REGISTRY }}/${{ env.OWNER }}/hunter-community-${{ matrix.image.name }}" >> $GITHUB_ENV
+
+      # runner 默认只剩十几 GB，web / daemon 镜像本身较大，加上 buildx 缓存很容易撑爆。
+      - name: 腾空间
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost || true
+          df -h /
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 若当前构建的是 daemon，先基于上游 v5.1.0 + docs/fork-patch/apply.py 编译出
+      # AtomCode Fork 提速版二进制，通过 Dockerfile.daemon-fork 叠层注入。
+      - name: 构建 AtomCode Fork 提速二进制（仅 daemon）
+        if: matrix.image.name == 'daemon'
+        run: |
+          set -euo pipefail
+          if git clone --depth 1 --branch v5.1.0 https://atomgit.com/atomgit_atomcode/atomcode.git /tmp/atomcode-src 2>/dev/null; then
+            python3 docs/fork-patch/apply.py /tmp/atomcode-src
+            docker run --rm -v /tmp/atomcode-src:/src -w /src rust:1-bookworm \
+              cargo build --release -p atomcode-cli
+            mkdir -p /tmp/forkbin
+            install -m 0755 /tmp/atomcode-src/target/release/atomcode /tmp/forkbin/atomcode
+            FORK_SHA=$(sha256sum /tmp/forkbin/atomcode | cut -d' ' -f1)
+            echo "FORK_BIN_READY=1" >> $GITHUB_ENV
+            echo "FORK_BIN_SHA256=${FORK_SHA}" >> $GITHUB_ENV
+          else
+            echo "::warning::无法访问 atomgit 上游源码，回退使用 npm 校验二进制构建 daemon"
+            echo "FORK_BIN_READY=0" >> $GITHUB_ENV
+          fi
+
+      # 这里只取 labels（OCI 注解）。tags 在 merge job 里算，build job 不打 tag。
+      - name: Compute labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY_IMAGE }}
+
+      - name: Build base daemon image for fork overlay
+        if: matrix.image.name == 'daemon' && env.FORK_BIN_READY == '1'
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.image.context }}
+          file: ${{ matrix.image.dockerfile }}
+          platforms: ${{ matrix.platform }}
+          load: true
+          tags: hca-daemon:base
+          cache-from: type=gha,scope=${{ matrix.image.name }}-${{ env.PLATFORM_PAIR }}
+          cache-to: type=gha,scope=${{ matrix.image.name }}-${{ env.PLATFORM_PAIR }},mode=max
+
+      - name: Build and push daemon fork by digest
+        id: build_fork
+        if: matrix.image.name == 'daemon' && env.FORK_BIN_READY == '1'
+        uses: docker/build-push-action@v6
+        with:
+          context: /tmp/forkbin
+          file: deploy/Dockerfile.daemon-fork
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            BASE_IMAGE=hca-daemon:base
+            FORK_BIN_SHA256=${{ env.FORK_BIN_SHA256 }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name-canonical=true,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,push=true
+
+      - name: Build and push by digest
+        id: build
+        if: matrix.image.name != 'daemon' || env.FORK_BIN_READY != '1'
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.image.context }}
+          file: ${{ matrix.image.dockerfile }}
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name-canonical=true,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,push=true
+          cache-from: type=gha,scope=${{ matrix.image.name }}-${{ env.PLATFORM_PAIR }}
+          cache-to: type=gha,scope=${{ matrix.image.name }}-${{ env.PLATFORM_PAIR }},mode=max
+
+      # 把 digest 变成一个空文件名传给 merge job —— 官方文档就是这么做的，
+      # 文件内容没有用，文件**名**才是 sha256 值。
+      - name: Export digest
+        run: |
+          mkdir -p ${{ runner.temp }}/digests
+          digest="${{ steps.build_fork.outputs.digest || steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.image.name }}-${{ env.PLATFORM_PAIR }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: 合成多架构 tag · ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [api, web, daemon, llm-shim, paper, fin-worker]
+    steps:
+      - name: 准备变量
+        run: |
+          echo "REGISTRY_IMAGE=${{ env.REGISTRY }}/${{ env.OWNER }}/hunter-community-${{ matrix.image }}" >> $GITHUB_ENV
+          if [ "${{ matrix.image }}" = "daemon" ]; then
+            echo "METADATA_IMAGES<<EOF" >> $GITHUB_ENV
+            echo "${{ env.REGISTRY }}/${{ env.OWNER }}/hunter-community-daemon" >> $GITHUB_ENV
+            echo "${{ env.REGISTRY }}/${{ env.OWNER }}/hunter-community-opencode" >> $GITHUB_ENV
+            echo "EOF" >> $GITHUB_ENV
+          else
+            echo "METADATA_IMAGES=${{ env.REGISTRY }}/${{ env.OWNER }}/hunter-community-${{ matrix.image }}" >> $GITHUB_ENV
+          fi
+
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-${{ matrix.image }}-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 标签规则（分支名 / tag 名 / sha- 短号 / latest 仅默认分支 / semver 不带前导 v）。
+      # ⚠️ semver 是必须的：`type=ref,event=tag` 出来的是原样的 `v3.0.0`，
+      #    而 docker-compose.yml 里 HUNTER_VERSION 的默认值是不带 v 的 `3.0.0`。
+      #    少了它，打完 git tag 之后用户 `docker compose up -d` 会拉不到镜像。
+      - name: Compute tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.METADATA_IMAGES }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+
+      - name: Create manifest list and push
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
+
+      - name: Inspect image
+        run: docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}

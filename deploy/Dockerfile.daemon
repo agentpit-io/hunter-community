@@ -23,7 +23,8 @@ ARG BASE_IMAGE_PREFIX=""
 
 FROM ${BASE_IMAGE_PREFIX}node:22-bookworm-slim AS atomcode-fetch
 
-# pins.lock [atomcode]：version 5.1.0 / npm_version 5.1.0-linux-x64
+# pins.lock [atomcode]：version 5.1.0 / npm_version 5.1.0-linux-x64 | 5.1.0-linux-arm64
+ARG TARGETARCH="amd64"
 ARG NPM_REGISTRY=""
 ARG ATOMCODE_NPM_PACKAGE="@atomgit.com/atomcode"
 ARG ATOMCODE_NPM_VERSION="5.1.0-linux-x64"
@@ -31,15 +32,25 @@ ARG ATOMCODE_NPM_VERSION="5.1.0-linux-x64"
 ARG ATOMCODE_TGZ_SHA256="220ea8d7b31c4482b7235fa251d266be080f8fedbf6d89d44f4cf642bfc872f5"
 # pins.lock [atomcode.binaries.linux-x64].sha256 —— 主校验，与上游 latest.json 一致
 ARG ATOMCODE_BIN_SHA256="40d86fa3e31980dbcdc8a6e5707c822f3953284ff76b31523789ca19988c8763"
+ARG ATOMCODE_BIN_SHA256_ARM64="19e0daf2d96bbf50e490ef56c1ef72cdbf5b10a208401e056808308403741a45"
 
 WORKDIR /fetch
 RUN set -eux; \
     if [ -n "${NPM_REGISTRY}" ]; then npm config set registry "${NPM_REGISTRY}"; fi; \
-    npm pack "${ATOMCODE_NPM_PACKAGE}@${ATOMCODE_NPM_VERSION}" >/dev/null; \
+    if [ "${TARGETARCH}" = "arm64" ] && [ "${ATOMCODE_NPM_VERSION}" = "5.1.0-linux-x64" ]; then \
+        NPM_VER="5.1.0-linux-arm64"; \
+        BIN_SHA="${ATOMCODE_BIN_SHA256_ARM64}"; \
+        TGZ_SHA=""; \
+    else \
+        NPM_VER="${ATOMCODE_NPM_VERSION}"; \
+        BIN_SHA="${ATOMCODE_BIN_SHA256}"; \
+        TGZ_SHA="${ATOMCODE_TGZ_SHA256}"; \
+    fi; \
+    npm pack "${ATOMCODE_NPM_PACKAGE}@${NPM_VER}" >/dev/null; \
     tgz="$(ls ./*.tgz)"; \
-    echo "${ATOMCODE_TGZ_SHA256}  ${tgz}" | sha256sum -c -; \
+    if [ -n "${TGZ_SHA}" ]; then echo "${TGZ_SHA}  ${tgz}" | sha256sum -c -; fi; \
     tar xzf "${tgz}" package/bin/atomcode; \
-    echo "${ATOMCODE_BIN_SHA256}  package/bin/atomcode" | sha256sum -c -; \
+    echo "${BIN_SHA}  package/bin/atomcode" | sha256sum -c -; \
     mkdir -p /out; \
     install -m 0755 package/bin/atomcode /out/atomcode; \
     /out/atomcode --version

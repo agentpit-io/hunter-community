@@ -1,49 +1,24 @@
-# Hunter Community Edition · 开发覆盖文件
+# Hunter Community Edition (AtomCode Unified) · 开发覆盖文件
 #
 #     docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 #
-# 它把 M1 之前 docker-compose.yml 里的两样东西原样接了回来:
-#   ① 四个自家服务的 build: 段(本地改代码、本地构建)
-#   ② 全部仓库文件 bind mount(改完不用重建镜像,`up -d` 或 `restart` 即生效)
+# 它把自家服务的 build: 段（本地改代码、本地构建）与仓库文件 bind mount 接了回来：
+#   ① 自家服务的 build: 段（本地改代码、本地构建）
+#   ② 全部仓库文件 bind mount（改完不用重建镜像，`up -d` 或 `restart` 即生效）
 #
-# 为什么这两样不能留在默认文件里:
-#   · build: —— compose 同时看到 image: 和 build: 时,本地没有该镜像就去**构建**
-#     而不是拉取。云平台和新用户只是想跑起来,却会莫名其妙开始编译 Next.js。
-#   · bind mount —— 挂的是仓库里的路径,而云平台上根本没有仓库目录。
-#
-# ⚠️ image: 在这里被改成了 `<名>:dev` 本地标签。不这么做的话,本地构建出来的
-#    东西会顶着 ghcr.io/…:1.1.0-rc1 这个正式标签躺在本机,下次用默认文件启动时
-#    compose 发现「镜像已存在」就不去拉了 —— 你会在「默认模式」下跑着自己的
-#    半成品构建,而且看不出任何异常。
+# ⚠️ image: 在这里被改成了 `<名>:dev` 本地标签，防止污染正式预构建标签。
 
 services:
   api:
     image: hunter-community-api:dev
     build:
-      # 上下文是仓库根(镜像要 COPY skills/ data/ db/migrations/),Dockerfile 仍在 apps/api
       context: .
       dockerfile: apps/api/Dockerfile
     volumes:
-      # SKILL 标准文件 · 我们发的 + 用户自己加的(同名时用户覆盖)
-      # 内置能力只读 —— api **永远不该改它们**。
-      # "恢复默认永远改不坏"这条,靠的就是内置层物理只读。
       - ./skills:/opt/hunter-skills:ro
-      # 用户能力**可写** —— UI 里新建/编辑/删除 SKILL 要往这里写文件
-      # (_19 §5.2)。opencode 那边仍然是 :ro,它只读不写。
       - ./user-skills:/opt/hunter-user-skills
-      # 推荐安装的 SKILL 清单(`_24` §5.4)· 只读。
-      # 挂载而不是打进镜像:换推荐不用重建,而且用户 fork 之后
-      # 改成他们团队的推荐位是改一个 JSON 就生效
       - ./data:/opt/hunter-data:ro
-      # 数据包 · 可读写。
-      #
-      # 用户把从云盘下载的 .tar 拖进 ./data-packages/ 就能在「数据」页
-      # 看到并导入;我们这边打包也写到这里。
-      #
-      # 为什么不放 ./data 下面:那个是 :ro(内置数据不该被改),而打包
-      # 要写。而且混在一起以后分不清哪个是随代码分发的、哪个是用户放的。
       - ./data-packages:/opt/hunter-packages
-      # 密钥卷照旧(它不是仓库文件,默认文件里也有)
       - hunter_secrets:/opt/hunter-secrets
 
   web:
@@ -52,12 +27,7 @@ services:
       context: ./apps/web
       dockerfile: Dockerfile
       args:
-        # 构建期烘进前端产物 · 留空则走同源 /api/*（反代部署）
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
-    # Phase D-3 · public/ 目录 volume mount · 本地改 HTML/JS 立即生效
-    # · 免每次都 docker cp · 参见 doc 13 §4.3
-    # ⚠️ **新增**文件要 `docker compose restart web`(Next 的 next start 只在启动时
-    #    扫一次 public 建静态路由表);只**改**已有文件则立即生效。
     volumes:
       - ./apps/web/public:/app/public:ro
 
@@ -67,60 +37,18 @@ services:
       context: .
       dockerfile: deploy/llm-shim.Dockerfile
     volumes:
-      # 改完 `docker compose restart llm-shim` 就生效,不需要也不该 build ——
-      # 本仓"改 python 也要 build"那条规则对它不适用(那条针对 COPY 进镜像的 api/web)。
       - ./scripts/llm-shim:/app:ro
 
-  opencode:
-    image: hunter-community-opencode:dev
+  daemon:
+    image: hunter-community-daemon:dev
     build:
       context: .
-      dockerfile: deploy/opencode.Dockerfile
+      dockerfile: deploy/Dockerfile.daemon
     volumes:
-      # 入口脚本 + gen-config.py。opencode 只认配置文件里的 provider、不认 LLM_*
-      # 环境变量 —— 不生成配置它会回落到内置的 OpenCode Zen,根本不去调你配的网关。
-      - ./scripts/opencode:/opt/hunter-boot:ro
-      # 覆盖镜像自带的 watchlist_mcp.py · 加了 watchlist_add tool 让 chat NL
-      # 「加XX到自选」能直接落库,而不是回落到"点击左侧菜单"的文本兜底。
-      # 详见 scripts/opencode-mcp/watchlist_mcp.py 文件头注释。
-      - ./scripts/opencode-mcp/watchlist_mcp.py:/opt/opencode-workspace/mcp/watchlist_mcp.py:ro
-      # 覆盖镜像自带的 uzi_mcp.py · httpx 120s→170s 对齐后端三段预算,失败对象带
-      # type/code/instruction(2026-09-07 茅台事故)。镜像重建要等 GHCR 登录,挂文件立即生效。
-      # 文件头注释写了它是 huntercode 的副本,改动先改 huntercode。
-      - ./scripts/opencode-mcp/uzi_mcp.py:/opt/opencode-workspace/mcp/uzi_mcp.py:ro
-      # 覆盖镜像自带的 hunter_user_mcp.py(2026-09-17)· 镜像那份描述让模型「预测走势调
-      # hunter_cap_kpred」,而 kpred 已删(_24 §4.1),模型会去找一个不存在的工具。
-      # 同样是 huntercode 的副本,镜像能拉新版之后这一行可以删。
-      - ./scripts/opencode-mcp/hunter_user_mcp.py:/opt/opencode-workspace/mcp/hunter_user_mcp.py:ro
-      # 覆盖镜像自带的 hunter-mcp-context.ts · HUNTER_TOOLS Set 里加了 watchlist_add,
-      # 不然 tool.execute.before hook 不注入 _hermes_user_id · api 收不到
-      # X-Hunter-User-Id → 401 unauthorized · LLM 会告诉用户"请登录",很误导。
-      - ./scripts/opencode-mcp/plugins/hunter-mcp-context.ts:/opt/opencode-workspace/plugins/hunter-mcp-context.ts:ro
-      # 语言守卫(2026-09-08)· 挂 experimental.text.complete hook,把整段回复
-      # 发给 api 的 /api/internal/lang/guard 判断有没有英文散文,有就换成中文。
-      # 为什么必须有:铁律 A10 说 prompt 里的中文约束单独用无效,要 prompt +
-      # 出口强校验两道。而 /chat 主回复由 opencode 直接产出,不经过 hunter-api
-      # 的 ToolResult / llm_json_call 出口 —— 那两道守卫从来没覆盖到它。
-      - ./scripts/opencode-mcp/plugins/hunter-lang.ts:/opt/opencode-workspace/plugins/hunter-lang.ts:ro
-      # 平台自有能力的 MCP(_12 Step 3)· 整目录挂进来由 gen-config.py 注册。
-      # 放 /opt/hunter-mcp 而不是覆盖 mcp/ 目录 —— 覆盖会把镜像自带的 4 个脚本一起遮掉。
-      - ./scripts/opencode-mcp:/opt/hunter-mcp:ro
-      # SKILL 标准文件 · opencode 自己也扫描这两处(实测见 _14 §2 结论 3):
-      #   .opencode/skills/            我们发的(会遮掉镜像自带的 effect skill —
-      #                                那是讲 Effect TS 库的,金融场景用不上)
-      #   ~/.config/opencode/skills/   用户自己加的
-      - ./skills:/opt/opencode-workspace/.opencode/skills:ro
-      # ⚠️ 只有开发模式挂这一行。默认模式下 opencode **不挂** user-skills ——
-      # 云平台上 api 与 opencode 可能在不同节点,共享目录不成立;改由 api 的
-      # 导出接口 + opencode 原生 skills.urls 同步(R0 第二节,M1 子任务 D)。
-      # 本地开发保持现状,免得一边开发一边还要等同步。
-      - ./user-skills:/home/hunter/.config/opencode/skills:ro
-      # 下面两个不是仓库文件,默认文件里也有 —— 写在这里是因为 compose 合并
-      # volumes 时按目标路径去重,漏写不会丢,但列全了看得清这个服务到底挂了什么。
-      - hunter_opencode_data:/home/hunter/.local
+      - ./tools/opencode-mcp:/opt/hca/mcp:ro
+      - ./distro/workspace-template:/opt/hca/workspace-template:ro
+      - ./distro/personas:/opt/hca/personas:ro
+      - hunter_workspace:/workspace
+      - hunter_atomcode_home:/data
+      - hunter_daemon_token:/run/hca
       - hunter_secrets:/opt/hunter-secrets:ro
-
-# postgres 的 ./db/migrations:/docker-entrypoint-initdb.d:ro **两种模式都没有**。
-# 不是漏写:那个目录只在数据卷第一次初始化时执行,而迁移现在由 api 启动时统一做
-# (boot.sh → app.migrate)。只在开发模式接回来的话,开发环境会走一条线上不存在的
-# 路径 —— 而迁移恰恰是最需要「开发跑的就是线上跑的」那一条。

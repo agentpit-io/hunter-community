@@ -1,0 +1,333 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # gitleaks-action v2+ requires a paid license for org repos.
+      # trufflehog is free for both individual and org · same signal quality.
+      - name: TruffleHog scan
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          extra_args: --results=verified,unknown
+
+  api:
+    name: API · import + syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: apps/api/requirements*.txt
+      - name: LLM shim SSE regression tests
+        run: python -m unittest discover -s scripts/llm-shim -p 'test_*.py' -v
+      - name: Install deps
+        working-directory: apps/api
+        run: pip install -r requirements-dev.txt
+      - name: Compile check (syntax)
+        working-directory: apps/api
+        run: python -m compileall -q app main.py
+      - name: Import smoke (HUNTER_MINIMAL_BOOT so schedulers skip)
+        working-directory: apps/api
+        env:
+          HUNTER_MINIMAL_BOOT: '1'
+          JWT_SECRET: ci-test-secret
+          DATABASE_URL: postgresql://placeholder@localhost/placeholder
+        run: python -c "import main; print('import ok')"
+      # 全部后端用例,含首启向导与内置额度的 test_setup_guard / test_llm_probe / test_setup_router /
+      # test_runtime_config / test_setup_builtin(原来单独一步点名跑这几份,现已并进这里)。
+      # 脚本式用例由 conftest 放进子进程跑;test_migrate.py 的真库用例在这里没有 TEST_DATABASE_URL
+      # 会跳过,由下面的 migrations job 跑。
+      - name: Backend tests (pytest · apps/api/tests)
+        working-directory: apps/api
+        env:
+          HUNTER_MINIMAL_BOOT: '1'
+          JWT_SECRET: ci-test-secret
+          DATABASE_URL: postgresql://placeholder@localhost/placeholder
+        run: python -m pytest
+      - name: SKILL tool references (offline)
+        run: python scripts/check_skill_tools.py --offline
+
+      # llm-shim 与 api 共用同一份 schema_clean.py —— 别让人在 api 里另存副本。
+      # 副本漂了的表现是「向导说能用、实际对话一发就 400」,最难查的那一类。
+      - name: 只能有一份 schema_clean.py
+        run: |
+          set -euo pipefail
+          N=$(find . -name schema_clean.py -not -path './node_modules/*' | wc -l)
+          find . -name schema_clean.py -not -path './node_modules/*'
+          [ "$N" = "1" ] || { echo "❌ schema_clean.py 出现了 $N 份,必须只有 scripts/llm-shim/ 那一份"; exit 1; }
+          grep -q 'scripts/llm-shim/schema_clean.py /opt/hunter-shim/' apps/api/Dockerfile \
+            || { echo "❌ api 镜像没有 COPY schema_clean.py,向导第 3 项检测会退化"; exit 1; }
+
+      - name: Export OpenAPI spec (audit diff)
+        env:
+          HUNTER_MINIMAL_BOOT: '1'
+          JWT_SECRET: ci-test-secret
+          DATABASE_URL: postgresql://placeholder@localhost/placeholder
+        run: |
+          python scripts/export-openapi.py
+          head -c 500 docs/api-reference.json
+          echo
+          # Fail if spec unexpectedly shrinks · route count guard
+          COUNT=$(python -c "import json; print(len(json.load(open('docs/api-reference.json'))['paths']))")
+          echo "route count: $COUNT"
+          [ "$COUNT" -ge 30 ] || (echo "❌ suspicious route count $COUNT (expected ≥30)" && exit 1)
+
+  migrations:
+    name: DB migrations · 空库连跑两遍 + 可重复执行规则
+    runs-on: ubuntu-latest
+    # 迁移从「postgres initdb(只在数据卷首次创建时跑一次)」改成「api 启动时跑
+    # (apps/api/app/migrate.py)」之后,这个 job 是唯一能挡住「迁移写坏了但没人发现、
+    # 等老用户升级时才炸」的东西。见 docs/setup-wizard/M1-B-自动迁移.md
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: hunter
+          POSTGRES_PASSWORD: ci-local-postgres   # service container 只在 job 内可达
+          POSTGRES_DB: hunter
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U hunter"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://hunter:ci-local-postgres@localhost:5432/hunter
+      HUNTER_MIGRATIONS_DIR: ${{ github.workspace }}/db/migrations
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── ① 迁移文件必须可重复执行 ────────────────────────────────────
+      # 为什么用 grep 而不是「跑两遍就完事」:跑两遍只能证明**现在这个库**上没问题,
+      # 而真实场景是各种中间状态的老库。写法上守住幂等,比事后测更可靠。
+      # 现有 23 个文件全部通过这四条规则(2026-09-17 实测),所以没有白名单。
+      # 真要加白名单请写在下面 SKIP 里并注明原因 —— 不要去改历史迁移文件的内容,
+      # 改了 checksum 就变了,已部署的库启动时会刷 WARNING。
+      - name: 迁移文件可重复执行规则(CREATE TABLE / INDEX / ADD COLUMN / VIEW)
+        run: |
+          set -uo pipefail
+          SKIP=""   # 白名单:文件名,用空格分隔;为空表示没有豁免
+          FAIL=0
+          report() { echo "❌ $1"; echo "$2"; echo; FAIL=1; }
+          for f in db/migrations/*.sql; do
+            case " $SKIP " in *" $(basename "$f") "*) echo "⏭ 跳过(白名单) $f"; continue ;; esac
+            # 先去掉 -- 行注释,免得注释里提到 CREATE TABLE 被误判
+            BODY=$(sed 's/--.*//' "$f")
+            bad=$(echo "$BODY" | grep -inE 'create[[:space:]]+table' | grep -ivE 'if[[:space:]]+not[[:space:]]+exists' || true)
+            [ -n "$bad" ] && report "$f · CREATE TABLE 必须带 IF NOT EXISTS" "$bad"
+            bad=$(echo "$BODY" | grep -inE 'create[[:space:]]+(unique[[:space:]]+)?index' | grep -ivE 'if[[:space:]]+not[[:space:]]+exists' || true)
+            [ -n "$bad" ] && report "$f · CREATE INDEX 必须带 IF NOT EXISTS" "$bad"
+            bad=$(echo "$BODY" | grep -inE 'add[[:space:]]+column' | grep -ivE 'if[[:space:]]+not[[:space:]]+exists' || true)
+            [ -n "$bad" ] && report "$f · ADD COLUMN 必须带 IF NOT EXISTS" "$bad"
+            bad=$(echo "$BODY" | grep -inE 'create[[:space:]]+view' || true)
+            [ -n "$bad" ] && report "$f · CREATE VIEW 必须写成 CREATE OR REPLACE VIEW" "$bad"
+          done
+          if [ "$FAIL" != 0 ]; then
+            echo "迁移文件必须可重复执行:同一个文件在老库上会被再跑一遍。"
+            echo "请改成 IF NOT EXISTS / CREATE OR REPLACE 写法(只改你新加的文件,不要动历史文件)。"
+            exit 1
+          fi
+          echo "✅ $(ls db/migrations/*.sql | wc -l) 个迁移文件全部符合可重复执行规则"
+
+      # 规则本身也要能被证伪,否则哪天 grep 写错了就成了永远绿的摆设
+      - name: 自检 · 上面的规则确实能抓到违规写法
+        run: |
+          set -uo pipefail
+          mkdir -p /tmp/negtest && cat > /tmp/negtest/9999_bad.sql <<'EOF'
+          CREATE TABLE bad_table (id int);
+          CREATE INDEX idx_bad ON bad_table(id);
+          ALTER TABLE bad_table ADD COLUMN foo int;
+          CREATE VIEW bad_view AS SELECT 1;
+          EOF
+          BODY=$(sed 's/--.*//' /tmp/negtest/9999_bad.sql)
+          HITS=0
+          echo "$BODY" | grep -iqE 'create[[:space:]]+table' && ! echo "$BODY" | grep -iqE 'create[[:space:]]+table[[:space:]]+if' && HITS=$((HITS+1))
+          echo "$BODY" | grep -iqE 'create[[:space:]]+index' && ! echo "$BODY" | grep -iqE 'index[[:space:]]+if' && HITS=$((HITS+1))
+          echo "$BODY" | grep -iqE 'add[[:space:]]+column' && ! echo "$BODY" | grep -iqE 'add[[:space:]]+column[[:space:]]+if' && HITS=$((HITS+1))
+          echo "$BODY" | grep -iqE 'create[[:space:]]+view' && HITS=$((HITS+1))
+          [ "$HITS" = 4 ] || { echo "❌ 规则自检失败:只抓到 $HITS/4 种违规写法"; exit 1; }
+          echo "✅ 四条规则都能抓到违规写法"
+
+      # ── ② 空库连跑两遍 ──────────────────────────────────────────────
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: apps/api/requirements.txt
+      - name: Install deps
+        working-directory: apps/api
+        run: pip install -r requirements.txt
+
+      - name: 第一遍 · 空库应把全部迁移跑完并记录
+        working-directory: apps/api
+        run: |
+          set -euo pipefail
+          TOTAL=$(ls "$HUNTER_MIGRATIONS_DIR"/*.sql | wc -l | tr -d ' ')
+          python -m app.migrate 2>&1 | tee /tmp/run1.log
+          grep -q "本次待执行 $TOTAL 个" /tmp/run1.log \
+            || { echo "❌ 第一遍没有把全部 $TOTAL 个迁移列为待执行"; exit 1; }
+          echo "✅ 第一遍执行了 $TOTAL 个迁移"
+
+      - name: 第二遍 · 应 0 个待执行且退出码 0
+        working-directory: apps/api
+        run: |
+          set -euo pipefail
+          python -m app.migrate 2>&1 | tee /tmp/run2.log   # set -e + 管道,非 0 会被 PIPESTATUS 之外的 pipefail 抓到
+          grep -q "本次待执行 0 个" /tmp/run2.log \
+            || { echo "❌ 第二遍不是 0 个待执行 —— 迁移不幂等或账本没写进去"; exit 1; }
+          if grep -q "WARNING" /tmp/run2.log; then
+            echo "❌ 第二遍出现 WARNING(多半是迁移文件 checksum 对不上)"; exit 1
+          fi
+          echo "✅ 第二遍 0 个待执行,退出码 0"
+
+      - name: 账本与关键列核对
+        run: |
+          set -euo pipefail
+          TOTAL=$(ls db/migrations/*.sql | wc -l | tr -d ' ')
+          q() { PGPASSWORD=ci-local-postgres psql -h localhost -U hunter -d hunter -tAc "$1"; }
+          ROWS=$(q "select count(*) from schema_migrations")
+          [ "$ROWS" = "$TOTAL" ] || { echo "❌ 账本 $ROWS 行,应为 $TOTAL 行"; exit 1; }
+          # 本机踩过的那个坑:老库缺 users.compliance_ack_at → compliance-status 500
+          [ "$(q "select count(*) from information_schema.columns where table_name='users' and column_name='compliance_ack_at'")" = 1 ] \
+            || { echo "❌ users.compliance_ack_at 没建出来"; exit 1; }
+          # 这几张表是 init_db() 建的 —— 证明阶段 ① 确实跑在增量迁移之前
+          for t in stocks klines backtest_result; do
+            [ "$(q "select count(*) from information_schema.tables where table_name='$t'")" = 1 ] \
+              || { echo "❌ 基础表 $t 没建出来"; exit 1; }
+          done
+          echo "✅ 账本 $ROWS 行,关键表/列齐全"
+
+      # ── ②b 真·可重复执行:在已迁移完的库上把每个文件再单独跑一遍 ──────
+      # grep 规则只看写法,这一步看实际效果 —— 它比 grep 强得多:
+      # 0010 写的是 CREATE OR REPLACE VIEW(grep 通过),但在 0014 之后重跑会报
+      # 「cannot drop columns from view」,只有这一步能抓到。
+      - name: 已迁移库上逐个文件重跑(真·幂等检查)
+        run: |
+          set -uo pipefail
+          # 白名单 · 每一项都必须写清楚为什么豁免。
+          # **现在是空的,这是有意的** —— 0010 曾经在这里(它与 0014 定义同一个视图,
+          # 0014 多一列 adv_20d,CREATE OR REPLACE VIEW 不能减列),M1 合并时直接在
+          # 0010 开头加了 `DROP VIEW IF EXISTS daily_close;` 根治,而不是长期豁免:
+          # 中招的是「手工补跑过迁移、账本却是空的」那类库(演示站就是),
+          # 它们升级后会从头跑一遍 0010,api 直接起不来。
+          # 加白名单只会让这一步看不见这个回归。详见 docs/setup-wizard/M1-B-自动迁移.md。
+          SKIP=""
+          FAIL=0
+          for f in db/migrations/*.sql; do
+            b=$(basename "$f")
+            case " $SKIP " in *" $b "*) echo "⏭ 跳过(白名单) $b"; continue ;; esac
+            if out=$(PGPASSWORD=ci-local-postgres psql -h localhost -U hunter -d hunter -q -v ON_ERROR_STOP=1 -f "$f" 2>&1); then
+              echo "✅ $b"
+            else
+              echo "❌ $b 重跑失败:"; echo "$out" | head -5; FAIL=1
+            fi
+          done
+          if [ "$FAIL" != 0 ]; then
+            echo "迁移文件必须能在已经跑过它的库上再跑一遍(老库升级时就是这个场景)。"
+            exit 1
+          fi
+
+      # ── ③ 迁移执行器自己的测试 ──────────────────────────────────────
+      # 只跑 tests/test_migrate.py 这一个文件:仓库里另外 32 个测试文件的通过状态未知,
+      # 贸然给整个 tests/ 加 pytest 会把 CI 搞红,那不是这个 job 该管的事。
+      - name: pytest tests/test_migrate.py
+        working-directory: apps/api
+        env:
+          TEST_DATABASE_URL: postgresql://hunter:ci-local-postgres@localhost:5432/hunter
+        run: |
+          pip install pytest
+          python -m pytest tests/test_migrate.py -p no:cacheprovider -q
+
+  guardrails:
+    name: Guard against known footguns
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: No hardcoded redis://localhost:6379 outside env fallback
+        run: |
+          set -euo pipefail
+          BAD=$(grep -rn 'redis://localhost:6379' apps/api/app/ 2>/dev/null | grep -v 'getenv\|environ' || true)
+          if [ -n "$BAD" ]; then
+            echo "❌ hardcoded redis without env fallback:"
+            echo "$BAD"
+            exit 1
+          fi
+      - name: No stray apps/api/routers or apps/api/services (must live under app/)
+        run: |
+          if [ -d apps/api/routers ] || [ -d apps/api/services ]; then
+            echo "❌ dead code path · move contents to apps/api/app/{routers,services}"
+            exit 1
+          fi
+      - name: No wx / feishu / booth / ax leftovers in code
+        run: |
+          set -euo pipefail
+          BAD=$(grep -rn -iE 'wx_openid|feishu_bindings|booth_admin|ADVENTUREX_' apps/api/app 2>/dev/null || true)
+          if [ -n "$BAD" ]; then
+            echo "❌ SaaS leftover found · P2 was supposed to strip:"
+            echo "$BAD"
+            exit 1
+          fi
+
+      - name: No hardcoded shared-secret defaults in os.getenv fallbacks
+        run: |
+          set -euo pipefail
+          # Whitelist obviously-safe strings: change-me, placeholder, example, empty, hermes local dev
+          BAD=$(grep -rnE 'os\.getenv\([^)]*,\s*["'\''][A-Za-z0-9@!#_-]{6,}["'\'']' apps/api/ 2>/dev/null \
+            | grep -viE 'change-me|placeholder|example|xxxxx|test-?secret|ci-test|localhost|127\.0\.0\.1|redis://redis|postgres:5432|gpt-4o-mini|claude-|gemini-|kronos-v1|3600|2592000|1000|noop|akshare|openai_compat|opencode|hunter-community|resend|smtp\.[a-z]+\.com|OA_DOMAIN' \
+            | grep -vE '_TTL|_PORT|_DEFAULT_MODEL|_PROVIDER|REGISTRATION_MODE|HUNTER_COMPLIANCE_MODE|HARVEST_REV|MAIL_FROM|MODE=|"(ok|open|closed|invite|light|dark)"' \
+            || true)
+          if [ -n "$BAD" ]; then
+            echo "⚠ suspicious hardcoded secret default:"
+            echo "$BAD"
+            echo "If genuinely benign, extend the whitelist in .github/workflows/ci.yml"
+            exit 1
+          fi
+
+  web:
+    name: Web · typecheck + build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Install deps
+        working-directory: apps/web
+        run: npm ci --no-audit --no-fund
+      - name: Typecheck
+        working-directory: apps/web
+        run: npx tsc --noEmit
+      # 「模型调用失败时用户看到什么」的唯一出口。坏掉的表现是界面一片空白或者
+      # 一句看不懂的英文,而 tsc 与 next build 全绿 —— 所以单独跑一遍真断言。
+      - name: 错误卡回归(真实抓到的报错对象)
+        working-directory: apps/web
+        run: node scripts/model-error-check.mjs
+      - name: Strategy pages self-check (render_check.js)
+        working-directory: apps/web/public/strategies
+        run: node render_check.js
+      - name: Build
+        working-directory: apps/web
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+        run: npm run build
