@@ -177,7 +177,7 @@ COPY --from=atomcode-fetch /out/atomcode /usr/local/bin/atomcode
 COPY --from=pydeps         /opt/hca/venv        /opt/hca/venv
 COPY --from=pydeps         /opt/hca/venv-hunter /opt/hca/venv-hunter
 
-# 六个 hunter 系 MCP（薄代理，反调 HunterCode 后端）
+# hunter 系 MCP（薄代理，反调 HunterCode 后端 / fin-worker）
 # hca_size_guard.py 与它们同目录，所以 stdio 启动时同目录 import 得到（待办池 P0-11）
 COPY tools/opencode-mcp/hca_size_guard.py         /opt/hca/mcp/hca_size_guard.py
 COPY tools/opencode-mcp/hca_pack_mcp.py           /opt/hca/mcp/hca_pack_mcp.py
@@ -188,6 +188,8 @@ COPY tools/opencode-mcp/portfolio_mcp.py          /opt/hca/mcp/portfolio_mcp.py
 COPY tools/opencode-mcp/screener_mcp.py           /opt/hca/mcp/screener_mcp.py
 COPY tools/opencode-mcp/hunter_capability_mcp.py  /opt/hca/mcp/hunter_capability_mcp.py
 COPY tools/opencode-mcp/hunter_user_mcp.py        /opt/hca/mcp/hunter_user_mcp.py
+COPY tools/opencode-mcp/runtime_mcp.py            /opt/hca/mcp/runtime_mcp.py
+COPY tools/opencode-mcp/fin_memory_mcp.py         /opt/hca/mcp/fin_memory_mcp.py
 
 # 工作区模板（含 .atomcode.md / .mcp.json / .hooks.json / .hooks/ / .atomcode/skills/）
 COPY distro/workspace-template /opt/hca/workspace-template

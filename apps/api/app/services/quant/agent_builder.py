@@ -246,6 +246,8 @@ async def recognize_async(text, single=False, language="text"):
     from app.services.online_analysis.prompts import parse_llm_json
     from app.services.lang_guard import ZH_ONLY_RULE
     from app.services.quant.screen_nl import model_name
+    from app.services import llm_trace
+    import time
     prompt = recognition_prompt(text, single, language)
     base, key_, configured_model = await asyncio.to_thread(_resolve)
     if not (base and key_ and configured_model):
@@ -257,7 +259,9 @@ async def recognize_async(text, single=False, language="text"):
     # 三次尝试共用路由90秒总时限；每次关闭旧连接，取消立即向上传播。
     retry_left = 2
     plain_mode_retry = False
+    t0 = time.monotonic()
     while True:
+        t0 = time.monotonic()
         try:
             async with AsyncOpenAI(base_url=base, api_key=key_, timeout=httpx.Timeout(75,connect=8,write=15,pool=8), max_retries=0) as client:
                 completion = await client.chat.completions.create(**arguments)
@@ -271,6 +275,14 @@ async def recognize_async(text, single=False, language="text"):
                 retry_left -= 1
                 await asyncio.sleep(1 if retry_left else 3)
                 continue
+            llm_trace.record_call(
+                caller="quant.agent_builder",
+                base_url=base,
+                req_model=model,
+                status=504,
+                latency_ms=int((time.monotonic() - t0) * 1000),
+                error=f"timeout:{cause}",
+            )
             raise ValueError("AI 识别失败：模型已配置，但本次响应超时，请稍后重试或分段识别。原规则未改变。")
         except APIConnectionError as e:
             label, cause = connection_cause(e)
@@ -288,6 +300,14 @@ async def recognize_async(text, single=False, language="text"):
                 retry_left -= 1
                 await asyncio.sleep(1 if retry_left else 3)
                 continue
+            llm_trace.record_call(
+                caller="quant.agent_builder",
+                base_url=base,
+                req_model=model,
+                status=502,
+                latency_ms=int((time.monotonic() - t0) * 1000),
+                error=f"connection:{cause}",
+            )
             raise ValueError("AI 识别失败：暂时无法连接模型服务（"+label+"），已自动重连两次。原文和已有规则已保留，请稍后重试；持续失败请检查服务状态。")
         except APIStatusError as e:
             code = e.status_code
@@ -303,12 +323,41 @@ async def recognize_async(text, single=False, language="text"):
                 retry_left -= 1
                 await asyncio.sleep(1 if retry_left else 3)
                 continue
+            llm_trace.record_call(
+                caller="quant.agent_builder",
+                base_url=base,
+                req_model=model,
+                status=code,
+                latency_ms=int((time.monotonic() - t0) * 1000),
+                error=f"HTTP {code}",
+            )
             reason = {401:"模型服务拒绝凭据，请检查已绑定服务的授权状态",403:"当前授权无权使用此模型，请检查模型权限",402:"模型服务额度不足，请检查服务余额",404:"模型服务地址或模型名称不可用，请检查模型设置",429:"模型服务限流或额度已用完，请稍后重试并检查额度"}.get(code)
             if not reason: reason = "模型服务暂时不可用，请稍后重试" if code >= 500 else "模型服务拒绝本次请求，请检查模型兼容性"
             raise ValueError("AI 识别失败：" + reason + "。原规则未改变。")
         except Exception as e:
             logger.warning("[builder-ai] unexpected response type={}", type(e).__name__)
+            llm_trace.record_call(
+                caller="quant.agent_builder",
+                base_url=base,
+                req_model=model,
+                status=500,
+                latency_ms=int((time.monotonic() - t0) * 1000),
+                error=type(e).__name__,
+            )
             raise ValueError("AI 识别失败：模型返回异常，未能读取结果。原规则未改变。")
+    latency_ms = int((time.monotonic() - t0) * 1000)
+    usage = getattr(completion, "usage", None)
+    resp_model = str(getattr(completion, "model", "") or model)
+    llm_trace.record_call(
+        caller="quant.agent_builder",
+        base_url=base,
+        req_model=model,
+        resp_model=resp_model,
+        status=200,
+        latency_ms=latency_ms,
+        tokens_in=int(getattr(usage, "prompt_tokens", 0) or 0) if usage else 0,
+        tokens_out=int(getattr(usage, "completion_tokens", 0) or 0) if usage else 0,
+    )
     choices = getattr(completion, "choices", None)
     if not choices:
         raise ValueError("AI 返回内容格式无效：模型没有返回识别内容，请重试。原规则未改变。")

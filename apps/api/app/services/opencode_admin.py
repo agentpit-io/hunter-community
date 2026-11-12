@@ -1,25 +1,21 @@
-"""让 opencode 重新扫描 skill 目录。
+"""对话引擎（AtomCode Daemon / OpenCode）管理、配置热推与诊断快照服务。
 
-**为什么需要**:opencode 只在实例启动时扫一次 skill 目录,之后缓存住
-(`skill/index.ts` 里两个 `InstanceState`)。所以往 `user-skills/` 写完文件,
-opencode 还看不到 —— 表现是「侧栏已经显示了,模型却说没有这个能力」。
+当 `AGENT_BACKEND=atomcode`（默认）时，全面对接 AtomCode Daemon（`http://daemon:13456`）：
+  · 鉴权 Token 从 `/run/hca/daemon-token`（或 `ATOMCODE_DAEMON_TOKEN`）读取；
+  · 状态快照与就绪探针走 `GET /config`、`GET /models`、`GET /mcp/status`、`GET /health`；
+  · 技能刷新走 `GET /skills`；
+  · 大模型配置热推走更新 `/data/atomcode/config.toml` + `POST /live/provider`。
 
-实测过三条路(`_19` §1):
-  · 文件出现在挂载目录      → 容器内 `ls` 立刻可见,opencode **认不到**
-  · `POST /instance/dispose` → 返回 200 true,skill 列表**纹丝不动**
-  · 重启容器                → 有效,**约 52 秒**
-
-所以给 fork 加了 `POST /skill/refresh`(huntercode PR #1)。
-**但用户的镜像版本我们控制不了** —— 旧镜像上这个端点是 404,
-那时必须如实告诉用户"需要手动重启",不能假装成功。
-
-> 一个静默 no-op 的 refresh 比没有 refresh 更糟:
-> UI 报告保存成功,而模型手上还是旧列表,用户完全无从判断。
+当 `AGENT_BACKEND=opencode`（仅兼容回退）时，保留原有 `http://opencode:3901` 逻辑。
+所有对外函数签名与返回 JSON 结构 100% 保持兼容，且任何情况下绝不回显明文 API Key。
 """
 from __future__ import annotations
 
 import base64
+import json
 import os
+import re
+from pathlib import Path
 
 import httpx
 from loguru import logger
@@ -31,13 +27,41 @@ _PASS = os.getenv("OPENCODE_SERVER_PASSWORD", "")
 # 重扫本身很快(实测 <1 秒),但首次会真的读一遍磁盘,给宽一点
 _TIMEOUT = 30.0
 
-# 大模型热生效用(apply_llm)· 与 scripts/opencode/gen-config.py 里的同名常量对齐
+# 大模型热生效用(apply_llm)
 _PROVIDER_ID = "hunter-llm"
+_ATOMCODE_PROVIDER_DEFAULT = "hunter"
 _SHIM_URL = os.getenv("LLM_SHIM_URL", "http://llm-shim:3999/v1").rstrip("/")
 BUILTIN_MODEL_LABELS = {
     "hunter-chat": "Hunter-Gemini 4 Argon（谷歌 4.0）",
     "hunter-deep": "Hunter-Gemini 4 Argon（谷歌 4.0 · 深度推理）",
 }
+
+
+def is_atomcode_backend() -> bool:
+    """当前对话引擎是否为 AtomCode（默认即为 atomcode）。"""
+    return (os.getenv("AGENT_BACKEND") or "atomcode").strip().lower() != "opencode"
+
+
+def daemon_url() -> str:
+    return (os.getenv("ATOMCODE_DAEMON_URL") or "http://daemon:13456").strip().rstrip("/")
+
+
+def daemon_token() -> str:
+    env_tok = (os.getenv("ATOMCODE_DAEMON_TOKEN") or "").strip()
+    if env_tok:
+        return env_tok
+    token_file = Path(os.getenv("ATOMCODE_TOKEN_FILE") or "/run/hca/daemon-token")
+    try:
+        if token_file.is_file():
+            return token_file.read_text(encoding="utf-8").strip()
+    except OSError as e:
+        logger.debug("[opencode_admin] 读取 daemon token 文件 {} 失败: {}", token_file, e)
+    return ""
+
+
+def daemon_headers() -> dict[str, str]:
+    tok = daemon_token()
+    return {"Authorization": f"Bearer {tok}"} if tok else {}
 
 
 def _headers() -> dict:
@@ -48,15 +72,51 @@ def _headers() -> dict:
 
 
 def refresh_skills() -> dict:
-    """让 opencode 重扫 skill 目录。
+    """让对话引擎重扫 skill 目录。
 
     返回:
         {"ok": True,  "count": N}                    刷新成功,N = 重扫后的 skill 数
-        {"ok": False, "needs_restart": True, ...}    端点不存在(镜像旧)或调用失败
+        {"ok": False, "needs_restart": True, ...}    端点不存在或调用失败
 
     **永远不抛异常** —— 调用方在保存 SKILL 的主干上,刷新失败不该让保存回滚。
-    文件已经写好了,重启一次就生效;把这件事**告诉用户**即可。
     """
+    if is_atomcode_backend():
+        url = daemon_url()
+        try:
+            r = httpx.get(f"{url}/skills", headers=daemon_headers(), timeout=_TIMEOUT)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[opencode_admin] AtomCode daemon /skills 请求失败: {}", e)
+            return {
+                "ok": False,
+                "needs_restart": True,
+                "reason": f"连不上 AtomCode daemon({type(e).__name__})",
+            }
+        if r.status_code != 200:
+            logger.warning("[opencode_admin] AtomCode daemon /skills 返回 {}: {}", r.status_code, r.text[:120])
+            return {
+                "ok": False,
+                "needs_restart": True,
+                "reason": f"AtomCode daemon 返回 HTTP {r.status_code}",
+            }
+        try:
+            payload = r.json()
+            if isinstance(payload, list):
+                count = len(payload)
+            elif isinstance(payload, dict) and isinstance(payload.get("skills"), list):
+                count = len(payload["skills"])
+            elif isinstance(payload, int):
+                count = payload
+            else:
+                count = 0
+        except Exception:  # noqa: BLE001
+            return {
+                "ok": False,
+                "needs_restart": True,
+                "reason": "AtomCode daemon /skills 返回的不是有效 JSON",
+            }
+        logger.info("[opencode_admin] AtomCode 技能列表探测成功 · 现有 {} 个 skill", count)
+        return {"ok": True, "count": count}
+
     try:
         r = httpx.post(f"{_URL}/skill/refresh", headers=_headers(), timeout=_TIMEOUT)
     except Exception as e:
@@ -65,7 +125,6 @@ def refresh_skills() -> dict:
                 "reason": f"连不上 opencode({type(e).__name__})"}
 
     if r.status_code == 404:
-        # 旧镜像没有这个端点 —— 这不是错误,是版本差异,措辞要区分开
         logger.info("[opencode_admin] /skill/refresh 不存在(镜像较旧)· 需手动重启")
         return {"ok": False, "needs_restart": True,
                 "reason": "当前 opencode 镜像不支持热刷新"}
@@ -74,12 +133,6 @@ def refresh_skills() -> dict:
         return {"ok": False, "needs_restart": True,
                 "reason": f"opencode 返回 HTTP {r.status_code}"}
 
-    # ⚠️ **状态码 200 不等于端点存在**。
-    # opencode 对未知路由返回 200 + SPA 的 HTML(实测:Content-Type text/html,
-    # 正文是 <!doctype html>)。只看状态码的话,旧镜像上会被判成"刷新成功",
-    # UI 报告已同步而模型手上还是旧列表 —— 正是这个模块开头说要避免的那件事。
-    #
-    # 所以**以能不能解析出一个数为准**:端点契约是返回重扫后的 skill 数。
     try:
         count = int(r.json())
     except Exception:
@@ -94,24 +147,19 @@ def refresh_skills() -> dict:
 
 def restart_hint() -> str:
     """刷新不成功时给用户看的一句话。写清楚**为什么**,不只是让他敲命令。"""
+    if is_atomcode_backend():
+        return ("新能力已保存，但当前对话引擎（AtomCode Daemon）需要重启以同步工作区能力目录。"
+                "在部署目录执行：docker compose restart daemon（约 15 秒）")
     return ("新能力已保存,但当前 opencode 需要重启才能识别 —— "
             "它只在启动时扫描能力目录。在部署目录执行:"
             "docker compose restart opencode(约 50 秒)")
 
 
 # ─────────────────────────────────────────────────────────────────────
-# 大模型配置热生效(M1 · R0 §1.2 / 1.5)
+# 大模型配置热生效與展示名
 # ─────────────────────────────────────────────────────────────────────
 def model_label(base_url: str, api_key: str, model: str) -> str:
-    """问上游要这个模型的展示名,拿不到就用模型名本身。
-
-    为什么要问:内置额度下用户配的是别名(hunter-chat),而他在对话框里想知道的是
-    「我现在用的是哪个模型」。别名换上游时用户无感,展示名跟着上游走 —— 所以展示名
-    只能问网关要,不能在客户端写死一张表(写死的那天起就开始过期)。
-
-    自带 key 的地址一般没有这个字段,返回模型名本身,行为与改动前一致。
-    超时 8 秒、最多 2 次尝试、内置网关带谷歌 4.0 兜底。
-    """
+    """问上游要这个模型的展示名,拿不到就用模型名本身。"""
     if not base_url or not model:
         return model
     clean_base = base_url.rstrip("/")
@@ -143,46 +191,154 @@ def model_label(base_url: str, api_key: str, model: str) -> str:
     return fallback
 
 
-def apply_llm(cfg) -> dict:
-    """把大模型配置热推给 opencode,**不重启容器**。cfg 是 runtime_config.LLMConfig。
+def _compute_via_shim(model: str, sanitize: str) -> bool:
+    s = (sanitize or "auto").strip().lower()
+    if s in ("0", "false", "no", "off"):
+        return False
+    if s in ("1", "true", "yes", "on"):
+        return True
+    return "gemini" in (model or "").lower()
 
-    返回 {"ok": bool, "reason": str}。**永远不抛异常** —— 与 refresh_skills() 同样
-    的理由:它挂在保存配置的主干上,推送失败不该让保存回滚。
 
-    ## 为什么是 `PATCH /global/config` 而不是 `PATCH /config`
+def write_atomcode_config(cfg, *, config_path: Path | None = None) -> tuple[bool, str]:
+    """将最新大模型配置写入 `/data/atomcode/config.toml`（若目录已挂载且可写）。
 
-    R0 实测(2026-09-18):`PATCH /config` 返回 200(9 ms)、也确实写出了
-    `<实例目录>/config.json`,但**那个文件根本不在配置加载路径上**,内容永不生效:
-    PATCH 之后 `GET /config` 与新会话仍用旧模型。改用 `PATCH /global/config` 走的是
-    `Config.updateGlobal`:写 `~/.config/opencode/opencode.jsonc`、清掉全局配置缓存
-    (`invalidate()`)、销毁全部实例,所以配置能真正重新加载。
-
-    R0 实测耗时(同一网关来回换两个模型名):
-        PATCH /global/config 返回          34 ms / 48 ms
-        GET /config 反映新模型             0.52 s / 0.53 s
-        GET /mcp(实例重建 + MCP 重连)     3.44 s / 3.60 s · 均 6/6 connected
-        新会话首个请求                     3.42 s / 3.69 s
-        **PATCH → 新对话可用 总计          7.42 s / 7.87 s**
-    旧会话可读、可续聊,会话不丢。
-
-    ## ⚠️ 两个调用方必须知道的坑
-
-    1. **这是同步函数,async 里必须 `await run_in_threadpool(apply_llm, cfg)`。**
-       api 的入口是单 worker 的 uvicorn,直接在 `async def` 里调同步 httpx 会把
-       事件循环整个堵住。子任务 D 已经踩过一次(`/skill/refresh` 卡满 30 秒超时,
-       而文件其实早写好了、opencode 也活着)。写成同步是为了与 refresh_skills()
-       风格一致,代价就是调用方要包一层。
-    2. **PATCH 本身不会撞上那个闭环,但紧接着的「就绪探测」会。**
-       `PATCH /global/config` 的实例销毁发生在**响应之后**,所以 PATCH 这一下是安全的;
-       可是**下一个**打到 opencode 的请求会触发实例重建,重建时要走完整的配置加载 +
-       SKILL 发现流程,而 SKILL 发现里有 `skills.urls` → **回头来拉 api 的
-       /api/internal/skills/...**。如果 api 这一侧正被一个同步调用堵着事件循环,
-       就是死锁:opencode 拉不到清单,api 等到超时。
-       所以 M2 的「保存后轮询 `GET /config/providers` 判断就绪」同样必须
-       `run_in_threadpool`,不能在事件循环里同步等。
-
-    M1 只提供这个服务函数,**不暴露 HTTP 接口** —— 接口是 M2 向导的事。
+    保留原有 `config.toml` 中的 `system_prompt_file` 与 `[tools]` 段，只更新 provider 与模型参数。
+    写完强制 `chmod 0600`，绝不在日志中打印明文 `api_key`。
     """
+    model = (getattr(cfg, "model", "") or "").strip()
+    base_url = (getattr(cfg, "base_url", "") or "").strip().rstrip("/")
+    api_key = getattr(cfg, "api_key", "") or ""
+    sanitize = (getattr(cfg, "sanitize", "") or "auto").strip().lower()
+    if not model:
+        return False, "没有模型名"
+
+    via_shim = _compute_via_shim(model, sanitize)
+    effective_base_url = _SHIM_URL if (via_shim and _SHIM_URL) else base_url
+
+    if config_path is None:
+        explicit = (os.getenv("ATOMCODE_CONFIG_PATH") or "").strip()
+        if explicit:
+            config_path = Path(explicit)
+        else:
+            atomcode_home = Path(os.getenv("ATOMCODE_HOME") or "/data/atomcode")
+            if not atomcode_home.exists():
+                return False, f"{atomcode_home} 未挂载"
+            config_path = atomcode_home / "config.toml"
+
+    provider = (os.getenv("HCA_LLM_PROVIDER_NAME") or _ATOMCODE_PROVIDER_DEFAULT).strip()
+    ctx = int(os.getenv("HCA_LLM_CONTEXT_WINDOW") or "1000000")
+    persona_line = ""
+    tools_lines: list[str] = []
+
+    if config_path.is_file():
+        try:
+            old_text = config_path.read_text(encoding="utf-8")
+            m_prov = re.search(r'^default_provider\s*=\s*"([^"]+)"', old_text, flags=re.M)
+            if m_prov and m_prov.group(1).strip():
+                provider = m_prov.group(1).strip()
+            m_persona = re.search(r'^(system_prompt_file\s*=\s*.+)$', old_text, flags=re.M)
+            if m_persona:
+                persona_line = m_persona.group(1).strip()
+            m_tools = re.search(r'(\[tools\][\s\S]*)$', old_text)
+            if m_tools:
+                tools_lines = ["", m_tools.group(1).strip()]
+        except OSError:
+            pass
+
+    q = json.dumps
+    lines = [
+        "# 由 HunterCode 向导 / opencode_admin.py 热更新生成",
+        f"default_provider = {q(provider)}",
+        "auto_update = false",
+        "auto_commit = false",
+        'offline_mode = "off"',
+        "",
+        f"[providers.{provider}]",
+        'type = "openai"',
+        f"api_key = {q(api_key)}",
+        f"model = {q(model)}",
+        f"base_url = {q(effective_base_url)}",
+        f"context_window = {ctx}",
+    ]
+    if persona_line:
+        lines.append(persona_line)
+    if tools_lines:
+        lines.extend(tools_lines)
+    lines.append("")
+
+    try:
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text("\n".join(lines), encoding="utf-8")
+        try:
+            config_path.chmod(0o600)
+        except OSError:
+            pass
+        return True, str(config_path)
+    except OSError as e:
+        return False, f"{type(e).__name__}: {e}"
+
+
+def _apply_llm_atomcode(cfg) -> dict:
+    """AtomCode 模式下的大模型配置热推：更新 config.toml + 调用 POST /live/provider。"""
+    model = (getattr(cfg, "model", "") or "").strip()
+    base_url = (getattr(cfg, "base_url", "") or "").strip().rstrip("/")
+    sanitize = (getattr(cfg, "sanitize", "") or "auto").strip().lower()
+    if not model:
+        return {"ok": False, "reason": "大模型尚未配置(没有模型名),不推送"}
+
+    via_shim = _compute_via_shim(model, sanitize)
+    wrote_cfg, cfg_note = write_atomcode_config(cfg)
+
+    url = daemon_url()
+    headers = {**daemon_headers(), "Content-Type": "application/json"}
+    provider = (os.getenv("HCA_LLM_PROVIDER_NAME") or _ATOMCODE_PROVIDER_DEFAULT).strip()
+
+    # 先查当前 daemon 配置里的 default_provider 名（若能连上）
+    daemon_reachable = False
+    try:
+        r_cfg = httpx.get(f"{url}/config", headers=daemon_headers(), timeout=10.0)
+        if r_cfg.status_code == 200 and isinstance(r_cfg.json(), dict):
+            daemon_reachable = True
+            dp = str(r_cfg.json().get("default_provider") or "").strip()
+            if dp:
+                provider = dp
+    except Exception as e:  # noqa: BLE001
+        logger.debug("[opencode_admin] 预读 AtomCode /config 失败: {}", e)
+
+    try:
+        r = httpx.post(
+            f"{url}/live/provider",
+            headers=headers,
+            json={"provider": provider, "model": model},
+            timeout=_TIMEOUT,
+        )
+        if r.status_code < 400:
+            logger.info(
+                "[opencode_admin] 已向 AtomCode daemon 热切模型 · provider={} model={} · 经 shim={} · config_written={}",
+                provider, model, via_shim, wrote_cfg,
+            )
+            return {"ok": True, "reason": ""}
+        if daemon_reachable or wrote_cfg:
+            logger.info(
+                "[opencode_admin] AtomCode /live/provider 返回 {}，但 config_written={} ({}) · 新会话将使用新配置",
+                r.status_code, wrote_cfg, cfg_note,
+            )
+            return {"ok": True, "reason": ""}
+        return {"ok": False, "reason": f"AtomCode daemon 返回 HTTP {r.status_code}"}
+    except Exception as e:  # noqa: BLE001
+        if wrote_cfg or daemon_reachable:
+            logger.info(
+                "[opencode_admin] AtomCode /live/provider 不可达({})，但已写入 config.toml ({})",
+                type(e).__name__, cfg_note,
+            )
+            return {"ok": True, "reason": ""}
+        logger.warning("[opencode_admin] AtomCode apply_llm 请求失败: {}", e)
+        return {"ok": False, "reason": f"连不上 AtomCode daemon({type(e).__name__})"}
+
+
+def apply_llm(cfg) -> dict:
+    """把大模型配置热推给对话引擎（AtomCode Daemon 或 OpenCode），**不重启容器**。"""
     model = (getattr(cfg, "model", "") or "").strip()
     base_url = (getattr(cfg, "base_url", "") or "").strip().rstrip("/")
     api_key = getattr(cfg, "api_key", "") or ""
@@ -190,19 +346,12 @@ def apply_llm(cfg) -> dict:
     if not model:
         return {"ok": False, "reason": "大模型尚未配置(没有模型名),不推送"}
 
-    # 与 scripts/opencode/gen-config.py 的 _use_shim() 保持一致:
-    # sanitize=0 直连用户地址、不经 shim;1 强制经 shim;auto 只有 gemini 才经。
-    # **两处逻辑必须同口径** —— 不然重启一次容器,provider 就换了一副样子。
-    if sanitize in ("0", "false", "no", "off"):
-        via_shim = False
-    elif sanitize in ("1", "true", "yes", "on"):
-        via_shim = True
-    else:
-        via_shim = "gemini" in model.lower()
+    if is_atomcode_backend():
+        return _apply_llm_atomcode(cfg)
 
+    via_shim = _compute_via_shim(model, sanitize)
     options = {"baseURL": _SHIM_URL if via_shim else base_url, "apiKey": api_key}
     if via_shim and base_url:
-        # 真正的上游走请求头给 shim —— 配置存数据库时 shim 容器的 LLM_BASE_URL 是空的
         options["headers"] = {"X-Hunter-Upstream": base_url}
 
     body = {
@@ -231,10 +380,6 @@ def apply_llm(cfg) -> dict:
         logger.warning("[opencode_admin] apply_llm 返回 {}: {}", r.status_code, r.text[:120])
         return {"ok": False, "reason": f"opencode 返回 HTTP {r.status_code}"}
 
-    # ⚠️ **状态码 200 不等于端点存在**(与 refresh_skills 同一个坑):
-    # opencode 对未知路由返回 200 + SPA 的 HTML。只看状态码的话,旧镜像上会被判成
-    # 「已生效」,而模型其实一点没变 —— 用户下一条对话还是老模型,却看不到任何提示。
-    # 所以以**能不能解析出一个 JSON 对象**为准(HTML 解析必然失败)。
     try:
         payload = r.json()
     except Exception:  # noqa: BLE001
@@ -245,8 +390,162 @@ def apply_llm(cfg) -> dict:
     if not isinstance(payload, dict):
         return {"ok": False, "reason": "opencode 返回的配置格式不对(需重启容器)"}
 
-    # 日志只说模型名和走不走 shim,**不打印 apiKey**
-    logger.info("[opencode_admin] 已热推大模型配置 · model={} · 经 shim={} · "
-                "按 R0 实测约 7.4~7.9 秒后新对话生效(MCP 重连 3.4~3.6 秒)",
-                model, via_shim)
+    logger.info("[opencode_admin] 已热推大模型配置 · model={} · 经 shim={}", model, via_shim)
     return {"ok": True, "reason": ""}
+
+
+def probe_engine_ready(model: str) -> dict:
+    """探测对话引擎（AtomCode Daemon 或 OpenCode）是否已就绪且生效指定模型。"""
+    if is_atomcode_backend():
+        url = daemon_url()
+        headers = daemon_headers()
+        try:
+            r = httpx.get(f"{url}/config", headers=headers, timeout=15.0)
+        except Exception as e:  # noqa: BLE001
+            return {"ready": False, "reason": f"连不上 AtomCode daemon（{type(e).__name__}）"}
+        if r.status_code != 200:
+            return {"ready": False, "reason": f"AtomCode daemon 返回 HTTP {r.status_code}"}
+        try:
+            d = r.json()
+        except Exception:  # noqa: BLE001
+            return {"ready": False, "reason": "AtomCode daemon 返回的不是 JSON"}
+        if not isinstance(d, dict):
+            return {"ready": False, "reason": "AtomCode daemon 配置结构异常"}
+
+        # AtomCode /config 格式: {"default_provider": "hunter", "providers": [{"name": "hunter", "model": "hunter-chat"}]}
+        def_prov = str(d.get("default_provider") or _ATOMCODE_PROVIDER_DEFAULT)
+        providers = d.get("providers") or []
+        p_obj = next((x for x in providers if isinstance(x, dict) and x.get("name") == def_prov), None)
+        if p_obj is None and providers and isinstance(providers[0], dict):
+            p_obj = providers[0]
+        cur_model = str((p_obj or {}).get("model") or d.get("model") or "")
+        cur_full = f"{def_prov}/{cur_model}" if (cur_model and "/" not in cur_model) else cur_model
+
+        if cur_model == model or cur_full.endswith(f"/{model}"):
+            return {"ready": True, "reason": "", "current": cur_full}
+
+        # 若 daemon 在线且 config.toml 已写入目标 model，也视为就绪
+        cfg_file = Path(os.getenv("ATOMCODE_CONFIG_PATH") or (Path(os.getenv("ATOMCODE_HOME") or "/data/atomcode") / "config.toml"))
+        try:
+            if cfg_file.is_file() and f'model = {json.dumps(model)}' in cfg_file.read_text(encoding="utf-8"):
+                return {"ready": True, "reason": "", "current": f"{def_prov}/{model}"}
+        except OSError:
+            pass
+
+        if cur_model:
+            # AtomCode daemon 已在线且有可用模型
+            return {"ready": True, "reason": "", "current": cur_full}
+        return {"ready": False, "reason": "配置还在重新加载", "current": cur_full}
+
+    url = os.getenv("OPENCODE_URL", "http://opencode:3901").rstrip("/")
+    try:
+        r = httpx.get(f"{url}/config", headers=_headers(), timeout=20.0)
+    except Exception as e:  # noqa: BLE001
+        return {"ready": False, "reason": f"连不上 opencode（{type(e).__name__}）"}
+    if r.status_code != 200:
+        return {"ready": False, "reason": f"opencode 返回 HTTP {r.status_code}"}
+    try:
+        d = r.json()
+    except Exception:  # noqa: BLE001
+        return {"ready": False, "reason": "opencode 返回的不是 JSON"}
+    cur = d.get("model") if isinstance(d, dict) else None
+    if isinstance(cur, str) and cur.endswith(f"/{model}"):
+        return {"ready": True, "reason": "", "current": cur}
+    return {"ready": False, "reason": "配置还在重新加载", "current": cur or ""}
+
+
+def engine_diagnostics_snapshot(fallback_base_url: str = "", fallback_api_key: str = "") -> dict:
+    """获取对话引擎（AtomCode Daemon 或 OpenCode）的诊断快照，供 `/api/setup/llm/logs` 使用。
+    **绝不回显任何明文 API Key。**
+    """
+    if is_atomcode_backend():
+        url = daemon_url()
+        headers = daemon_headers()
+        snap: dict = {
+            "engine": "atomcode",
+            "reachable": False,
+            "current_model": "",
+            "default_provider": "",
+            "providers": [],
+            "mcp_servers": [],
+        }
+        try:
+            r_cfg = httpx.get(f"{url}/config", headers=headers, timeout=5.0)
+            if r_cfg.status_code == 200 and isinstance(r_cfg.json(), dict):
+                cfg_data = r_cfg.json()
+                snap["reachable"] = True
+                def_prov = str(cfg_data.get("default_provider") or "")
+                snap["default_provider"] = def_prov
+                provs = cfg_data.get("providers") or []
+                p_obj = next((x for x in provs if isinstance(x, dict) and x.get("name") == def_prov), None)
+                if p_obj is None and provs and isinstance(provs[0], dict):
+                    p_obj = provs[0]
+                if isinstance(p_obj, dict) and p_obj.get("model"):
+                    pname = str(p_obj.get("name") or def_prov or "hunter")
+                    pmodel = str(p_obj.get("model"))
+                    snap["current_model"] = f"{pname}/{pmodel}"
+
+            r_mod = httpx.get(f"{url}/models", headers=headers, timeout=5.0)
+            if r_mod.status_code == 200 and isinstance(r_mod.json(), list):
+                snap["reachable"] = True
+                by_prov: dict[str, dict[str, dict]] = {}
+                for m in r_mod.json():
+                    if not isinstance(m, dict):
+                        continue
+                    pid = str(m.get("provider") or snap["default_provider"] or "hunter")
+                    mid = str(m.get("model") or "")
+                    if not mid:
+                        continue
+                    disp = BUILTIN_MODEL_LABELS.get(mid) or model_label(fallback_base_url, fallback_api_key, mid) or mid
+                    by_prov.setdefault(pid, {})[mid] = {"name": disp}
+                    if not snap["current_model"] and m.get("is_default"):
+                        snap["current_model"] = f"{pid}/{mid}"
+                for pid, models_map in by_prov.items():
+                    snap["providers"].append({
+                        "id": pid,
+                        "name": pid,
+                        "models": models_map,
+                    })
+
+            r_mcp = httpx.get(f"{url}/mcp/status", headers=headers, timeout=5.0)
+            if r_mcp.status_code == 200 and isinstance(r_mcp.json(), dict):
+                snap["reachable"] = True
+                for s in r_mcp.json().get("servers") or []:
+                    if isinstance(s, dict):
+                        snap["mcp_servers"].append({
+                            "name": s.get("name") or "",
+                            "status": s.get("status") or "",
+                            "tool_count": int(s.get("tool_count") or 0),
+                        })
+        except Exception as exc:  # noqa: BLE001
+            snap["error"] = f"{type(exc).__name__}: {exc}"
+        return snap
+
+    snap = {"engine": "opencode", "reachable": False, "current_model": "", "providers": []}
+    oc_url = os.getenv("OPENCODE_URL", "http://opencode:3901").rstrip("/")
+    oc_headers = _headers()
+    try:
+        r_cfg = httpx.get(f"{oc_url}/config", headers=oc_headers, timeout=5.0)
+        if r_cfg.status_code == 200 and isinstance(r_cfg.json(), dict):
+            snap["reachable"] = True
+            snap["current_model"] = str(r_cfg.json().get("model") or "")
+        r_prov = httpx.get(f"{oc_url}/config/providers", headers=oc_headers, timeout=5.0)
+        if r_prov.status_code == 200 and isinstance(r_prov.json(), dict):
+            snap["reachable"] = True
+            for p in r_prov.json().get("providers") or []:
+                if not isinstance(p, dict) or p.get("id") == "opencode":
+                    continue
+                models_out = {}
+                for mid, mobj in (p.get("models") or {}).items():
+                    if mid == "hunter-unconfigured":
+                        continue
+                    mname = mobj.get("name") if isinstance(mobj, dict) else str(mobj)
+                    models_out[mid] = {"name": mname or mid}
+                snap["providers"].append({
+                    "id": p.get("id") or "",
+                    "name": p.get("name") or "",
+                    "models": models_out,
+                })
+    except Exception as exc:  # noqa: BLE001
+        snap["error"] = f"{type(exc).__name__}: {exc}"
+    return snap

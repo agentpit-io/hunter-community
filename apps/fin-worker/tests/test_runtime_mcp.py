@@ -21,7 +21,8 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parents[3]
-MCP_PATH = REPO / "scripts" / "opencode-mcp" / "runtime_mcp.py"
+_TOOLS_MCP = REPO / "tools" / "opencode-mcp" / "runtime_mcp.py"
+MCP_PATH = _TOOLS_MCP if _TOOLS_MCP.exists() else (REPO / "scripts" / "opencode-mcp" / "runtime_mcp.py")
 
 
 def _install_mcp_stub():

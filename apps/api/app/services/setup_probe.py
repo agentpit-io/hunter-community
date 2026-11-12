@@ -82,12 +82,14 @@ def probe_redis() -> dict:
 
 
 def probe_opencode() -> dict:
-    """探 opencode。
-
-    ⚠️ **不要探会触发实例重建的端点**（`/config/providers` 之类）：
-    重建时 SKILL 发现会回头拉 api 的清单，而我们正在 api 的请求里 ——
-    M1 3.3 节记过这个死锁。`/app` 是只读的，安全。
-    """
+    """探对话引擎（AtomCode Daemon 或 OpenCode）。"""
+    from app.services import opencode_admin
+    if opencode_admin.is_atomcode_backend():
+        base = opencode_admin.daemon_url()
+        ok, detail, _ = _http(f"{base}/health")
+        return _item("opencode", "对话引擎 AtomCode Daemon", "ok" if ok else "fail",
+                     detail if ok else f"连不上 {base} · {detail}",
+                     "" if ok else "看日志：docker compose logs daemon --tail 50")
     base = os.getenv("OPENCODE_URL", "http://opencode:3901").rstrip("/")
     ok, detail, _ = _http(f"{base}/app")
     return _item("opencode", "对话引擎 opencode", "ok" if ok else "fail",
@@ -105,20 +107,34 @@ def probe_shim() -> dict:
 
 
 def probe_opencode_to_api() -> dict:
-    """api ↔ opencode 的**反向**连通（M1 交接第 7 条）。
+    """探对话引擎与 MCP / API 的连通状态。"""
+    from app.services import opencode_admin
+    if opencode_admin.is_atomcode_backend():
+        base = opencode_admin.daemon_url()
+        headers = opencode_admin.daemon_headers()
+        if not headers:
+            return _item("skill-sync", "AtomCode Daemon ↔ MCP 连通", "unknown",
+                         "尚未读取到 /run/hca/daemon-token，跳过 MCP 状态探测")
+        try:
+            r = httpx.get(f"{base}/mcp/status", headers=headers, timeout=SCAN_PROBE_TIMEOUT)
+            if r.status_code == 200 and isinstance(r.json(), dict):
+                servers = r.json().get("servers") or []
+                total = len(servers)
+                connected = sum(1 for s in servers if isinstance(s, dict) and s.get("status") == "connected")
+                state = "ok" if (total > 0 and connected == total) else ("warn" if connected > 0 else "fail")
+                return _item("skill-sync", "AtomCode Daemon ↔ MCP 连通", state,
+                             f"MCP 服务已就绪 {connected}/{total} 个")
+            return _item("skill-sync", "AtomCode Daemon ↔ MCP 连通", "warn",
+                         f"daemon /mcp/status 返回 HTTP {r.status_code}")
+        except Exception as e:  # noqa: BLE001
+            return _item("skill-sync", "AtomCode Daemon ↔ MCP 连通", "warn", f"{type(e).__name__}: {e}")
 
-    opencode 要能回头拉 api 的 SKILL 清单（`skills.urls`）。这条断了的表现是
-    「用户 SKILL 从能力列表里消失」，而 api 自己一切正常 —— 单向探测看不出来。
-    """
     base = os.getenv("OPENCODE_URL", "http://opencode:3901").rstrip("/")
     key = os.getenv("HUNTER_INTERNAL_KEY", "")
     if not key:
         return _item("skill-sync", "opencode → api 反向连通", "unknown",
                      "HUNTER_INTERNAL_KEY 为空，无法构造探测地址")
     try:
-        # 这一条不是 ping,是让 opencode 扫一遍 SKILL 目录再返回。刚启动那几十秒里
-        # 它还在加载插件,3 秒会超时 —— 而向导第 1 步恰恰是用户开机后第一眼看的页面,
-        # 在那里挂一个黄色的 ReadTimeout 纯属吓人(M4 实测:热起来之后只要 16~70 毫秒)。
         r = httpx.get(f"{base}/skill", timeout=SCAN_PROBE_TIMEOUT)
         if r.status_code == 401:
             return _item("skill-sync", "opencode → api 反向连通", "unknown",
@@ -130,9 +146,6 @@ def probe_opencode_to_api() -> dict:
         return _item("skill-sync", "opencode → api 反向连通", "warn",
                      f"opencode /skill 返回 HTTP {r.status_code}")
     except httpx.TimeoutException:
-        # 冷启后的头几十秒,opencode 还在加载 6 个插件 + 连 MCP,扫一遍 SKILL 会超过
-        # 10 秒 —— 而向导第 1 步正是用户开机后看的第一屏。在那里甩一句 `ReadTimeout`
-        # 纯属吓人(实测热起来之后只要 16~80 毫秒)。说人话,并告诉他怎么办。
         return _item("skill-sync", "opencode → api 反向连通", "warn",
                      f"对话引擎还在启动(等它 {SCAN_PROBE_TIMEOUT:.0f} 秒没扫完 SKILL)",
                      "等半分钟点一次「重新检查」;一直这样再看 docker compose logs opencode")

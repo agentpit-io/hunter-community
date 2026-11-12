@@ -142,6 +142,7 @@ HUNTER_MCP_UID_FIELD = {
     "portfolio": "_hermes_user_id",
     "hunter_cap": "_hermes_user_id",
     "hunter_user": "_hermes_user_id",
+    "fin_memory": "_hermes_user_id",
     "hcapack": "hermes_user_id",
 }
 HUNTER_MCP_SERVERS = tuple(HUNTER_MCP_UID_FIELD)

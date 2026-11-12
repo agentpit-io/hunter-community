@@ -712,7 +712,17 @@ def fact_table_text(facts: list[dict]) -> str:
 
 async def analyze_with_llm(facts: list[dict], ctx: dict) -> dict:
     """调用配置里的 LLM 产出分析层文字。**数字受事实表约束**（见 `_SYS_PROMPT`）。"""
+    import time
     from app.providers.llm import get_llm
+    from app.services import llm_trace
+
+    base_url, req_model = "", ""
+    try:
+        from app.services import runtime_config
+        cfg = runtime_config.llm()
+        base_url, req_model = cfg.base_url, cfg.model
+    except Exception:  # noqa: BLE001
+        pass
 
     llm = get_llm()
     user = (
@@ -721,13 +731,38 @@ async def analyze_with_llm(facts: list[dict], ctx: dict) -> dict:
         f"事实表（唯一可用的数字来源）：\n{fact_table_text(facts)}\n\n"
         "请基于以上事实写今天的复盘。"
     )
-    resp = await llm.chat(
-        [{"role": "system", "content": _SYS_PROMPT}, {"role": "user", "content": user}],
-        temperature=0.3, max_tokens=1400,
-    )
+    t0 = time.monotonic()
+    try:
+        resp = await llm.chat(
+            [{"role": "system", "content": _SYS_PROMPT}, {"role": "user", "content": user}],
+            temperature=0.3, max_tokens=1400,
+        )
+    except Exception as exc:  # noqa: BLE001
+        llm_trace.record_call(
+            caller="fin.report",
+            base_url=base_url,
+            req_model=req_model,
+            status=502,
+            latency_ms=int((time.monotonic() - t0) * 1000),
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        raise
+
+    latency_ms = int((time.monotonic() - t0) * 1000)
     content = (resp or {}).get("content") or ""
-    parsed = _parse_analysis_json(content)
     model = (resp or {}).get("model") or ""
+    usage = (resp or {}).get("usage") or {}
+    llm_trace.record_call(
+        caller="fin.report",
+        base_url=base_url,
+        req_model=req_model or model,
+        resp_model=model,
+        status=200,
+        latency_ms=latency_ms,
+        tokens_in=int(usage.get("prompt_tokens") or 0) if isinstance(usage, dict) else 0,
+        tokens_out=int(usage.get("completion_tokens") or 0) if isinstance(usage, dict) else 0,
+    )
+    parsed = _parse_analysis_json(content)
     return {
         "analysis_text": parsed["analysis_text"],
         "self_review": parsed["self_review"],

@@ -517,36 +517,8 @@ async def apply(request: Request):
 
 # ── 8. 就绪探测 ─────────────────────────────────────────────────────
 def _probe_ready(model: str) -> dict:
-    """问 opencode 当前生效的模型是不是我们刚推的那个。
-
-    **判据是「当前 model 等于新模型」，不是「models 列表里有它」**（M1 交接第 3 条）：
-    `updateGlobal` 是 mergeDeep，旧模型名会一直累积在列表里。
-
-    同步 httpx，调用方负责丢线程池 —— 这个请求会触发 opencode 实例重建，
-    重建时 SKILL 发现要回头拉 api，在事件循环里同步等就是死锁（M1 3.3）。
-    """
-    import base64
-
-    import httpx
-    url = os.getenv("OPENCODE_URL", "http://opencode:3901").rstrip("/")
-    u, p = os.getenv("OPENCODE_SERVER_USERNAME", ""), os.getenv("OPENCODE_SERVER_PASSWORD", "")
-    headers = {}
-    if u or p:
-        headers["Authorization"] = "Basic " + base64.b64encode(f"{u}:{p}".encode()).decode()
-    try:
-        r = httpx.get(f"{url}/config", headers=headers, timeout=20.0)
-    except Exception as e:  # noqa: BLE001
-        return {"ready": False, "reason": f"连不上 opencode（{type(e).__name__}）"}
-    if r.status_code != 200:
-        return {"ready": False, "reason": f"opencode 返回 HTTP {r.status_code}"}
-    try:
-        d = r.json()
-    except Exception:  # noqa: BLE001
-        return {"ready": False, "reason": "opencode 返回的不是 JSON"}
-    cur = d.get("model") if isinstance(d, dict) else None
-    if isinstance(cur, str) and cur.endswith(f"/{model}"):
-        return {"ready": True, "reason": "", "current": cur}
-    return {"ready": False, "reason": "配置还在重新加载", "current": cur or ""}
+    """探测对话引擎（AtomCode Daemon 或 OpenCode）当前生效的模型是否就绪。"""
+    return opencode_admin.probe_engine_ready(model)
 
 
 @router.get("/engine-ready")
@@ -615,37 +587,11 @@ def _collect_llm_diagnostics(do_ping: bool = False) -> dict:
         except Exception as exc:  # noqa: BLE001
             logger.debug("[setup] 诊断拉取网关 /models 失败: {}", exc)
 
-    # 2. 查询 opencode 当前生效 provider 与模型展示名（严格脱敏 options.apiKey）
-    opencode_snapshot: dict = {"reachable": False, "current_model": "", "providers": []}
-    oc_url = os.getenv("OPENCODE_URL", "http://opencode:3901").rstrip("/")
-    oc_u, oc_p = os.getenv("OPENCODE_SERVER_USERNAME", ""), os.getenv("OPENCODE_SERVER_PASSWORD", "")
-    oc_headers = {}
-    if oc_u or oc_p:
-        oc_headers["Authorization"] = "Basic " + base64.b64encode(f"{oc_u}:{oc_p}".encode()).decode()
-    try:
-        r_cfg = httpx.get(f"{oc_url}/config", headers=oc_headers, timeout=5.0)
-        if r_cfg.status_code == 200 and isinstance(r_cfg.json(), dict):
-            opencode_snapshot["reachable"] = True
-            opencode_snapshot["current_model"] = str(r_cfg.json().get("model") or "")
-        r_prov = httpx.get(f"{oc_url}/config/providers", headers=oc_headers, timeout=5.0)
-        if r_prov.status_code == 200 and isinstance(r_prov.json(), dict):
-            opencode_snapshot["reachable"] = True
-            for p in r_prov.json().get("providers") or []:
-                if not isinstance(p, dict) or p.get("id") == "opencode":
-                    continue
-                models_out = {}
-                for mid, mobj in (p.get("models") or {}).items():
-                    if mid == "hunter-unconfigured":
-                        continue
-                    mname = mobj.get("name") if isinstance(mobj, dict) else str(mobj)
-                    models_out[mid] = {"name": mname or mid}
-                opencode_snapshot["providers"].append({
-                    "id": p.get("id") or "",
-                    "name": p.get("name") or "",
-                    "models": models_out,
-                })
-    except Exception as exc:  # noqa: BLE001
-        opencode_snapshot["error"] = f"{type(exc).__name__}: {exc}"
+    # 2. 查询对话引擎（AtomCode Daemon / OpenCode）当前生效 provider、模型展示名与 MCP 状态（严格脱敏 apiKey）
+    engine_snapshot = opencode_admin.engine_diagnostics_snapshot(
+        fallback_base_url=cfg.base_url,
+        fallback_api_key=cfg.api_key,
+    )
 
     # 3. 拉取 llm-shim 转发跟踪记录
     shim_traces: list[dict] = []
@@ -727,7 +673,7 @@ def _collect_llm_diagnostics(do_ping: bool = False) -> dict:
     now_str = datetime.now(market_time.market_tz("CN_A")).strftime("%Y-%m-%d %H:%M:%S")
     return {
         "generated_at": now_str,
-        "instance_version": (os.getenv("HUNTER_VERSION") or "2.2.1").strip(),
+        "instance_version": (os.getenv("HUNTER_VERSION") or "3.0.0").strip(),
         "llm_config": {
             "configured": cfg.configured,
             "source": cfg.source,
@@ -740,7 +686,8 @@ def _collect_llm_diagnostics(do_ping: bool = False) -> dict:
             "agent_router_model": runtime_config.agent_model("AGENT_MODEL_ROUTER", "gemini-4-argon"),
         },
         "gateway_models": gateway_models,
-        "opencode_provider": opencode_snapshot,
+        "engine_provider": engine_snapshot,
+        "opencode_provider": engine_snapshot,
         "probe_ping": probe_ping,
         "shim_traces": shim_traces,
         "api_traces": llm_trace.recent_calls(limit=100),
@@ -764,7 +711,7 @@ async def llm_logs_download(request: Request, ping: int = 0):
 
     lines = [
         "# ====================================================================",
-        "# Hunter Community 大模型调用与配置诊断日志（已自动脱敏 API Key 与对话正文）",
+        "# Hunter-AtomCode 大模型调用与配置诊断日志（已自动脱敏 API Key 与对话正文）",
         f"# 导出时间（上海）: {diag['generated_at']}",
         f"# 实例版本: v{diag['instance_version']}",
         "# ====================================================================",
@@ -775,8 +722,8 @@ async def llm_logs_download(request: Request, ping: int = 0):
         "## 二、网关模型映射表（/models）",
         json.dumps(diag["gateway_models"], ensure_ascii=False, indent=2),
         "",
-        "## 三、对话引擎（opencode）生效 Provider 快照",
-        json.dumps(diag["opencode_provider"], ensure_ascii=False, indent=2),
+        "## 三、对话引擎（AtomCode）生效 Provider 与 MCP 状态快照",
+        json.dumps(diag["engine_provider"], ensure_ascii=False, indent=2),
     ]
     if diag.get("probe_ping") is not None:
         lines.extend([

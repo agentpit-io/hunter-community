@@ -32,7 +32,7 @@ from mcp.types import Tool, TextContent
 # 这里在 MCP 侧先裁成**合法 JSON + 明确的裁剪说明**。
 # 跟这个文件一起被 COPY 到 /opt/hca/mcp/，所以同目录 import 得到。
 try:
-    from hca_size_guard import fit as _fit
+    from hca_size_guard import fit as _fit, guard_mcp_text
 except ImportError:                                            # pragma: no cover
     # 静默降级是危险的：闸没了照样能跑，只是又回到「被内核砍成半截 JSON」。
     # 所以这里必须往 stderr 喊一声（stdio server 的 stderr 进 daemon 日志）。
@@ -41,6 +41,9 @@ except ImportError:                                            # pragma: no cove
           "（镜像里应当在 /opt/hca/mcp/hca_size_guard.py）", file=_sys.stderr, flush=True)
 
     def _fit(text, tool="", max_bytes=None):                   # type: ignore[misc]
+        return text
+
+    def guard_mcp_text(text, tool_name="", *, tool="", max_bytes=None):  # type: ignore[misc]
         return text
 
 # docker bridge · 生产 172.17.0.1(host 主机 IP)· 本机 test 可用 host.docker.internal
@@ -227,6 +230,73 @@ async def list_tools():
                 "required": ["query"],
             },
         ),
+        Tool(
+            name="file_search_in_doc",
+            description=(
+                "在用户上传的文档（PDF 财报/研报、Excel、Word、Markdown）中按关键词检索命中页面及上下文。\n"
+                "当 `<uploaded-documents>` 显示文档为 `paged`（长文档目录+黄金摘要模式）或需要查找某项具体财务科目、"
+                "附注、股东、风险条款所在页码时调用。优先返回包含表格的命中页，每页带有 `[来源：文件名 · 第 X 页]` 钢印。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "file_id": {
+                        "type": "string",
+                        "description": "上传文档的 file_id（见 `<uploaded-documents>` 标题行，如 f_...）",
+                    },
+                    "keyword": {
+                        "type": "string",
+                        "description": "要检索的关键词（如 '研发费用'、'应收账款'、'前十大股东'、'分红'）",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "default": 5,
+                        "minimum": 1,
+                        "maximum": 10,
+                        "description": "最多返回命中页数（默认 5）",
+                    },
+                    "_hermes_user_id": {
+                        "type": "string",
+                        "description": "内部字段 · 由 guard.py 自动注入 · 请勿填写",
+                    },
+                },
+                "required": ["file_id", "keyword"],
+            },
+        ),
+        Tool(
+            name="file_read_pages",
+            description=(
+                "按页码区间翻阅用户上传文档（PDF 财报/研报、Excel、Word、Markdown）的指定页面原文与 Markdown 表格。\n"
+                "单次最多跨 8 页（如 start_page=10, end_page=15）。引用返回内容中的任何数字或结论时，"
+                "必须在正文中附上 `[来源：文件名 · 第X页]` 角标溯源。"
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "file_id": {
+                        "type": "string",
+                        "description": "上传文档的 file_id（见 `<uploaded-documents>` 标题行，如 f_...）",
+                    },
+                    "start_page": {
+                        "type": "integer",
+                        "default": 1,
+                        "minimum": 1,
+                        "description": "起始页码（从 1 开始）",
+                    },
+                    "end_page": {
+                        "type": "integer",
+                        "default": 5,
+                        "minimum": 1,
+                        "description": "结束页码（含，单次最多跨 8 页）",
+                    },
+                    "_hermes_user_id": {
+                        "type": "string",
+                        "description": "内部字段 · 由 guard.py 自动注入 · 请勿填写",
+                    },
+                },
+                "required": ["file_id", "start_page"],
+            },
+        ),
     ]
 
 
@@ -257,7 +327,12 @@ async def call_tool(name: str, args: dict):
     args = args or {}
     # 剔除内部字段(避免带到 hermes-api body 里报 422)
     body = {k: v for k, v in args.items() if not k.startswith("_")}
-    url = f"{HERMES_API}/api/internal/watchlist/{name}"
+    if name == "file_search_in_doc":
+        url = f"{HERMES_API}/api/internal/files/search"
+    elif name == "file_read_pages":
+        url = f"{HERMES_API}/api/internal/files/read_pages"
+    else:
+        url = f"{HERMES_API}/api/internal/watchlist/{name}"
     try:
         async with httpx.AsyncClient(timeout=45) as c:
             r = await c.post(url, json=body, headers=_headers(args))
@@ -269,7 +344,7 @@ async def call_tool(name: str, args: dict):
         text = json.dumps({"error": f"hermes-api call failed: {type(e).__name__}: {e}",
                             "hermes_api": HERMES_API, "tool": name},
                           ensure_ascii=False)
-    return [TextContent(type="text", text=_fit(text, tool="watchlist"))]
+    return [TextContent(type="text", text=guard_mcp_text(text, tool_name=name, tool="watchlist"))]
 
 
 async def main():

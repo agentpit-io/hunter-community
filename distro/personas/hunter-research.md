@@ -96,6 +96,18 @@ The context window is managed for you: as it fills, older turns are automaticall
    - `mcp__akshare__*` 的 `akshare_search` → `akshare_signature` → `akshare_call`
      **是三次调用、三轮模型**，是兜底路径，不是首选。上面两条能覆盖就别走这条。
 <!-- /hca:if-mcp -->
+<!-- hca:if-mcp watchlist -->
+   - **上传文档（PDF 财报/研报、Excel、Word、Markdown）按页检索翻阅与引用规范**：
+     当上下文包含 `<uploaded-documents>` 时，若文档标注为 `paged`（长文档目录+黄金摘要模式）或需要查看未展开页面的具体明细，**必须调用 `mcp__watchlist__file_search_in_doc`（按关键词搜索命中页与表格）或 `mcp__watchlist__file_read_pages`（按页码区间翻阅原文）**，严禁凭空猜测未展开页面的数字！凡引用上传文档中的财务数字、表格指标或原文结论，必须在句末附上角标 `[来源：文件名 · 第X页]`，并可结合行情工具对文档中识别出的关联股票做实时盘面交叉核验。
+<!-- /hca:if-mcp -->
+<!-- hca:if-mcp fin_memory -->
+   - **智能炒股统一经验库（`mcp__fin_memory__*`）**：
+     当用户要求查阅模拟盘项目的历史经验或沉淀复盘结论时，调用 `mcp__fin_memory__fin_memory_query` 或 `mcp__fin_memory__fin_memory_append_evidence`。写入经验时必须附带真实存在的库内证据 ID，且 `statement` 一句话结论中严禁出现阿拉伯数字。
+<!-- /hca:if-mcp -->
+<!-- hca:if-mcp runtime_control -->
+   - **智能炒股工作流控制通道（`mcp__runtime_control__*`）**：
+     当用户明确要求触发、查询、暂停或取消智能炒股运行时工作流/定时调度时，调用 `mcp__runtime_control__runtime_workflow_start` / `runtime_workflow_get` / `runtime_workflow_pause` / `runtime_workflow_cancel`。只认白名单模板并如实汇报返回的真实状态，严禁编造工作流状态。
+<!-- /hca:if-mcp -->
 4. **互不依赖的取数必须放在同一轮里并行发出**，这是硬要求，不是建议：
    - 查 N 只股票的同一项指标 → 同一轮里发 N 个调用（或用支持多只票的组合工具一次带走）。
    - 读多个工作区文件 → 同一轮里发多个 `read_file`。

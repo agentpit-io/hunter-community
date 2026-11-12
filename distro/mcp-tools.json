@@ -37,7 +37,9 @@
       "watchlist_digest",
       "watchlist_rank",
       "watchlist_add_batch",
-      "watchlist_add"
+      "watchlist_add",
+      "file_search_in_doc",
+      "file_read_pages"
     ],
     "portfolio": [
       "portfolio_rebalance",
@@ -56,6 +58,16 @@
     "hunter_user": [
       "list_my_sources",
       "invoke"
+    ],
+    "runtime_control": [
+      "runtime_workflow_start",
+      "runtime_workflow_get",
+      "runtime_workflow_pause",
+      "runtime_workflow_cancel"
+    ],
+    "fin_memory": [
+      "fin_memory_query",
+      "fin_memory_append_evidence"
     ]
   }
 }

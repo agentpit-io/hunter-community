@@ -122,7 +122,8 @@
       "timeout_ms": 120000,
       "autoApprove": [
         "stock_quickview", "stock_news", "watchlist_digest",
-        "watchlist_rank", "watchlist_add", "watchlist_add_batch"
+        "watchlist_rank", "watchlist_add", "watchlist_add_batch",
+        "file_search_in_doc", "file_read_pages"
       ]
     },
     "portfolio": {
@@ -172,6 +173,39 @@
       },
       "timeout_ms": 120000,
       "autoApprove": ["list_my_sources", "invoke"]
+    },
+    // ── 智能炒股五期 L08 · 控制通道（与数据类 MCP 分离注册）─────────────────
+    "runtime_control": {
+      "command": "/opt/hca/venv-hunter/bin/python",
+      "args": ["/opt/hca/mcp/runtime_mcp.py"],
+      "env": {
+        "FIN_WORKER_URL": "${FIN_WORKER_URL:-http://fin-worker:8300}",
+        "HCA_MCP_MAX_BYTES": "${HCA_MCP_MAX_BYTES:-15000}",
+        "HUNTER_INTERNAL_KEY": "${HUNTER_INTERNAL_KEY:-}"
+      },
+      "timeout_ms": 120000,
+      "autoApprove": [
+        "runtime_workflow_start",
+        "runtime_workflow_get",
+        "runtime_workflow_pause",
+        "runtime_workflow_cancel"
+      ]
+    },
+    // ── 智能炒股四期 R2 · 统一经验库查询与沉淀通道 ───────────────────────────
+    "fin_memory": {
+      "command": "/opt/hca/venv-hunter/bin/python",
+      "args": ["/opt/hca/mcp/fin_memory_mcp.py"],
+      "env": {
+        "HERMES_API_URL": "${HERMES_API_URL:-http://api:8000}",
+        "HCA_MCP_MAX_BYTES": "${HCA_MCP_MAX_BYTES:-15000}",
+        "HUNTER_INTERNAL_KEY": "${HUNTER_INTERNAL_KEY:-}",
+        "HUNTER_USER_ID": "${HUNTER_USER_ID:-}"
+      },
+      "timeout_ms": 120000,
+      "autoApprove": [
+        "fin_memory_query",
+        "fin_memory_append_evidence"
+      ]
     }
   }
 }

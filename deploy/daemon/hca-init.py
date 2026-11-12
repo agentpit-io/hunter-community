@@ -212,7 +212,59 @@ def disabled_mcp() -> set:
     return {x.strip() for x in (os.environ.get("HCA_MCP_DISABLE") or "").split(",") if x.strip()}
 
 
+def ensure_internal_key() -> str:
+    """确保 HUNTER_INTERNAL_KEY 在 os.environ 中可用：优先环境变量，其次密钥文件或 secrets.env。"""
+    cur = (os.environ.get("HUNTER_INTERNAL_KEY") or "").strip()
+    if cur:
+        return cur
+    key_file = Path((os.environ.get("HUNTER_INTERNAL_KEY_FILE") or "/opt/hunter-secrets/internal_key").strip())
+    try:
+        if key_file.is_file():
+            val = key_file.read_text(encoding="utf-8").strip()
+            if val:
+                os.environ["HUNTER_INTERNAL_KEY"] = val
+                print(f"[hca-init] HUNTER_INTERNAL_KEY 从 {key_file} 读入")
+                return val
+    except OSError:
+        pass
+    sec_env = Path((os.environ.get("HUNTER_SECRETS_FILE") or "/opt/hunter-secrets/secrets.env").strip())
+    try:
+        if sec_env.is_file():
+            for line in sec_env.read_text(encoding="utf-8", errors="ignore").splitlines():
+                if line.startswith("HUNTER_INTERNAL_KEY="):
+                    val = line.split("=", 1)[1].strip().strip("'\"")
+                    if val:
+                        os.environ["HUNTER_INTERNAL_KEY"] = val
+                        print(f"[hca-init] HUNTER_INTERNAL_KEY 从 {sec_env} 读入")
+                        return val
+    except OSError:
+        pass
+    return ""
+
+
+def fetch_wizard_llm_config() -> dict:
+    """当环境变量未指定大模型 Key 时，向 api 的 `/api/internal/runtime/llm` 拉取向导保存的数据库配置。"""
+    api_url = (os.environ.get("HERMES_API_URL") or "").strip().rstrip("/")
+    internal_key = ensure_internal_key()
+    if not api_url or not internal_key:
+        return {}
+    import urllib.request
+    req = urllib.request.Request(
+        f"{api_url}/api/internal/runtime/llm",
+        headers={"X-Hunter-Internal-Key": internal_key},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=3.0) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if isinstance(data, dict) and data.get("configured"):
+                return data
+    except Exception as e:  # noqa: BLE001
+        print(f"[hca-init] ℹ 向导模型配置拉取跳过（{type(e).__name__}）")
+    return {}
+
+
 def seed_workspace() -> None:
+    ensure_internal_key()
     refresh = env_bool("HCA_WORKSPACE_REFRESH", True)
     WORKSPACE.mkdir(parents=True, exist_ok=True)
     print(f"[hca-init] 工作区 {WORKSPACE}（模板 {TEMPLATE_DIR}，重铺托管文件={'是' if refresh else '否'}）")
@@ -283,12 +335,12 @@ def render_config() -> None:
         return
 
     provider = os.environ.get("HCA_LLM_PROVIDER_NAME") or "hunter"
-    base_url = (os.environ.get("HCA_LLM_BASE_URL") or "").strip()
-    model = os.environ.get("HCA_LLM_MODEL") or "hunter-chat"
+    base_url = (os.environ.get("HCA_LLM_BASE_URL") or os.environ.get("LLM_BASE_URL") or "").strip()
+    model = (os.environ.get("HCA_LLM_MODEL") or os.environ.get("LLM_DEFAULT_MODEL") or "hunter-chat").strip()
     ctx = os.environ.get("HCA_LLM_CONTEXT_WINDOW") or "1000000"
 
-    key = (os.environ.get("HCA_LLM_API_KEY") or "").strip()
-    key_file = (os.environ.get("HCA_LLM_API_KEY_FILE") or "").strip()
+    key = (os.environ.get("HCA_LLM_API_KEY") or os.environ.get("LLM_API_KEY") or "").strip()
+    key_file = (os.environ.get("HCA_LLM_API_KEY_FILE") or os.environ.get("LLM_API_KEY_FILE") or "").strip()
     if not key and key_file:
         # 这里以前是 `p.is_file()` 裸调 —— 文件存在但**没有读权限**时
         # `os.stat` 直接抛 PermissionError，容器就死在启动脚本里（只留一段 traceback）。
@@ -317,6 +369,31 @@ def render_config() -> None:
             print(f"[hca-init] ⚠ HCA_LLM_API_KEY_FILE={key_file} 不存在")
         except OSError as e:
             print(f"[hca-init] ⚠ 读 {key_file} 失败：{type(e).__name__}: {e}")
+
+    # 当环境变量与密钥文件均未提供 key 时，联动拉取向导在数据库中保存的模型配置
+    if not key:
+        wiz = fetch_wizard_llm_config()
+        if wiz:
+            key = str(wiz.get("api_key") or "").strip()
+            w_model = str(wiz.get("model") or "").strip()
+            w_base = str(wiz.get("base_url") or "").strip().rstrip("/")
+            w_san = str(wiz.get("sanitize") or "auto").strip().lower()
+            if w_model:
+                model = w_model
+            via_shim = w_san in ("1", "true", "yes", "on") or (w_san not in ("0", "false", "no", "off") and "gemini" in model.lower())
+            shim_url = (os.environ.get("LLM_SHIM_URL") or "http://llm-shim:3999/v1").strip().rstrip("/")
+            if via_shim and shim_url:
+                base_url = shim_url
+            elif w_base:
+                base_url = w_base
+            print(f"[hca-init] 已从向导数据库配置拉取模型：model={model} via_shim={via_shim}")
+
+    # 若走内置额度网关且仍未显式设置 LLM key，自动回退使用 HUNTER_API_KEY
+    if not key and base_url.rstrip("/").endswith("/api/saas/llm/v1"):
+        platform_key = (os.environ.get("HUNTER_API_KEY") or "").strip()
+        if platform_key.startswith("hunt_tools_"):
+            key = platform_key
+            print("[hca-init] 内置额度网关自动复用 HUNTER_API_KEY")
 
     # 人设替换（**只有 fork 二进制认这一项**，见 docs/fork-patches.md）。
     # 官方 5.1.0 会把 `system_prompt_file` 当成未知键读进来又原样忽略 ——

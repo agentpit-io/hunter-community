@@ -203,3 +203,26 @@ def test_guard_logs_the_identity_source(api, tmp_path):
     assert rec["decision"] == "rewrite"
     assert "session" in rec["reason"], f"审计里要看得出身份是哪来的：{rec}"
 
+
+def test_fin_memory_and_doc_tools_receive_session_identity(api, tmp_path):
+    """M2 新增的 fin_memory 与 watchlist 文档翻阅工具都必须由 guard 自动注入且覆盖 _hermes_user_id。"""
+    env = base_env(api)
+    m_res, _ = run_guard(
+        "sess-alice",
+        "mcp__fin_memory__fin_memory_query",
+        {"project_id": "prj_1", "_hermes_user_id": "伪造身份"},
+        tmp_path,
+        env,
+    )
+    assert injected(m_res) == {"project_id": "prj_1", "_hermes_user_id": "u-alice"}
+
+    f_res, _ = run_guard(
+        "sess-bob",
+        "mcp__watchlist__file_search_in_doc",
+        {"file_id": "f_1", "keyword": "营收"},
+        tmp_path / "b",
+        env,
+    )
+    assert injected(f_res) == {"file_id": "f_1", "keyword": "营收", "_hermes_user_id": "u-bob"}
+
+

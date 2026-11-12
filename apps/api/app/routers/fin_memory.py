@@ -34,14 +34,36 @@ from app.services.fin import memory as memory_svc
 
 router = APIRouter(tags=["fin-memory"])
 
-_INTERNAL_KEY = os.getenv("HUNTER_INTERNAL_KEY", "")
+def _load_internal_key() -> str:
+    val = (os.getenv("HUNTER_INTERNAL_KEY") or "").strip()
+    if val:
+        return val
+    key_file = (os.getenv("HUNTER_INTERNAL_KEY_FILE") or "/opt/hunter-secrets/internal_key").strip()
+    if key_file and os.path.isfile(key_file):
+        try:
+            with open(key_file, encoding="utf-8") as f:
+                return f.read().strip()
+        except OSError:
+            pass
+    return ""
+
+
+_INTERNAL_KEY = _load_internal_key()
 
 
 def _auth_internal(request: Request) -> None:
     """内网口令（与 `fin_report.py:52` 同一条），**不新增密钥**。"""
     key = request.headers.get("X-Hunter-Internal-Key", "")
-    if not _INTERNAL_KEY or key != _INTERNAL_KEY:
+    expected = _INTERNAL_KEY or _load_internal_key()
+    if not expected or key != expected:
         raise HTTPException(401, "internal auth failed")
+
+
+def _header_uid(request: Request) -> Optional[str]:
+    """内网通道可选带 `X-Hunter-User-Id`（如 AtomCode `fin_memory_mcp` 由 `guard.py` 注入）：
+    带了就强制按该用户校验项目归属（防多租户串户），未带（如 `fin-worker` 定时回路）则为 None。"""
+    h = (request.headers.get("X-Hunter-User-Id") or "").strip()
+    return h or None
 
 
 def _uid(request: Request) -> str:
@@ -170,8 +192,9 @@ def _append_kwargs(body: EvidenceIn, caller: str, user_id: Optional[str]) -> dic
 async def append_evidence_internal(body: EvidenceIn, request: Request):
     """**唯一写入口**（内网通道）—— AI 自主经验，`source` 强制 `ai`。"""
     _auth_internal(request)
+    h_uid = _header_uid(request)
     try:
-        row = memory_svc.append_evidence(**_append_kwargs(body, "internal", None))
+        row = memory_svc.append_evidence(**_append_kwargs(body, "internal", h_uid))
     except memory_svc.MemoryDisabledError as exc:
         raise _disabled(exc) from exc
     except memory_svc.MemoryValidationError as exc:
@@ -187,9 +210,10 @@ async def append_evidence_internal(body: EvidenceIn, request: Request):
 async def query_internal(body: QueryIn, request: Request):
     """**唯一读入口**（内网通道）—— 工作流读经验；`freeze=true` 顺带冻结。"""
     _auth_internal(request)
+    h_uid = _header_uid(request)
     try:
         out = memory_svc.query(
-            project_id=body.project_id, caller="internal", user_id=None,
+            project_id=body.project_id, caller="internal", user_id=h_uid,
             market=body.market, kind=body.kind, status=body.status,
             for_decision=body.for_decision, as_of=body.as_of, freeze=body.freeze,
             purpose=body.purpose, trade_date=body.trade_date, point=body.point,

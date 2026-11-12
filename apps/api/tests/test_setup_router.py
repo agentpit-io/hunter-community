@@ -406,3 +406,143 @@ def test_llm_logs_and_download_never_leak_api_key(client, monkeypatch, tmp_path)
     assert secret_key not in r_dl.text
     assert "gemini-4-argon" in r_dl.text
 
+
+def test_opencode_admin_atomcode_daemon_integration(monkeypatch, tmp_path):
+    """M2：验证 AGENT_BACKEND=atomcode 时，opencode_admin 写 config.toml、调 /live/provider、探测就绪与诊断快照。"""
+    import httpx
+
+    monkeypatch.setenv("AGENT_BACKEND", "atomcode")
+    monkeypatch.setenv("ATOMCODE_DAEMON_URL", "http://daemon:13456")
+    tok_file = tmp_path / "daemon-token"
+    tok_file.write_text("secret-daemon-token-123\n", encoding="utf-8")
+    monkeypatch.setenv("ATOMCODE_TOKEN_FILE", str(tok_file))
+    cfg_dir = tmp_path / "atomcode"
+    cfg_dir.mkdir()
+    monkeypatch.setenv("ATOMCODE_HOME", str(cfg_dir))
+
+    # 预置一份带 system_prompt_file 与 [tools] 的 config.toml，验证热更新保留这两块
+    (cfg_dir / "config.toml").write_text(
+        'default_provider = "hunter"\n'
+        '[providers.hunter]\n'
+        'type = "openai"\n'
+        'api_key = "old"\n'
+        'model = "old-model"\n'
+        'base_url = "http://old"\n'
+        'context_window = 1000000\n'
+        'system_prompt_file = "/data/atomcode/persona.md"\n\n'
+        '[tools]\n'
+        'deny = ["group:codeintel"]\n',
+        encoding="utf-8",
+    )
+
+    seen_posts: list[tuple[str, dict, dict]] = []
+
+    class _FakeResp:
+        def __init__(self, code: int, data):
+            self.status_code = code
+            self._data = data
+            self.text = str(data)
+            self.headers = {"content-type": "application/json"}
+
+        def json(self):
+            return self._data
+
+    def _fake_get(url, headers=None, timeout=None):
+        assert (headers or {}).get("Authorization") == "Bearer secret-daemon-token-123"
+        if url.endswith("/config"):
+            return _FakeResp(
+                200,
+                {
+                    "default_provider": "hunter",
+                    "providers": [{"name": "hunter", "model": "hunter-chat"}],
+                },
+            )
+        if url.endswith("/models"):
+            return _FakeResp(
+                200,
+                [{"provider": "hunter", "model": "hunter-chat", "is_default": True}],
+            )
+        if url.endswith("/mcp/status"):
+            return _FakeResp(
+                200,
+                {
+                    "servers": [
+                        {"name": "watchlist", "status": "connected", "tool_count": 8},
+                        {"name": "runtime_control", "status": "connected", "tool_count": 4},
+                        {"name": "fin_memory", "status": "connected", "tool_count": 2},
+                    ],
+                    "trusted": True,
+                },
+            )
+        if url.endswith("/skills"):
+            return _FakeResp(200, [{"name": "uzi"}, {"name": "deep_analysis"}])
+        return _FakeResp(404, {})
+
+    def _fake_post(url, headers=None, json=None, timeout=None):
+        seen_posts.append((url, headers or {}, json or {}))
+        return _FakeResp(200, {"ok": True})
+
+    monkeypatch.setattr(httpx, "get", _fake_get)
+    monkeypatch.setattr(httpx, "post", _fake_post)
+
+    cfg = MemCfg("https://hunter.agentpit.io/api/saas/llm/v1", "hunt_tools_test_999", "hunter-chat", "0", "db")
+    applied = OA.apply_llm(cfg)
+    assert applied["ok"] is True
+    assert seen_posts and seen_posts[0][0] == "http://daemon:13456/live/provider"
+    assert seen_posts[0][2] == {"provider": "hunter", "model": "hunter-chat"}
+
+    toml_txt = (cfg_dir / "config.toml").read_text(encoding="utf-8")
+    assert 'model = "hunter-chat"' in toml_txt
+    assert 'api_key = "hunt_tools_test_999"' in toml_txt
+    assert 'system_prompt_file = "/data/atomcode/persona.md"' in toml_txt
+    assert 'deny = ["group:codeintel"]' in toml_txt
+
+    ready = OA.probe_engine_ready("hunter-chat")
+    assert ready["ready"] is True
+    assert ready["current"] == "hunter/hunter-chat"
+
+    snap = OA.engine_diagnostics_snapshot()
+    assert snap["engine"] == "atomcode"
+    assert snap["reachable"] is True
+    assert snap["current_model"] == "hunter/hunter-chat"
+    assert len(snap["mcp_servers"]) == 3
+    assert "hunt_tools_test_999" not in str(snap)
+
+    sk = OA.refresh_skills()
+    assert sk == {"ok": True, "count": 2}
+
+
+def test_fin_report_and_agent_builder_record_llm_trace(monkeypatch, tmp_path):
+    """M2：验证 fin/report.py 与 quant/agent_builder.py 调用大模型时均写入 llm_trace。"""
+    import asyncio
+    from decimal import Decimal
+    from app.services.fin import report as fin_report
+
+    trace_file = tmp_path / "m2_trace.jsonl"
+    monkeypatch.setenv("HUNTER_LLM_TRACE_PATH", str(trace_file))
+
+    sr_key = fin_report.SELF_REVIEW_KEYS[0]
+
+    class _FakeLLM:
+        async def chat(self, messages, **kwargs):
+            return {
+                "content": f'{{"analysis_text": "今日组合表现稳健", "self_review": {{"{sr_key}": "持仓分散"}}}}',
+                "model": "gemini-4-argon",
+                "usage": {"prompt_tokens": 120, "completion_tokens": 45},
+            }
+
+    import app.providers.llm as llm_prov
+    monkeypatch.setattr(llm_prov, "get_llm", lambda: _FakeLLM())
+
+    res = asyncio.run(
+        fin_report.analyze_with_llm(
+            [{"metric_key": "nav", "label_cn": "净值", "value": Decimal("1.0"), "unit": "ratio"}],
+            {"trade_date": "2026-11-12", "project": {"tier": "play"}},
+        )
+    )
+    assert res["llm_model"] == "gemini-4-argon"
+    recent = LT.recent_calls(limit=10)
+    assert any(c["caller"] == "fin.report" and c["resp_model"] == "gemini-4-argon" and c["tokens_in"] == 120 for c in recent)
+
+
+

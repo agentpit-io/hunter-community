@@ -79,10 +79,10 @@ class TestFilterMcp(unittest.TestCase):
     def test_真实的mcp_json能被剥注释并解析(self):
         real = (REPO / "distro" / "workspace-template" / ".mcp.json").read_text(encoding="utf-8")
         obj = json.loads(hca_init._strip_jsonc(real))
-        self.assertEqual(len(obj["mcpServers"]), 10)
-        os.environ["HCA_MCP_DISABLE"] = "hcapack,akshare,kronos,truesource,screener,hunter_cap"
+        self.assertEqual(len(obj["mcpServers"]), 12)
+        os.environ["HCA_MCP_DISABLE"] = "hcapack,akshare,kronos,truesource,screener,hunter_cap,runtime_control,fin_memory"
         text, removed = hca_init.filter_mcp(real)
-        self.assertEqual(len(removed), 6)
+        self.assertEqual(len(removed), 8)
         self.assertEqual(sorted(json.loads(text)["mcpServers"]),
                          ["hunter_user", "portfolio", "uzi", "watchlist"])
 
@@ -130,11 +130,17 @@ class TestFilterPersona(unittest.TestCase):
     def test_真实人设里的块能被正确裁掉(self):
         real = (REPO / "distro" / "workspace-template" / ".atomcode.md").read_text(encoding="utf-8")
         self.assertIn("hca:if-mcp hcapack", real)
+        self.assertIn("hca:if-mcp runtime_control", real)
+        self.assertIn("hca:if-mcp fin_memory", real)
         kept, _ = hca_init.filter_persona(real, set())
-        cut, dropped = hca_init.filter_persona(real, {"hcapack"})
+        cut, dropped = hca_init.filter_persona(real, {"hcapack", "runtime_control", "fin_memory"})
         self.assertIn("mcp__hcapack__stock_snapshot", kept)
+        self.assertIn("mcp__runtime_control__runtime_workflow_start", kept)
+        self.assertIn("mcp__fin_memory__fin_memory_query", kept)
         self.assertNotIn("mcp__hcapack__", cut)
-        self.assertEqual(dropped, ["hcapack"])
+        self.assertNotIn("mcp__runtime_control__", cut)
+        self.assertNotIn("mcp__fin_memory__", cut)
+        self.assertEqual(sorted(dropped), ["fin_memory", "hcapack", "runtime_control"])
         # 裁掉之后正文仍然连贯：第 4 条（akshare 三连）必须还在
         self.assertIn("akshare_search", cut)
         self.assertNotIn("hca:if-mcp", kept + cut)

@@ -1,10 +1,10 @@
 """runtime-mcp · **控制通道**（L08 · 五期方案 §5.1 / §6.3 / §10.1）
 
 这是**唯一一个控制类 MCP server** —— 与数据类 MCP（`watchlist_mcp` / `screener_mcp` /
-`uzi_mcp` / `hunter_capability_mcp` …）**在配置上分开注册**（见 `scripts/opencode/gen-config.py`
-的 `_CONTROL_MCP`）。这就是方案 §6.3「控制通道与数据通道分离」的落点：
-**控制**（启动 / 查询 / 暂停 / 取消工作流）单独一个 server，**数据**（行情 / 选股 / 自选…）
-各是另外几个。
+`uzi_mcp` / `hunter_capability_mcp` / `fin_memory_mcp` …）**在配置上分开注册**（见
+`distro/workspace-template/.mcp.json` 的 `runtime_control`）。这就是方案 §6.3
+「控制通道与数据通道分离」的落点：**控制**（启动 / 查询 / 暂停 / 取消工作流）单独一个
+server，**数据**（行情 / 选股 / 自选 / 经验库…）各是另外几个。
 
 四个工具 = `runtime.workflow_start/get/pause/cancel`（§10.1 的「运行时」一行），
 全部转发到 fin-worker 的内部端点（`apps/fin-worker/app/api.py` 的 `/internal/runtime/*`）。
@@ -16,6 +16,7 @@
 - 没有「跑一段代码 / 跑一条命令 / 打任意 URL」这类参数。
 - 走共享口令 `HUNTER_INTERNAL_KEY`；fin-worker 只绑 127.0.0.1，不经公网。
 - 工具描述里明确告诉模型：**只读它自己 `workflow_get` 回来的真实状态**，不要凭记忆编状态。
+- 返回出口统一经过 `hca_size_guard.guard_mcp_text`（16KB 三档大小闸保护）。
 
 失败对象带 `type` / `code` / `instruction`（照 `uzi_mcp` 的约定）：fin-worker 连不上时，
 明确让模型「如实说连不上控制通道、不要编」。
@@ -24,15 +25,46 @@ import asyncio
 import json
 import os
 import sys
+from pathlib import Path
 
 import httpx
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+
+try:
+    from hca_size_guard import guard_mcp_text
+except ImportError:                                            # pragma: no cover
+    import sys as _sys
+    print("[hca] ⚠️ 没找到 hca_size_guard，MCP 返回的大小闸**未生效**"
+          "（镜像里应当在 /opt/hca/mcp/hca_size_guard.py）", file=_sys.stderr, flush=True)
+
+    def guard_mcp_text(text: str, tool_name: str = "", *, tool: str = "", max_bytes=None) -> str:  # type: ignore[misc]
+        return text
+
+
+def _load_internal_key() -> str:
+    val = (os.getenv("HUNTER_INTERNAL_KEY") or "").strip()
+    if val:
+        return val
+    key_file = (os.getenv("HUNTER_INTERNAL_KEY_FILE") or "/opt/hunter-secrets/internal_key").strip()
+    if key_file:
+        try:
+            p = Path(key_file)
+            if p.is_file():
+                return p.read_text(encoding="utf-8").strip()
+        except OSError:
+            pass
+    return ""
+
+
 # docker 网络里 fin-worker 的服务名；本机自测可设 FIN_WORKER_URL=http://127.0.0.1:8399
 FIN_WORKER = os.getenv("FIN_WORKER_URL", "http://fin-worker:8300").rstrip("/")
-INTERNAL_KEY = os.getenv("HUNTER_INTERNAL_KEY", "")
+INTERNAL_KEY = _load_internal_key()
 
 server = Server("runtime-mcp")
 
@@ -180,7 +212,7 @@ async def call_tool(name: str, args: dict):
         text = await _call("POST", "/internal/runtime/workflow_cancel", body=body)
     else:
         text = _fail("unknown_tool", f"未知工具 {name}")
-    return [TextContent(type="text", text=text)]
+    return [TextContent(type="text", text=guard_mcp_text(text, tool_name=name))]
 
 
 async def main():

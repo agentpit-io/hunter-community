@@ -105,6 +105,17 @@ def fit(text: str, tool: str = "", max_bytes: int | None = None) -> str:
     return _head_truncate(text, tool, budget, wrapped_list)
 
 
+def guard_mcp_text(
+    text: str,
+    tool_name: str = "",
+    *,
+    tool: str = "",
+    max_bytes: int | None = None,
+) -> str:
+    """`fit()` 的语义化别名，供 MCP 工具在返回出口统一调用（16KB 三档大小闸）。"""
+    return fit(text, tool=tool_name or tool, max_bytes=max_bytes)
+
+
 def _head_truncate(text: str, tool: str, budget: int, wrapped_list: bool) -> str:
     """按字节截头，**但量的是序列化之后的字节数**。
 
