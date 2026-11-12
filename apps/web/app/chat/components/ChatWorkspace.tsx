@@ -1,7 +1,7 @@
 'use client'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { HUNTER } from '../../lib/hunter-theme'
-import type { Message, MessagePart, MessagePartTool, OpencodeEvent } from '../lib/types'
+import type { Message, MessagePart, MessagePartTool, OpencodeEvent, UploadedAttachment } from '../lib/types'
 import {
   createSession,
   getSession,
@@ -14,11 +14,12 @@ import {
   switchSessionAgent,
   switchSessionModel,
 } from '../lib/opencodeClient'
+import { fetchFilePreview, listSessionFiles } from '../lib/fileClient'
 import { useOpencodeSSE } from '../lib/useSSE'
 import { ensureLocalSession } from '../../lib/localSession'
 import { condenseMemory } from '../lib/profileClient'
 import MessageList from './MessageList'
-import InputBox, { type Attachment as InputAttachment } from './InputBox'
+import InputBox from './InputBox'
 import SessionHeader from './SessionHeader'
 import DebateProgressCard, { type DebatePhase } from './DebateProgressCard'
 import KpredProgressCard from './KpredProgressCard'
@@ -205,6 +206,7 @@ export default function ChatWorkspace({
   // Sprint E · HTML artifact 内容缓存 · 消息 id → {html, title}
   // 关闭 Artifact 面板后再想打开 · 靠这个 lookup 恢复 · 只在当前 session 有效
   const [htmlArtifacts, setHtmlArtifacts] = useState<Record<string, { html: string; title: string }>>({})
+  const [sessionFiles, setSessionFiles] = useState<UploadedAttachment[]>([])
 
   // Agent · Model state · 持久 localStorage
   // 空串 = 不指定 agent,让 opencode 用默认的,BFF 注入的金融助手 system prompt 才生效。
@@ -367,6 +369,7 @@ export default function ChatWorkspace({
     setBusy(false)
     setStagedOpen(false)
     setHtmlArtifacts({})
+    setSessionFiles([])
   }, [sessionId])
 
   useEffect(() => {
@@ -376,12 +379,16 @@ export default function ChatWorkspace({
     }
     ;(async () => {
       try {
-        // 并行拉 opencode 消息 + 本 session 历史辩论 + kpred
-        const [msgs, debates, kpreds] = await Promise.all([
+        // 并行拉 opencode 消息 + 本 session 历史辩论 + kpred + 已上传文档
+        const [msgs, debates, kpreds, files] = await Promise.all([
           listMessages(sessionId),
           listSessionDebates(sessionId).catch(() => []),
           listSessionKpreds(sessionId).catch(() => []),
+          listSessionFiles(sessionId).catch(() => []),
         ])
+        if (Array.isArray(files) && files.length > 0) {
+          setSessionFiles(files)
+        }
         const base = Array.isArray(msgs) ? msgs : []
 
         // 把每个历史辩论 · 恢复成 user + assistant 两条 · id 用 task_id 派生
@@ -560,62 +567,92 @@ export default function ChatWorkspace({
     }
   }
 
-  const handleSend = async (text: string, attachments?: InputAttachment[]) => {
+  const handlePreviewFilePage = useCallback(
+    async (fileIdOrName: string, pageNo = 1) => {
+      if (!onOpenReport) return
+      let targetFileId = fileIdOrName
+      if (!targetFileId.startsWith('file_')) {
+        const matched = sessionFiles.find(
+          (f) => f.filename === fileIdOrName || f.filename.includes(fileIdOrName) || fileIdOrName.includes(f.filename),
+        )
+        if (matched?.fileId) targetFileId = matched.fileId
+        else if (sessionFiles[0]?.fileId) targetFileId = sessionFiles[0].fileId
+      }
+      if (!targetFileId || !targetFileId.startsWith('file_')) return
+
+      try {
+        const res = await fetchFilePreview(targetFileId, pageNo, pageNo)
+        const pageMd =
+          res.pages?.[0]?.content_md ||
+          `### 📄 ${res.filename} · 第 ${pageNo} 页\n\n（未找到该页内容）`
+        onOpenReport(
+          pageMd,
+          `doc_${targetFileId}_p${pageNo}`,
+          'markdown',
+          `${res.filename} · 第 ${pageNo}/${res.total_pages} 页原文核对`,
+        )
+      } catch (e: any) {
+        setError(`打开文档页码预览失败: ${e?.message || e}`)
+      }
+    },
+    [onOpenReport, sessionFiles],
+  )
+
+  const handleSend = async (text: string, attachments?: UploadedAttachment[]) => {
     if (!sessionId || busy) return
 
+    const docAttachments = (attachments || []).filter((a) => a.kind === 'document' && a.fileId)
+    const imgAttachments = (attachments || [])
+      .filter((a) => a.kind === 'image' && a.dataUrl)
+      .map((a) => ({
+        dataUrl: a.dataUrl!,
+        mime: a.mime || 'image/png',
+        filename: a.filename,
+      }))
+
+    if (docAttachments.length > 0) {
+      setSessionFiles((prev) => {
+        const map = new Map<string, UploadedAttachment>()
+        for (const item of [...prev, ...docAttachments]) {
+          if (item.fileId) map.set(item.fileId, item)
+        }
+        return Array.from(map.values())
+      })
+    }
+
+    const fallbackDetectedStock =
+      docAttachments.flatMap((d) => d.detectedStocks || [])[0] ||
+      sessionFiles.flatMap((d) => d.detectedStocks || [])[0]
+
     // ── 多专家辩论 SKILL ──
-    // 辩论/预测这类 SKILL 走本地专用管线,不接图片 —— 有附件就先给个提示
-    // 让用户明白他刚才拖进来的图不会走进这些流程,而是走普通 chat。
-    const hasAttachments = !!attachments && attachments.length > 0
+    const hasImgAttachments = imgAttachments.length > 0
     const isDebateByPattern = /做\s*多\s*空\s*辩\s*论/.test(text)
-    if (!hasAttachments && (pendingSkillKey === 'debate' || isDebateByPattern)) {
+    if (!hasImgAttachments && (pendingSkillKey === 'debate' || isDebateByPattern)) {
       onSkillConsumed?.()
-      void handleDebateSend(text, sessionId)
+      void handleDebateSend(text, sessionId, fallbackDetectedStock?.code)
       return
     }
 
     // ── Kronos 走势预测 SKILL (Sprint E) ──
-    //
-    // ⚠️ 这条判断决定用户拿到的是 **K 线图 artifact** 还是一段普通 markdown。
-    // 走进来 → runKpred → 右侧面板出 K 线 + 综合评分 + 8 因子 + 每日预测表;
-    // 没走进来 → 掉到通用 LLM,模型自己找工具、吐一段文字。
-    //
-    // 原来只认两个含 "Kronos" 的写法:
-    //     /用\s*Kronos\s*预测/  和  /Kronos.*未来.*天走势/
-    //
-    // 而能力库里「K 线走势预测」那张卡的模板是
-    //     `预测 {股票} 未来 5 天走势`          ← tool_catalog.py:134
-    // **一个 Kronos 都没有**。用户从能力库点「用它 →」,填完股票发出去,
-    // 正则匹配不上 → 走通用分支 → 拿到的是 📄 markdown 而不是 📈 K 线图。
-    // 招牌功能从最显眼的入口进去反而是坏的。
-    //
-    // 现在按「预测 + 走势/走向 + 天数」这个语义组合识别,不再依赖必须出现
-    // "Kronos" 这个内部模型名 —— 用户没有理由知道我们的模型叫什么。
     const isKpredByPattern =
       /用\s*Kronos\s*预测/i.test(text) ||
       /Kronos.*未来.*天走势/i.test(text) ||
-      // 能力库模板 & 用户自然说法:「预测 XX 未来 5 天走势」「预测 XX 后市走向」
       (/预测/.test(text) && /走势|走向|行情/.test(text) && /\d+\s*(天|日|个交易日)|未来|后市/.test(text))
-    if (!hasAttachments && (pendingSkillKey === 'forecast' || isKpredByPattern)) {
+    if (!hasImgAttachments && (pendingSkillKey === 'forecast' || isKpredByPattern)) {
       onSkillConsumed?.()
-      void handleKpredSend(text, sessionId)
+      void handleKpredSend(text, sessionId, fallbackDetectedStock?.code)
       return
     }
 
     setBusy(true)
     setError(null)
-    // 普通对话的停法:调 opencode 的 abort 端点 —— 这一条是**后端真停**。
-    // 失败只记日志:按钮那边已经把界面解锁了,再弹一个错误条只会添乱
     abortRef.current = () => {
       void abortSession(sessionId).catch((e) => console.warn('[chat] abort 请求失败:', e))
     }
-    // 判断是否第一条 user message · 用于后面自动生成标题
     const isFirstUserMsg = !messages.some((m) => m.role === 'user')
 
     const tempId = `tmp_user_${Date.now()}`
-    // 用户可视的乐观气泡:文本 + 附件占位("📎 图片 N 张")· 服务端持久化的是 OCR 文本
-    // 服务器 SSE 回来后会替换成真消息(那时只有 text part) · 差异用户看不出
-    const bubbleText = text || (hasAttachments ? `📎 图片 ${attachments!.length} 张` : '')
+    const bubbleText = text || (hasImgAttachments ? `📎 图片 ${imgAttachments.length} 张` : '')
     setMessages((prev) => [
       ...prev,
       {
@@ -623,6 +660,7 @@ export default function ChatWorkspace({
         sessionID: sessionId,
         role: 'user',
         parts: [{ type: 'text', text: bubbleText }],
+        attachments: attachments && attachments.length > 0 ? attachments : undefined,
         time: { created: Date.now() },
       },
     ])
@@ -634,33 +672,20 @@ export default function ChatWorkspace({
         text,
         agent: currentAgent || undefined,
         model: providerID && modelID ? { providerID, modelID } : undefined,
-        attachments: attachments?.map((a) => ({
-          dataUrl: a.dataUrl,
-          mime: a.mime,
-          filename: a.filename,
-        })),
-        // 用户在能力库点了哪个 SKILL —— 必须显式告诉模型。
-        // opencode 是让**模型自己**按 description 匹配该用哪个 SKILL 的,
-        // 而自建 SKILL 的模板常常不带名字(2026-09-09 用户那条就是
-        // 「{GOOG}这只票,现在到底能不能做?」),模型无从判断就走默认流程了。
+        fileIds: docAttachments.map((d) => d.fileId!).filter(Boolean),
+        attachments: hasImgAttachments ? imgAttachments : undefined,
         skillKey: pendingSkillKey || undefined,
       })
-      // 这一条已经用掉了 —— 不清的话下一条随口问的话也会被当成"还在用那个 SKILL"。
-      // (debate / forecast 两个分支在上面各自 consume 过,普通分支一直漏了)
       if (pendingSkillKey) onSkillConsumed?.()
 
-      // 自动生成标题 · 若这是首条 user msg 且当前 session title 是"新对话"或空
       if (isFirstUserMsg) {
         void autoTitleIfNeeded(sessionId, text)
       }
     } catch (e: any) {
-      // 切走了就别把这条错误画到别的会话上(同 handleDebateSend)
       if (stillOn(sessionId)) setError(`发送失败: ${e?.message || e}`)
     } finally {
       if (stillOn(sessionId)) setBusy(false)
-      // 这一轮里模型可能暂存了 SKILL · 查一次
       void checkStaged()
-      // 收尾时用服务端的版本对一次账 —— 见 reconcileMessages 的说明
       void reconcileMessages(sessionId)
     }
   }
@@ -747,7 +772,7 @@ export default function ChatWorkspace({
    * 3. 调 debateClient.runDebate · 6 阶段进度更新 debate state
    * 4. 完成后注入 assistant 消息 · id=`debate_${taskId}` · 打开 Artifact
    */
-  const handleDebateSend = async (text: string, sid: string) => {
+  const handleDebateSend = async (text: string, sid: string, fallbackCode?: string) => {
     setBusy(true)
     setError(null)
     // 辩论的停法:切断 SSE 不再等(后端没取消接口 · 见 abortRef 的说明)
@@ -762,6 +787,9 @@ export default function ChatWorkspace({
     // 剥占位符括号(半/全角) · 剥前后杂字符
     stockQuery = stockQuery.replace(/[{}【】\[\]（）()<>《》「」『』]/g, '').trim()
     stockQuery = stockQuery.replace(/^(股票|代码)\s*[:：]?\s*/, '').trim()
+    if ((!stockQuery || /^(这家公司|该公司|文中标的|这只股票|它|股票)$/.test(stockQuery)) && fallbackCode) {
+      stockQuery = fallbackCode
+    }
 
     const isFirstUserMsg = !messages.some((m) => m.role === 'user')
 
@@ -870,21 +898,13 @@ export default function ChatWorkspace({
    * · 从文本抽股票查询 + 天数(regex)
    * · 出 HTML 而不是 markdown · 交 Artifact iframe 渲染
    */
-  const handleKpredSend = async (text: string, sid: string) => {
+  const handleKpredSend = async (text: string, sid: string, fallbackCode?: string) => {
     setBusy(true)
     setError(null)
     // 同辩论:切断 SSE 不再等
     const kpredAbort = new AbortController()
     abortRef.current = () => kpredAbort.abort()
 
-    // 抽股票查询: SKILL 模板 "用 Kronos 预测 {股票} 未来 N 天走势"
-    //
-    // 抽取优先级:
-    // 1) 括号里的内容(SKILL 模板留的坑位 · 用户意图最明确)—— 兼容
-    //    "{股票代码：002463}" / "【沪电股份】" / "[002463]" 这种混合形态。
-    // 2) 兜底:从 "预测" 到"未来/走势/N 天/日"之间的片段。
-    //    停止边界里**不要**放裸 \d —— 股票代码本身就是数字,一遇 "0" 就截断,
-    //    "预测 002463 未来 10 天" 会只捕到 "0"。只有 "N天/N日" 才算天数边界。
     let stockQuery = ''
     const bm = text.match(/[{【\[]\s*([^}】\]]+?)\s*[}】\]]/)
     if (bm) {
@@ -898,13 +918,14 @@ export default function ChatWorkspace({
         else stockQuery = text
       }
     }
-    // 剥占位符括号 + 常见杂字符(括号已在上面消耗过,这里兜底剩余)
     stockQuery = stockQuery.replace(/[{}【】\[\]（）()<>《》「」『』]/g, '').trim()
-    // 剥常见 label 前缀:"股票代码：002463" → "002463" · "股票名称:沪电股份" → "沪电股份"
     stockQuery = stockQuery.replace(
       /^(股票代码|股票名称|股票|代码|名称|ticker|symbol)\s*[:：]\s*/i, '',
     ).trim()
     stockQuery = stockQuery.replace(/(未来|走势|\d+\s*[天日]|Kronos|预测)/gi, '').trim()
+    if ((!stockQuery || /^(这家公司|该公司|文中标的|这只股票|它|股票)$/.test(stockQuery)) && fallbackCode) {
+      stockQuery = fallbackCode
+    }
 
     // 抽完关键词后什么都不剩(常见于用户没把 SKILL 模板里的 {股票} 换成实际标的
     // 就直接发送)· 这时后端 Pydantic 会因 stock_query min_length=1 抛 422 ·
@@ -1040,6 +1061,7 @@ export default function ChatWorkspace({
   const inputEl = (
     <InputBox
       onSend={handleSend}
+      sessionId={sessionId}
       disabled={busy || !sessionId}
       generating={busy}
       onAbort={handleAbort}
@@ -1054,6 +1076,9 @@ export default function ChatWorkspace({
       onAutoTextConsumed={onAutoTextConsumed}
       clearSeq={inputClearSeq}
       mode={isEmpty ? 'hero' : 'follow'}
+      onPreviewDocument={(att, pageNo) => {
+        if (att.fileId) void handlePreviewFilePage(att.fileId, pageNo || 1)
+      }}
     />
   )
 
@@ -1107,6 +1132,7 @@ export default function ChatWorkspace({
         onPickSuggestion={onPickSuggestion}
         onPickSkill={onPickSkill}
         onOpenReport={onOpenReport}
+        onPreviewDocSource={handlePreviewFilePage}
         busy={busy}
         heroInput={isEmpty ? inputEl : null}
         htmlArtifacts={htmlArtifacts}

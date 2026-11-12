@@ -352,7 +352,7 @@
     .rs-form{display:grid;gap:10px}
     .rs-f{display:grid;grid-template-columns:90px minmax(0,1fr);gap:10px;align-items:start;font-size:12.5px}
     .rs-f label{color:var(--muted);padding-top:6px}
-    .rs-f input,.rs-f textarea{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:7px;padding:6px 9px;
+    .rs-f input,.rs-f textarea,.rs-f select{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:7px;padding:6px 9px;
       font:inherit;font-size:13px;background:#fff;color:var(--text);resize:vertical}
     .rs-f input:focus,.rs-f textarea:focus{outline:2px solid var(--brand-pale);border-color:var(--brand)}
     .rs-ro{padding:6px 0;color:var(--text)}
@@ -364,6 +364,7 @@
 </head>
 <body>
 <script src="app.js"></script>
+<script src="agent-overfit.js"></script>
 <script>
 // ═══════════════════════════════════════════════════════════════════
 // 小鹿智能体 · 自迭代量化原型
@@ -580,6 +581,7 @@ function rsCard(ln) {
       + '</div>'
     : ''
   let btns = ''
+  btns += '<button type="button" class="btn small" data-delete-line="' + esc(ln.key || '') + '">删除</button>'
   if (has && ln.best_branch) btns += '<a class="btn small" href="#branch=' + esc(ln.best_branch) + '" data-open="' + esc(ln.best_branch) + '">打开看板</a>'
   if (has && st === 'archived') btns += '<button type="button" class="btn small" data-arch="0" data-line="' + esc(ln.key || '') + '">解除封存</button>'
   else if (has && rsColumn(ln) === 'running') btns += '<button type="button" class="btn small" data-arch="1" data-line="' + esc(ln.key || '') + '">封存</button>'
@@ -592,6 +594,7 @@ function rsCard(ln) {
     (ln.hypothesis ? '<div class="hyp">' + esc(ln.hypothesis) + '</div>' : '') +
     (ln.rules_draft ? '<div class="draft">' + esc(ln.rules_draft) + '</div>' : '') +
     dirs + (kv ? '<div class="rs-sub">全段(含回测)</div>' + kv : '') + oos + verdict + note +
+    (window.agentOverfitCard ? window.agentOverfitCard(ln.overfit) : '') +
     '<div class="rs-foot"><span>' + foot + '</span>' + (btns ? '<span class="btns">' + btns + '</span>' : '') + '</div></div>'
 }
 
@@ -700,17 +703,16 @@ function rsChart(r) {
 function vRsForm(r) {
   if (!RS.form) return ''
   const f = function (label, ctl) { return '<div class="rs-f"><label>' + label + '</label><div>' + ctl + '</div></div>' }
-  return panel('新建研究线', '提交后放在「运行中」、标「待写引擎」· 写好引擎才开始跑 · 淘汰线提交即锁定',
+  return panel('创建策略', 'AI 整理或手动添加 · 逐条确认后回测 · 在「已保存的个人策略」中管理',
     '<div class="rs-form">' +
-      f('名称', '<input id="rs-f-label" maxlength="30" placeholder="例如:均线回踩线">') +
-      f('一句话假设', '<textarea id="rs-f-hyp" maxlength="400" rows="3" placeholder="要验证的是什么?说不清在验证什么,回测结果怎么读都对"></textarea>') +
-      f('规则草案', '<textarea id="rs-f-rules" maxlength="600" rows="3" placeholder="进场 / 出场 / 止损 / 仓位"></textarea>') +
-      f('股票池', '<input id="rs-f-pool" maxlength="200" placeholder="筛选器预设或保存的扫描策略名">') +
-      f('对照组', '<div class="rs-ro">VCP 波段线 · 方向 C · 三段式(封存版)</div>') +
-      f('淘汰线', '<div class="rs-kill">' + txt(r && r.kill_text) + '<br><b>提交后这一栏锁定,不能看过结果再改。</b></div>') +
+      f('策略名称', '<input id="rs-f-label" maxlength="30" placeholder="例如：我的 VCP 波段策略">') +
+      f('策略描述', '<textarea id="rs-f-hyp" maxlength="100" rows="2" placeholder="选填，100字以内。简要介绍策略用途；具体交易条件请写在下方规则编辑器。"></textarea>') +
+      f('策略规则', '<textarea id="rs-f-rules" maxlength="6000" rows="14" placeholder="输入规则或粘贴策略代码"></textarea>') +
+      f('股票池', '<select id="rs-f-pool" aria-label="选择筛选策略"><option value="">正在加载筛选策略…</option></select><div class="ag-note" id="rs-pool-note" role="status"></div><button type="button" class="btn small" id="rs-pool-reload">刷新列表</button>') +
+      f('运行方式', '<div class="rs-ro">个人策略独立保存；确认后执行历史回测，不会自动启动每日交易或影响公共研究线。</div>') +
       '<div class="rs-fact"><span class="rs-msg" id="rs-f-msg"></span>' +
         '<button type="button" class="btn small" id="rs-f-cancel">取消</button>' +
-        '<button type="button" class="btn small primary" id="rs-f-submit">提交</button></div>' +
+        '<button type="button" class="btn small primary" id="rs-f-submit">保存策略草案</button></div>' +
     '</div>')
 }
 
@@ -728,7 +730,7 @@ function renderResearch(r, notice) {
     '<span>共同口径:<b>' + txt(cm.start) + ' → ' + txt(cm.end) + '</b> · ' + (Number.isFinite(cm.days) ? int(cm.days) : NA) + ' 个交易日</span>' +
     '<span>基准 <b>' + txt(cm.bench_label, '标普500') + ' <span class="' + dir(cm.bench_pct) + '">' + pct(cm.bench_pct, 2, true) + '</span></b></span>' +
     '<span>手续费 <b>阶梯式</b>(与历史交易记录同口径)</span>' +
-    '<span class="rs-acts"><button type="button" class="btn small primary" id="rs-new">' + (RS.form ? '收起新建' : '＋ 新建研究线') + '</button></span></div>'
+    '<span class="rs-acts"><button type="button" class="btn small" data-experiment-assistant>实验助手</button><button type="button" class="btn small primary" id="rs-new">' + (RS.form ? '收起创建' : '＋ 创建策略') + '</button></span></div>'
   const cols = RS_STAGES.map(function (sg) {
     const items = byStage[sg[0]] || []
     return '<div class="rs-col" data-stage="' + sg[0] + '"><div class="rs-colhd"><b>' + sg[1] + '</b> ' +
@@ -740,8 +742,7 @@ function renderResearch(r, notice) {
   // 魔法筛选器已经是顶栏一级页面,这里再放一张是重复入口。运行看板那张同日也去掉了。
   const html = '<div class="ag-wrap">' + vBanner(notice) + vTopNav('research') +
     panel('研究台', (has ? esc(lines.length + ' 条研究线') : NA) + ' · 运行中 / 封存 · 淘汰的线收在下面',
-      strip + '<div class="rs-board">' + cols + '</div>') +
-    vRsForm(r) +
+      strip + vRsForm(r) + '<div class="rs-board">' + cols + '</div>') +
     '<div class="rs-two">' +
       panel('同口径对照', '每条线取它最好的那个方向 · 算不出的一律 —', rsTable(r)) +
       panel('净值 vs 基准', '累计收益 %', rsChart(r)) +
@@ -784,20 +785,80 @@ function bindTopNav() {
 
 function bindResearch() {
   bindTopNav()
+  container.querySelectorAll('[data-delete-line]').forEach(function (button) {
+    button.addEventListener('click', async function () {
+      if (RS.busy || !confirm('从你的研究台删除这条策略？\n历史回测记录保留，其他账号不受影响。')) return
+      RS.busy = true; button.disabled = true
+      try {
+        const r = await fetch('/api/quant/agent/builder/research/' + encodeURIComponent(button.dataset.deleteLine), {method:'DELETE',headers:apiHeaders()})
+        const d = await r.json()
+        if (!r.ok) throw new Error(r.status === 401 ? '请登录后再删除' : d.detail || '删除失败')
+        await bootResearch()
+      } catch (e) { toast(e.message || '删除失败，请重试', 'warn'); button.disabled = false }
+      finally { RS.busy = false }
+    })
+  })
   const retry = document.getElementById('ag-retry')
   if (retry) retry.addEventListener('click', function () { boot('') })
   const nb = document.getElementById('rs-new')
-  if (nb) nb.addEventListener('click', function () { RS.form = !RS.form; renderResearch(RS.data) })
+  if (nb) nb.addEventListener('click', function () {
+    RS.form = !RS.form
+    renderResearch(RS.data)
+    if (RS.form) document.getElementById('rs-f-label').focus()
+  })
   const cancel = document.getElementById('rs-f-cancel')
   if (cancel) cancel.addEventListener('click', function () { RS.form = false; renderResearch(RS.data) })
   const sub = document.getElementById('rs-f-submit')
   if (sub) sub.addEventListener('click', rsSubmit)
+  const poolReload = document.getElementById('rs-pool-reload')
+  if (poolReload) { poolReload.addEventListener('click', loadRsPools); loadRsPools() }
   Array.prototype.forEach.call(container.querySelectorAll('[data-open]'), function (el) {
     el.addEventListener('click', function (e) {
       if (e && e.preventDefault) e.preventDefault()
       switchBranch(el.getAttribute('data-open'))
     })
   })
+}
+
+// 与魔法筛选器共用预设与账号保存接口，不在研究台维护另一份策略列表。
+async function loadRsPools() {
+  const select = document.getElementById('rs-f-pool')
+  const note = document.getElementById('rs-pool-note')
+  if (!select || select.dataset.loading === '1') return
+  select.dataset.loading = '1'
+  const previous = select.value
+  if (note) note.textContent = '正在加载…'
+  const urls = ['/api/quant/screener/meta', '/api/quant/screener/saved']
+  const results = await Promise.all(urls.map(async function (url) {
+    try {
+      const r = await fetch(url, { headers: apiHeaders(), cache: 'no-store' })
+      if (!r.ok) throw new Error(r.status === 401 ? '请重新登录后刷新列表' : '请求失败（HTTP ' + r.status + '）')
+      return { data: await r.json() }
+    } catch (e) { return { error: e.message || '网络请求失败' } }
+  }))
+  if (document.getElementById('rs-f-pool') !== select) return
+  let hidden = []
+  try { const h = JSON.parse(localStorage.getItem('hunter_screener_hidden_presets') || '[]'); if (Array.isArray(h)) hidden = h } catch (e) { /* 无有效隐藏记录时显示全部预设 */ }
+  const meta = results[0].data || {}
+  const markets = {}
+  ;(meta.markets || []).forEach(function (m) { markets[m.key] = m.label })
+  const groups = [
+    ['系统预设', (meta.presets || []).filter(function (p) { return hidden.indexOf(p.key) < 0 })],
+    ['我保存的扫描策略', (results[1].data || {}).items || []]
+  ]
+  let count = 0
+  select.innerHTML = '<option value="">请选择筛选策略</option>' + groups.map(function (g) {
+    const options = g[1].map(function (p) {
+      count++
+      const label = p.name + '（' + (markets[p.market] || {us:'美股',hk:'港股',a:'A股'}[p.market] || p.market) + '）'
+      return '<option value="' + esc(label) + '" data-kind="' + (g[0] === '系统预设' ? 'preset' : 'saved') + '" data-id="' + esc(String(p.key || p.id)) + '" data-script="' + esc(p.script || '') + '">' + esc(label) + '</option>'
+    }).join('')
+    return options ? '<optgroup label="' + g[0] + '">' + options + '</optgroup>' : ''
+  }).join('')
+  select.value = previous
+  select.dataset.loading = '0'
+  const errors = results.map(function (r, i) { return r.error ? groups[i][0] + '：' + r.error : '' }).filter(Boolean)
+  if (note) note.textContent = errors.length ? errors.join('；') : count ? '来自魔法筛选器；选中后随策略草案保存。' : '暂无可选策略，请先在魔法筛选器保存扫描策略。'
 }
 
 async function rsPost(url, body) {
@@ -819,7 +880,7 @@ async function rsSubmit() {
   const val = function (id) { const el = document.getElementById(id); return el ? String(el.value || '').trim() : '' }
   const body = { label: val('rs-f-label'), hypothesis: val('rs-f-hyp'), rules_draft: val('rs-f-rules'), pool: val('rs-f-pool') }
   const msg = document.getElementById('rs-f-msg')
-  if (!body.label || !body.hypothesis) { if (msg) msg.textContent = '名称和一句话假设必须写'; return }
+  if (!body.label || !body.hypothesis) { if (msg) msg.textContent = '请填写策略名称和策略思路'; return }
   RS.busy = true
   const res = await rsPost(RESEARCH_API, body)
   RS.busy = false
@@ -870,6 +931,8 @@ async function bootResearch() {
   let d
   try { d = await r.json() } catch (e) { RS.data = null; renderResearch(null, errNotice('返回的不是合法 JSON')); return }
   RS.data = d && typeof d === 'object' ? d : null
+  // 旧预览链接统一进入真实草案表单，避免用户误把预览当作另一套创建功能。
+  if (/(?:^#|&)create=1(?:&|$)/.test(String(location.hash || ''))) RS.form = true
   renderResearch(RS.data, RS.data ? null : errNotice('返回体为空'))
 }
 
@@ -1101,7 +1164,7 @@ function vRules(d) {
       (stats ? '<div class="ft">' + stats + '</div>' : '') + '</div>'
   }).join('')
   return panel('当前生效的规则', (has ? esc(rs.length + ' 条') : NA) + ' · 交易记录里的 R-xx 都指向这里',
-    '<div class="ag-rules" id="ag-rules">' + cards + '</div>' +
+    (['limitup', 'limitup_yin'].includes(hashBranch()) ? '<div style="display:flex;gap:10px;margin-bottom:16px"><button class="btn small" id="ag-edit-rules">编辑规则</button><button class="btn small primary" id="ag-manual-backtest">手动回测</button></div>' : '') + '<div class="ag-rules" id="ag-rules">' + cards + '</div>' +
     '<div class="ag-note" style="margin-top:12px">每条规则都带<b>触发次数与触发后胜率</b> —— ' +
     '没有这两个数,就分不清一条规则是「有效」还是「只是没怎么触发」。</div>')
 }
@@ -1554,6 +1617,7 @@ function render(d, notice) {
   // 返回 html 而不只是写进 container:render_check.js 靠这个返回值断言区块顺序
   const html = '<div class="ag-wrap">' + vBanner(notice) + vTopNav('dash') + vLineBanner(d) +
     vStatus(d) + vBranches(d) + vStrategy(d) + vGuard(d) + vPipeline(d) + vKpi(d) + vNav(d) +
+    (window.agentOverfitCard ? window.agentOverfitCard(d.overfit) : '') +
     vRules(d) +
     '<div class="ag-two"><div class="ag-col" id="ag-col">' + vHoldings(d) + vHistory(d) + '</div>' + vWatch(d) + '</div>' +
     vVersions(d) + vLessons(d) +
@@ -1654,6 +1718,10 @@ function fitBoth() {
 }
 let watchFitBound = false
 function bindOps() {
+  const edit = document.getElementById("ag-edit-rules");
+  if (edit) edit.onclick = () => window.openAgentRules(hashBranch());
+  const backtest = document.getElementById("ag-manual-backtest");
+  if (backtest) backtest.onclick = () => window.openAgentBacktest(hashBranch());
   bindTopNav()
   fitBoth()
   bindKChart()          // 悬停日K(app.js)· 内部自带「只绑一次」的闸门
@@ -1764,5 +1832,8 @@ const reload = document.getElementById('ag-reload')
 if (reload) reload.addEventListener('click', boot)
 boot()
 </script>
+<script src="agent-rules.js"></script>
+<script src="agent-create.js"></script>
+<script src="agent-experiments.js"></script>
 </body>
 </html>

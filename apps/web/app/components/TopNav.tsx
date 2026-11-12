@@ -6,7 +6,10 @@
 import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Target, Bell, LogOut, Settings, Gift } from 'lucide-react'
+import {
+  Target, CircleHelp, LogOut, Settings, ChevronDown, Bot,
+  Activity, TrendingUp, Wallet, FileText, GraduationCap, ShieldCheck, Compass,
+} from 'lucide-react'
 import { HUNTER, HUNTER_LOGO } from '../lib/hunter-theme'
 
 
@@ -124,6 +127,24 @@ export default function TopNav({ active }: NavProps) {
        */}
       <NavLink href="/strategies/index.html" icon={<Target size={14} />} label="策略中心" active={active === 'strategies'} />
 
+      <NavMenu
+        icon={<Bot size={14} />}
+        label="hunter智能体自动炒股"
+        labelShort="智能炒股"
+        badge="模拟"
+        active={active === 'finance'}
+      >
+        <DropdownLink href="/finance/overview"   icon={<Activity size={13} />}      label="总览" />
+        <DropdownLink href="/finance/auto-trade" icon={<TrendingUp size={13} />}    label="自动交易" />
+        <DropdownLink href="/finance/account"    icon={<Wallet size={13} />}        label="我的账户" />
+        <DropdownLink href="/finance/report"     icon={<FileText size={13} />}      label="每日报告" />
+        <DropdownLink href="/finance/growth"     icon={<GraduationCap size={13} />} label="成长与复盘" />
+        <DropdownLink href="/finance/help"       icon={<ShieldCheck size={13} />}   label="安全与帮助" />
+        <DropdownLink href="/finance/setup"      icon={<Compass size={13} />}       label="设置向导" />
+        <div style={panelNoteStyle}>模拟盘 · 不接实盘</div>
+      </NavMenu>
+
+      <NavLink href="/help/index.html" icon={<CircleHelp size={14} />} label="帮助中心" active={active === 'help'} />
       {/* 弹簧 */}
       <div style={{ flex: 1 }} />
 
@@ -206,6 +227,66 @@ function NavLink({ href, icon, label, active }: { href: string; icon: React.Reac
 }
 
 
+function NavMenu({ icon, label, labelShort, badge, active, children }: {
+  icon: React.ReactNode
+  label: string
+  labelShort?: string
+  badge?: string
+  active?: boolean
+  children: React.ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if (open && !ref.current?.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [open])
+
+  const lit = open || active
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        title={label}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 5,
+          height: 32, padding: '0 12px', marginRight: 4,
+          background: lit ? HUNTER.BRAND_PALE : 'transparent',
+          border: 'none', borderRadius: 8,
+          color: active ? HUNTER.COPPER3 : HUNTER.INK_S,
+          fontSize: 13, fontWeight: active ? 600 : 400,
+          cursor: 'pointer', transition: 'background .1s', fontFamily: 'inherit',
+        }}
+        onMouseEnter={(e) => { if (!lit) e.currentTarget.style.background = HOVER }}
+        onMouseLeave={(e) => { if (!lit) e.currentTarget.style.background = 'transparent' }}
+      >
+        {icon}
+        <span className="hidden sm:inline">{label}</span>
+        <span className="sm:hidden">{labelShort || label}</span>
+        {badge && (
+          <span className="hidden sm:inline" style={{
+            padding: '1px 6px', borderRadius: 999,
+            background: HUNTER.BRAND_PALE, color: HUNTER.COPPER3,
+            fontSize: 10, fontWeight: 600,
+          }}>{badge}</span>
+        )}
+        <ChevronDown size={11} style={{
+          opacity: .6, transform: open ? 'rotate(180deg)' : 'none',
+          transition: 'transform .12s',
+        }} />
+      </button>
+      {open && <div style={dropdownStyle} role="menu">{children}</div>}
+    </div>
+  )
+}
+
+
 function DropdownLink({ href, icon, label, badge }: { href: string; icon: React.ReactNode; label: string; badge?: string }) {
   return (
     <a
@@ -234,6 +315,15 @@ function DropdownLink({ href, icon, label, badge }: { href: string; icon: React.
   )
 }
 
+
+
+const panelNoteStyle: React.CSSProperties = {
+  margin: '5px 10px 1px',
+  paddingTop: 7,
+  borderTop: `1px solid ${HUNTER.LINE}`,
+  fontSize: 11,
+  color: HUNTER.INK_F,
+}
 
 
 const dropdownStyle: React.CSSProperties = {

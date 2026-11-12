@@ -1,0 +1,43 @@
+/* 草稿回归：只操作隔离浏览器存储，不写服务器策略，不调用AI。 */
+const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
+const fs=require('fs'),path=require('path');
+(async()=>{const browser=await chromium.launch({channel:'msedge',headless:true});try{
+ const p=await browser.newPage(),base='http://192.168.64.10:8300',errors=[];let aiCalls=0;
+ p.on('pageerror',e=>errors.push(e.message));
+ await p.route(base+'/**',async r=>r.fulfill({response:await r.fetch()}));
+ if(process.env.HUNTER_TEST_LOCAL_ASSETS)await p.route('**/agent-create.js',r=>r.fulfill({contentType:'text/javascript',body:fs.readFileSync(path.join(__dirname,'agent-create.js'),'utf8')}));
+ await p.route('**/agent/builder/recognize',r=>{aiCalls++;return r.fulfill({json:{rules:[]}})});
+ await p.goto(base+'/strategies/agent.html');await p.locator('#rs-new').click();
+ await p.waitForFunction(()=>document.querySelector('#ac-execution')?.textContent.includes('已入库'));
+ await p.locator('#rs-f-label').fill('刷新保留测试');await p.locator('#rs-f-hyp').fill('简介');
+ await p.locator('#rs-f-rules').fill('原文代码不可丢失');await p.locator('#ac-prompt').fill('我的输入内容');
+ await p.locator('#ac-language').selectOption('python');
+ await p.locator('#ac-start').fill('2026-01-02');await p.locator('#ac-end').fill('2026-09-01');await p.locator('#ac-initial').fill('123456');
+ const pool=await p.locator('#rs-f-pool option[data-id]').first().getAttribute('value');await p.locator('#rs-f-pool').selectOption(pool);
+ await p.locator('#ac-tab-rows').click();await p.locator('#ac-add').click();await p.locator('[data-source]').fill('止损5%');await p.locator('[data-type]').selectOption('stop');await p.locator('[data-param="pct"]').fill('5');await p.locator('[data-confirm]').check();await p.locator('#ac-confirm').check();
+ if(!p.url().includes('create=1'))throw Error('创建状态未入地址');
+ await p.reload();await p.waitForFunction(()=>document.querySelector('#ac-execution')?.textContent.includes('已入库'));
+ for(const [id,v]of Object.entries({'rs-f-label':'刷新保留测试','rs-f-hyp':'简介','rs-f-rules':'原文代码不可丢失','ac-prompt':'我的输入内容','ac-language':'python','ac-start':'2026-01-02','ac-end':'2026-09-01','ac-initial':'123456'})){if(await p.locator('#'+id).inputValue()!==v)throw Error('刷新丢失 '+id)}
+ await p.waitForFunction(v=>document.querySelector('#rs-f-pool').value===v,pool);
+ if(!await p.locator('[data-confirm]').isChecked()||await p.locator('#ac-confirm').isChecked())throw Error('规则确认或成交确认恢复错误');
+ await p.locator('#rs-new').click();if(p.url().includes('create=1'))throw Error('收起后状态未更新');await p.locator('#rs-new').click();
+ await p.locator('[data-source]').waitFor({state:'attached'});if(await p.locator('#ac-prompt').inputValue()!=='我的输入内容')throw Error('收起再打开丢草稿');
+ await p.evaluate(()=>goView('dash'));await p.waitForFunction(()=>!document.querySelector('#rs-f-rules'));await p.evaluate(()=>goView('research'));
+ await p.locator('#rs-new').waitFor();if(!await p.locator('#rs-f-rules').count())await p.locator('#rs-new').click();await p.locator('[data-source]').waitFor({state:'attached'});
+ if(await p.locator('#rs-f-label').inputValue()!=='刷新保留测试')throw Error('切换看板丢草稿');
+ const key=await p.evaluate(()=>Object.keys(localStorage).find(k=>k.startsWith('hunter_agent_builder_draft:v1:')));
+ if(!key||key.endsWith('undefined'))throw Error('草稿未按账号隔离');
+ await p.evaluate(()=>localStorage.setItem('hunter_agent_builder_draft:v1:other-user',JSON.stringify({v:1,values:{'rs-f-label':'其他账号草稿'},rows:[]})));
+ await p.reload();await p.locator('#ac-draft-status').waitFor();if(await p.locator('#rs-f-label').inputValue()==='其他账号草稿')throw Error('串账号');
+ await p.evaluate(()=>{window.originalSet=Storage.prototype.setItem;Storage.prototype.setItem=function(k,v){if(k.startsWith('hunter_agent_builder_draft:'))throw new Error('quota');return window.originalSet.call(this,k,v)}});
+ await p.locator('#ac-prompt').fill('配额失败仍保留输入');await p.locator('#ac-draft-status').filter({hasText:'保存失败'}).waitFor();
+ if(await p.locator('#ac-prompt').inputValue()!=='配额失败仍保留输入')throw Error('存储失败清空输入');
+ await p.evaluate(()=>Storage.prototype.setItem=window.originalSet);
+ await p.locator('#ac-prompt').fill('恢复正常存储');
+ p.once('dialog',d=>d.accept());await p.locator('#ac-discard').click();
+ if(await p.evaluate(k=>localStorage.getItem(k),key)!==null)throw Error('清空未删除草稿');
+ if(await p.locator('#ac-prompt').inputValue()!=='')throw Error('清空后还留输入');
+ await p.reload();await p.locator('#ac-prompt').waitFor();if(await p.locator('#rs-f-label').inputValue()!=='')throw Error('旧草稿复活');
+ if(aiCalls||errors.length)throw Error('恢复不应调用AI或JS错误 '+errors);
+ console.log('DRAFT_BROWSER_OK：刷新、规则、参数、确认、股票池、收起、切换、账号隔离、存储失败、清空，不重复调用AI');
+}finally{await browser.close()}})().catch(e=>{console.error(e);process.exitCode=1});

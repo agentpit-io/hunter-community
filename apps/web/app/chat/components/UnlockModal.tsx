@@ -18,6 +18,7 @@ import {
   type UnlockStatus, APPLY_URL_FALLBACK,
 } from '../lib/unlockClient'
 import CapabilityMatrixPanel from './CapabilityMatrixPanel'
+import BuiltinLlmOffer from './BuiltinLlmOffer'
 
 interface Props {
   /** 从某张 SKILL 卡点进来时传它的名字,文案里点名会更贴题 */
@@ -109,6 +110,8 @@ export default function UnlockModal({ triggeredBy, onClose, onUnlocked }: Props)
                 <Check size={14} />
                 <span>已接入 Hunter 服务 · {st?.masked}</span>
               </div>
+              {/* 平台 key 不会自动切换大模型 —— 在这里给出一键开启内置额度(2026-09-22) */}
+              <BuiltinLlmOffer />
               {/* 能力矩阵 · 数据源/工具/SKILL 三层聚合 · 2026-08-29 UI 改造 */}
               <CapabilityMatrixPanel unlocked={true} defaultOpen={false} />
               {st?.env_locked ? (

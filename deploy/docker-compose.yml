@@ -100,6 +100,7 @@ services:
 
       # MCP 依赖（.mcp.json 里的 ${VAR} 由 hca-init.py 用这些值渲染）
       HERMES_API_URL: "${HERMES_API_URL:-http://api:8000}"
+      FIN_WORKER_URL: "${FIN_WORKER_URL:-http://fin-worker:8300}"
       HUNTER_INTERNAL_KEY: "${HUNTER_INTERNAL_KEY:-}"
       HUNTER_USER_ID: "${HUNTER_USER_ID:-}"
       AKSHARE_MAX_ROWS: "${AKSHARE_MAX_ROWS:-50}"
@@ -249,30 +250,13 @@ services:
       hca.component: web
 
   # ── HunterCode 后端 ──────────────────────────────────────────────────────
-  #
-  # 用公开 GHCR 上的预构建镜像，**不在本仓库构建**：apps/api 的源码是从
-  # hunter-community 一次性导入的（docs/来源说明.md），M3 一行没改 ——
-  # guard.py 要的 GET /api/internal/session/{id}/user 在 1.2.0 里已经有了。
-  # 钉具体版本，不用 latest。
   api:
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-api:${HUNTER_VERSION:-1.2.0}
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    image: hca-api:${HCA_IMAGE_TAG:-dev}
     container_name: ${HCA_COMPOSE_PROJECT:-hca}-api
     restart: unless-stopped
-    # ── 模型 key 走文件时，api 也要拿得到（I1 §1.1 · 用户 2026-09-22 19:36 真实浏览器发现）─
-    #
-    # install.sh 推荐的装法是「key 写文件」：它会在 deploy/.env 里写
-    # `HCA_LLM_API_KEY_FILE=/run/secrets/llm-key` 并把 `HCA_LLM_API_KEY` **留空**。
-    # 改造之前只有 daemon 认这个文件（hca-init.py），api 这边读的是环境变量
-    # `LLM_API_KEY` —— 于是 api 判「大模型未配置」，网页登录后反复跳 /setup，
-    # api 自己的模型功能（自然语言选股 / 在线分析 / UZI）也全部 503。
-    # 浸泡与评测走的都是接口，绕过了那个判断，所以四小时浸泡没发现。
-    #
-    # 为什么是包一层 entrypoint 而不是「把文件内容读进环境变量」：
-    # 读进环境变量的话 `docker inspect hca-api` 就能看到明文 key，
-    # 那正是「key 走文件」这条路要避免的事。上游镜像 `CMD ["/app/boot.sh"]`、
-    # 没有 ENTRYPOINT（2026-09-23 在测试机 docker inspect 实测），
-    # 所以这里 exec 原 CMD，镜像自己的启动流程一步不少。
-    # `$$` 是给 compose 转义用的，容器里看到的是 `$`。
     entrypoint:
       - /bin/sh
       - -c
@@ -298,13 +282,12 @@ services:
       HUNTER_BIND_HOST: "0.0.0.0"
       HUNTER_MINIMAL_BOOT: "1"
       DATABASE_URL: postgresql://hunter:${HCA_PG_PASSWORD:?deploy/.env 里必须给一个随机口令}@postgres:5432/hunter
+      FIN_PAPER_PASSWORD: "${FIN_PAPER_PASSWORD:-}"
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET: "${HCA_JWT_SECRET:-}"
       # ⚠️ 对公网就必须关单用户免登录 + 设初始化口令（总控端口与暴露一节）
       HUNTER_SINGLE_USER: "${HUNTER_SINGLE_USER:-0}"
       HUNTER_SETUP_TOKEN: "${HUNTER_SETUP_TOKEN:?deploy/.env 里必须给一个随机值}"
-      # invite：第一个注册的人自动成为 admin（auth.py 的 is_first 分支），之后要邀请码。
-      # 不能用 closed —— 那会连第一个管理员都建不出来。
       REGISTRATION_MODE: "${REGISTRATION_MODE:-invite}"
       HUNTER_ADMIN_EMAILS: "${HUNTER_ADMIN_EMAILS:-}"
       HUNTER_INTERNAL_KEY: "${HUNTER_INTERNAL_KEY:-}"
@@ -313,35 +296,128 @@ services:
       LLM_PROVIDER: openai_compat
       LLM_BASE_URL: "${HCA_LLM_UPSTREAM_URL:-https://hunter.agentpit.io/api/saas/llm/v1}"
       LLM_API_KEY: "${HCA_LLM_API_KEY:-}"
-      # 上面那个为空时，由本服务的 entrypoint 从这个文件里读（见 service 头部注释）。
-      # 路径是**容器内**路径，与 daemon 用的同一个（两边挂的是同一个宿主目录）。
       LLM_API_KEY_FILE: "${HCA_LLM_API_KEY_FILE:-}"
       LLM_DEFAULT_MODEL: "${HCA_LLM_MODEL:-hunter-chat}"
       LLM_SHIM_URL: "http://llm-shim:3999/v1"
       HUNTER_SKILLS_DIR: /opt/hunter-skills
       HUNTER_USER_SKILLS_DIR: /opt/hunter-user-skills
-      # api 里那套「给 opencode 推配置」的路径在 AtomCode 版用不到；
-      # 留空比指一个不存在的主机名强（指错了报错会指向 opencode 而不是真正的原因）
+      AGENT_BACKEND: atomcode
+      ATOMCODE_DAEMON_URL: "http://daemon:${HCA_DAEMON_PORT:-13456}"
+      ATOMCODE_TOKEN_FILE: /run/hca/daemon-token
       OPENCODE_URL: ""
-      # 迁移目录指到**本仓库**的 db/migrations，而不是镜像里自带的
-      # /opt/hunter-migrations。两者 0001–0022 逐字节一致（部署时 sha256 核过），
-      # 本仓库多一个 0023_chat_kpred_reports.sql —— 那张表 chat_kpred.py 一直在用，
-      # 上游迁移里却没有，缺了它 Kronos 报告一刷新就没（M3 报告 §3.2）。
       HUNTER_MIGRATIONS_DIR: /opt/hca-migrations
+      FIN_MEMORY_ENABLED: "${FIN_MEMORY_ENABLED:-1}"
+      FIN_EVOLUTION_MODE: "${FIN_EVOLUTION_MODE:-paper}"
+      FIN_AUTO_APPLY: "${FIN_AUTO_APPLY:-1}"
+      FIN_LIVE_ORDER_ENABLED: "${FIN_LIVE_ORDER_ENABLED:-0}"
+      PAPER_BASE_URL: "${PAPER_BASE_URL:-http://paper:8000}"
+      FIN_WORKER_URL: "${FIN_WORKER_URL:-http://fin-worker:8300}"
+    group_add:
+      - "10001"
     volumes:
       - ../db/migrations:/opt/hca-migrations:ro
+      - daemon-token:/run/hca:ro
       - hunter-user-skills:/opt/hunter-user-skills
       - hunter-packages:/opt/hunter-packages
-      # api 写、web 只读：两边必须拿到同一把 HUNTER_INTERNAL_KEY / JWT_SECRET
       - hunter-secrets:/opt/hunter-secrets
-      # 与 daemon 挂的是同一个宿主密钥目录（I1 §1.1）。api 容器里是 root
-      # （镜像没写 USER，2026-09-23 实测），0640/gid 10001 的 key 文件读得到。
+      - hunter-experiments:/var/lib/hunter/experiments
       - "${HCA_SECRETS_DIR:-./secrets}:/run/secrets:ro"
     ports:
-      # 只绑回环 —— 用来跑 Playwright 之外的脚本化核对，不对公网
       - "127.0.0.1:${HCA_API_HOST_PORT:-8200}:8000"
     labels:
       hca.component: api
+
+  # ── 智能炒股 · Paper Service（唯一账本 + 确定性风控）─────────────────────
+  paper:
+    build:
+      context: ../apps/paper
+      dockerfile: Dockerfile
+    image: hca-paper:${HCA_IMAGE_TAG:-dev}
+    container_name: ${HCA_COMPOSE_PROJECT:-hca}-paper
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://fin_paper_rw:${FIN_PAPER_PASSWORD:?deploy/.env 里必须有 FIN_PAPER_PASSWORD}@postgres:5432/hunter
+      PAPER_MODE: PAPER
+      HUNTER_INTERNAL_KEY: "${HUNTER_INTERNAL_KEY:-}"
+      HUNTER_EXEC_KEY: "${HUNTER_EXEC_KEY:-}"
+      PAPER_QUOTE_URL: "${PAPER_QUOTE_URL:-http://api:8000}"
+      PAPER_SNAPSHOT_STALE_SECONDS: "${PAPER_SNAPSHOT_STALE_SECONDS:-900}"
+    ports:
+      - "127.0.0.1:${HCA_PAPER_HOST_PORT:-8220}:8000"
+    labels:
+      hca.component: paper
+
+  # ── 智能炒股 · Temporal 服务端（唯一的上层调度权威）──────────────────────
+  temporal:
+    image: temporalio/auto-setup:1.25
+    container_name: ${HCA_COMPOSE_PROJECT:-hca}-temporal
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: hunter
+      POSTGRES_PWD: "${HCA_PG_PASSWORD:?deploy/.env 里必须给一个随机口令}"
+      POSTGRES_SEEDS: postgres
+      DBNAME: temporal
+      VISIBILITY_DBNAME: temporal_visibility
+    ports:
+      - "127.0.0.1:${HCA_TEMPORAL_HOST_PORT:-7233}:7233"
+    healthcheck:
+      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "temporal:7233"]
+      interval: 10s
+      timeout: 5s
+      start_period: 40s
+      retries: 12
+    labels:
+      hca.component: temporal
+
+  # ── 智能炒股 · fin-worker（Temporal 工作流 + 控制通道）──────────────────
+  fin-worker:
+    build:
+      context: ../apps/fin-worker
+      dockerfile: Dockerfile
+    image: hca-fin-worker:${HCA_IMAGE_TAG:-dev}
+    container_name: ${HCA_COMPOSE_PROJECT:-hca}-fin-worker
+    restart: unless-stopped
+    depends_on:
+      paper:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+    environment:
+      PAPER_BASE_URL: "${PAPER_BASE_URL:-http://paper:8000}"
+      API_BASE_URL: "${FIN_WORKER_API_BASE_URL:-http://api:8000}"
+      TEMPORAL_ADDRESS: "${TEMPORAL_ADDRESS:-temporal:7233}"
+      TEMPORAL_NAMESPACE: "${TEMPORAL_NAMESPACE:-default}"
+      TEMPORAL_TASK_QUEUE: "${TEMPORAL_TASK_QUEUE:-fin-trading}"
+      HUNTER_INTERNAL_KEY: "${HUNTER_INTERNAL_KEY:-}"
+      HUNTER_EXEC_KEY: "${HUNTER_EXEC_KEY:-}"
+      FIN_WORKER_HTTP_PORT: "8300"
+      FIN_SAMPLE_CODE: "${FIN_SAMPLE_CODE:-601398}"
+      FIN_SAMPLE_STRATEGY_KEY: "${FIN_SAMPLE_STRATEGY_KEY:-sample-fixed}"
+      FIN_SAMPLE_STRATEGY_VERSION: "${FIN_SAMPLE_STRATEGY_VERSION:-1.0}"
+      FIN_INTENT_TTL_SECONDS: "${FIN_INTENT_TTL_SECONDS:-1800}"
+      FIN_SCHEDULES_ENABLED: "${FIN_SCHEDULES_ENABLED:-1}"
+      FIN_REVIEW_DELAY_MINUTES: "${FIN_REVIEW_DELAY_MINUTES:-30}"
+      FIN_SHADOW_DELAY_MINUTES: "${FIN_SHADOW_DELAY_MINUTES:-15}"
+      FIN_OBSERVE_DELAY_MINUTES: "${FIN_OBSERVE_DELAY_MINUTES:-30}"
+      FIN_PROPOSE_DELAY_MINUTES: "${FIN_PROPOSE_DELAY_MINUTES:-2}"
+      FIN_MEMORY_ENABLED: "${FIN_MEMORY_ENABLED:-1}"
+      FIN_EVOLUTION_MODE: "${FIN_EVOLUTION_MODE:-paper}"
+      FIN_AUTO_APPLY: "${FIN_AUTO_APPLY:-1}"
+      FIN_LIVE_ORDER_ENABLED: "${FIN_LIVE_ORDER_ENABLED:-0}"
+    ports:
+      - "127.0.0.1:${HCA_FIN_WORKER_HOST_PORT:-8320}:8300"
+    labels:
+      hca.component: fin-worker
 
   postgres:
     image: postgres:16-alpine
@@ -398,5 +474,8 @@ volumes:
     labels:
       hca.component: api
   hunter-packages:
+    labels:
+      hca.component: api
+  hunter-experiments:
     labels:
       hca.component: api

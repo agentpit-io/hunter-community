@@ -207,6 +207,22 @@ export interface QuotaView {
 
 export const getQuota = () => call<QuotaView>('/llm/quota')
 
+/** 用已保存的平台 key 一键切到内置额度(侧栏「Hunter key 管理」弹窗)。
+ *  `ok:false` 且没有 status = 三项检测没过,当前配置原样保留,`message` 里写了哪一项。 */
+export interface AdoptBuiltinResult {
+  ok: boolean
+  already?: boolean
+  model?: string
+  applied?: boolean
+  apply_reason?: string
+  expect_ready_seconds?: number
+  message?: string
+  checks?: ProbeCheck[]
+}
+
+export const adoptBuiltin = () =>
+  call<AdoptBuiltinResult>('/llm/adopt-builtin', { method: 'POST', body: '{}' })
+
 export const applyLlm = () =>
   call<{ ok: boolean; reason: string; model: string; expect_ready_seconds: number }>(
     '/apply', { method: 'POST', body: '{}' })

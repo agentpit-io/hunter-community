@@ -221,6 +221,33 @@ echo "[boot] 密钥就位 · JWT_SECRET 来源=$_jwt_src 长度=${#JWT_SECRET}" 
 # 缺表的实例「看着是健康的、一点就 500」比直接起不来难排查得多。
 python -m app.migrate
 
+# ── ②a 智能炒股 fin_paper_rw 角色口令自动同步 ────────────────────
+# 0023_fin_core.sql 创建了 NOLOGIN 的 fin_paper_rw 角色。当环境变量提供了
+# FIN_PAPER_PASSWORD 时，自动用幂等参数化 SQL 启用 LOGIN 并同步口令，无需手工敲脚本。
+if [ -n "${FIN_PAPER_PASSWORD:-}" ]; then
+    python - <<'PYEOF'
+import os
+import psycopg2
+from psycopg2 import sql
+
+db_url = os.environ.get("DATABASE_URL", "")
+pwd = os.environ.get("FIN_PAPER_PASSWORD", "")
+if db_url and pwd:
+    conn = psycopg2.connect(db_url)
+    conn.autocommit = True
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                sql.SQL("ALTER ROLE fin_paper_rw WITH LOGIN PASSWORD {}").format(
+                    sql.Literal(pwd)
+                )
+            )
+        print("[boot] fin_paper_rw 角色 LOGIN 口令已同步（长度 %d）" % len(pwd))
+    finally:
+        conn.close()
+PYEOF
+fi
+
 # ── ②b 升级提示:用户 SKILL 卷是空的 ───────────────────────────
 # v1.0.x 把 ./user-skills 和 ./data-packages 直接 bind mount 给 api;v1.1.0 起改成
 # api 自己的具名卷(云平台上没有仓库目录,挂不了)。直接升级的话新卷是空的,

@@ -147,6 +147,7 @@ prepare_env() {
   local changed=0
   for pair in \
       "HCA_PG_PASSWORD:postgres 口令" \
+      "FIN_PAPER_PASSWORD:智能炒股账本口令" \
       "HCA_JWT_SECRET:JWT 签名密钥" \
       "HUNTER_SETUP_TOKEN:首启向导口令" \
       "HUNTER_INTERNAL_KEY:/api/internal 共享密钥"; do
@@ -345,8 +346,15 @@ PYEOF
 
   # ── M3：api 与 web ──
   local api_port="${HCA_API_HOST_PORT:-8200}" web_port="${HCA_WEB_HOST_PORT:-3200}"
+  local paper_port="${HCA_PAPER_HOST_PORT:-8220}" fin_worker_port="${HCA_FIN_WORKER_HOST_PORT:-8320}"
   echo -n "  api /api/health: "
   curl -fsS -m 10 "http://127.0.0.1:${api_port}/api/health" || echo "—（取不到）"
+  echo
+  echo -n "  paper /healthz : "
+  curl -fsS -m 10 "http://127.0.0.1:${paper_port}/healthz" || echo "—（取不到）"
+  echo
+  echo -n "  fin-worker     : "
+  curl -fsS -m 10 "http://127.0.0.1:${fin_worker_port}/healthz" || echo "—（取不到）"
   echo
   echo -n "  api 注册策略   : "
   curl -fsS -m 10 "http://127.0.0.1:${api_port}/api/auth/status" \
@@ -434,11 +442,14 @@ if [ "$BUILD" = 1 ]; then
     fork="hca-daemon:${HCA_IMAGE_TAG:-dev}${HCA_DAEMON_VARIANT}"
     b=$(docker image inspect "$base" --format '{{.Created}}' 2>/dev/null || echo "")
     f=$(docker image inspect "$fork" --format '{{.Created}}' 2>/dev/null || echo "")
-    if [ -z "$f" ]; then
-      warn "在跑 fork 变体但镜像 ${fork} 不存在 —— 先跑 bash deploy/switch-to-fork.sh <二进制>"
-    elif [ -n "$b" ] && [ "$f" \< "$b" ]; then
-      warn "fork 那一层（${f}）比基础镜像（${b}）旧 —— **它里面的人设/模板是上一版**。"
-      warn "跑 bash deploy/switch-to-fork.sh <二进制> 重新叠一层，否则代码更新了模型行为不变。"
+    fork_bin="${HCA_FORK_BIN:-/mnt/mixplode/hca-forkbin/atomcode-i2}"
+    if [ -z "$f" ] || { [ -n "$b" ] && [ "$f" \< "$b" ]; }; then
+      if [ -f "$fork_bin" ]; then
+        log "基础镜像已更新，使用 ${fork_bin} 自动重叠 ${fork}"
+        bash "${HERE}/fork-image.sh" "$fork_bin"
+      else
+        warn "fork 那一层（${f}）比基础镜像（${b}）旧且未找到 ${fork_bin}，请手动跑 bash deploy/switch-to-fork.sh <二进制>"
+      fi
     fi
   fi
 fi
@@ -446,12 +457,15 @@ fi
 log "启动"
 dc up -d --remove-orphans
 
-wait_healthy llm-shim || die "llm-shim 没起来"
-wait_healthy daemon   || die "daemon 没起来"
-wait_healthy postgres || die "postgres 没起来"
-wait_healthy redis    || die "redis 没起来"
-wait_healthy api      || die "api 没起来"
-wait_healthy web      || die "web 没起来"
+wait_healthy llm-shim   || die "llm-shim 没起来"
+wait_healthy daemon     || die "daemon 没起来"
+wait_healthy postgres   || die "postgres 没起来"
+wait_healthy redis      || die "redis 没起来"
+wait_healthy api        || die "api 没起来"
+wait_healthy paper      || die "paper 没起来"
+wait_healthy temporal   || die "temporal 没起来"
+wait_healthy fin-worker || die "fin-worker 没起来"
+wait_healthy web        || die "web 没起来"
 
 # web 对公网 + 免登录已关 = 没有管理员账号这套栈就没法用。所以这一步失败就是部署失败，
 # 不能只打个 ⚠ 就往下走（M3 首次部署正是这么漏过去的：邮箱 422，栈却报「完成」）。

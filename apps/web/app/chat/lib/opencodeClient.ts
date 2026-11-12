@@ -119,6 +119,8 @@ export interface SendMessageArgs {
   text: string
   agent?: string
   model?: { providerID: string; modelID: string }
+  /** 已上传解析完毕的文档 file_id 列表（PDF / Excel / Word / Markdown） */
+  fileIds?: string[]
   /** 图片附件 · 走 BFF 的 image → text OCR 拦截 · LLM 收到的还是纯文本 part */
   attachments?: SendAttachment[]
   /**
@@ -155,6 +157,7 @@ export async function sendMessage(args: SendMessageArgs): Promise<any> {
   const body: any = { parts }
   if (args.agent) body.agent = args.agent
   if (args.model) body.model = args.model
+  if (args.fileIds && args.fileIds.length > 0) body.file_ids = args.fileIds
   // 见 SendMessageArgs.skillKey 的说明 · BFF 用完即删,不会转发给 opencode
   if (args.skillKey) body.skillKey = args.skillKey
   return req(
@@ -180,6 +183,56 @@ export interface ProviderInfo {
  *  它**永远不是用户挑的**:不许留在 localStorage 里,不许进模型选择器,
  *  也不许被当成默认值 —— 选中它发消息只会得到一句「大模型尚未配置」。 */
 const PLACEHOLDER_MODEL = 'hunter-unconfigured'
+
+/** 向导 / 一键内置额度热推时写的那个 provider(api `opencode_admin._PROVIDER_ID`)。
+ *  按设计它**只有一个真模型** —— 就是 `/config` 里当前选定的那个。
+ *
+ *  ⚠️ 热推走 mergeDeep,换模型之后旧模型名会一直残留在它的 models 里
+ *  (与占位名同一个根因)。2026-09-22 实测到的后果:从 `deepseek-flash` 切到
+ *  内置额度 `hunter-chat` 后,浏览器存的 `hunter-llm/deepseek-flash` 仍被判为
+ *  「还在清单里 = 有效」,继续拿旧模型名去打内置网关 → 400 model_not_allowed;
+ *  选择器里也同时挂着两个模型。所以这个 provider 下**只认当前选定的模型**。 */
+const MANAGED_PROVIDER = 'hunter-llm'
+
+const providerOf = (key: string) => key.split('/')[0]
+const modelOf = (key: string) => key.split('/').slice(1).join('/')
+
+export function formatModelDisplayName(
+  providerId: string,
+  modelId: string,
+  rawName?: string,
+): string {
+  const name = (rawName || '').trim()
+  if (modelId === 'hunter-chat') {
+    if (
+      !name ||
+      name === 'hunter-chat' ||
+      name.includes('3.8') ||
+      name === 'Hunter-Gemini 4 Argon'
+    ) {
+      return 'Hunter-Gemini 4 Argon（谷歌 4.0）'
+    }
+    return name
+  }
+  if (modelId === 'hunter-deep') {
+    if (
+      !name ||
+      name === 'hunter-deep' ||
+      name.includes('3.8') ||
+      !name.includes('谷歌 4.0')
+    ) {
+      return 'Hunter-Gemini 4 Argon（谷歌 4.0 · 深度推理）'
+    }
+    return name
+  }
+  if (modelId === 'gemini-4-argon') {
+    if (!name || name === 'gemini-4-argon') {
+      return 'Gemini 4 Argon（谷歌 4.0）'
+    }
+    return name
+  }
+  return name || modelId
+}
 
 /**
  * opencode 自己声明的默认模型 · 形如 {"hunter-llm": "gemini-3-flash-preview"}。
@@ -261,6 +314,10 @@ export async function resolveModelKey(saved: string | null): Promise<string> {
     // 直接通过了,浏览器继续拿着它发消息,用户看到的是:向导说配好了、
     // 第一条消息却回「大模型尚未配置」。2026-09-18 M2 实测踩到。
     if (saved && saved.split('/').slice(1).join('/') === PLACEHOLDER_MODEL) saved = null
+    // 托管 provider 下只认当前选定的模型(见 MANAGED_PROVIDER 的注释)
+    const curKey = await currentModelKey()
+    if (saved && providerOf(saved) === MANAGED_PROVIDER
+        && curKey && providerOf(curKey) === MANAGED_PROVIDER && saved !== curKey) saved = null
     if (saved) {
       const [pid, ...rest] = saved.split('/')
       const mid = rest.join('/')
@@ -269,7 +326,7 @@ export async function resolveModelKey(saved: string | null): Promise<string> {
     }
     // 存的那个用不了 → 回到「这台实例当前选定的模型」(同 defaultModelKey 的理由:
     // `default` 会被累积下来的占位名占住)
-    const cur = await currentModelKey()
+    const cur = curKey
     if (cur && cur.split('/').slice(1).join('/') !== PLACEHOLDER_MODEL) return cur
     const def = data?.default
     if (def && typeof def === 'object') {
@@ -285,10 +342,12 @@ export async function resolveModelKey(saved: string | null): Promise<string> {
 
 export async function listProviders(): Promise<ProviderInfo[]> {
   try {
-    const data = await req<any>('GET', '/config/providers')
+    const [data, cur] = await Promise.all([
+      req<any>('GET', '/config/providers'), currentModelKey(),
+    ])
     // 真实结构: {providers: [{id, name, models: {...}}]}
     if (data?.providers && Array.isArray(data.providers)) {
-      return data.providers
+      const list: ProviderInfo[] = data.providers
         // 隐藏 OpenCode Zen · 镜像内置无 key 模型 · 用户点了会 401 · 不该出现在 ModelPicker
         .filter((p: any) => p.id !== 'opencode')
         .map((p: any) => ({
@@ -298,9 +357,26 @@ export async function listProviders(): Promise<ProviderInfo[]> {
           // models 里(M1 遗留问题 #3 的同一个根因),用户点中它只会得到
           // 一句「大模型尚未配置」。容器重启后 gen-config 整份重写才会真正清掉。
           models: Object.fromEntries(
-            Object.entries(p.models || {}).filter(([mid]) => mid !== PLACEHOLDER_MODEL),
+            Object.entries(p.models || {})
+              .filter(([mid]) => mid !== PLACEHOLDER_MODEL)
+              .map(([mid, m]: [string, any]) => [
+                mid,
+                {
+                  ...(m || {}),
+                  name: formatModelDisplayName(p.id, mid, m?.name),
+                },
+              ]),
           ),
         }))
+      // 托管 provider 只留当前选定的那个(换模型后的 mergeDeep 残留不进选择器)。
+      // 拿不到当前模型、或它不在清单里时原样返回 —— 宁可多显示,不可显示空。
+      if (cur && providerOf(cur) === MANAGED_PROVIDER) {
+        const mid = modelOf(cur)
+        for (const p of list) {
+          if (p.id === MANAGED_PROVIDER && p.models[mid]) p.models = { [mid]: p.models[mid] }
+        }
+      }
+      return list
     }
     if (Array.isArray(data)) return data
   } catch (e) {

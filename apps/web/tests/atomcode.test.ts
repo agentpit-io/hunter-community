@@ -128,6 +128,9 @@ test('剥注入块 · 按 hca-* / hunter-* 前缀整族剥，以后新增 hook �
   // 故意用两个**代码里还不存在**的标签名 —— 这条用例守的就是「下次加 hook 不会再漏」
   const t = '正文\n\n<hca-budget>\n本月已用 3 万 token\n</hca-budget>\n\n<hunter-memory>\n上次聊过茅台\n</hunter-memory>'
   assert.equal(stripInjected(t), '正文')
+  // 对话框上传文档注入的 <hunter-doc-context> 也一并剥离
+  const withDoc = '帮我核对营收数据\n\n<hunter-doc-context>\n<uploaded-documents>\n营收834亿\n</uploaded-documents>\n</hunter-doc-context>'
+  assert.equal(stripInjected(withDoc), '帮我核对营收数据')
   // 多个注入块连在一起、顺序颠倒，也要剥干净
   const many = '<hca-lang>A</hca-lang>\n正文二\n<hca-context>B</hca-context><hunter-profile>C</hunter-profile>'
   assert.equal(stripInjected(many), '正文二')

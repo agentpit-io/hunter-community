@@ -1,20 +1,12 @@
-# Hunter Community Edition · 默认编排(**只用预构建镜像**)
+# Hunter Community Edition (AtomCode Unified v3.0.0) · 默认编排(**只用预构建镜像**)
 #
 # `git clone` 之后直接 `docker compose up -d` 就能起,不需要先改 .env、
-# 也不需要本地构建 —— 四个自家服务全部走 GHCR 上的预构建镜像。
+# 也不需要本地构建 —— 自家服务全部走 GHCR 上的预构建镜像。
 #
 # 开发者要改代码 / 改静态文件并立即生效,叠加开发覆盖文件:
 #     docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
-# 那份文件里有全部 build: 段与原来的 13 处仓库文件 bind mount。
-#
-# ⚠️ 这个文件里**不要再写 build:**。compose 在同时有 image: 和 build: 时,
-#    本地没有该镜像就会去**构建**而不是拉取 —— 云平台和新用户会莫名其妙
-#    开始编译 Next.js(十几分钟甚至超时),而他们只是想跑起来。
-#    「拉镜像就能跑」这条,靠的就是默认文件里一个 build: 都没有。
-#
-# ⚠️ 这个文件里也**不要再挂仓库里的文件**。所有随代码走的东西(SKILL、
-#    静态数据、迁移 SQL、MCP 脚本、插件)都已经打进镜像;挂载会让镜像
-#    在没有仓库目录的环境(云平台 / K8s)里起不来。
+# 或使用服务器源码一键部署栈:
+#     bash deploy/up.sh
 
 name: hunter-community
 
@@ -31,11 +23,6 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-hunter}
     volumes:
       - hunter_pg_data:/var/lib/postgresql/data
-      # 这里原来挂 ./db/migrations:/docker-entrypoint-initdb.d:ro —— **已删除**。
-      # 那个目录只在数据卷第一次初始化时执行,已有部署里新加的 .sql 永远跑不到
-      # (仓内铁律「db/migrations 里的 .sql 对已有部署不生效」)。
-      # 迁移改由 api 启动时执行:镜像自带 /opt/hunter-migrations,boot.sh 调
-      # python -m app.migrate,带 advisory lock 与 schema_migrations 记账。
     ports:
       - "${POSTGRES_HOST_PORT:-5442}:5432"
     healthcheck:
@@ -58,9 +45,7 @@ services:
       retries: 10
 
   api:
-    # HUNTER_VERSION / HUNTER_REGISTRY 见 .env.example。**钉具体版本,别用 latest** ——
-    # 浮动标签意味着某次 pull 会无声换掉运行的代码,排查时连「什么时候变的」都查不出来。
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-api:${HUNTER_VERSION:-1.2.0}
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-api:${HUNTER_VERSION:-3.0.0}
     <<: *restart
     depends_on:
       postgres:
@@ -68,91 +53,32 @@ services:
       redis:
         condition: service_healthy
     environment:
-      # 监听地址。默认 0.0.0.0;Railway 的老环境私有网络是 IPv6-only,那里设 `::`。
-      # 见 docs/deploy/railway.md
       HUNTER_BIND_HOST: "${HUNTER_BIND_HOST:-0.0.0.0}"
-      # P1 · skip heavy startup schedulers so a fresh clone boots healthy
       HUNTER_MINIMAL_BOOT: "${HUNTER_MINIMAL_BOOT:-1}"
       DATABASE_URL: postgresql://${POSTGRES_USER:-hunter}:${POSTGRES_PASSWORD:-hunter}@postgres:5432/${POSTGRES_DB:-hunter}
+      FIN_PAPER_PASSWORD: "${FIN_PAPER_PASSWORD:-}"
       REDIS_URL: redis://redis:6379/0
-      # Local auth (P3) · JWT signing + registration policy
-      # api 和 opencode 必须用**同一个** JWT_SECRET:api 签发的 token 要由
-      # opencode 的 hunter-auth 插件验签才能认出用户。两边取值不同的话服务照常
-      # 启动,只是对话莫名 401。
-      #
-      # 留空不再拒绝启动(原来是 `:?`):留空时 api 启动脚本会生成一把写进
-      # hunter_secrets 卷,opencode 只读挂同一个卷读到同一把(见 3.2)。
-      # ⚠️ 更换或丢失 JWT_SECRET = 已保存的 key 全部解不开、需要重新填写。
       JWT_SECRET: ${JWT_SECRET:-}
       JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-3600}
       JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-2592000}
-      # 首启向导的初始化口令(M2 · 设计方案 4.2)。
-      #
-      # **留空 = 本机 / 内网可以直接进向导**(git clone && up -d 的主路径)。
-      # **非空 = 一律要口令**,不管来源看起来是本机还是公网 —— 来源判断靠 HTTP
-      # 转发头,而那是访问者可以伪造的;"有没有口令"伪造不了。
-      #
-      # ⚠️ **公网上跑就必须设**:不设的话,谁先打开这个页面谁就能配置大模型。
-      # 云平台模板会自动生成一个随机值。改完要 `docker compose up -d api`
-      # (不是 restart —— restart 不重新读 .env)。
       HUNTER_SETUP_TOKEN: ${HUNTER_SETUP_TOKEN:-}
-      # 单用户模式(默认开)· 本机自用不需要账号密码,前端自动换会话不显示登录页
-      # 暴露到公网前务必置 0 —— 开着等于谁都能拿到 admin token
       HUNTER_SINGLE_USER: ${HUNTER_SINGLE_USER:-1}
       HUNTER_LOCAL_USER_EMAIL: ${HUNTER_LOCAL_USER_EMAIL:-local@hunter.local}
       REGISTRATION_MODE: ${REGISTRATION_MODE:-open}
       HUNTER_ADMIN_EMAILS: ${HUNTER_ADMIN_EMAILS:-}
-      # MCP 回调 /api/internal/* 的共享口令 · **必须与 opencode、web 三家同值**
-      #
-      # ⚠️ 这里**不要**再给 `hunter-internal-local` 之类的兜底值。原因有两条:
-      #   1. 那是写在公开仓库里的公开字符串,等于没有认证;
-      #   2. compose 的 `${X:-默认}` 会让这个变量**永远非空**,而 boot.sh 的优先级是
-      #      「环境变量非空 → 密钥卷 → 本次生成」—— 有兜底值的话第一条永远命中,
-      #      api 自动生成的那把密钥一辈子用不上(M1 · 设计方案 3.2)。
-      # 留空时:api 首启生成并写进 hunter_secrets 卷,opencode 与 web 只读挂同一个卷读回来。
       HUNTER_INTERNAL_KEY: ${HUNTER_INTERNAL_KEY:-}
-      # ⭐ 唯一必填的 hunter-side key · 一把管所有 SaaS 功能(Kronos + 数据 + 工具 + SKILL)
-      # 服务端按 key 归属计量/限流/鉴权 · 每部署自己申请一把即可(免费 · 30 秒)
-      # 申请: hunter.agentpit.io/dev/api-keys
-      # 留空也能跑:聊天用你自己的 LLM key,工具则在 UI 左下角「解锁全部工具」里填 key
       HUNTER_API_KEY: ${HUNTER_API_KEY:-}
-      # 魔法筛选器两次扫描的间隔 / 扫完倒数几秒再出结果。默认 5(多人共用时替所有人省上游)。
-      # 只有自己用的本地部署可设 0 = 扫完立刻显示;上游缓存 / 并发限制不受影响
       SCREEN_SCAN_GAP_S: ${SCREEN_SCAN_GAP_S:-5}
-      # 独立运行模式 · 兜底默认改成空 · .env 里显式清空即真清空 · 不再默默指回平台
       HUNTER_UPSTREAM_URL: ${HUNTER_UPSTREAM_URL:-}
-      # P4 · pluggable providers
-      # 默认留空 = 自动选:配了 key 走 hunter 网关,没配则 akshare(A股免 key)
       DATA_SOURCE_PROVIDER: ${DATA_SOURCE_PROVIDER:-}
       HUNTER_SAAS_DATA_URL: ${HUNTER_SAAS_DATA_URL:-}
-      # 不推荐设 · 留空即自动 fallback 到 HUNTER_API_KEY(代码 finance_data_auth.py 已实现)
-      # 仅在需要"数据源用独立 key 分账"时才填 · 99% 用户直接留空
       HUNTER_SAAS_DATA_KEY: ${HUNTER_SAAS_DATA_KEY:-}
-      # 预测回测三张表(pred_snapshot/pred_backtest/pred_consistency)默认走 finance-data
-      # 库。留空则 /api/backtest/* 一律返 503。独立部署时若想让 hunter-community
-      # 自足(见 db/migrations/0004_pred_backtest.sql 已建的本地表),把这里指向本地
-      # postgres:postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       FINDATA_DB_URL: ${FINDATA_DB_URL:-}
       LLM_PROVIDER: ${LLM_PROVIDER:-openai_compat}
       LLM_BASE_URL: ${LLM_BASE_URL:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_DEFAULT_MODEL: ${LLM_DEFAULT_MODEL:-}
-      # ⚠️ **api 也要看得到这一项**。它原来只给了 opencode(见那边的 `:-auto`),
-      # 于是 .env 里写了 `LLM_SCHEMA_SANITIZE=0` 的锁定实例上,opencode 按 0 直连、
-      # 而 api 这边读不到、退回数据库里的旧值 —— 设置页显示的开关与实际走法不一致
-      # (2026-09-19 P2 在测试机上实测到:.env 写 0、设置页显示 1)。
-      # 这里**兜底留空**、不写 auto:runtime_config 的规矩是「空串 = 没配」,
-      # 写 auto 会让向导存进数据库的值永远轮不到生效。
       LLM_SCHEMA_SANITIZE: ${LLM_SCHEMA_SANITIZE:-}
-      # Sub-agent 独立 env · 换基座 LLM 时可以一并透传,否则 DeepSeek/Anthropic 会
-      # 400 拒绝 gemini 模型名 → tool 累计重试 > 45s → MCP ReadTimeout →
-      # 前端"hermes-api call failed"。
-      #
-      # ⚠️ 下面这些 `${X:-}` 注进容器的是**空串,不是「未设置」**。代码侧现在统一走
-      # `runtime_config.agent_model()`:**环境变量非空 → 数据库(向导写入)→ 代码默认值**,
-      # 所以留空是安全的(回到代码默认值)。
-      # 走「内置额度」的实例由向导把这一批写进数据库(chat 类 → hunter-chat,
-      # 深度分析 → hunter-deep),**用户不用在这里填**;这里填了优先级更高,会盖过向导。
       ONE_API_MODEL: ${ONE_API_MODEL:-}
       AGENT_SUB_WL_MODEL: ${AGENT_SUB_WL_MODEL:-}
       AGENT_SUB_PORT_MODEL: ${AGENT_SUB_PORT_MODEL:-}
@@ -164,216 +90,226 @@ services:
       ASSISTANT_MODEL_ROUTE: ${ASSISTANT_MODEL_ROUTE:-}
       ASSISTANT_MODEL_CHAT: ${ASSISTANT_MODEL_CHAT:-}
       ASSISTANT_MODEL_COMPRESS: ${ASSISTANT_MODEL_COMPRESS:-}
-      # HTTP 代理透传(Mac Docker Desktop 场景 · 宿主机开了 clash/verge TUN 时)
-      # 容器直连外网被 TUN 劫持后超时 · 显式走宿主机代理绕开。
-      # NO_PROXY 必须列出所有内部服务名,否则 api → postgres/redis/opencode 也会
-      # 试图走代理 → ECONNREFUSED。留空则不注入,不影响非代理环境。
       HTTP_PROXY: ${HTTP_PROXY_UPSTREAM:-}
       HTTPS_PROXY: ${HTTPS_PROXY_UPSTREAM:-}
-      NO_PROXY: ${NO_PROXY_UPSTREAM:-localhost,127.0.0.1,api,web,postgres,redis,opencode,llm-shim}
-      # 默认留空,让代码去决定(app/providers/forecast/__init__.py → kronos_saas)。
-      # **别在这里写 noop** —— compose 的 :- 对"未设"和"设为空"一视同仁,
-      # 用户 .env 里留空时这里会把 noop 塞进容器,代码层的默认值永远轮不到生效,
-      # 表现是"改了默认值却不起作用",极难排查。
+      NO_PROXY: ${NO_PROXY_UPSTREAM:-localhost,127.0.0.1,api,web,postgres,redis,daemon,llm-shim,paper,fin-worker,temporal}
       FORECAST_PROVIDER: ${FORECAST_PROVIDER:-}
       KRONOS_LOCAL_URL: ${KRONOS_LOCAL_URL:-}
       HUNTER_SAAS_KRONOS_URL: ${HUNTER_SAAS_KRONOS_URL:-}
-      # 不推荐设 · 留空即自动 fallback 到 HUNTER_API_KEY(代码 providers/forecast/__init__.py 已实现)
-      # 仅在需要"Kronos 用独立 key 分账"时才填 · 99% 用户直接留空
       HUNTER_SAAS_KRONOS_KEY: ${HUNTER_SAAS_KRONOS_KEY:-}
-      # SKILL 现在是 skills/ 下的标准 SKILL.md 文件(_14 Step A),api 要读它们。
-      # 这两个路径在镜像里:内置 SKILL 随镜像走,用户 SKILL 在具名卷上。
       HUNTER_SKILLS_DIR: /opt/hunter-skills
       HUNTER_USER_SKILLS_DIR: /opt/hunter-user-skills
-      # api 写完 user-skills 之后要让 opencode 重扫(它只在启动时扫一次)。
-      # 之前这三个只给了 web,api 打过去是 401 —— 而 401 跟"镜像旧没这端点"
-      # 是两回事,不区分的话会把配置问题误报成版本问题。
-      OPENCODE_URL: http://opencode:3901
-      OPENCODE_SERVER_USERNAME: ${OPENCODE_USER:-}
-      OPENCODE_SERVER_PASSWORD: ${OPENCODE_PASS:-}
-      # ⚠️ **api 也要知道 llm-shim 在哪** —— 不是只有 opencode 需要。
-      # 向导保存后,api 走 PATCH /global/config 把 provider 的 baseURL 推给 opencode,
-      # 而那个值取自 **api 容器的** LLM_SHIM_URL(services/opencode_admin.py)。
-      #
-      # 在这份 compose 里服务就叫 llm-shim,不设也会回落到同一个值 —— 但换到服务名
-      # 不叫 llm-shim 的地方(Sealos 是 `<应用名>-llm-shim`、1Panel 是
-      # `<容器前缀>-llm-shim`、Zeabur 私有网络是 `llm-shim.zeabur.internal`)就会被
-      # 推进去一个解析不了的主机名。M3 在 Sealos 等价栈上实测:向导五步全绿、
-      # engine-ready 也返回 true,**但发消息永远收不到回复,日志里一条报错都没有**。
-      # 显式写在这里,是为了让「api 依赖 shim 地址」这件事在默认文件里就看得见。
+      AGENT_BACKEND: atomcode
+      ATOMCODE_DAEMON_URL: http://daemon:13456
+      ATOMCODE_TOKEN_FILE: /run/hca/daemon-token
       LLM_SHIM_URL: ${LLM_SHIM_URL:-http://llm-shim:3999/v1}
+      FIN_MEMORY_ENABLED: "${FIN_MEMORY_ENABLED:-1}"
+      FIN_EVOLUTION_MODE: "${FIN_EVOLUTION_MODE:-paper}"
+      FIN_AUTO_APPLY: "${FIN_AUTO_APPLY:-1}"
+      FIN_LIVE_ORDER_ENABLED: "${FIN_LIVE_ORDER_ENABLED:-0}"
+      PAPER_BASE_URL: ${PAPER_BASE_URL:-http://paper:8000}
+      FIN_WORKER_URL: ${FIN_WORKER_URL:-http://fin-worker:8300}
+    group_add:
+      - "10001"
     volumes:
-      # 用户能力**可写** —— UI 里新建/编辑/删除 SKILL 要往这里写文件(_19 §5.2)。
-      # 原来是 bind mount ./user-skills;改成 api 自己的具名卷,因为云平台上
-      # 没有仓库目录。opencode 不再挂它 —— 改由 api 的导出接口 + opencode 原生
-      # skills.urls 同步(R0 第二节,M1 子任务 D)。
+      - hunter_daemon_token:/run/hca:ro
       - hunter_user_skills:/opt/hunter-user-skills
-      # 数据包 · 可读写。用户把从云盘下载的 .tar 放进来就能在「数据」页导入;
-      # 我们这边打包也写到这里。原来是 bind mount ./data-packages。
-      #
-      # 为什么不和内置数据放一起:内置数据(/opt/hunter-data)随镜像走、只读,
-      # 而打包要写;混在一起以后也分不清哪个是随代码分发的、哪个是用户放的。
       - hunter_packages:/opt/hunter-packages
-      # 自动生成的密钥(JWT_SECRET / HUNTER_INTERNAL_KEY)· api 写、opencode 只读。
-      # 这是本地 compose 下两个容器共享同一把密钥的唯一途径(云平台靠模板注入
-      # 环境变量)。生成逻辑由 M1 子任务 C 实现。
       - hunter_secrets:/opt/hunter-secrets
+      - hunter_experiments:/var/lib/hunter/experiments
     ports:
       - "${API_HOST_PORT:-8100}:8000"
 
+  paper:
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-paper:${FIN_TAG:-3.0.0}
+    <<: *restart
+    profiles: ["fin"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      api: { condition: service_healthy }
+    environment:
+      DATABASE_URL: postgresql://fin_paper_rw:${FIN_PAPER_PASSWORD:-}@postgres:5432/${POSTGRES_DB:-hunter}
+      PAPER_MODE: PAPER
+      HUNTER_INTERNAL_KEY: ${HUNTER_INTERNAL_KEY:-}
+      HUNTER_EXEC_KEY: ${HUNTER_EXEC_KEY:-}
+      PAPER_QUOTE_URL: ${PAPER_QUOTE_URL:-http://api:8000}
+      PAPER_SNAPSHOT_STALE_SECONDS: ${PAPER_SNAPSHOT_STALE_SECONDS:-900}
+    ports:
+      - "127.0.0.1:${PAPER_HOST_PORT:-8200}:8000"
+
+  temporal:
+    image: temporalio/auto-setup:1.25
+    <<: *restart
+    profiles: ["fin"]
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-hunter}
+      POSTGRES_PWD: ${POSTGRES_PASSWORD:-hunter}
+      POSTGRES_SEEDS: postgres
+      DBNAME: temporal
+      VISIBILITY_DBNAME: temporal_visibility
+    ports:
+      - "127.0.0.1:${TEMPORAL_HOST_PORT:-7233}:7233"
+    healthcheck:
+      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "temporal:7233"]
+      interval: 10s
+      timeout: 5s
+      start_period: 40s
+      retries: 12
+
+  temporal-ui:
+    image: temporalio/ui:2.34.0
+    <<: *restart
+    profiles: ["fin"]
+    depends_on:
+      temporal: { condition: service_started }
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:${TEMPORAL_UI_HOST_PORT:-8233}
+    ports:
+      - "127.0.0.1:${TEMPORAL_UI_HOST_PORT:-8233}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
+  fin-worker:
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-fin-worker:${FIN_TAG:-3.0.0}
+    <<: *restart
+    profiles: ["fin"]
+    depends_on:
+      paper: { condition: service_started }
+      temporal: { condition: service_started }
+    environment:
+      PAPER_BASE_URL: ${PAPER_BASE_URL:-http://paper:8000}
+      API_BASE_URL: ${FIN_WORKER_API_BASE_URL:-http://api:8000}
+      TEMPORAL_ADDRESS: ${TEMPORAL_ADDRESS:-temporal:7233}
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
+      TEMPORAL_TASK_QUEUE: ${TEMPORAL_TASK_QUEUE:-fin-trading}
+      HUNTER_INTERNAL_KEY: ${HUNTER_INTERNAL_KEY:-}
+      HUNTER_EXEC_KEY: ${HUNTER_EXEC_KEY:-}
+      FIN_WORKER_HTTP_PORT: "8300"
+      FIN_SAMPLE_CODE: ${FIN_SAMPLE_CODE:-601398}
+      FIN_SAMPLE_STRATEGY_KEY: ${FIN_SAMPLE_STRATEGY_KEY:-sample-fixed}
+      FIN_SAMPLE_STRATEGY_VERSION: ${FIN_SAMPLE_STRATEGY_VERSION:-1.0}
+      FIN_INTENT_TTL_SECONDS: ${FIN_INTENT_TTL_SECONDS:-1800}
+      FIN_SCHEDULES_ENABLED: ${FIN_SCHEDULES_ENABLED:-1}
+      FIN_REVIEW_DELAY_MINUTES: ${FIN_REVIEW_DELAY_MINUTES:-30}
+      FIN_SHADOW_DELAY_MINUTES: ${FIN_SHADOW_DELAY_MINUTES:-15}
+      FIN_OBSERVE_DELAY_MINUTES: ${FIN_OBSERVE_DELAY_MINUTES:-30}
+      FIN_PROPOSE_DELAY_MINUTES: ${FIN_PROPOSE_DELAY_MINUTES:-2}
+      FIN_MEMORY_ENABLED: "${FIN_MEMORY_ENABLED:-1}"
+      FIN_EVOLUTION_MODE: "${FIN_EVOLUTION_MODE:-paper}"
+      FIN_AUTO_APPLY: "${FIN_AUTO_APPLY:-1}"
+      FIN_LIVE_ORDER_ENABLED: "${FIN_LIVE_ORDER_ENABLED:-0}"
+    ports:
+      - "127.0.0.1:${FIN_WORKER_HOST_PORT:-8300}:8300"
+
   web:
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-web:${HUNTER_VERSION:-1.2.0}
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-web:${HUNTER_VERSION:-3.0.0}
     <<: *restart
     depends_on:
       - api
+      - daemon
     environment:
-      # Next.js standalone 用 HOSTNAME 定监听地址(镜像里默认 0.0.0.0)。
-      # Railway 老环境设 `::`,见 docs/deploy/railway.md
       HOSTNAME: "${HUNTER_BIND_HOST:-0.0.0.0}"
       NODE_ENV: production
-      # ── chat 依赖 · web 的 BFF 要反代到 opencode 容器 ──────────────────
-      # 这几个都必须传给 web(不只是 opencode)，否则 /chat 起不来：
-      #  · OPENCODE_URL 不传 → 代码回落 http://127.0.0.1:3901，在 web 容器内
-      #    那是 web 自己 → 三个 chat 端点全 ECONNREFUSED(502)
-      #  · 用户名/密码不传 → BFF 拼出 "opencode:"(空密码)，而 opencode 容器
-      #    要的是 ${OPENCODE_PASS} → 401
-      OPENCODE_URL: http://opencode:3901
-      OPENCODE_SERVER_USERNAME: ${OPENCODE_USER:-}
-      OPENCODE_SERVER_PASSWORD: ${OPENCODE_PASS:-}
-      # BFF 还要回调 api 查会话归属(谁能看哪个 session)。
-      # 不传 → 回落 http://127.0.0.1:8000 → 503 ownership_unavailable
+      AGENT_BACKEND: atomcode
+      ATOMCODE_DAEMON_URL: http://daemon:13456
+      ATOMCODE_TOKEN_FILE: /run/hca/daemon-token
+      ATOMCODE_WORKSPACE: /workspace
+      HCA_LLM_MODEL_LABEL: ${HCA_LLM_MODEL_LABEL:-}
+      HCA_LLM_PROVIDER_LABEL: ${HCA_LLM_PROVIDER_LABEL:-}
       HERMES_API_URL: http://api:8000
-      # BFF 拦截用户上传图片后调 /api/internal/ocr/extract 抽文本 · 走共享 secret
-      # 必须与 api 服务的 HUNTER_INTERNAL_KEY 同源 · 缺了 OCR 会 401 · image → text 兜底走"OCR 失败"分支
-      # 留空时由入口脚本从下面那个密钥卷读回来(见 apps/web/entrypoint.sh)
       HUNTER_INTERNAL_KEY: ${HUNTER_INTERNAL_KEY:-}
+    group_add:
+      - "10001"
     ports:
       - "${WEB_HOST_PORT:-3100}:3000"
     volumes:
-      # 自动生成的密钥 · **只读**。web 要和 api 用同一个 HUNTER_INTERNAL_KEY,
-      # 否则 api 自动生成随机值之后,web 还拿着空值去调 /api/internal/ocr/extract → 一律 401,
-      # 而症状只是「上传图片没反应」,401 和「api 没起来」在前端看不出区别。
+      - hunter_daemon_token:/run/hca:ro
       - hunter_secrets:/opt/hunter-secrets:ro
-    # 原来这里挂 ./apps/web/public:/app/public:ro(本地改 HTML/JS 立即生效)。
-    # 移到 docker-compose.dev.yml —— 镜像里本来就有 public/,挂载只是开发便利。
 
-  # opencode 送出的 tool schema 是完整 JSON Schema,Gemini 只认 OpenAPI 子集,
-  # 收到 $schema / additionalProperties 之类会整个请求报错 —— 表现是"一发消息就没回复"。
-  # 这一层只洗 tools[].function.parameters,其余原样转发。见 scripts/llm-shim/shim.py。
-  # 不需要时(provider 本来就吃全量 JSON Schema)设 LLM_SCHEMA_SANITIZE=0,
-  # gen-config 就会让 opencode 直连 LLM_BASE_URL,这个容器空转不影响。
   llm-shim:
-    # 原来是裸 python:3.12-alpine + 挂 ./scripts/llm-shim。现在源码打进镜像
-    # (deploy/llm-shim.Dockerfile),command 与 healthcheck 也在镜像里,
-    # 这样不写 compose 的平台(K8s / 云平台表单)拿到的是同一套行为。
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-llm-shim:${HUNTER_VERSION:-1.2.0}
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-llm-shim:${HUNTER_VERSION:-3.0.0}
     <<: *restart
     environment:
-      # 监听地址。默认 0.0.0.0;Railway 的老环境私有网络是 IPv6-only,那里设 `::`。
-      # 见 docs/deploy/railway.md
       HUNTER_BIND_HOST: "${HUNTER_BIND_HOST:-0.0.0.0}"
-      LLM_BASE_URL: ${LLM_BASE_URL:-}
-      # 大模型请求是从这个容器发出去的,代理必须配在这里,只配给 api 没用。
-      # 宿主机开了 TUN 代理,或网关按 TLS 指纹拦容器直连(aihubmix 实测:
-      # 直连报 SSL UNEXPECTED_EOF,走宿主机代理 200)时,对话会一直超时。
-      # 与 api 服务共用同一组 *_UPSTREAM 变量;留空则不走代理。
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://hunter.agentpit.io/api/saas/llm/v1}
+      LLM_FIX_TOOL_INDEX: "1"
+      LLM_STRIP_THINK: "1"
+      LLM_TOOL_DENY: "${HCA_LLM_TOOL_DENY-atomgit_*,code_review,ast_grep,read_symbol,list_symbols,find_references,trace_callers,trace_callees,trace_chain,blast_radius,file_dependencies,lsp,list_sessions,schedule_wakeup,recall}"
       HTTP_PROXY: ${HTTP_PROXY_UPSTREAM:-}
       HTTPS_PROXY: ${HTTPS_PROXY_UPSTREAM:-}
-      NO_PROXY: ${NO_PROXY_UPSTREAM:-localhost,127.0.0.1,api,web,postgres,redis,opencode,llm-shim}
+      NO_PROXY: ${NO_PROXY_UPSTREAM:-localhost,127.0.0.1,api,web,postgres,redis,daemon,llm-shim}
 
-  opencode:
-    # 自家包装镜像(deploy/opencode.Dockerfile),基础镜像仍是私仓 huntercode 编出的
-    # hunter-opencode:1.18.12-slim.1 —— 那一版起从「bun + 整个源码树」改成了单文件
-    # 二进制(7.56 GB → 618 MB)。包装层把入口脚本、MCP、插件、SKILL 都 COPY 进来,
-    # 所以这个服务不再需要任何 bind mount。
-    #
-    # 换源(自建 registry / 国内镜像)改 HUNTER_REGISTRY,见 .env.example。
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-opencode:${HUNTER_VERSION:-1.2.0}
+  daemon:
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-daemon:${HUNTER_VERSION:-3.0.0}
     <<: *restart
     depends_on:
       api:
         condition: service_healthy
       llm-shim:
         condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    expose:
+      - "13456"
     environment:
-      # api 还没起来时最多等多久再放弃拉配置(秒)。本地有 depends_on,api 一定先健康,
-      # 这个预算一秒都用不上;云平台大多不编排启动顺序,那里靠它。见 scripts/opencode/gen-config.py
-      HUNTER_CONFIG_WAIT: "${HUNTER_CONFIG_WAIT:-90}"
-      # 监听地址。默认 0.0.0.0;Railway 的老环境私有网络是 IPv6-only,那里设 `::`。
-      # 见 docs/deploy/railway.md
-      HUNTER_BIND_HOST: "${HUNTER_BIND_HOST:-0.0.0.0}"
-      # Basic auth kept OFF by default · hunter-auth plugin is the real gate.
-      # Set both env vars to non-empty to add belt-and-suspenders auth (nginx
-      # would then need to inject Basic + JWT would move to a custom header).
-      OPENCODE_SERVER_USERNAME: ${OPENCODE_USER:-}
-      OPENCODE_SERVER_PASSWORD: ${OPENCODE_PASS:-}
-      # Shared with api container · lets hunter-auth plugin verify Bearer JWT locally
-      # 与 api 容器同源 · 留空时从 hunter_secrets 卷读 api 生成的那把(见上面 api 服务处)
-      JWT_SECRET: ${JWT_SECRET:-}
-      # MCP subprocesses reach the api container via internal docker network
+      HCA_DAEMON_PORT: "13456"
+      HCA_DAEMON_INTERNAL_PORT: "13457"
+      HCA_DAEMON_SERVICE_NAME: daemon
+      HCA_WORKSPACE: /workspace
+      ATOMCODE_HOME: /data/atomcode
+      HCA_WORKSPACE_REFRESH: "1"
+      HCA_CONFIG_REFRESH: "1"
+      HCA_HOOKD: "1"
+      HCA_HOOKD_PORT: "13458"
+      ATOMCODE_VERIFY: "off"
+      ATOMCODE_TODO: "0"
+      ATOMCODE_SUBAGENT: "0"
+      ATOMCODE_MEMORY_TOOL: "0"
+      ATOMCODE_REQUEST_USER_INPUT: "0"
+      ATOMCODE_TURN_MAX_ROUNDS: "30"
+      ATOMCODE_AI_SESSION_NAMING: "0"
+      HCA_LLM_BASE_URL: ${LLM_SHIM_URL:-http://llm-shim:3999/v1}
+      HCA_LLM_MODEL: ${LLM_DEFAULT_MODEL:-hunter-chat}
+      HCA_LLM_PROVIDER_NAME: ${LLM_PROVIDER:-hunter}
+      HCA_LLM_CONTEXT_WINDOW: "1000000"
+      HCA_LLM_API_KEY: ${LLM_API_KEY:-${HUNTER_API_KEY:-}}
+      HCA_LLM_SYSTEM_PROMPT_FILE: ${HCA_LLM_SYSTEM_PROMPT_FILE:-/opt/hca/personas/hunter-research.md}
+      HCA_TOOLS_DENY: ${HCA_TOOLS_DENY:-group:codeintel,group:atomgit,group:subagent,code_review,ast_grep,list_sessions,schedule_wakeup,recall,web_fetch,web_search,glob,grep,search_replace,open_file}
       HERMES_API_URL: http://api:8000
-      # Shared secret for /api/internal/* calls
+      FIN_WORKER_URL: ${FIN_WORKER_URL:-http://fin-worker:8300}
       HUNTER_INTERNAL_KEY: ${HUNTER_INTERNAL_KEY:-}
-      # LLM · same source of truth as api container
-      LLM_PROVIDER: ${LLM_PROVIDER:-openai_compat}
-      LLM_BASE_URL: ${LLM_BASE_URL:-}
-      LLM_API_KEY: ${LLM_API_KEY:-}
-      LLM_DEFAULT_MODEL: ${LLM_DEFAULT_MODEL:-}
-      # 审计日志默认写 /opt/opencode-audit/,但容器以非 root 跑,在 /opt 下建不了目录。
-      # **指到卷内,不要指 /tmp**:/tmp 是容器可写层,一次 recreate 就没
-      # (2026-09-07 会话全丢那次,审计日志跟着一起没了 —— 而审计日志的全部意义
-      #  就是留痕,放在会被清掉的地方等于没有审计,且事后复盘正好需要它)。
-      # `.local` 是具名卷且属主是 hunter(1001),插件 mkdir 建得起来;
-      # 万一路径写错,plugins/hunter-audit.ts 会自己退回 tmpdir,不会崩。
-      HUNTER_AUDIT_PATH: ${HUNTER_AUDIT_PATH:-/home/hunter/.local/share/hunter-audit/AUDIT.jsonl}
-      # 自部署用户付的是自己的 LLM 账单,不该被我们限额。
-      # 下面两个上限只在 HUNTER_BUDGET_ENABLED=true 时才有意义;仍然透传,是因为
-      # 老镜像只认这两个、不认开关。
-      HUNTER_BUDGET_ENABLED: ${HUNTER_BUDGET_ENABLED:-false}
-      HUNTER_BUDGET_DAILY: ${HUNTER_BUDGET_DAILY:-999999999}
-      HUNTER_BUDGET_PER_REQUEST: ${HUNTER_BUDGET_PER_REQUEST:-999999999}
-      # auto = 模型名含 gemini 时才经 shim(见 scripts/opencode/gen-config.py)
-      LLM_SCHEMA_SANITIZE: ${LLM_SCHEMA_SANITIZE:-auto}
-      LLM_SHIM_URL: http://llm-shim:3999/v1
-      # 工具超时 · 留空走各自默认(gen-config.py 里 hunter_cap 180000 / screener 60000,
-      # 镜像自带那 4 个 180000;uzi 的 httpx 读超时 170s)。两者要一起调:
-      # UZI_HTTP_TIMEOUT 必须小于 HUNTER_MCP_TIMEOUT_MS/1000,否则 opencode 先掐断,
-      # 模型只会拿到 "(pending / no output)",日志里看不到任何超时字样。
-      HUNTER_MCP_TIMEOUT_MS: ${HUNTER_MCP_TIMEOUT_MS:-}
-      UZI_HTTP_TIMEOUT: ${UZI_HTTP_TIMEOUT:-}
+      AKSHARE_MAX_ROWS: "50"
+      AKSHARE_MAX_BYTES: "15000"
+      HCA_MCP_MAX_BYTES: "15000"
+      KRONOS_API_KEY: ${HUNTER_SAAS_KRONOS_KEY:-${HUNTER_API_KEY:-}}
+      HUNTER_API_KEY: ${HUNTER_API_KEY:-}
+      HCA_LANG_HOOK: "1"
+      HCA_CTX_CAPABILITIES: "1"
     volumes:
-      # ⚠️ 会话数据(opencode-local.db · 所有对话的正文)必须落在具名卷上。
-      #
-      # 2026-09-07 事故:这行不存在的时候,会话只活在容器可写层里。
-      # 一次 `docker compose up -d opencode`(改了挂载就会 Recreate)把容器换掉,
-      # 33 个用户会话全部消失,用户刷新后看到"暂无对话"。**不可恢复** ——
-      # 旧容器一删,可写层跟着删。
-      #
-      # 注意 postgres 的 chat_session_owner 表**不是**备份:它只存
-      # session_id ↔ user_id 的归属映射,对话正文一个字都不在里面。
-      #
-      # ⚠️ 挂的是 `.local` **整个目录**,不是更精确的 `.local/share/opencode` ——
-      # 后者会让 `.local/state` 建不出来(父目录由 docker 以 root 补建,容器是 1001)。
-      # 挂 `.local` 之后 state 和 share 都落在卷内,而**卷根目录的属主是持久的**。
-      # R0 实测(预研结论第四节):1.18.12-slim.1 的镜像里 /home/hunter/.local
-      # 已经存在且属主 1001,空的具名卷首次挂载会把内容与属主一起拷进卷,所以
-      # Docker 语义的平台开箱可写;K8s 的 PVC 不拷贝,需要 fsGroup: 1001 或
-      # initContainer chown,入口脚本会在不可写时打印中文报错并退出。
-      - hunter_opencode_data:/home/hunter/.local
-      # 密钥卷 · **只读**。api 生成、这边只读取(子任务 C 实现读取逻辑)。
+      - hunter_workspace:/workspace
+      - hunter_atomcode_home:/data
+      - hunter_daemon_token:/run/hca
       - hunter_secrets:/opt/hunter-secrets:ro
-    # 入口在镜像里(deploy/opencode.Dockerfile 的 ENTRYPOINT),不再写在这里。
-    ports:
-      - "${OPENCODE_HOST_PORT:-3921}:3901"
+    init: true
+    security_opt:
+      - no-new-privileges:true
 
 volumes:
+  hunter_experiments:
   hunter_pg_data:
   hunter_redis_data:
-  # opencode 会话正文(见 opencode 服务里那段注释)· 2026-09-07 补
-  hunter_opencode_data:
-  # 用户自建 / 自装的 SKILL(原 ./user-skills)· api 可写
+  hunter_workspace:
+  hunter_atomcode_home:
+  hunter_daemon_token:
   hunter_user_skills:
-  # 数据包(原 ./data-packages)· api 可写
   hunter_packages:
-  # 自动生成的密钥 · api 可写 / opencode 只读 · 内容由 M1 子任务 C 写入
   hunter_secrets:

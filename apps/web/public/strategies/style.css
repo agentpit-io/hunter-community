@@ -469,7 +469,8 @@ a{text-decoration:none;color:inherit}
 
 /* 响应式（手机） */
 @media (max-width: 900px){
-  .app{grid-template-columns:60px 1fr}
+  /* railbar 已移除(见 renderShell),这条两列的旧写法会让手机端只剩 60px 宽 */
+  .app{grid-template-columns:1fr}
   .rail-icon{width:52px}
   .rail-icon .lbl{font-size:9.5px}
   .wb-layout{grid-template-columns:1fr;gap:12px;padding:14px}
@@ -477,7 +478,7 @@ a{text-decoration:none;color:inherit}
   .factor-grid{grid-template-columns:repeat(2,1fr)}
 }
 @media (max-width: 640px){
-  .app{grid-template-columns:0 1fr}
+  .app{grid-template-columns:1fr}
   .railbar{display:none}
   .tabs-h{overflow-x:auto;white-space:nowrap}
   .metric-grid{grid-template-columns:repeat(2,1fr)}

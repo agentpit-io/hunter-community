@@ -327,6 +327,32 @@ async function sendMessage(req: Request, sid: string, token: string, deps: Adapt
 
   let prompt = userText
 
+  // 若包含上传的文档 file_ids，向 hermes-api 拉取文档结构化上下文包与关联股票清单并包入 <hunter-doc-context>
+  if (Array.isArray(body.file_ids) && body.file_ids.length > 0) {
+    const ctxRes = await deps.hermes('POST', '/api/internal/files/context_bundle', token, {
+      session_id: sid,
+      file_ids: body.file_ids,
+    })
+    delete body.file_ids
+    if (ctxRes.ok && ctxRes.data?.context_md) {
+      const docContextBlock = ctxRes.data.context_md
+      let detectedStocksHint = ''
+      if (Array.isArray(ctxRes.data.detected_stocks) && ctxRes.data.detected_stocks.length > 0) {
+        const stocksStr = ctxRes.data.detected_stocks
+          .map((s: any) => `${s.name}(${s.code})`)
+          .join('、')
+        detectedStocksHint = `\n【文档关联股票识别】系统已从用户上传的文档中识别出关联标的：${stocksStr}。`
+      }
+      const docInstruction =
+        `<uploaded-documents>\n${docContextBlock}\n</uploaded-documents>${detectedStocksHint}\n` +
+        `【上传文档分析与交叉核验铁律（最高优先级）】\n` +
+        `1. **数字零编造与页码溯源**：凡引用上述上传文档中的财务数字、表格指标或原文观点，**必须原样引用表格数值**，并在句末附上角标 \`[来源：文件名 第X页]\`（例如：\`营业收入 834.51 亿元 [来源：贵州茅台2025半年报摘要.pdf 第2页]\`）。\n` +
+        `2. **长文档按需翻页**：若文档标注为 \`paged\`（超长文档摘要模式），当摘要和目录中未包含具体明细时，严禁凭空猜测未展开页面的数字！可使用 \`doc_search\` 工具按页查询。\n` +
+        `3. **文档观点 × 实时盘面交叉核验（Hunter 独有优势）**：当用户要求分析研报/财报、评估投资价值或对比盘面时，若文档中识别出了关联股票代码，请**主动调用内置金融工具**（如 \`mcp__watchlist__stock_quickview\` / \`mcp__uzi__stock_deep_analysis\`），将「文档内的历史/预测数据」与「最新实时股价、估值分位」进行对比分析！`
+      prompt += `\n\n<hunter-doc-context>\n${docInstruction}\n</hunter-doc-context>`
+    }
+  }
+
   const sp = await deps.hermes('GET', '/api/chat/system-prompt', token)
   const profile = sp.ok ? String(sp.data?.system || '').trim() : ''
   if (profile) prompt += `\n\n<hunter-profile>\n${profile}\n</hunter-profile>`
@@ -338,7 +364,16 @@ async function sendMessage(req: Request, sid: string, token: string, deps: Adapt
       `找不到就如实说「没找到这个能力」，不要假装按它做了。\n</hunter-skill>`
   }
 
+  const reqModelStr = body.model
+    ? `${body.model.providerID || ''}/${body.model.modelID || ''}`
+    : 'default'
+  const tMsg0 = Date.now()
+  console.info(`[llm-trace] chat_message session=${sid} model=${reqModelStr} status=start`)
   const result = await runTurn(sid, prompt, stripInjected(userText))
+  const statusCode = !result.ok && result.error && !result.text ? (result.stopReason === 'timeout' ? 504 : 502) : 200
+  console.info(
+    `[llm-trace] chat_message session=${sid} model=${reqModelStr} status=${statusCode} latency_ms=${Date.now() - tMsg0}`,
+  )
   void deps.hermes('PATCH', `/api/chat/sessions/${encodeURIComponent(sid)}`, token, {})
 
   if (!result.ok && result.error && !result.text) {
@@ -346,7 +381,7 @@ async function sendMessage(req: Request, sid: string, token: string, deps: Adapt
       error: result.stopReason === 'timeout' ? 'upstream_timeout' : 'upstream_unreachable',
       message: result.error,
       id: result.messageId,
-    }, result.stopReason === 'timeout' ? 504 : 502)
+    }, statusCode)
   }
   return json({
     id: result.messageId,
