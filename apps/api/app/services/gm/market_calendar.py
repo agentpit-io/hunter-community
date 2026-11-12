@@ -7,10 +7,12 @@ MVP 简化：不含节假日表——周内假期会误判为交易时段，但�
 无副作用；节假日表后续接 pandas_market_calendars 补。
 """
 from datetime import datetime, time, timezone
-from zoneinfo import ZoneInfo
 
-_NY = ZoneInfo("America/New_York")
-_HK = ZoneInfo("Asia/Hong_Kong")
+# 时区单一来源（L02）：不再自己 ZoneInfo("...")，走 market_time。
+from app.services.market_time import market_tz
+
+_NY = market_tz("US")
+_HK = market_tz("HK")
 
 
 def us_market_state(now_utc: datetime | None = None) -> str:

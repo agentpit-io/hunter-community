@@ -18,6 +18,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 os.environ.setdefault("JWT_SECRET", "unit-test-secret-for-setup-router-0123456789")
 
 from app.routers import setup as S              # noqa: E402
+from app.services import llm_probe as P         # noqa: E402
+from app.services import llm_trace as LT        # noqa: E402
+from app.services import opencode_admin as OA   # noqa: E402
 from app.services import runtime_config as RC   # noqa: E402
 from app.services import setup_guard as G       # noqa: E402
 
@@ -345,3 +348,61 @@ def test_reopen_does_not_wipe_config(client, monkeypatch):
     mem["cfg"] = MemCfg("https://x/v1", "k", "m", "auto", "db")
     client.post("/api/setup/reopen", json={}, headers=LOCAL)
     assert mem["cfg"].configured and mem["saved"] == []
+
+
+# ── v2.2.1 谷歌 4.0 展示名兜底与大模型调用日志跟踪 ──────────────────────
+def test_opencode_admin_model_label_google4_fallback(monkeypatch):
+    """内置网关下即使网络抖动或返回不含谷歌 4.0 字样，也应返回 Hunter-Gemini 4 Argon（谷歌 4.0）。"""
+    import httpx
+
+    def _fail_get(*args, **kwargs):
+        raise httpx.ConnectTimeout("timeout")
+
+    monkeypatch.setattr(httpx, "get", _fail_get)
+    label = OA.model_label("https://hunter.agentpit.io/api/saas/llm/v1", "hunt_tools_xxx", "hunter-chat")
+    assert label == "Hunter-Gemini 4 Argon（谷歌 4.0）"
+
+
+def test_llm_logs_and_download_never_leak_api_key(client, monkeypatch, tmp_path):
+    """诊断日志与下载接口必须返回调用跟踪记录且绝不泄露明文 API Key。"""
+    import httpx
+
+    monkeypatch.delenv("HUNTER_SETUP_TOKEN", raising=False)
+    trace_file = tmp_path / "trace.jsonl"
+    monkeypatch.setenv("HUNTER_LLM_TRACE_PATH", str(trace_file))
+    monkeypatch.setattr(httpx, "get", lambda *a, **kw: (_ for _ in ()).throw(httpx.ConnectTimeout("offline")))
+
+    secret_key = "sk-super-secret-never-leak-9999"
+    client.app.state.mem["cfg"] = MemCfg(
+        "https://hunter.agentpit.io/api/saas/llm/v1",
+        secret_key,
+        "hunter-chat",
+        "0",
+        "db",
+    )
+
+    LT.record_call(
+        caller="unit.test",
+        base_url="https://user:pass@hunter.agentpit.io/api/saas/llm/v1?key=abc",
+        req_model="hunter-chat",
+        resp_model="gemini-4-argon",
+        status=200,
+        latency_ms=123,
+        tokens_in=10,
+        tokens_out=20,
+    )
+
+    r = client.get("/api/setup/llm/logs", headers=LOCAL)
+    assert r.status_code == 200
+    body = r.json()
+    assert secret_key not in r.text
+    assert body["llm_config"]["display_name"] == "Hunter-Gemini 4 Argon（谷歌 4.0）"
+    assert len(body["api_traces"]) >= 1
+    assert body["api_traces"][0]["resp_model"] == "gemini-4-argon"
+
+    r_dl = client.get("/api/setup/llm/logs/download", headers=LOCAL)
+    assert r_dl.status_code == 200
+    assert "attachment; filename=\"hunter-llm-diagnostics-" in r_dl.headers.get("content-disposition", "")
+    assert secret_key not in r_dl.text
+    assert "gemini-4-argon" in r_dl.text
+

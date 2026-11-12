@@ -101,6 +101,11 @@ def app(monkeypatch):
     # setup.py 是在函数体里 `from app.services import hunter_key` 的,
     # 所以要把模块本身换掉,不能只 setattr 到 S 上。
     monkeypatch.setitem(sys.modules, "app.services.hunter_key", hk)
+    # 光换 sys.modules 不够:同一进程里别的用例先 import 过真的 hunter_key 时(全量 pytest 里
+    # tests/agent/test_mcp_tools.py 等),包 app.services 上已挂着这个属性,
+    # `from app.services import hunter_key` 先取包属性、不查 sys.modules —— 拿到的是真模块。
+    import app.services as _services
+    monkeypatch.setattr(_services, "hunter_key", hk, raising=False)
 
     def _fetch(url, api_key):
         state["quota_calls"].append((url, api_key))
@@ -379,3 +384,85 @@ def test_status_exposes_builtin(client):
     assert client.get("/api/setup/status", headers=LOCAL).json()["llm"]["builtin"] is False
     _save(client)
     assert client.get("/api/setup/status", headers=LOCAL).json()["llm"]["builtin"] is True
+
+
+# ── 7. 一键切到内置额度(侧栏平台 key 弹窗)────────────────────────────
+# 2026-09-22 用户实报:侧栏填了 Hunter key,对话框里还是自己的 deepseek-flash。
+# 这条接口用库里已存的平台 key 走一遍与向导内置卡片同口径的「检测 → 写库 → 热推」。
+ADOPT = "/api/setup/llm/adopt-builtin"
+
+
+@pytest.fixture
+def adopt(client, monkeypatch):
+    st = {"probe": {"ok": True, "checks": [], "models": [], "sanitize_suggest": "",
+                    "elapsed_ms": 1},
+          "probe_calls": [], "applied": []}
+
+    def _probe(base_url, api_key, model):
+        st["probe_calls"].append((base_url, api_key, model))
+        return st["probe"]
+    monkeypatch.setattr(S.llm_probe, "run_all", _probe)
+
+    def _apply(cfg):
+        st["applied"].append(cfg.model)
+        return {"ok": True}
+    monkeypatch.setattr(S.opencode_admin, "apply_llm", _apply)
+    client.app.state.mem["cfg"] = MemCfg("https://api.deepseek.com/v1", "sk-own",
+                                         "deepseek-flash", "auto", "db")
+    client.app.state.hk.stored = "hunt_tools_abc"
+    return st
+
+
+def test_adopt_builtin_happy_path(client, adopt):
+    r = client.post(ADOPT, headers=LOCAL)
+    assert r.status_code == 200 and r.json()["ok"] is True
+    assert r.json()["applied"] is True
+    # 检测用的是库里那把平台 key,打的是网关 + hunter-chat
+    assert adopt["probe_calls"] == [(GW, "hunt_tools_abc", "hunter-chat")]
+    mem = client.app.state.mem
+    assert mem["saved"][-1] == {"base_url": GW, "model": "hunter-chat",
+                                "sanitize": "0", "api_key": "hunt_tools_abc"}
+    assert mem["builtin"] is True
+    assert mem["agent_models"]["AGENT_SUB_UZI_MODEL"] == "hunter-deep"
+    assert adopt["applied"] == ["hunter-chat"]
+    assert mem["kv"].get(RC.K_SETUP_DONE)            # 不会再被弹回向导
+
+
+def test_adopt_builtin_probe_failure_keeps_old_config(client, adopt):
+    adopt["probe"] = {"ok": False, "checks": [
+        {"name": "连通", "ok": False, "code": "bad_key", "message": "key 无效(HTTP 401)"}],
+        "models": [], "sanitize_suggest": "", "elapsed_ms": 1}
+    r = client.post(ADOPT, headers=LOCAL)
+    assert r.status_code == 200 and r.json()["ok"] is False
+    assert "连通" in r.json()["message"] and "没有改动" in r.json()["message"]
+    assert client.app.state.mem["saved"] == []
+    assert client.app.state.mem["builtin"] is False
+    assert adopt["applied"] == []
+
+
+def test_adopt_builtin_env_locked(client, adopt):
+    client.app.state.mem["env_locked"] = True
+    assert client.post(ADOPT, headers=LOCAL).status_code == 409
+    assert adopt["probe_calls"] == []
+
+
+def test_adopt_builtin_needs_platform_key(client, adopt):
+    client.app.state.hk.stored = ""
+    r = client.post(ADOPT, headers=LOCAL)
+    assert r.status_code == 400 and r.json()["detail"]["code"] == "no_key"
+    client.app.state.hk.stored = "sk-something-else"
+    r = client.post(ADOPT, headers=LOCAL)
+    assert r.status_code == 400 and r.json()["detail"]["code"] == "not_platform_key"
+    assert adopt["probe_calls"] == []
+
+
+def test_adopt_builtin_already_on_is_noop(client, adopt):
+    client.app.state.mem["builtin"] = True
+    r = client.post(ADOPT, headers=LOCAL)
+    assert r.json()["ok"] is True and r.json()["already"] is True
+    assert adopt["probe_calls"] == [] and client.app.state.mem["saved"] == []
+
+
+def test_adopt_builtin_is_guarded(client, adopt):
+    assert client.post(ADOPT, headers=PUBLIC).status_code == 401
+    assert adopt["probe_calls"] == []

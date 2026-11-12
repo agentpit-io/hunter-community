@@ -8,7 +8,8 @@ from datetime import datetime, timezone, timedelta
 from agents.state import EnhancedAgentState
 
 
-_CST = timezone(timedelta(hours=8))
+from app.services.market_time import market_tz
+_CST = market_tz("CN_A")
 
 _DECISION_EMOJI = {
     "BUY":  "🟢",

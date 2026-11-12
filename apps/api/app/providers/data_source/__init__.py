@@ -1,8 +1,15 @@
 """Data source provider factory · env-driven singleton.
 
 Set DATA_SOURCE_PROVIDER to one of: hunter · saas · akshare · yfinance
-Leave it unset and we pick for you: "hunter" when a platform key is configured
-(see app.services.hunter_key), else "akshare" (A-shares out-of-box, no key).
+Leave it unset and you get "hunter", whether or not a platform key is
+configured (see app.services.hunter_key). Without a key its calls raise
+HunterKeyRequired ("go apply for a key") instead of falling back to akshare;
+the comment in get_data_source() explains why. For no-key data, set
+DATA_SOURCE_PROVIDER=akshare (A-shares) or yfinance (US/HK).
+
+Only caller today: app.services.finance_data_client.get_quote() (via
+_provider_get_quote_sync), and only when no data key is configured
+(HK/US try the free market_source channel first).
 """
 import os
 from loguru import logger
@@ -34,18 +41,22 @@ def get_data_source() -> IDataSource:
         from .hunter_tools import HunterToolsDataSource
         _INSTANCE = HunterToolsDataSource()
     elif provider == "saas":
-        # URL/KEY 三级 fallback · 与 finance_data_client / unified_fetcher 一致。
-        # 只填 HUNTER_API_KEY 就自动通往官方 finance-data.agentpit.io。
-        _DEFAULT_SAAS_URL = "https://finance-data.agentpit.io"
-        # 与 finance_data_client / sentinel 同一个入口 · 含数据库里网页填的 key
+        # URL/KEY 的解析顺序见 finance_data_auth；与 finance_data_client /
+        # sentinel 共用入口，包含默认网关和数据库里网页填写的 key。
         from app.services import finance_data_auth as _auth
+        from app.services import hunter_key
+        from .hunter_tools import HunterKeyRequired
         url = _auth.data_url()
         key = _auth.data_token()
         if not key:
-            raise RuntimeError(
+            # HunterKeyRequired, not a bare RuntimeError: _provider_get_quote_sync
+            # re-raises only this type so the FastAPI handler can turn it into the
+            # structured hunter_key_required response instead of a silent None.
+            raise HunterKeyRequired(
                 "DATA_SOURCE_PROVIDER=saas requires a key. "
                 "Set HUNTER_API_KEY (统一 key) or HUNTER_SAAS_DATA_KEY (独立数据 key). "
-                "Free-tier: https://hunter.agentpit.io/dev/api-keys"
+                "Free-tier: https://hunter.agentpit.io/dev/api-keys",
+                hunter_key.APPLY_URL,
             )
         from .saas import SaasDataSource
         _INSTANCE = SaasDataSource(url, key)

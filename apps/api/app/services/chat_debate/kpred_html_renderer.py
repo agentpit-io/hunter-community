@@ -14,7 +14,8 @@ from datetime import datetime, timezone, timedelta
 import json
 import html as _html
 
-_CST = timezone(timedelta(hours=8))
+from app.services.market_time import market_tz
+_CST = market_tz("CN_A")
 
 # 8 因子中文名(与 factor_engine.py FACTOR_LABELS 对齐)
 _FACTOR_LABELS = {

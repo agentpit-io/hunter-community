@@ -23,7 +23,9 @@ PyYAML==6.0.3
 ta==0.11.0
 # uvicorn[standard] 的可选高性能依赖，hermes-agent-core 默认 import 探测，缺了会报 warning（不致命，但跟现网一致更稳）
 httptools==0.7.1
-uvloop==0.22.1
+# uvloop 不支持 Windows(pip 直接报错),所以只在非 Windows 上装。本仓代码没有直接 import 它,
+# 它是 uvicorn 在 Linux 上自动启用的加速;Linux 容器照装,行为不变
+uvloop==0.22.1; sys_platform != "win32"
 watchfiles==1.1.1
 websockets==16.0
 
@@ -45,3 +47,13 @@ Pillow==11.0.0
 # 文件上传(数据包「浏览…」按钮)· FastAPI 的 UploadFile 依赖它,
 # 不装的话带 File(...) 的路由在**启动时**就报错,整个 API 起不来
 python-multipart==0.0.9
+
+# 对话框多格式文件导入（PDF / Excel / Word / Markdown）解析依赖
+# 钉死 PyMuPDF<2.0：PyMuPDF 2.x 默认强拉 69MB wheel + onnxruntime + pymupdf-layout，
+# 不仅镜像暴涨且其 layout 引擎对 CJK 表格单元格会拆乱小数点/负号顺序
+PyMuPDF>=1.24.0,<2.0.0
+python-docx>=1.1.0,<2.0.0
+openpyxl>=3.1.0,<4.0.0
+pandas>=2.0.0,<3.0.0
+xlrd>=2.0.1,<3.0.0
+

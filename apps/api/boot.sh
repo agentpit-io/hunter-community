@@ -8,6 +8,19 @@ set -e
 
 # ── ① 密钥(见 3.2)────────────────────────────────────────────
 #
+# 支持文件挂载读取 LLM_API_KEY（HCA I1 §1.1）：当 LLM_API_KEY 为空而
+# LLM_API_KEY_FILE 或 HCA_LLM_API_KEY_FILE 可读时，自动从文件加载。
+_llm_key_file="${LLM_API_KEY_FILE:-${HCA_LLM_API_KEY_FILE:-}}"
+if [ -z "${LLM_API_KEY:-}" ] && [ -n "$_llm_key_file" ]; then
+    if [ -r "$_llm_key_file" ]; then
+        LLM_API_KEY="$(tr -d '\r\n' < "$_llm_key_file")"
+        export LLM_API_KEY
+        echo "[boot] 模型 key 取自文件 $_llm_key_file（长度 ${#LLM_API_KEY}）"
+    else
+        echo "[boot] WARN LLM_API_KEY_FILE=$_llm_key_file 不可读（不存在或无权限）" >&2
+    fi
+fi
+
 # 优先级:**环境变量非空 → hunter_secrets 卷里的 secrets.env → 本次生成**。
 #
 # ⚠️ 判断一律用「非空」而不是「已定义」:compose 的 `${JWT_SECRET:-}` 会把

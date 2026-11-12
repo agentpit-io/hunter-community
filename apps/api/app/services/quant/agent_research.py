@@ -417,6 +417,7 @@ def set_archived(cur, key: str, archived: bool, uid) -> dict:
 # ═══════════════════════════════════════════════════════════════
 
 def board(cur) -> dict:
+    from app.services.quant import agent_overfit
     ar = _meta()
     lines = all_lines(cur)
     metrics = {}
@@ -440,6 +441,7 @@ def board(cur) -> dict:
         ft = ln.get("frozen_through")
         oos = split_after(m, ft) if (m and ft) else None
         out_lines.append({
+            "overfit": agent_overfit.public_report(m["_rounds"], sorted(m["equity"]), ln, best) if m else None,
             "key": ln["key"], "label": ln.get("label"), "status": ln.get("status"),
             "status_text": STATUS_TEXT.get(ln.get("status"), ln.get("status")),
             # 研究台只有两列:running(待写引擎 / 回测 / 纸上跑)· archived;killed 不上看板

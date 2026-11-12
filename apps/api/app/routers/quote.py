@@ -15,7 +15,8 @@ _redis = redis.Redis.from_url(
     decode_responses=True,
 )
 
-CST = timezone(timedelta(hours=8))
+from app.services.market_time import market_tz
+CST = market_tz("CN_A")
 
 # 防微信内嵌浏览器 / 部分手机 App webview 激进缓存行情数据（曾出现用户看到很老的 quote）
 _NO_STORE_HEADERS = {
@@ -52,6 +53,35 @@ def _cache_poisoned(code: str, raw) -> bool:
     return bool(got) and got != want
 
 
+# 各市场"当天算走完了"的时刻(北京时间口径)
+_DAY_CLOSE_HHMM = {"A": (15, 0), "HK": (16, 0)}
+
+
+def _is_stale(q: dict, today: str) -> bool:
+    """这条缓存还能不能当"最新"用。
+
+    只看"是不是今天"是不够的:**盘中某一刻**写下的快照,过了收盘就不再是"最新"了。
+
+    2026-10-14 事故:缓存里冻着上午 10:37 的 22.51(松霖科技 603992 那一刻
+    的真实价),而它当天涨停收 24.61。判据只看到 ts 是今天,就把这个盘中价
+    一路当收盘价发到用户面前,一直错到第二天。
+    """
+    ts = str(q.get("ts") or "")[:19]
+    if ts[:10] != today:
+        return True
+    cutoff = _DAY_CLOSE_HHMM.get((q.get("market") or "A").upper())
+    if cutoff is None:
+        return False                 # 未收录的市场:保持原判据,不误伤
+    now = datetime.now(CST)
+    if (now.hour, now.minute) < cutoff:
+        return False                 # 还没收盘,盘中快照本来就是最新的
+    try:
+        snap = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return False                 # 时间戳解析不了:当它不过期,别把好缓存误判
+    return snap < datetime(now.year, now.month, now.day, cutoff[0], cutoff[1])
+
+
 def _kline_refresh(code: str, today: str) -> dict | None:
     """用 kline 刷新过期 quote 并写回 Redis。"""
     kq = get_reliable_close(code, today)
@@ -83,7 +113,7 @@ async def get_quote(code: str):
         cached = None
     if cached:
         q = json.loads(cached)
-        if q.get("ts", "")[:10] != today:
+        if _is_stale(q, today):
             kq = await asyncio.to_thread(_kline_refresh, code, today)
             if kq:
                 return JSONResponse(content=kq, headers=_NO_STORE_HEADERS)
@@ -92,8 +122,9 @@ async def get_quote(code: str):
     stock_map = {s["code"]: s for s in stocks}
     if code not in stock_map:
         raise HTTPException(404, f"股票 {code} 不存在")
-    # Cache-miss path · try live fetch (finance_data_client hits SaaS or
-    # falls back to providers.data_source · either yfinance/akshare).
+    # Cache-miss path · try live fetch (finance_data_client hits SaaS or, with
+    # no key, falls back to providers.data_source · `hunter` by default, which
+    # raises HunterKeyRequired; akshare/yfinance only if DATA_SOURCE_PROVIDER says so).
     fresh = await asyncio.to_thread(fd_get_quote, code)
     if fresh:
         _redis.set(f"quote:{code}", json.dumps(fresh))
@@ -123,7 +154,7 @@ async def get_all_quotes(request: Request):
         if raw:
             q = json.loads(raw)
             cached_map[s["code"]] = q
-            if q.get("ts", "")[:10] != today:
+            if _is_stale(q, today):
                 stale_codes.append(s["code"])
         else:
             cached_map[s["code"]] = {"code": s["code"], "name": s["name"], "price": None}

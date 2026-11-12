@@ -180,8 +180,8 @@ def _tokenize(src: str) -> list[_Tok]:
 # ThinkScript 本身不分大小写。原来只有 close/open/…、函数名、关键字不分,扫描源字段名
 # (SMA20 / RSI / market_cap_basic / MACD.macd / Perf.W)和自己 def 的名字(def Up … plot scan = up)
 # 都是逐字比对,换个大小写就「不认识」。按类别探针实测这两类全中。
-# 做法:编译前把**标识符**按原名改写 —— 先对自己的 def / input / rec 名字,再对扫描源字段(不分大小写
-# 唯一对上才改,对上多个就不动,照旧报不认识)。只改大小写,长度不变,所以 decompose / 编辑框 / 数字框
+# 做法:编译前把**标识符**按原名改写。逐字就是字段名或 def 名的不动(字段逐字优先,见下面 09-22 事故);
+# 其余先对自己的 def / input / rec 名字,再对扫描源字段(不分大小写唯一对上才改,对上多个就不动,照旧报不认识)。只改大小写,长度不变,所以 decompose / 编辑框 / 数字框
 # 用的源码位置全都照旧成立。函数调用(后面紧跟 `(`)、价格名、关键字本来就不分大小写,不动。
 # 词法不过(大白话、半截输入)原样返回,交给后面的流程报错或走本地识别。
 def fix_case(src: str, names, extra_src: str = "") -> tuple[str, list[str]]:
@@ -211,12 +211,13 @@ def fix_case(src: str, names, extra_src: str = "") -> tuple[str, list[str]]:
         if i + 1 < len(toks) and toks[i + 1].kind == "op" and toks[i + 1].val == "(":
             continue                       # 函数调用,本来就不分大小写
         low = v.lower()
-        if low in _PRICE or v in defs.values():
+        # 已经逐字是字段名 / 自己的 def 名的一律不动 —— **字段逐字匹配优先于别处 def 的不分大小写匹配**。
+        # 2026-09-22 线上事故:当前条件是「上升趋势」(def sma50 = Average(close, 50)),追加「VCP 波段收缩」,
+        # VCP 里写得完全正确的 SMA50 被改成上下文里的 sma50,报「不认识 'sma50'」。
+        if low in _PRICE or v in defs.values() or v in (names or ()):
             continue
         target = defs.get(low)
         if target is None:
-            if v in (names or ()):
-                continue
             cand = by_low.get(low) or []
             target = cand[0] if len(cand) == 1 else None
         if not target or target == v or len(target) != len(v):

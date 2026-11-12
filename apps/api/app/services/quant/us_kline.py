@@ -195,8 +195,8 @@ def fetch_ohlcv(sym: str, n: int) -> list[tuple] | None:
 
 
 def now_et() -> datetime:
-    from zoneinfo import ZoneInfo
-    return datetime.now(ZoneInfo("America/New_York"))
+    from app.services.market_time import market_tz
+    return datetime.now(market_tz("US"))
 
 
 # ── 池子 + 锚点(一次扫描源请求拿全)──────────────────────────

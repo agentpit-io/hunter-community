@@ -953,9 +953,18 @@ check("I 已经是原名的不列、不改", fixed("plot scan = SMA10 > SMA20;")
 check("I ⭐ def 名换大小写引用:def Up … plot scan = up", fixed("def Up = close > 20; plot scan = up;")[0]
       == "def Up = close > 20; plot scan = Up;")
 check("I def 名换大小写后编译得过", compiles("def Up = close > 20; plot scan = UP;"))
-check("I ⭐ def 与字段同名不同大小写:引用归 def(ThinkScript 语义)",
+# 2026-09-22 改口径:原来这条断言「引用归 def」,线上当天就出事(见下一条)。逐字是字段名的一律按字段
+check("I ⭐ 逐字写对的字段名不被同名(不同大小写)的 def 抢走",
       fixed("def sma20 = Average(close, 20); plot scan = close > SMA20;")[0]
-      == "def sma20 = Average(close, 20); plot scan = close > sma20;")
+      == "def sma20 = Average(close, 20); plot scan = close > SMA20;")
+check("I ⭐ 09-22 事故:上下文有 def sma50,追加的脚本里 SMA50 不动",
+      fixed("def c_trend = close > SMA50 and SMA50 > SMA150; plot scan = c_trend;",
+            "def sma50 = Average(close, 50); def cond_price_sma50 = close > sma50; plot scan = cond_price_sma50;")[0]
+      == "def c_trend = close > SMA50 and SMA50 > SMA150; plot scan = c_trend;")
+check("I 事故那份追加后编译得过", compiles("def sma50 = Average(close, 50); def c1 = close > sma50;"
+                                     " def c_trend = close > SMA50 and SMA50 > SMA150; plot scan = c1 and c_trend;"))
+check("I 不是字段的名字仍按 def 改(def Foo50 … foo50)",
+      fixed("def Foo50 = close > 1; plot scan = foo50;")[0] == "def Foo50 = close > 1; plot scan = Foo50;")
 check("I 追加模式:片段引用上下文里的 def,按上下文的写法改",
       fixed("plot scan = MYCOND;", "def myCond = close > 20;")[0] == "plot scan = myCond;")
 check("I input 名换大小写", fixed("input N = 20; plot scan = close > n;")[0] == "input N = 20; plot scan = close > N;")

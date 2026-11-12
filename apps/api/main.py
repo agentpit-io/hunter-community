@@ -10,8 +10,7 @@ from app.services.collector import start_collector, stop_collector
 from app.services.database import init_db, get_stocks
 from app.services.finance_data_client import register_stocks
 from app.services import signal_monitor
-from app.services.data import klines_etl
-from datetime import datetime, timezone, timedelta
+from app.services.market_time import tz_name
 import asyncio
 import os
 
@@ -39,67 +38,67 @@ if not _HUNTER_API_KEY_CONFIGURED:
 _signal_task = None
 _gm_alert_task = None
 _backtest_task = None
-_klines_etl_task = None
-
-# 东八区 —— A 股/港股收盘 + 美股次日凌晨的触发窗口都按 CST 算
-CST = timezone(timedelta(hours=8))
-
-
-async def _klines_etl_loop():
-    """每 10 min 检查一次 · 在收盘后的触发窗口内跑 klines_etl.
-
-    ⚠ 适配说明:klines_etl.py(小王 bc19dc0)对外只暴露同步的
-    ``run_market(market=...)`` 和 ``health()``,并**没有** ``daily_etl`` /
-    ``target_date`` —— run_market 每次直接从三源(腾讯/akshare/新浪)拉最近
-    MAX_BARS(800)根日线并 UPSERT,天然覆盖当日最新一根,所以不需要按日期取。
-    该文件属小王代码,此处只 import 不改,故按其真实签名调用。
-
-    run_market 是阻塞函数(逐只 sleep + 网络 IO),放线程里跑,别堵事件循环。
-    """
-    _last_trigger = {}  # 防止同一触发窗口内重复跑(键: 市场 → 日期)
-    while True:
-        try:
-            now = datetime.now(CST)
-            hour_min = now.hour * 60 + now.minute
-            weekday = now.weekday()  # 0-6 · 中国节假日暂不判断(P2)
-            today = now.date()
-
-            is_trading_day = weekday < 5
-
-            # 15:25-15:40 CST → A 股当日 ETL
-            if is_trading_day and 925 <= hour_min <= 940 and _last_trigger.get('cn') != today:
-                await asyncio.to_thread(klines_etl.run_market, 'cn')
-                _last_trigger['cn'] = today
-
-            # 16:40-16:55 CST → 港股当日 ETL
-            elif is_trading_day and 1000 <= hour_min <= 1015 and _last_trigger.get('hk') != today:
-                await asyncio.to_thread(klines_etl.run_market, 'hk')
-                _last_trigger['hk'] = today
-
-            # 03:25-03:40 CST 次日 → 美股(dedup 键按前一交易日算)
-            elif 205 <= hour_min <= 220:
-                yesterday = today - timedelta(days=1)
-                if _last_trigger.get('us') != yesterday:
-                    await asyncio.to_thread(klines_etl.run_market, 'us')
-                    _last_trigger['us'] = yesterday
-
-            await asyncio.sleep(600)  # 10 min 检查一次
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("_klines_etl_loop 错误 · 60s 后重试")
-            await asyncio.sleep(60)
+# ⚠️ 这里原来有一个 `_klines_etl_loop()`（每 10 分钟检查一次触发窗口的进程内
+# asyncio 循环）。**M4 已删除**：`01方案 §5.3`「上层调度只有一个权威」——
+# 六个交易时点与「什么时候拉 K 线」都归 Temporal（容器 `temporal` +
+# `apps/fin-worker`）。取数的实现函数 `klines_etl.run_market` 一个字符没改，
+# 由 `POST /api/internal/etl/run-market`（`routers/internal_etl.py`）暴露给
+# Temporal 工作流调用。
+#
+# **不要再把它加回来，也不许在别处补一条兜底 cron / 定时器** ——
+# 两套调度器同时存在，就会出现「都以为自己是权威」，而这不会有任何报错。
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _signal_task, _gm_alert_task, _backtest_task, _klines_etl_task
+    global _signal_task, _gm_alert_task, _backtest_task
+
+    # ─── R4 · 运行开关与安全边界：启动时把状态打进日志 ───
+    #
+    # 开关读在 services/fin/switches.py（全仓唯一点）。这里**不缓存**，只是把启动那一刻
+    # 的值打出来，让运维一眼看到「这台机器开没开经验库、进化模式是什么」。
+    #
+    # ⚠️ 硬开关违规（FIN_AUTO_APPLY / FIN_LIVE_ORDER_ENABLED 非 0）**打 ERROR、不退出**：
+    #    03 §2 要的是「拒绝启动**或**拒绝请求，并在日志与接口里写明」。选后者 ——
+    #    进程活着，GET /v1/fin/runtime 才能用 503 把原因说给前端；退出只剩一条日志。
+    try:
+        from app.services.fin import switches as _fin_switches
+        _hard = _fin_switches.hard_config_errors()
+        if _hard:
+            logger.error(
+                "[fin.switches] 硬开关违规（服务端将拒绝 /api/v1/fin/runtime）：{}",
+                "；".join(_hard))
+        logger.info(
+            "[fin.switches] memory_enabled={} · evolution_mode={} · auto_apply={} · live_order_enabled={}",
+            _fin_switches.memory_enabled(),
+            _fin_switches.evolution_mode_requested(),
+            _fin_switches.ceiling_auto_apply(),
+            _fin_switches.live_order_enabled(),
+        )
+    except Exception as e:      # noqa: BLE001 — 开关状态打印失败不该挡住启动
+        logger.warning("[fin.switches] 启动开关检查失败（非致命）：{}", e)
 
     # ─── Business tables · always ensure (idempotent · no side effects) ───
     try:
         await init_db()
     except Exception as e:
         logger.error("[boot] init_db failed (service will run but table-backed features may 500): {}", e)
+
+    # ─── L04 · 策略登记表：把内置策略登记进去（幂等，`ON CONFLICT DO NOTHING`）───
+    # 迁移 0049 已建表（api 启动时 `app.migrate` 自动跑）；这里只把内置定义补登一次，
+    # 让 `strategy.get` / `active` 一启动就有可解析的版本。失败只记 warning（读路径会自愈）。
+    try:
+        from app.services.fin import strategy as _strategy
+        _c = _strategy.get_conn()
+        try:
+            with _c.cursor() as _cur:
+                _builtins = _strategy.ensure_builtins(_cur)
+            _c.commit()
+            logger.info("[fin.strategy] 内置策略登记就绪：{} 个", len(_builtins))
+        finally:
+            _c.close()
+    except Exception as e:      # noqa: BLE001 — 登记失败不该挡住启动（读路径自愈）
+        logger.warning("[fin.strategy] 内置策略登记失败（非致命，读路径会自愈）：{}", e)
 
     # 上次崩掉留下的下载任务 —— worker 是进程内的线程,容器一重启它就没了,
     # 而库里状态还是 running。不处理的话页面上永远显示"进行中"然后不动。
@@ -125,7 +124,7 @@ async def lifespan(app: FastAPI):
     try:
         from apscheduler.schedulers.asyncio import AsyncIOScheduler as _AS
         from app.services.quant.scheduler import register_local as _reg_local
-        _local_sched = _AS(timezone="Asia/Shanghai")
+        _local_sched = _AS(timezone=tz_name("CN_A"))
         _reg_local(_local_sched)
         _local_sched.start()
         logger.info("[quant.local] 每日 17:10 CST 本地流水线已挂载(不需要任何 key)")
@@ -172,12 +171,8 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("[backtest] scheduler 启动失败(非致命): {}", e)
 
-    try:
-        _klines_etl_task = asyncio.create_task(_klines_etl_loop())
-        logger.info("[klines.etl] 每日 ETL loop 已挂载(A股 15:30 · 港股 17:00 · 美股次日 03:30 CST)")
-    except Exception as e:
-        logger.warning("[klines.etl] loop 挂载失败(非致命): {}", e)
-
+    # K 线 ETL 的触发已交给 Temporal（见 main.py 顶部那段说明）。
+    # 这里不再挂任何进程内定时器。
     # 魔法筛选器:官方示例「最近一次命中的日子」定时预热(2026-09-16 用户要求)。只读自家日线,
     # 没下载过日线的实例直接跳过;放在 MINIMAL_BOOT 之前,生产开着那个开关
     try:
@@ -226,11 +221,17 @@ async def lifespan(app: FastAPI):
         try:
             from apscheduler.schedulers.asyncio import AsyncIOScheduler
             from apscheduler.triggers.cron import CronTrigger
-            _catalog_sched = AsyncIOScheduler(timezone="Asia/Shanghai")
+            from app.routers.chat_files import cleanup_expired_chat_files as _cleanup_chat_files
+            _catalog_sched = AsyncIOScheduler(timezone=tz_name("CN_A"))
             _catalog_sched.add_job(
                 lambda: asyncio.create_task(asyncio.to_thread(_seed_catalog)),
                 CronTrigger(hour=3, minute=0),
                 id="stocks_catalog_daily_seed", replace_existing=True,
+            )
+            _catalog_sched.add_job(
+                lambda: asyncio.create_task(asyncio.to_thread(_cleanup_chat_files)),
+                CronTrigger(hour=4, minute=15),
+                id="chat_uploaded_files_daily_cleanup", replace_existing=True,
             )
             # B4 · quant 每日 17:00 CST 重算 16 因子 · 复用同一 scheduler
             try:
@@ -256,9 +257,6 @@ async def lifespan(app: FastAPI):
         _gm_alert_task.cancel()
     if _backtest_task:
         _backtest_task.cancel()
-    if _klines_etl_task:
-        _klines_etl_task.cancel()
-        await asyncio.gather(_klines_etl_task, return_exceptions=True)
 
 # FastAPI Swagger + OpenAPI closed by default · they leak full API surface.
 # Ops who want them can set HUNTER_ENABLE_DOCS=1 (behind their own auth layer).
@@ -325,6 +323,10 @@ from app.routers import research_assistant
 app.include_router(research_assistant.router, prefix="/api")
 from app.routers import admin_etl
 app.include_router(admin_etl.router, prefix="/api")
+# M4：K 线 ETL 的触发与交易日历改由 Temporal（fin-worker）经内网端点调用。
+# `01方案 §5.3`「上层调度只有一个权威」——进程内 ETL 循环已删除。
+from app.routers import internal_etl
+app.include_router(internal_etl.router, prefix="/api")
 
 # P4 · Per-user SaaS accelerator config
 from app.routers import settings as settings_router
@@ -383,6 +385,10 @@ app.include_router(quant_data_router.router, prefix="/api")
 # ── /chat 会话归属(用户隔离的权威数据源, 供 web BFF 调用) ──
 from app.routers import chat_session as chat_session_router
 app.include_router(chat_session_router.router, prefix="/api")
+
+# ── /chat 多格式文件导入(PDF / Excel / Word / Markdown)与翻页检索 ──
+from app.routers import chat_files as chat_files_router
+app.include_router(chat_files_router.router, prefix="/api")
 
 # ── /chat 能力面板(内置能力 + 用户自定义) ──
 from app.routers import chat_skill as chat_skill_router
@@ -463,6 +469,53 @@ app.include_router(catalog_router.router, prefix="/api")
 # 写操作放进去会变成谁都能改。这里走默认的硬鉴权。
 from app.routers import capability_groups as capability_groups_router
 app.include_router(capability_groups_router.router, prefix="/api")
+
+# ── 智能炒股 · 项目与开户（一期 M1）· /api/v1/fin/* ──
+# 走默认硬鉴权（不在 middleware 的免登录前缀里）；账本表见 db/migrations/0023_fin_core.sql
+from app.routers import fin_project as fin_project_router
+app.include_router(fin_project_router.router, prefix="/api")
+
+# ── 智能炒股 · 每日报告（一期 M5）· 生成走内网口令、读走 JWT ──
+from app.routers import fin_report as fin_report_router
+app.include_router(fin_report_router.router, prefix="/api")
+
+# ── 智能炒股 · 发布（五期 L07）· publish.submit/get + 待核实队列 · JWT ──
+from app.routers import fin_publish as fin_publish_router
+app.include_router(fin_publish_router.router, prefix="/api")
+
+# M6：四个正文页的读模型与自动交易页的三个控制（总开关 / 策略 / 风险档位）
+from app.routers import fin_dashboard as fin_dashboard_router
+app.include_router(fin_dashboard_router.router, prefix="/api")
+
+# M7：数据面（统一行情结构 + 标的元数据），内网口令，只读
+from app.routers import fin_data as fin_data_router
+app.include_router(fin_data_router.router, prefix="/api")
+
+# R2：统一经验系统（记忆服务）· 内网口令写 / JWT 读 —— 唯一入口。
+# 唯一碰「经验三张表」的路由；过滤在服务端（app/services/fin/memory.py），
+# 这里只判通道与翻错误码。
+from app.routers import fin_memory as fin_memory_router
+app.include_router(fin_memory_router.router, prefix="/api")
+
+# R3：复核（复盘）回路 · 内网口令，只读 / 产出候选（写经验仍走 fin_memory 的唯一入口）。
+from app.routers import fin_review as fin_review_router
+app.include_router(fin_review_router.router, prefix="/api")
+
+# R4：运行开关与安全边界 · 只读运行时快照（前端读开关的唯一来源）。
+# 开关本身读在 services/fin/switches.py（全仓唯一点）；这里只把它暴露成一个接口。
+from app.routers import fin_runtime as fin_runtime_router
+app.include_router(fin_runtime_router.router, prefix="/api")
+
+# L04：自有策略服务 · 内网口令（`strategy.submit/get/cancel` + 只读 active）。
+# 业务在 services/fin/strategy.py（唯一服务模块）；**不写 fin_param**（生效仍走 control 唯一入口）。
+from app.routers import fin_strategy as fin_strategy_router
+app.include_router(fin_strategy_router.router, prefix="/api")
+
+# R6：受控自进化 · 提案层 · 内网口令提交（写）/ JWT 列出（读，供 R9 界面）。
+# 闸门（白名单 / 证据 / param_diff / 方向 · 红线 8 / regime）全在
+# services/fin/evolution.py（唯一入口）；这里只判通道与翻错误码。
+from app.routers import fin_evolution as fin_evolution_router
+app.include_router(fin_evolution_router.router, prefix="/api")
 
 @app.get("/api/health")
 async def health():

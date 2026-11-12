@@ -1,0 +1,11 @@
+# fin-worker · Runtime Bridge + Temporal Workers（智能炒股执行编排层）
+#
+# 它**不连账本库**：账本只有 `paper` 一个入口（01方案 §7.4 / §11.3）。
+# 所以这里既没有 psycopg2、也没有任何 DB 驱动 —— 这是刻意的，
+# 让「不许直连 hunter_fin」成为一条「依赖里根本没有那条腿」的事实。
+temporalio==1.15.0      # Temporal Python SDK（Schedules 自 1.5 起）
+fastapi==0.136.1        # 内部最小 HTTP 端点（给 api 触发用）
+uvicorn==0.46.0
+pydantic==2.13.4
+httpx==0.28.1           # 只用来打 paper / api 的 HTTP 接口
+loguru==0.7.3

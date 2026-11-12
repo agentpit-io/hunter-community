@@ -649,10 +649,10 @@ def _post_cninfo(row: dict) -> dict:
             # 差一天在公告上是实质错误 —— 半年报"8-14 发布"和"8-15 发布"
             # 会影响"这消息出来之后股价怎么走"的判断。而它不报错,
             # 只是一个看起来很正常的日期。
-            row["published_at"] = (
-                _dt.datetime.utcfromtimestamp(t / 1000)
-                + _dt.timedelta(hours=8)
-            ).strftime("%Y-%m-%d")
+            # L02：市场时区走单一来源（原来手写 +8 小时偏移）。
+            from app.services.market_time import market_tz
+            row["published_at"] = _dt.datetime.fromtimestamp(
+                t / 1000, market_tz("CN_A")).strftime("%Y-%m-%d")
         except (OverflowError, OSError, ValueError):
             pass
     u = row.get("url")

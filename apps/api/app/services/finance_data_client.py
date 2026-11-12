@@ -1,9 +1,11 @@
 """Hunter-compatible aggregate market-data client.
 
-Historically hits `finance-data.agentpit.io`; in Community it's opt-in via
-`FINANCE_DATA_URL` + `FINANCE_DATA_TOKEN` env. When those are empty (the
-default), calls fall back to `app.providers.data_source` (akshare for A-shares,
-yfinance for US/HK · whichever `DATA_SOURCE_PROVIDER` picks).
+Historically hits `finance-data.agentpit.io`; URL and key now resolve in
+`app.services.finance_data_auth` (Hunter data gateway by default, see below).
+When no data key is configured at all, `get_quote()` falls back to
+`app.providers.data_source`: `hunter` by default, which asks the user for a
+key; set `DATA_SOURCE_PROVIDER=akshare` / `yfinance` for no-key quotes.
+HK/US quotes try the free `market_source` channel first.
 
 symbol 格式映射：hermes code "002595" + exchange "SZ" → "002595.SZ"
 """
@@ -633,6 +635,8 @@ def _free_daily(code: str, limit: int = 120) -> list[dict]:
     """
     try:
         from app.services import market_source
+        if market_source.market_of(code) not in ("us", "hk") or str(code).upper().endswith(".OF"):
+            return []
         return market_source.daily(code, limit=limit or 800)
     except Exception as e:                                     # noqa: BLE001
         logger.warning("[finance_data_client] 免费日线通道失败 {}: {}", code, e)

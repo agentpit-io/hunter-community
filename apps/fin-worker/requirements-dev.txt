@@ -1,0 +1,6 @@
+# 本地开发与 CI 用：运行时依赖 + 测试工具
+#   cd apps/fin-worker && pip install -r requirements-dev.txt && python -m pytest
+-r requirements.txt
+
+pytest==9.1.1
+httpx==0.28.1   # fastapi.testclient 需要（已在运行时依赖里，这里显式列出以免误删）

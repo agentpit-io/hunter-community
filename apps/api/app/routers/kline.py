@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import APIRouter
 from app.services.finance_data_client import get_kline, get_timeshare, to_symbol
 
@@ -21,7 +22,7 @@ async def get_kline_route(code: str, period: str = "daily", limit: int = 120):
     **这条改动独立于港美股支持** —— 就算港美股都通了,冷门票、退市票、
     源挂了还是会拿不到,每一次都会长得像同一个 bug。
     """
-    rows = get_kline(code, period=period, limit=limit)
+    rows = await asyncio.to_thread(get_kline, code, period=period, limit=limit)
     if rows:
         return rows
     return {"code": code, "period": period, "data": [],

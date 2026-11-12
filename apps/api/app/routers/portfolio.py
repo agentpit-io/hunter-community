@@ -192,3 +192,80 @@ async def update_risk_profile_api(payload: RiskProfileIn, request: Request):
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+
+class ImportFromFileIn(BaseModel):
+    file_id: str
+
+
+@router.post("/portfolio/import-from-file")
+async def import_portfolio_from_file(payload: ImportFromFileIn, request: Request):
+    """从已上传解析的 Excel/CSV 持仓单/交割单文件中一键同步持仓股数与成本价。"""
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id:
+        raise HTTPException(401, "未登录")
+
+    from app.services.database import add_stock_by_user, get_conn
+    from app.services.doc_parser.stock_extractor import _load_stock_dict
+
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT user_id, extra_meta FROM chat_uploaded_files WHERE file_id = %s",
+            (payload.file_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(404, "文件不存在")
+        if str(row[0] or "") != str(user_id):
+            raise HTTPException(403, "无权访问该文件")
+        meta = row[1] if isinstance(row[1], dict) else {}
+    finally:
+        conn.close()
+
+    rows = meta.get("portfolio_rows") or []
+    if not rows:
+        raise HTTPException(400, "该文件中未检测到持仓明细行")
+
+    name_to_code, code_to_info = _load_stock_dict()
+    imported: list[dict] = []
+    for item in rows[:50]:
+        code = str(item.get("code") or "").strip()
+        name = str(item.get("name") or "").strip()
+        if not code and name in name_to_code:
+            code = name_to_code[name]
+        if not code:
+            continue
+        info = code_to_info.get(code, {})
+        if not name:
+            name = info.get("name") or code
+        mkt = info.get("market") or ("HK" if len(code) == 5 else "CN")
+        if mkt == "CN_A":
+            mkt = "CN"
+        exch = "SH" if code.startswith("6") else ("HK" if mkt == "HK" else "SZ")
+        try:
+            add_stock_by_user(code, name, mkt, exch, "stock", str(user_id))
+            existing = get_thesis_by_user(code, str(user_id))
+            thesis_text = existing.get("thesis_text", "") if existing else ""
+            upsert_thesis_by_user(
+                code,
+                str(user_id),
+                thesis_text,
+                shares=item.get("shares"),
+                cost_price=item.get("cost_price"),
+                buy_date=existing.get("buy_date") if existing else None,
+            )
+            imported.append(
+                {
+                    "code": code,
+                    "name": name,
+                    "shares": item.get("shares"),
+                    "cost_price": item.get("cost_price"),
+                }
+            )
+        except Exception:
+            continue
+
+    return {"ok": True, "imported_count": len(imported), "imported": imported}
+

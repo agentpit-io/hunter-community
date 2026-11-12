@@ -1587,8 +1587,10 @@ async def agent_resume(request: Request):
 # 研究台(2026-09-13):研究线看板免登录;立项 / 封存 / 解除封存要登录。
 # 淘汰线在立项时写定,**没有**修改接口 —— 防的是看过回测结果再回头改标准。
 @router.get("/agent/research")
-async def agent_research_board():
-    return await asyncio.to_thread(_agent.research_board)
+async def agent_research_board(request: Request):
+    from app.services.quant.agent_builder import filter_research
+    board = await asyncio.to_thread(_agent.research_board)
+    return await asyncio.to_thread(filter_research, getattr(request.state, "user_id", None), board)
 
 
 @router.post("/agent/research")
@@ -1618,5 +1620,47 @@ async def agent_research_unarchive(key: str, request: Request):
     uid = _need_uid(request)
     try:
         return await asyncio.to_thread(_agent.research_archive, key, False, uid)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+# 个人规则按登录账号隔离，回测不覆盖公共研究账本。
+from app.services.quant import agent_manual as _manual
+from app.routers.agent_builder import router as _builder_router
+router.include_router(_builder_router)
+from app.routers.agent_experiments import router as _experiments_router
+router.include_router(_experiments_router)
+
+
+@router.get("/agent/rules/{branch}")
+async def agent_rules_get(branch: str, request: Request):
+    uid = _need_uid(request)
+    try:
+        return await asyncio.to_thread(_manual.read, uid, branch)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/agent/rules/{branch}")
+async def agent_rules_save(branch: str, request: Request):
+    uid = _need_uid(request)
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise ValueError("请求体必须为对象")
+        return await asyncio.to_thread(_manual.save, uid, branch, body)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/agent/rules/{branch}/backtest")
+async def agent_rules_backtest(branch: str, request: Request, bg: BackgroundTasks):
+    uid = _need_uid(request)
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise ValueError("请求体必须为对象")
+        conn, key, run = await asyncio.to_thread(_manual.submit, uid, branch, body)
+        bg.add_task(_manual.run_job, conn, key, run)
+        return {"id": run["id"], "status": run["status"]}
     except ValueError as e:
         raise HTTPException(400, str(e))

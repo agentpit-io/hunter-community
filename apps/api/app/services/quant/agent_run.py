@@ -46,6 +46,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from app.services.quant import agent_vcp as av, agent_opt as ao, agent_sim, commission as cm
 from app.services.quant import agent_store
+from app.services.market_time import market_tz
 
 log = logging.getLogger(__name__)
 
@@ -657,7 +658,7 @@ def _bench_at(bench: dict, d: date):
 
 
 def _hm() -> str:
-    return datetime.now(timezone(timedelta(hours=8))).strftime("%H:%M")
+    return datetime.now(market_tz("CN_A")).strftime("%H:%M")
 
 
 def _backfill_followups(cur, branch: str, d: date, bars_of, sym: str = "$") -> list[dict]:
@@ -799,7 +800,7 @@ def _max_dd(equities: list[float]) -> tuple[float, float, int, int]:
 def _fmt_sh(dt: datetime | None) -> str | None:
     if not dt:
         return None
-    return dt.astimezone(timezone(timedelta(hours=8))).strftime("%m-%d %H:%M 沪")
+    return dt.astimezone(market_tz("CN_A")).strftime("%m-%d %H:%M 沪")
 
 
 def _next_run_text(market: str = MARKET) -> str:
@@ -920,7 +921,9 @@ def dashboard(branch: str = "base") -> dict:
     started = days[0][0]
     date_index = {str(r[0]): i for i, r in enumerate(days)}
     versions, marks = _versions_block(st, started, days, branch)
+    from app.services.quant import agent_overfit
     return {
+        "overfit": agent_overfit.public_report(history, [r[0] for r in days], line, branch),
         "enabled": True, "state": state, "paper": True, "version": f"v{st['version']}",
         "branch": branch, "branches": branches, "line": line_block,
         "day_count": len(days), "iteration_count": st["version"] - 1,

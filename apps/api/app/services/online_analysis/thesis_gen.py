@@ -15,7 +15,7 @@ from app.services import runtime_config
 
 _BASE_URL = runtime_config.one_api_base_url()
 _API_KEY  = os.getenv("ONE_API_KEY",      "")
-_MODEL    = os.getenv("ONE_API_MODEL",    "gemini-3.5-flash")
+_MODEL    = os.getenv("ONE_API_MODEL",    "gemini-4-argon")
 _TIMEOUT  = 30
 
 

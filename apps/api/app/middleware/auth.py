@@ -4,6 +4,8 @@ Verifies `Authorization: Bearer <JWT>` locally via app.routers.auth.verify_jwt.
 No external calls. Public paths and prefixes below are the only routes that
 skip auth · everything else under /api/ requires a valid access token.
 """
+import time
+
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -132,6 +134,20 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 {"error": "INVALID_TOKEN", "needLogin": True}, status_code=401
             )
 
+        if not _user_exists(payload.get("sub")):
+            # 签名对、用户却不在库里:数据卷被清过（重装 / 恢复出厂）而 JWT_SECRET
+            # 被启动器沿用了下来，浏览器里还存着上一轮的 token。
+            # 以前这里照常放行，各接口再各自查用户、回 404「用户不存在」——
+            # 前端只认 401 才会清 token 重新登录，于是整个界面卡在一个死 token 上
+            # （2026-09-25 本机重装后模型选择器、合规弹层全挂）。
+            logger.warning(
+                "[auth] 401 USER_GONE path={} method={} client={} sub={}",
+                path, request.method, client_host, payload.get("sub"),
+            )
+            return JSONResponse(
+                {"error": "INVALID_TOKEN", "needLogin": True}, status_code=401
+            )
+
         request.state.user_id = payload["sub"]
         request.state.user_role = payload.get("role", "user")
         # 同一个 user_id 也挂到 contextvar 上(`_21` §6.2)。
@@ -176,7 +192,8 @@ def _bind_optional_identity(request: Request, path: str) -> None:
             token = _extract_token(request)
             if token:
                 payload = _verify(token)
-                if payload and payload.get("type") in ("access", None):
+                if payload and payload.get("type") in ("access", None) \
+                        and _user_exists(payload.get("sub")):
                     uid = payload.get("sub")
                     role = payload.get("role", "user")
 
@@ -194,6 +211,44 @@ def _bind_optional_identity(request: Request, path: str) -> None:
                          "· 用户自定义数据源不会出现在结果里", path)
     except Exception as e:      # noqa: BLE001 — 绝不能让它挡住公开请求
         logger.warning("[auth] 可选身份识别失败(已忽略): {}", e)
+
+
+#: 用户存在性缓存 · uid → 查到的时间。只缓存「存在」：用户被删是低频事件，
+#: 最多晚 5 分钟生效；而每个请求都去连一次库代价太大（get_conn 每次新建连接）。
+_USER_OK: dict[str, float] = {}
+_USER_OK_TTL = 300.0
+
+
+def _user_exists(uid) -> bool:
+    """token 里的用户是否还在 users 表里。
+
+    **查库失败时返回 True（放行）**：数据库抖一下不该把所有已登录用户踢回登录页，
+    真有问题各接口自己会报错。这里只拦「确定不存在」的那一种。
+    """
+    if not uid:
+        return False
+    uid = str(uid)
+    now = time.monotonic()
+    t = _USER_OK.get(uid)
+    if t is not None and now - t < _USER_OK_TTL:
+        return True
+    try:
+        from app.services.database import get_conn
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT 1 FROM users WHERE id = %s", (uid,))
+            found = cur.fetchone() is not None
+        finally:
+            conn.close()
+    except Exception as e:      # noqa: BLE001
+        logger.warning("[auth] 查用户是否存在失败,按存在放行: {}", e)
+        return True
+    if found:
+        _USER_OK[uid] = now
+    else:
+        _USER_OK.pop(uid, None)
+    return found
 
 
 def _extract_token(request: Request) -> str | None:

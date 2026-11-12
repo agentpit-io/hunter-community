@@ -153,9 +153,9 @@ def rules_for(p: dict = PARAMS) -> list[dict]:
                                                    f"之前 ≥ {p['lu_st'] * 100:.1f}%")},
         {"id": "L-02", "kind": "buy", "condition": "没再涨停:之后三天(T-2、T-1、T)每天涨幅都没到同一门槛"},
         {"id": "L-03", "kind": "buy", "condition": "守住:这三天的收盘都高于涨停那天(T-3)的收盘价"},
-        {"id": "L-07", "kind": "buy", "condition": "5 日均线多头:信号当天收盘高于 5 日均线,且 5 日均线比前一天高"},
+        {"id": "L-07", "kind": "buy", "condition": ("5 日均线多头:信号当天收盘高于 5 日均线,且 5 日均线比前一天高" if p.get("require_ma5", True) else "不要求 5 日均线多头")},
         {"id": "L-08", "kind": "buy", "condition": ("只做创业板 / 科创板:代码 300 / 301 / 688 / 689 开头,主板不买" if p.get("growth_only")
-                                                   else "板块不限(主板、创业板、科创板都做)")},
+                                                   else ("只做沪深主板" if p.get("main_only") else "板块不限(主板、创业板、科创板都做)"))},
         {"id": "L-09", "kind": "buy", "condition": (f"整理幅度不大:涨停后三天的最高价 − 最低价,不超过涨停日收盘的 {p['amp_max']:g}%"
                                                    if p.get("amp_max") is not None else "整理幅度不限")},
         {"id": "L-10", "kind": "buy", "condition": ("不许三天都缩量:涨停后三天成交量每天都低于涨停日的,不买" if p.get("no_all_shrink")
@@ -230,8 +230,8 @@ def entry_checks(ind: dict, code: str, name: str | None, p: dict = PARAMS) -> di
     l02 = all(x < lim for x in chg[1:])
     l03 = all(x > c[1] for x in c[2:])
     ma5, ma5p = ind.get("ma5"), ind.get("ma5_prev")
-    l07 = ma5 is not None and ma5p is not None and c[4] > ma5 and ma5 > ma5p
-    l08 = (not p.get("growth_only")) or is_growth(code)
+    l07 = not p.get("require_ma5", True) or (ma5 is not None and ma5p is not None and c[4] > ma5 and ma5 > ma5p)
+    l08 = ((not p.get("growth_only")) or is_growth(code)) and (not p.get("main_only") or is_main(code))
     amp, shr = ind.get("amp"), ind.get("all_shrink")
     l09 = p.get("amp_max") is None or (amp is not None and amp <= p["amp_max"] + 1e-9)     # 1e-9:(13.8 − 12) / 12 算出 15.000000000000002
     l10 = (not p.get("no_all_shrink")) or shr is False

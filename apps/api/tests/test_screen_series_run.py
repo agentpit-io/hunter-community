@@ -7,7 +7,8 @@
   a ⭐ 回溯(as_of)时快照字段(市值 / PE)整批 NaN → 用到它们的条件是「算不出」,不是「不满足」,也不能拿今天的值顶
   b 回溯日早于日线起点 → ScreenError,报错里写明两个日期
   c 回溯日不是交易日 → 取之前最近的交易日求值,warnings 与 as_of 字段都写实际日期
-  d 不回溯时快照字段按今天的值当常量,整段历史都生效(递归计数不会只在最后一根有值)
+  d 不回溯时快照字段按今天的值当常量,整段历史都生效(递归计数不会只在最后一根有值);
+    warnings 点名这些字段按今天的值当常量(36d3869),「怎么算 / 求值截至」两条说明不回来(5540bce 用户要求去掉)
   e 今天快照里的价格不进求值(收盘价列来自日线)
 
 store / fetch_rows / today_sh 全部换成假的。
@@ -128,7 +129,14 @@ check("d 不回溯 · asof_unavailable 为空", out["asof_unavailable"] == [])
 check("d 快照请求里带上了脚本直接写的快照字段", any("market_cap_basic" in cols for cols in CALLS["fetch_cols"]), CALLS["fetch_cols"])
 a_row = out["picks"][0]
 check("e ⭐ 收盘价列来自日线最后一根(不是快照的 999)", a_row["close"] == UP[-1], a_row["close"])
-check("d warnings 写明快照字段按今天的值当常量", any("当常量" in w for w in out["warnings"]), out["warnings"])
+# 5540bce(2026-09-16 用户要求)去掉了「怎么算」(以「时间序列模式:」开头)与「求值截至 …」两条说明,把同一句里的快照字段口径声明一起删了;
+# 36d3869 把口径声明单独补回(只在不回溯且脚本用了快照字段时出,点名字段),两条说明不恢复。两边都盯着
+check("d warnings 写明快照字段按今天的值当常量,并点名字段(36d3869)",
+      any("当常量" in w and "市值" in w for w in out["warnings"]), out["warnings"])
+check("d 不回溯 · 被要求去掉的「怎么算 / 求值截至」两条说明没有回来(5540bce)",
+      not any(w.startswith("时间序列模式") or "求值截至" in w for w in out["warnings"]), out["warnings"])
+check("d 不回溯 · 要用户处理的提示照留:D 缺市值的「没能判断」、市值口径说明",
+      any("没能判断" in w and "市值" in w for w in out["warnings"]) and ss.MARKET_CAP_WARN in out["warnings"], out["warnings"])
 
 # 用 close > open(第 0 根就算得出)。写 close > close[1] 的话,第 0 根没有前一根 → 算不出,
 # 一路上涨从不走 else 重置,连续计数整段都是「算不出」—— 那是引擎三值逻辑的口径(screen_series),不是这里要测的

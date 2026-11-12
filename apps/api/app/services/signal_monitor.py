@@ -16,7 +16,8 @@ from app.services.database import (
 )
 from app.services import runtime_config
 
-CST = timezone(timedelta(hours=8))
+from app.services.market_time import market_tz
+CST = market_tz("CN_A")
 
 _CPI_CONSENSUS_YOY = float(os.getenv("CPI_CONSENSUS_YOY", "2.5"))
 _OIL_SPIKE_1H_PCT  = float(os.getenv("OIL_SPIKE_1H_PCT",  "3.0"))
@@ -87,7 +88,7 @@ REASON: 用2-3句中文说明影响机制和程度，不超过80字"""
 
     try:
         resp = client.chat.completions.create(
-            model=runtime_config.agent_model("SIGNAL_ANALYSIS_MODEL", "gemini-3.1-pro-preview"),
+            model=runtime_config.agent_model("SIGNAL_ANALYSIS_MODEL", "gemini-4-argon"),
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
             tools=[{"type": "google_search"}],

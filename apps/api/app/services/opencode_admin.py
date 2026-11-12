@@ -34,6 +34,10 @@ _TIMEOUT = 30.0
 # 大模型热生效用(apply_llm)· 与 scripts/opencode/gen-config.py 里的同名常量对齐
 _PROVIDER_ID = "hunter-llm"
 _SHIM_URL = os.getenv("LLM_SHIM_URL", "http://llm-shim:3999/v1").rstrip("/")
+BUILTIN_MODEL_LABELS = {
+    "hunter-chat": "Hunter-Gemini 4 Argon（谷歌 4.0）",
+    "hunter-deep": "Hunter-Gemini 4 Argon（谷歌 4.0 · 深度推理）",
+}
 
 
 def _headers() -> dict:
@@ -106,22 +110,37 @@ def model_label(base_url: str, api_key: str, model: str) -> str:
     只能问网关要,不能在客户端写死一张表(写死的那天起就开始过期)。
 
     自带 key 的地址一般没有这个字段,返回模型名本身,行为与改动前一致。
-    超时 3 秒、失败即回退:这只是个标签,不值得为它卡住启动或保存。
+    超时 8 秒、最多 2 次尝试、内置网关带谷歌 4.0 兜底。
     """
     if not base_url or not model:
         return model
-    try:
-        r = httpx.get(f"{base_url.rstrip('/')}/models",
-                      headers={"Authorization": f"Bearer {api_key}"} if api_key else {},
-                      timeout=3.0)
-        if r.status_code != 200:
-            return model
-        for m in (r.json() or {}).get("data") or []:
-            if m.get("id") == model:
-                return (m.get("display_name") or "").strip() or model
-    except Exception as e:  # noqa: BLE001
-        logger.debug("[opencode_admin] 取模型展示名失败(不影响功能): {}", e)
-    return model
+    clean_base = base_url.rstrip("/")
+    is_builtin_base = clean_base.endswith("/api/saas/llm/v1")
+    for attempt in (1, 2):
+        try:
+            r = httpx.get(
+                f"{clean_base}/models",
+                headers={"Authorization": f"Bearer {api_key}"} if api_key else {},
+                timeout=8.0,
+            )
+            if r.status_code != 200:
+                break
+            for m in (r.json() or {}).get("data") or []:
+                if m.get("id") == model:
+                    disp = (m.get("display_name") or "").strip()
+                    if model in BUILTIN_MODEL_LABELS and (
+                        not disp or ("Gemini 4 Argon" in disp and "谷歌 4.0" not in disp)
+                    ):
+                        disp = BUILTIN_MODEL_LABELS[model]
+                    label = disp or model
+                    logger.info("[opencode_admin] model_label={} (model={})", label, model)
+                    return label
+            break
+        except Exception as e:  # noqa: BLE001
+            logger.debug("[opencode_admin] 第 {} 次取模型展示名失败(不影响功能): {}", attempt, e)
+    fallback = BUILTIN_MODEL_LABELS[model] if (is_builtin_base and model in BUILTIN_MODEL_LABELS) else model
+    logger.info("[opencode_admin] model_label={}(回退, model={})", fallback, model)
+    return fallback
 
 
 def apply_llm(cfg) -> dict:

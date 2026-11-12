@@ -58,7 +58,7 @@ def _setup_logging() -> None:
 # psycopg2.connect(DATABASE_URL)，没有连接池、不依赖 FastAPI 上下文）。
 # 这里不 import 它，是为了让迁移这条启动路径尽量少依赖 —— 迁移跑在 uvicorn
 # 起来之前，import 链越短，出问题时越好排查。默认值也与那边一致。
-DEFAULT_DATABASE_URL = "postgresql://hermes:Hermes2026DB!@localhost:5432/hermes"
+DEFAULT_DATABASE_URL = "postgresql://hunter:hunter@localhost:5432/hunter"
 
 # 连不上就重试：compose 里有 depends_on: service_healthy，但云平台（Zeabur /
 # Sealos / Railway）不保证这一点，postgres 比 api 慢起来是常态。

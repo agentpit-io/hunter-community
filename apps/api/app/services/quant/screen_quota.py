@@ -35,7 +35,8 @@ from datetime import datetime, timedelta, timezone
 
 from app.services.database import get_conn
 
-_SH = timezone(timedelta(hours=8))
+from app.services.market_time import market_tz
+_SH = market_tz("CN_A")
 
 # 档位 → 每天次数。以后有「高级会员」就在这里加一档,再在 tier_of 里认出来。
 # preset:原样运行官方示例(2026-09-14 用户要求不扣扫描次数)。单独计数、上限宽松 ——

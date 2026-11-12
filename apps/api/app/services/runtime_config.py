@@ -110,7 +110,28 @@ def invalidate() -> None:
 
 def _env(item: str) -> str:
     """环境变量的**非空**取值。空串 = 没配(见文件头的 compose 说明)。"""
-    return (os.environ.get(_ITEMS[item][0]) or "").strip()
+    val = (os.environ.get(_ITEMS[item][0]) or "").strip()
+    if val:
+        return val
+    if item == "api_key":
+        # HCA 兼容：支持 HCA_LLM_API_KEY 以及 LLM_API_KEY_FILE / HCA_LLM_API_KEY_FILE 文件挂载
+        hca_val = (os.environ.get("HCA_LLM_API_KEY") or "").strip()
+        if hca_val:
+            return hca_val
+        key_file = (
+            os.environ.get("LLM_API_KEY_FILE")
+            or os.environ.get("HCA_LLM_API_KEY_FILE")
+            or ""
+        ).strip()
+        if key_file:
+            try:
+                with open(key_file, "r", encoding="utf-8") as fh:
+                    file_val = fh.read().strip()
+                if file_val:
+                    return file_val
+            except OSError:
+                pass
+    return ""
 
 
 def _read_db() -> dict:

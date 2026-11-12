@@ -8,7 +8,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 log = logging.getLogger(__name__)
-CST = timezone(timedelta(hours=8))
+from app.services.market_time import market_tz
+CST = market_tz("CN_A")
 RUN_HOUR = 16
 RUN_MINUTE = 30
 CHECK_INTERVAL = 600      # 10分钟检查一次

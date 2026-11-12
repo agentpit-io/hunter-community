@@ -289,7 +289,8 @@ def _require_admin(request: Request) -> str:
     except Exception:
         raise HTTPException(401, "token 无效")
     email = (payload.get("email") or "").lower()
-    if payload.get("role") != "ADMIN" and email not in _ADMIN_EMAILS:
+    role = (payload.get("role") or "").strip().lower()
+    if role != "admin" and email not in _ADMIN_EMAILS:
         raise HTTPException(403, "仅管理员可操作回测配置")
     return payload.get("sub") or email
 

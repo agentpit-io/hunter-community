@@ -1,0 +1,7 @@
+# Paper Service · 运行时依赖（与 apps/api 同栈、同版本）
+# 少而稳：账本服务不拉行情、不算因子、不调大模型 —— 它是执行区，不是研究区。
+fastapi==0.136.1
+uvicorn==0.46.0
+pydantic==2.13.4
+psycopg2-binary==2.9.12
+loguru==0.7.3
