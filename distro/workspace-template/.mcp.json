@@ -206,6 +206,78 @@
         "fin_memory_query",
         "fin_memory_append_evidence"
       ]
+    },
+    // ── 阶段 M1 · 首期 P0 券商专属只读 MCP 服务群（4 个）──────────────────────
+    "broker_security": {
+      "command": "${HCA_PYTHON:-python3}",
+      "args": ["${HCA_BROKER_MCP_DIR:-/opt/hca/mcp-servers}/broker_security/server.py"],
+      "env": {
+        "PYTHONPATH": "${HCA_BROKER_MCP_DIR:-/opt/hca/mcp-servers}:/opt/hca/mcp",
+        "HCA_MCP_MAX_BYTES": "${HCA_MCP_MAX_BYTES:-15000}",
+        "BROKER_GATEWAY_URL": "${BROKER_GATEWAY_URL:-}",
+        "BROKER_API_KEY": "${BROKER_API_KEY:-}"
+      },
+      "timeout_ms": 120000,
+      "autoApprove": [
+        "search_security",
+        "get_security_profile",
+        "get_security_status",
+        "get_index_constituents"
+      ]
+    },
+    "broker_market": {
+      "command": "${HCA_PYTHON:-python3}",
+      "args": ["${HCA_BROKER_MCP_DIR:-/opt/hca/mcp-servers}/broker_market/server.py"],
+      "env": {
+        "PYTHONPATH": "${HCA_BROKER_MCP_DIR:-/opt/hca/mcp-servers}:/opt/hca/mcp",
+        "HCA_MCP_MAX_BYTES": "${HCA_MCP_MAX_BYTES:-15000}",
+        "BROKER_GATEWAY_URL": "${BROKER_GATEWAY_URL:-}",
+        "BROKER_API_KEY": "${BROKER_API_KEY:-}"
+      },
+      "timeout_ms": 120000,
+      "autoApprove": [
+        "get_quote",
+        "get_kline",
+        "get_orderbook",
+        "get_market_status",
+        "get_market_overview",
+        "get_market_calendar"
+      ]
+    },
+    "broker_disclosure": {
+      "command": "${HCA_PYTHON:-python3}",
+      "args": ["${HCA_BROKER_MCP_DIR:-/opt/hca/mcp-servers}/broker_disclosure/server.py"],
+      "env": {
+        "PYTHONPATH": "${HCA_BROKER_MCP_DIR:-/opt/hca/mcp-servers}:/opt/hca/mcp",
+        "HCA_MCP_MAX_BYTES": "${HCA_MCP_MAX_BYTES:-15000}",
+        "BROKER_GATEWAY_URL": "${BROKER_GATEWAY_URL:-}",
+        "BROKER_API_KEY": "${BROKER_API_KEY:-}"
+      },
+      "timeout_ms": 120000,
+      "autoApprove": [
+        "search_announcements",
+        "get_announcement",
+        "search_news",
+        "get_news_detail"
+      ]
+    },
+    "broker_fundamental": {
+      "command": "${HCA_PYTHON:-python3}",
+      "args": ["${HCA_BROKER_MCP_DIR:-/opt/hca/mcp-servers}/broker_fundamental/server.py"],
+      "env": {
+        "PYTHONPATH": "${HCA_BROKER_MCP_DIR:-/opt/hca/mcp-servers}:/opt/hca/mcp",
+        "HCA_MCP_MAX_BYTES": "${HCA_MCP_MAX_BYTES:-15000}",
+        "BROKER_GATEWAY_URL": "${BROKER_GATEWAY_URL:-}",
+        "BROKER_API_KEY": "${BROKER_API_KEY:-}"
+      },
+      "timeout_ms": 120000,
+      "autoApprove": [
+        "get_financial_statements",
+        "get_financial_ratios",
+        "get_valuation",
+        "get_shareholders",
+        "get_corporate_actions"
+      ]
     }
   }
 }

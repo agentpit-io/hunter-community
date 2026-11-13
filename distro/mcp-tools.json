@@ -68,6 +68,33 @@
     "fin_memory": [
       "fin_memory_query",
       "fin_memory_append_evidence"
+    ],
+    "broker_security": [
+      "search_security",
+      "get_security_profile",
+      "get_security_status",
+      "get_index_constituents"
+    ],
+    "broker_market": [
+      "get_quote",
+      "get_kline",
+      "get_orderbook",
+      "get_market_status",
+      "get_market_overview",
+      "get_market_calendar"
+    ],
+    "broker_disclosure": [
+      "search_announcements",
+      "get_announcement",
+      "search_news",
+      "get_news_detail"
+    ],
+    "broker_fundamental": [
+      "get_financial_statements",
+      "get_financial_ratios",
+      "get_valuation",
+      "get_shareholders",
+      "get_corporate_actions"
     ]
   }
 }
