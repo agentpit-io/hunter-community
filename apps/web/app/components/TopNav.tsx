@@ -125,6 +125,7 @@ export default function TopNav({ active }: NavProps) {
        * 方案见 doc/开源hunter-community/04开源比赛/
        *        2026-08-30_导航重构方案-对话与自选股双栏.md
        */}
+      <NavLink href="/workbench" icon={<Activity size={14} />} label="投研工作台" active={active === 'workbench'} />
       <NavLink href="/strategies/index.html" icon={<Target size={14} />} label="策略中心" active={active === 'strategies'} />
 
       <NavMenu

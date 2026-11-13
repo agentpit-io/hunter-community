@@ -174,6 +174,7 @@ export default function Sidebar() {
 
           <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wider mt-3 mb-1"
             style={{ color: 'var(--text-muted)' }}>分析工具</div>
+          <NavItem href="/workbench" icon={<Activity className="w-4 h-4" />} label="投研工作台" badge="M2" />
           <NavItem href="/chat" icon={<Sparkles className="w-4 h-4" />} label="AI 对话" badge="新" />
           <NavItem href="/portfolio" icon={<Briefcase className="w-4 h-4" />} label="持仓报告" />
           <NavItem href="/online-analysis" icon={<Shield className="w-4 h-4" />} label="在线分析" badge="抗投毒" />

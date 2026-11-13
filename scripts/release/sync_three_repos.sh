@@ -137,6 +137,10 @@ if [ -d "${HCA_REPO}/distro/workspace-template/skills" ]; then
   done
 fi
 
+if [ -f "${HCA_REPO}/apps/api/skills/market-event-analyst.skill" ]; then
+  cp -f "${HCA_REPO}/apps/api/skills/market-event-analyst.skill" "${HUNTERCODE_REPO}/skills-source/market-event-analyst.skill"
+fi
+
 # 5.3 同步券商接口适配层、计算引擎与共享规范文档至 huntercode-repo/docs-hunter/ 及 shared-broker/
 mkdir -p "${HUNTERCODE_REPO}/docs-hunter/broker-specs"
 if [ -f "${HCA_REPO}/docs/开源SKILL复用与许可证清单.md" ]; then
@@ -156,6 +160,11 @@ for svc_name in indicators fundamentals etf_dca workflows; do
     rm -rf "${HUNTERCODE_REPO}/packages/hunter-broker/services/${svc_name}/__pycache__"
   fi
 done
+
+if [ -f "${HCA_REPO}/apps/api/app/routers/daily_workflows.py" ]; then
+  mkdir -p "${HUNTERCODE_REPO}/packages/hunter-broker/routers"
+  cp -f "${HCA_REPO}/apps/api/app/routers/daily_workflows.py" "${HUNTERCODE_REPO}/packages/hunter-broker/routers/"
+fi
 
 # 5.4 更新 huntercode-repo 版本号文件
 echo "${VER_NUM}" > "${HUNTERCODE_REPO}/VERSION"
