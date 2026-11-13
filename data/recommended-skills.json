@@ -1,0 +1,115 @@
+{
+  "_readme": [
+    "推荐安装的 SKILL —— `_24` §5。",
+    "",
+    "## 为什么是一个 JSON 文件而不是硬编码进前端",
+    "  · 换推荐不用发版",
+    "  · 用户可以 fork 改成他们团队的推荐位",
+    "  · `checked_at` 在页面上显示 —— 半年没更的推荐位比空的更掉价",
+    "",
+    "## 为什么数字要预先算好存在这里",
+    "GitHub 未登录 API 是 60 次/小时,实测在开发过程中就撞到了限流。",
+    "如果推荐列表渲染时才去查 star 和 SKILL 数量,限流那一刻整个推荐位就是空的,",
+    "而用户看到的是「这个功能坏了」。所以这里存的是**快照**,",
+    "页面渲染零 API 调用;只有用户真的点「安装」才访问 GitHub。",
+    "",
+    "## ⚠️ 每条都必须先跑过 portability() 才能进来",
+    "`clean` / `total` 是实测数,不是估的。`_24` §5.3:",
+    "「一键安装如果有一半装完是坏的,比没有这个入口更伤 —— 用户会认为是我们的产品坏了。」",
+    "所以卡片上如实写「N 个 · M 个可直接用 · K 个需模型改写」,而不是「一键安装」四个字了事。",
+    "",
+    "## 排序口径不是 star",
+    "实测反复证明 star 和「能不能装上」几乎无关:",
+    "  VoltAgent/awesome-agent-skills   30500★  →  0 个 SKILL.md,纯清单,装不上任何东西",
+    "  lyra81604/zhengxi-views           1388★  →  1 个,0 个可移植",
+    "  prof-little-bear/cc-equity-research  84★  →  9 个,8 个干净  ⭐ 本批最佳",
+    "按 star 排会把两个装不上的顶到最前面。所以按「能装上 + 跟投研相关」排,",
+    "star 只作为可信度参考显示在卡片上。"
+  ],
+  "checked_at": "2026-08-19",
+  "note": "star 与可移植性均为 2026-08-19 实测快照 · 页面渲染不查 GitHub",
+  "items": [
+    {
+      "repo": "prof-little-bear/cc-equity-research",
+      "title": "机构级股票研究",
+      "summary": "24 个分析师角色的权益研究流程 —— 本批可移植性最好的一个",
+      "stars": 84,
+      "total": 9,
+      "clean": 8,
+      "lang": "en",
+      "tags": ["投研报告", "估值建模"],
+      "why": "9 个 SKILL 里 8 个不依赖作者的脚本和缓存目录,装完直接能用。是这批里唯一大体量且干净的。"
+    },
+    {
+      "repo": "KylinMountain/TradingAgents-AShare",
+      "title": "TradingAgents · A股多智能体",
+      "summary": "15 个 AI Agent 模拟机构协作与实时辩论",
+      "stars": 779,
+      "total": 1,
+      "clean": 1,
+      "lang": "zh",
+      "tags": ["综合分析"],
+      "why": "A 股方向,和这个项目最对味。只有 1 个 SKILL,但那 1 个是干净的。"
+    },
+    {
+      "repo": "wbh604/UZI-Skill",
+      "title": "UZI 投研全家桶",
+      "summary": "DCF / LBO / 同行对标 / 尽调清单 / 杀猪盘排查等 20 个命令",
+      "stars": 0,
+      "total": 5,
+      "clean": 1,
+      "lang": "zh",
+      "tags": ["估值建模", "尽调风控", "投研报告"],
+      "why": "覆盖面最全,而且**作者自己写了 opencode 装法**(`.opencode/INSTALL.md`),是这批里唯一一个。但 5 个里只有 1 个能直接装 —— 另外 4 个调作者仓库里的 Python 脚本、读他自己的缓存目录,要让模型改写成可移植版本。"
+    },
+    {
+      "repo": "algoderiv/agent-skills",
+      "title": "A股量化工具箱",
+      "summary": "面向中国市场量化交易的 Claude Code skills",
+      "stars": 58,
+      "total": 7,
+      "clean": 4,
+      "lang": "zh",
+      "tags": ["事件与筛选", "组合级"],
+      "why": "7 个里 4 个干净,另外 3 个有本地路径依赖。量化方向,补了 UZI 没有的角度。"
+    },
+    {
+      "repo": "tigersking520/stock-analysis-skill",
+      "title": "个股投研",
+      "summary": "面向 Codex / Claude Code / OpenAI Agents 的个股投研 SKILL",
+      "stars": 26,
+      "total": 1,
+      "clean": 1,
+      "lang": "zh",
+      "tags": ["综合分析"],
+      "why": "小而干净,1/1 可直接装。作者明确写了跨 Agent 平台通用。"
+    }
+  ],
+  "rejected": [
+    {
+      "repo": "VoltAgent/awesome-agent-skills",
+      "stars": 30500,
+      "reason": "0 个 SKILL.md —— 纯 awesome 清单,点了装不上任何东西"
+    },
+    {
+      "repo": "lyra81604/zhengxi-views",
+      "stars": 1388,
+      "reason": "1 个 SKILL,0 个可移植。star 是本批金融类最高的,但装完是坏的"
+    },
+    {
+      "repo": "ZICXR/A-Stock-Skills",
+      "stars": 20,
+      "reason": "11 个候选,前 8 个全部依赖作者的本地数据采集脚本"
+    },
+    {
+      "repo": "komako-workshop/digital-oracle",
+      "stars": 786,
+      "reason": "import 作者自己的模块,0/1 可移植"
+    },
+    {
+      "repo": "alirezarezvani/claude-skills",
+      "stars": 24600,
+      "reason": "798 个 SKILL 且质量不错(抽查 6/6 干净),但是通用开发向(a11y 审计、AB 测试、广告创意),跟投研无关。适合以后做「浏览更多」入口,不进一键安装位"
+    }
+  ]
+}

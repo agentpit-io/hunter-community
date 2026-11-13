@@ -860,6 +860,38 @@ async def init_db():
         cur.execute("CREATE INDEX IF NOT EXISTS idx_chat_files_session ON chat_uploaded_files(session_id, created_at)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_chat_files_user_sha ON chat_uploaded_files(user_id, file_sha256)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_chat_files_expires ON chat_uploaded_files(expires_at)")
+        # 兼容从旧版本升级上来的 chat_uploaded_files 表，幂等补齐所有兼容列
+        cur.execute("""
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS user_id TEXT NOT NULL DEFAULT '';
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS user_key TEXT NOT NULL DEFAULT '';
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS session_id VARCHAR(128) NOT NULL DEFAULT '';
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS filename VARCHAR(512) NOT NULL DEFAULT '';
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS file_ext VARCHAR(16) NOT NULL DEFAULT '';
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS mime_type VARCHAR(128) NOT NULL DEFAULT '';
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS file_size_bytes BIGINT NOT NULL DEFAULT 0;
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS file_size BIGINT NOT NULL DEFAULT 0;
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS file_sha256 VARCHAR(64) NOT NULL DEFAULT '';
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS storage_path TEXT NOT NULL DEFAULT '';
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS parse_status VARCHAR(32) NOT NULL DEFAULT 'ready';
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS parse_error TEXT;
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS error_message TEXT;
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS total_pages INT NOT NULL DEFAULT 0;
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS page_count INT NOT NULL DEFAULT 0;
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS total_chars INT NOT NULL DEFAULT 0;
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS char_count INT NOT NULL DEFAULT 0;
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS table_count INT NOT NULL DEFAULT 0;
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS ocr_page_count INT NOT NULL DEFAULT 0;
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS inject_mode VARCHAR(32) NOT NULL DEFAULT 'full';
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS toc_json JSONB NOT NULL DEFAULT '[]'::jsonb;
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS detected_stocks JSONB NOT NULL DEFAULT '[]'::jsonb;
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS related_stocks JSONB NOT NULL DEFAULT '[]'::jsonb;
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS full_markdown TEXT NOT NULL DEFAULT '';
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS summary_md TEXT NOT NULL DEFAULT '';
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS summary_markdown TEXT NOT NULL DEFAULT '';
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS extra_meta JSONB NOT NULL DEFAULT '{}'::jsonb;
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '7 days');
+        """)
         cur.execute("""
             CREATE TABLE IF NOT EXISTS chat_uploaded_file_pages (
                 id                BIGSERIAL PRIMARY KEY,
@@ -877,6 +909,16 @@ async def init_db():
             )
         """)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_chat_file_pages_lookup ON chat_uploaded_file_pages(file_id, page_no)")
+        cur.execute("""
+            ALTER TABLE chat_uploaded_file_pages ADD COLUMN IF NOT EXISTS page_title VARCHAR(256) NOT NULL DEFAULT '';
+            ALTER TABLE chat_uploaded_file_pages ADD COLUMN IF NOT EXISTS content_md TEXT NOT NULL DEFAULT '';
+            ALTER TABLE chat_uploaded_file_pages ADD COLUMN IF NOT EXISTS page_markdown TEXT NOT NULL DEFAULT '';
+            ALTER TABLE chat_uploaded_file_pages ADD COLUMN IF NOT EXISTS char_count INT NOT NULL DEFAULT 0;
+            ALTER TABLE chat_uploaded_file_pages ADD COLUMN IF NOT EXISTS table_count INT NOT NULL DEFAULT 0;
+            ALTER TABLE chat_uploaded_file_pages ADD COLUMN IF NOT EXISTS has_table BOOLEAN NOT NULL DEFAULT FALSE;
+            ALTER TABLE chat_uploaded_file_pages ADD COLUMN IF NOT EXISTS used_ocr BOOLEAN NOT NULL DEFAULT FALSE;
+            ALTER TABLE chat_uploaded_file_pages ADD COLUMN IF NOT EXISTS is_ocr BOOLEAN NOT NULL DEFAULT FALSE;
+        """)
 
         conn.commit()
         conn.close()

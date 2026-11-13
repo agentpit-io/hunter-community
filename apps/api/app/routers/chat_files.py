@@ -20,13 +20,36 @@ from loguru import logger
 from pydantic import BaseModel
 
 from app.services.database import get_conn
-from app.services.doc_parser import ALLOWED_EXTENSIONS, ParsedDocument, parse_uploaded_file
+from app.services.doc_parser import ALLOWED_EXTENSIONS, ParsedDocument, _strip_nul, parse_uploaded_file
 
 router = APIRouter(tags=["chat-files"])
 
 CHAT_UPLOAD_DIR = os.getenv("CHAT_UPLOAD_DIR", "/tmp/hunter_chat_uploads")
 MAX_PAGE_READ_SPAN = 8
 MAX_READ_BYTES = 14_000  # 严格受控在 14KB 以内，避免触发 16KB 截断
+
+_TABLES_ENSURED = False
+
+
+def _sanitize_pg_str(val: Any) -> str:
+    """确保写入 PostgreSQL TEXT/VARCHAR 的字符串不含 NUL (\\x00) 空字节与非法 UTF-8 surrogate。"""
+    if val is None:
+        return ""
+    s = str(val)
+    if "\x00" in s:
+        s = s.replace("\x00", "")
+    try:
+        s.encode("utf-8")
+        return s
+    except UnicodeEncodeError:
+        return s.encode("utf-8", "replace").decode("utf-8")
+
+
+def _sanitize_pg_json_str(obj: Any) -> str:
+    """将对象清洗后序列化为安全的 JSON 字符串（剥离 NUL、非法 surrogate 与 NaN/Inf）。"""
+    cleaned = _strip_nul(obj)
+    raw = json.dumps(cleaned, ensure_ascii=False, allow_nan=False)
+    return _sanitize_pg_str(raw)
 
 
 def _uid(request: Request) -> str:
@@ -43,8 +66,11 @@ def _uid(request: Request) -> str:
     raise HTTPException(401, "需要登录")
 
 
-def _ensure_tables_once() -> None:
-    """惰性幂等建表兜底（防止单测或未重启进程时表不存在）。"""
+def _ensure_tables_once(force: bool = False) -> None:
+    """惰性幂等建表与补列兜底（防止单测或从旧版本升级上来时缺列报错）。"""
+    global _TABLES_ENSURED
+    if _TABLES_ENSURED and not force:
+        return
     conn = get_conn()
     try:
         cur = conn.cursor()
@@ -55,8 +81,8 @@ def _ensure_tables_once() -> None:
                 user_id           TEXT NOT NULL DEFAULT '',
                 user_key          TEXT NOT NULL DEFAULT '',
                 session_id        VARCHAR(128) NOT NULL DEFAULT '',
-                filename          VARCHAR(512) NOT NULL,
-                file_ext          VARCHAR(16) NOT NULL,
+                filename          VARCHAR(512) NOT NULL DEFAULT '',
+                file_ext          VARCHAR(16) NOT NULL DEFAULT '',
                 mime_type         VARCHAR(128) NOT NULL DEFAULT '',
                 file_size_bytes   BIGINT NOT NULL DEFAULT 0,
                 file_size         BIGINT NOT NULL DEFAULT 0,
@@ -82,6 +108,36 @@ def _ensure_tables_once() -> None:
                 created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 expires_at        TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '7 days')
             );
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS user_id TEXT NOT NULL DEFAULT '';
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS user_key TEXT NOT NULL DEFAULT '';
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS session_id VARCHAR(128) NOT NULL DEFAULT '';
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS filename VARCHAR(512) NOT NULL DEFAULT '';
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS file_ext VARCHAR(16) NOT NULL DEFAULT '';
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS mime_type VARCHAR(128) NOT NULL DEFAULT '';
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS file_size_bytes BIGINT NOT NULL DEFAULT 0;
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS file_size BIGINT NOT NULL DEFAULT 0;
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS file_sha256 VARCHAR(64) NOT NULL DEFAULT '';
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS storage_path TEXT NOT NULL DEFAULT '';
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS parse_status VARCHAR(32) NOT NULL DEFAULT 'ready';
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS parse_error TEXT;
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS error_message TEXT;
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS total_pages INT NOT NULL DEFAULT 0;
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS page_count INT NOT NULL DEFAULT 0;
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS total_chars INT NOT NULL DEFAULT 0;
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS char_count INT NOT NULL DEFAULT 0;
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS table_count INT NOT NULL DEFAULT 0;
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS ocr_page_count INT NOT NULL DEFAULT 0;
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS inject_mode VARCHAR(32) NOT NULL DEFAULT 'full';
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS toc_json JSONB NOT NULL DEFAULT '[]'::jsonb;
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS detected_stocks JSONB NOT NULL DEFAULT '[]'::jsonb;
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS related_stocks JSONB NOT NULL DEFAULT '[]'::jsonb;
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS full_markdown TEXT NOT NULL DEFAULT '';
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS summary_md TEXT NOT NULL DEFAULT '';
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS summary_markdown TEXT NOT NULL DEFAULT '';
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS extra_meta JSONB NOT NULL DEFAULT '{}'::jsonb;
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+            ALTER TABLE chat_uploaded_files ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '7 days');
+
             CREATE TABLE IF NOT EXISTS chat_uploaded_file_pages (
                 id                BIGSERIAL PRIMARY KEY,
                 file_id           VARCHAR(64) NOT NULL REFERENCES chat_uploaded_files(file_id) ON DELETE CASCADE,
@@ -96,11 +152,21 @@ def _ensure_tables_once() -> None:
                 is_ocr            BOOLEAN NOT NULL DEFAULT FALSE,
                 UNIQUE(file_id, page_no)
             );
+            ALTER TABLE chat_uploaded_file_pages ADD COLUMN IF NOT EXISTS page_title VARCHAR(256) NOT NULL DEFAULT '';
+            ALTER TABLE chat_uploaded_file_pages ADD COLUMN IF NOT EXISTS content_md TEXT NOT NULL DEFAULT '';
+            ALTER TABLE chat_uploaded_file_pages ADD COLUMN IF NOT EXISTS page_markdown TEXT NOT NULL DEFAULT '';
+            ALTER TABLE chat_uploaded_file_pages ADD COLUMN IF NOT EXISTS char_count INT NOT NULL DEFAULT 0;
+            ALTER TABLE chat_uploaded_file_pages ADD COLUMN IF NOT EXISTS table_count INT NOT NULL DEFAULT 0;
+            ALTER TABLE chat_uploaded_file_pages ADD COLUMN IF NOT EXISTS has_table BOOLEAN NOT NULL DEFAULT FALSE;
+            ALTER TABLE chat_uploaded_file_pages ADD COLUMN IF NOT EXISTS used_ocr BOOLEAN NOT NULL DEFAULT FALSE;
+            ALTER TABLE chat_uploaded_file_pages ADD COLUMN IF NOT EXISTS is_ocr BOOLEAN NOT NULL DEFAULT FALSE;
             """
         )
         conn.commit()
+        _TABLES_ENSURED = True
     except Exception as e:
         conn.rollback()
+        _TABLES_ENSURED = False
         logger.debug("[chat_files] ensure_tables warning: {}", e)
     finally:
         conn.close()
@@ -193,15 +259,26 @@ def save_parsed_document_to_db(
     _ensure_tables_once()
     file_id = f"file_{secrets.token_hex(8)}"
     sha256_hex = hashlib.sha256(raw_bytes).hexdigest()
-    storage_path = _save_raw_file(file_id, user_id, parsed.file_ext, raw_bytes)
+    clean_uid = _sanitize_pg_str(user_id)
+    clean_sid = _sanitize_pg_str(session_id)
+    clean_fname = _sanitize_pg_str(filename or parsed.filename or "uploaded.pdf")[:510]
+    clean_ext = _sanitize_pg_str(parsed.file_ext)[:16]
+    clean_mime = _sanitize_pg_str(mime_type or "")[:128]
+    storage_path = _sanitize_pg_str(_save_raw_file(file_id, clean_uid, clean_ext, raw_bytes))
+
+    toc_clean = _strip_nul(parsed.toc or [])
+    stocks_clean = _strip_nul(parsed.detected_stocks or [])
+    meta_clean = _strip_nul(parsed.extra_meta or {})
+    toc_json_str = _sanitize_pg_json_str(toc_clean)
+    stocks_json_str = _sanitize_pg_json_str(stocks_clean)
+    meta_json_str = _sanitize_pg_json_str(meta_clean)
+
+    summary_clean = _sanitize_pg_str(parsed.summary_md)
+    full_clean = _sanitize_pg_str(parsed.full_md or parsed.summary_md)
 
     conn = get_conn()
     try:
         cur = conn.cursor()
-        toc_json_str = json.dumps(parsed.toc or [], ensure_ascii=False)
-        stocks_json_str = json.dumps(parsed.detected_stocks or [], ensure_ascii=False)
-        meta_json_str = json.dumps(parsed.extra_meta or {}, ensure_ascii=False)
-
         cur.execute(
             """
             INSERT INTO chat_uploaded_files (
@@ -224,34 +301,36 @@ def save_parsed_document_to_db(
             """,
             (
                 file_id,
-                user_id,
-                user_id,
-                session_id,
-                filename,
-                parsed.file_ext,
-                mime_type or "",
+                clean_uid,
+                clean_uid,
+                clean_sid,
+                clean_fname,
+                clean_ext,
+                clean_mime,
                 len(raw_bytes),
                 len(raw_bytes),
                 sha256_hex,
                 storage_path,
-                parsed.total_pages,
-                parsed.total_pages,
-                parsed.total_chars,
-                parsed.total_chars,
-                parsed.table_count,
-                parsed.ocr_page_count,
-                parsed.inject_mode,
+                int(parsed.total_pages or 0),
+                int(parsed.total_pages or 0),
+                int(parsed.total_chars or 0),
+                int(parsed.total_chars or 0),
+                int(parsed.table_count or 0),
+                int(parsed.ocr_page_count or 0),
+                _sanitize_pg_str(parsed.inject_mode or "full")[:32],
                 toc_json_str,
                 stocks_json_str,
                 stocks_json_str,
-                parsed.full_md or parsed.summary_md,
-                parsed.summary_md,
-                parsed.summary_md,
+                full_clean,
+                summary_clean,
+                summary_clean,
                 meta_json_str,
             ),
         )
 
         for p in parsed.pages:
+            p_title = _sanitize_pg_str(p.page_title)[:250]
+            p_md = _sanitize_pg_str(p.content_md)
             cur.execute(
                 """
                 INSERT INTO chat_uploaded_file_pages (
@@ -270,15 +349,15 @@ def save_parsed_document_to_db(
                 """,
                 (
                     file_id,
-                    p.page_no,
-                    p.page_title,
-                    p.content_md,
-                    p.content_md,
-                    p.char_count,
-                    p.table_count,
-                    p.has_table,
-                    p.used_ocr,
-                    p.used_ocr,
+                    int(p.page_no),
+                    p_title,
+                    p_md,
+                    p_md,
+                    len(p_md),
+                    int(p.table_count or 0),
+                    bool(p.has_table),
+                    bool(p.used_ocr),
+                    bool(p.used_ocr),
                 ),
             )
         conn.commit()
@@ -290,27 +369,27 @@ def save_parsed_document_to_db(
 
     return {
         "file_id": file_id,
-        "user_id": user_id,
-        "user_key": user_id,
-        "session_id": session_id,
-        "filename": filename,
-        "file_ext": parsed.file_ext,
-        "mime_type": mime_type or "",
+        "user_id": clean_uid,
+        "user_key": clean_uid,
+        "session_id": clean_sid,
+        "filename": clean_fname,
+        "file_ext": clean_ext,
+        "mime_type": clean_mime,
         "file_size_bytes": len(raw_bytes),
         "file_size": len(raw_bytes),
         "parse_status": "ready",
-        "total_pages": parsed.total_pages,
-        "page_count": parsed.total_pages,
-        "total_chars": parsed.total_chars,
-        "char_count": parsed.total_chars,
-        "table_count": parsed.table_count,
-        "ocr_page_count": parsed.ocr_page_count,
-        "inject_mode": parsed.inject_mode,
-        "toc": parsed.toc,
-        "detected_stocks": parsed.detected_stocks,
-        "related_stocks": parsed.detected_stocks,
-        "summary_preview": (parsed.summary_md or "")[:600],
-        "extra_meta": parsed.extra_meta,
+        "total_pages": int(parsed.total_pages or 0),
+        "page_count": int(parsed.total_pages or 0),
+        "total_chars": int(parsed.total_chars or 0),
+        "char_count": int(parsed.total_chars or 0),
+        "table_count": int(parsed.table_count or 0),
+        "ocr_page_count": int(parsed.ocr_page_count or 0),
+        "inject_mode": _sanitize_pg_str(parsed.inject_mode or "full"),
+        "toc": toc_clean,
+        "detected_stocks": stocks_clean,
+        "related_stocks": stocks_clean,
+        "summary_preview": summary_clean[:600],
+        "extra_meta": meta_clean,
     }
 
 
@@ -320,7 +399,7 @@ async def _handle_upload(
     session_id: str = "",
 ) -> dict[str, Any]:
     uid = _uid(request)
-    filename = (file.filename or "uploaded.pdf").strip()
+    filename = _sanitize_pg_str((file.filename or "uploaded.pdf").strip())
     ext = Path(filename).suffix.lower().lstrip(".")
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
@@ -340,14 +419,32 @@ async def _handle_upload(
         logger.exception("[chat_files] parse failed for {}: {}", filename, e)
         raise HTTPException(400, f"文件解析失败：{e}")
 
-    record = save_parsed_document_to_db(
-        user_id=uid,
-        session_id=(session_id or "").strip(),
-        filename=filename,
-        mime_type=file.content_type or "",
-        raw_bytes=raw_bytes,
-        parsed=parsed,
-    )
+    try:
+        record = save_parsed_document_to_db(
+            user_id=uid,
+            session_id=(session_id or "").strip(),
+            filename=filename,
+            mime_type=file.content_type or "",
+            raw_bytes=raw_bytes,
+            parsed=parsed,
+        )
+    except Exception as first_err:
+        logger.warning("[chat_files] first db save failed for {}, re-ensuring schema and retrying: {}", filename, first_err)
+        global _TABLES_ENSURED
+        _TABLES_ENSURED = False
+        _ensure_tables_once(force=True)
+        try:
+            record = save_parsed_document_to_db(
+                user_id=uid,
+                session_id=(session_id or "").strip(),
+                filename=filename,
+                mime_type=file.content_type or "",
+                raw_bytes=raw_bytes,
+                parsed=parsed,
+            )
+        except Exception as second_err:
+            logger.exception("[chat_files] db save failed after retry for {}: {}", filename, second_err)
+            raise HTTPException(500, f"文档已解析但入库保存失败：{second_err}")
     return {"ok": True, "file": record, **record}
 
 

@@ -96,17 +96,17 @@ jobs:
         if: matrix.image.name == 'daemon'
         run: |
           set -euo pipefail
-          if git clone --depth 1 --branch v5.1.0 https://atomgit.com/atomgit_atomcode/atomcode.git /tmp/atomcode-src 2>/dev/null; then
-            python3 docs/fork-patch/apply.py /tmp/atomcode-src
-            docker run --rm -v /tmp/atomcode-src:/src -w /src rust:1-bookworm \
-              cargo build --release -p atomcode-cli
+          if git clone --depth 1 --branch v5.1.0 https://atomgit.com/atomgit_atomcode/atomcode.git /tmp/atomcode-src 2>/dev/null \
+            && python3 docs/fork-patch/apply.py /tmp/atomcode-src \
+            && docker run --rm -v /tmp/atomcode-src:/src -w /src rust:1-bookworm \
+                 cargo build --release -p atomcode --bin atomcode; then
             mkdir -p /tmp/forkbin
             install -m 0755 /tmp/atomcode-src/target/release/atomcode /tmp/forkbin/atomcode
             FORK_SHA=$(sha256sum /tmp/forkbin/atomcode | cut -d' ' -f1)
             echo "FORK_BIN_READY=1" >> $GITHUB_ENV
             echo "FORK_BIN_SHA256=${FORK_SHA}" >> $GITHUB_ENV
           else
-            echo "::warning::无法访问 atomgit 上游源码，回退使用 npm 校验二进制构建 daemon"
+            echo "::warning::AtomCode Fork 源码拉取或编译未就绪，回退使用 npm 校验二进制构建 daemon"
             echo "FORK_BIN_READY=0" >> $GITHUB_ENV
           fi
 

@@ -426,3 +426,148 @@ def test_m2_multi_format_excel_docx_and_md():
     ).encode("utf-8")
     parsed_md = parse_uploaded_file(md_raw, "双均线RSI策略笔记.md")
     assert parsed_md.extra_meta.get("has_strategy_draft") is True
+
+
+def _make_daily_close_pdf_with_nul_bytes(target_min_bytes: int = 1_420_000) -> bytes:
+    """构造一份 ~1.42MB 的模拟《A股收盘日刊_2026-11-13.pdf》，包含内嵌图片、表格与关联股票。"""
+    from PIL import Image, ImageDraw
+    import random
+
+    doc = pymupdf.open()
+    font = pymupdf.Font("cjk")
+
+    # 构造一张彩色市场热力图 PNG（配合注释补足使 PDF 体积精确为 ~1.42MB）
+    rng = random.Random(20261113)
+    raw_rgb = bytes(rng.getrandbits(8) for _ in range(180 * 120 * 3))
+    img = Image.frombytes("RGB", (180, 120), raw_rgb)
+    draw = ImageDraw.Draw(img)
+    draw.rectangle([4, 4, 176, 116], outline=(220, 38, 38), width=3)
+    img_buf = io.BytesIO()
+    img.save(img_buf, format="PNG")
+    img_bytes = img_buf.getvalue()
+
+    p1 = doc.new_page(width=595, height=842)
+    tw1 = pymupdf.TextWriter(p1.rect)
+    tw1.append((50, 55), "第一节 A股收盘日刊（2026-11-13）市场总览", font=font, fontsize=15)
+    tw1.append(
+        (50, 90),
+        "今日上证指数探底回升，两市成交额突破 1.85 万亿元。核心龙头 贵州茅台（600519）与 宁德时代(300750) 领涨主力资金榜。",
+        font=font,
+        fontsize=11,
+    )
+    tw1.append(
+        (50, 118),
+        "港股科技龙头 腾讯控股(00700.HK) 及算力龙头 中芯国际(688981) 同步获得北向与机构资金净流入。",
+        font=font,
+        fontsize=11,
+    )
+    tw1.write_text(p1)
+    p1.insert_image(pymupdf.Rect(50, 145, 545, 480), stream=img_bytes)
+
+    # 在第 1 页下方绘制核心资金流向表
+    rows = [
+        ["证券代码", "证券简称", "收盘价(元)", "涨跌幅", "主力净流入(亿元)"],
+        ["600519", "贵州茅台", "1,688.00", "+3.25%", "+18.42"],
+        ["300750", "宁德时代", "268.50", "+4.80%", "+24.15"],
+        ["688981", "中芯国际", "96.30", "−1.15%", "−3.20"],
+    ]
+    x0, y0 = 50, 510
+    col_w = [80, 100, 100, 90, 120]
+    row_h = 28
+    shape = p1.new_shape()
+    tw_tb = pymupdf.TextWriter(p1.rect)
+    for r_idx, row in enumerate(rows):
+        cy = y0 + r_idx * row_h
+        cx = x0
+        for c_idx, cell_text in enumerate(row):
+            w = col_w[c_idx]
+            rect = pymupdf.Rect(cx, cy, cx + w, cy + row_h)
+            shape.draw_rect(rect)
+            tw_tb.append((cx + 6, cy + 19), cell_text, font=font, fontsize=10)
+            cx += w
+    shape.finish(color=(0, 0, 0), width=0.8)
+    shape.commit()
+    tw_tb.write_text(p1)
+
+    p2 = doc.new_page(width=595, height=842)
+    tw2 = pymupdf.TextWriter(p2.rect)
+    tw2.append((50, 55), "第二节 行业板块复盘与明日策略展望", font=font, fontsize=14)
+    tw2.append(
+        (50, 90),
+        "白酒与锂电产业链景气度边际改善，建议重点跟踪贵州茅台(600519)批价企稳及宁德时代(300750)排产上修催化。",
+        font=font,
+        fontsize=11,
+    )
+    tw2.write_text(p2)
+
+    doc.set_toc([
+        [1, "第一节 A股收盘日刊（2026-11-13）市场总览\x00", 1],
+        [1, "第二节 行业板块复盘与明日策略展望", 2],
+    ])
+    pdf_bytes = doc.tobytes(garbage=3, deflate=True)
+    doc.close()
+    if len(pdf_bytes) < target_min_bytes:
+        # 使用 PDF 注释补足到 ~1.42MB
+        pad_len = target_min_bytes - len(pdf_bytes)
+        pdf_bytes = pdf_bytes + b"\n%" + (b"X" * pad_len) + b"\n"
+    return pdf_bytes
+
+
+def test_9_pdf_with_nul_bytes_and_surrogates_upload_to_db(monkeypatch):
+    """断言 9（复现客户 HL-S68BMN 故障）：含 \\x00 空字节、非法 UTF-8 surrogate 及 NaN 的 1.42MB《A股收盘日刊_2026-11-13.pdf》
+    上传解析与入库 100% 成功，不抛 ValueError: A string literal cannot contain NUL (0x00) characters。
+    """
+    import app.services.doc_parser.pdf_parser as pdf_mod
+
+    pdf_bytes = _make_daily_close_pdf_with_nul_bytes(1_420_000)
+    assert len(pdf_bytes) >= 1_420_000
+
+    orig_extract = pdf_mod._extract_page_l1
+
+    def _polluted_extract_l1(page):
+        md, tb_cnt, is_scan = orig_extract(page)
+        # 模拟图文 PDF 子集字体 CMap 产出的 \x00 空字节与非法 UTF-8 surrogate (\ud83d)
+        dirty_prefix = "【日刊子集字体\x00内嵌CMap\x00测试\ud83d】"
+        return pdf_mod._normalize_fin_text(dirty_prefix + md), tb_cnt, is_scan
+
+    monkeypatch.setattr(pdf_mod, "_extract_page_l1", _polluted_extract_l1)
+
+    parsed = parse_uploaded_file(pdf_bytes, "A股收盘日刊_2026-11-13\x00.pdf")
+    parsed.extra_meta["nan_metric"] = float("nan")
+    parsed.extra_meta["dirty_key\x00"] = "val\x00with\ud83dsurrogate"
+
+    assert "\x00" not in parsed.filename
+    assert "\x00" not in parsed.summary_md
+    assert "\x00" not in parsed.full_md
+    for p in parsed.pages:
+        assert "\x00" not in p.page_title
+        assert "\x00" not in p.content_md
+        # 确保可正常编码为 UTF-8
+        p.content_md.encode("utf-8")
+
+    _ensure_postgres_or_skip()
+    app = _build_test_app()
+    client = TestClient(app)
+
+    resp = client.post(
+        "/api/chat/files/upload",
+        headers={"X-Hunter-User-Id": "user_hl_s68bmn"},
+        data={"session_id": "ses_daily_close_1113"},
+        files={"file": ("A股收盘日刊_2026-11-13.pdf", pdf_bytes, "application/pdf")},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["file"]["filename"] == "A股收盘日刊_2026-11-13.pdf"
+    assert body["file"]["total_pages"] == 2
+    assert body["file"]["table_count"] >= 1
+    codes = {s["code"] for s in body["file"]["detected_stocks"]}
+    assert "600519" in codes
+    assert "300750" in codes
+
+    # 清理测试数据
+    client.delete(
+        f"/api/chat/files/{body['file']['file_id']}",
+        headers={"X-Hunter-User-Id": "user_hl_s68bmn"},
+    )
+

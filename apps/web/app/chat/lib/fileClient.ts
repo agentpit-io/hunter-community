@@ -48,12 +48,20 @@ export async function uploadChatFile(
   })
 
   if (!res.ok) {
+    const rawText = await res.text().catch(() => '')
     let errText = ''
-    try {
-      const j = await res.json()
-      errText = j?.detail || j?.message || j?.error || ''
-    } catch {
-      errText = await res.text().catch(() => '')
+    if (rawText) {
+      try {
+        const j = JSON.parse(rawText)
+        errText =
+          typeof j?.detail === 'string'
+            ? j.detail
+            : j?.detail
+              ? JSON.stringify(j.detail)
+              : j?.message || j?.error || ''
+      } catch {
+        errText = rawText.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 180)
+      }
     }
     throw new Error(errText || `上传失败 (HTTP ${res.status})`)
   }

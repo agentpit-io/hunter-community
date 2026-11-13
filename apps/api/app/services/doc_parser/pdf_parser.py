@@ -22,14 +22,29 @@ SCAN_PAGE_MIN_CHARS = 30          # 单页原生提取少于 30 字且含图 →
 MAX_OCR_PAGES_PER_DOC = 15        # 单次上传实时 OCR 最大页数，避免 200 页纯扫描件阻塞请求
 
 
+def _strip_nul_and_surrogates(text: str) -> str:
+    """剥离 PostgreSQL/JSONB 禁止的 NUL (\\x00) 空字节及非法 UTF-8 surrogate 字符。"""
+    if not text:
+        return ""
+    if "\x00" in text:
+        text = text.replace("\x00", "")
+    try:
+        text.encode("utf-8")
+        return text
+    except UnicodeEncodeError:
+        return text.encode("utf-8", "replace").decode("utf-8")
+
+
 def _normalize_fin_text(text: str) -> str:
     """金融文本清洗（源自 supplement_cn_annual.py 实战经验）：
-    1. 统一特殊负号（−、－、﹣、—）为标准 ASCII '-'，防负利润变正数；
-    2. 消除中文字符间被 PDF 排版拆出的多余空格（如 '贵 州 茅 台' → '贵州茅台'）；
-    3. 折叠连续空行。
+    1. 剥离 PDF 子集字体/CMap 可能混入的 NUL (\\x00) 空字节与非法 UTF-8 surrogate；
+    2. 统一特殊负号（−、－、﹣、—）为标准 ASCII '-'，防负利润变正数；
+    3. 消除中文字符间被 PDF 排版拆出的多余空格（如 '贵 州 茅 台' → '贵州茅台'）；
+    4. 折叠连续空行。
     """
     if not text:
         return ""
+    text = _strip_nul_and_surrogates(str(text))
     for minus in ("−", "－", "﹣", "—"):
         # 仅当后面紧跟数字时把破折号/特殊减号归一化为负号
         text = re.sub(rf"{re.escape(minus)}(?=\d)", "-", text)
@@ -45,7 +60,7 @@ def _clean_cell(val: Any) -> str:
     """清洗 PDF 表格单元格：去掉内部换行与多余空格，修复 CJK 字体下被拆乱的小数点/负号，转义管道符 |"""
     if val is None:
         return ""
-    s = str(val).replace("\r", " ").replace("\n", " ").strip()
+    s = _strip_nul_and_surrogates(str(val)).replace("\r", " ").replace("\n", " ").strip()
     s = re.sub(r"\s+", " ", s)
     # 修复部分 PDF 引擎（如 pymupdf_layout + CJK 混排字体）将单元格内负号/小数点拆到末尾的乱序现象：
     # 例如 "1245% − ." -> "-12.45%"、"83451 ." -> "834.51"、"+1756% ." -> "+17.56%"
@@ -207,7 +222,13 @@ def parse_pdf_bytes(raw_bytes: bytes, filename: str) -> ParsedDocument:
         raw_toc = doc.get_toc()  # [[level, title, page], ...]
         for item in raw_toc[:80]:
             if len(item) >= 3:
-                toc_list.append({"level": int(item[0]), "title": str(item[1]).strip(), "page": int(item[2])})
+                toc_list.append(
+                    {
+                        "level": int(item[0]),
+                        "title": _strip_nul_and_surrogates(str(item[1])).strip(),
+                        "page": int(item[2]),
+                    }
+                )
     except Exception:
         pass
 
