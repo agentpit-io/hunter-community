@@ -90,6 +90,8 @@ _PUBLIC_PREFIXES = (
     "/api/setup/",
     # M2：三大日常投研工作台与盘前/盘中/盘后只读工作流公开展示前缀（走可选身份识别）
     "/api/workflows/",
+    # M4：合作券商数据源与只读授权管理前缀（走可选身份识别 + OAuth Scope 强核验）
+    "/api/broker/",
 )
 
 

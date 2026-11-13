@@ -2,7 +2,8 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Activity, User as UserIcon, Zap, Info, Loader2, ExternalLink, Save, Check, X, Cpu, Lock, Wand2 } from 'lucide-react'
+import { Activity, User as UserIcon, Zap, Info, Loader2, ExternalLink, Save, Check, X, Cpu, Lock, Wand2, Shield } from 'lucide-react'
+import { BrokerConnectorPanel } from './BrokerConnectorPanel'
 
 const API = process.env.NEXT_PUBLIC_API_URL || ''
 
@@ -25,7 +26,7 @@ interface SaasConfig {
   kronos_key_masked?: string | null
 }
 
-type TabId = 'account' | 'llm' | 'saas' | 'about'
+type TabId = 'account' | 'llm' | 'broker' | 'saas' | 'about'
 
 export default function SettingsPage() {
   const router = useRouter()
@@ -36,7 +37,7 @@ export default function SettingsPage() {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const qTab = new URLSearchParams(window.location.search).get('tab')
-      if (qTab === 'account' || qTab === 'llm' || qTab === 'saas' || qTab === 'about') {
+      if (qTab === 'account' || qTab === 'llm' || qTab === 'broker' || qTab === 'saas' || qTab === 'about') {
         setTab(qTab)
       }
     }
@@ -53,16 +54,18 @@ export default function SettingsPage() {
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)', fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif' }}>
       <TopBar me={me} />
-      <div style={{ maxWidth: 900, margin: '0 auto', padding: '32px 24px', display: 'grid', gridTemplateColumns: '200px 1fr', gap: 24 }}>
+      <div style={{ maxWidth: 960, margin: '0 auto', padding: '32px 24px', display: 'grid', gridTemplateColumns: '220px 1fr', gap: 24 }}>
         <nav style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <TabButton active={tab === 'account'} onClick={() => setTab('account')} icon={<UserIcon size={15} />} label="账户" />
           <TabButton active={tab === 'llm'} onClick={() => setTab('llm')} icon={<Cpu size={15} />} label="大模型" />
+          <TabButton active={tab === 'broker'} onClick={() => setTab('broker')} icon={<Shield size={15} />} label="合作券商与只读授权" />
           <TabButton active={tab === 'saas'} onClick={() => setTab('saas')} icon={<Zap size={15} />} label="SaaS 加速" />
           <TabButton active={tab === 'about'} onClick={() => setTab('about')} icon={<Info size={15} />} label="关于" />
         </nav>
         <div>
           {tab === 'account' && <AccountTab me={me} />}
           {tab === 'llm' && <LlmTab />}
+          {tab === 'broker' && <BrokerConnectorPanel />}
           {tab === 'saas' && <SaasTab />}
           {tab === 'about' && <AboutTab />}
         </div>

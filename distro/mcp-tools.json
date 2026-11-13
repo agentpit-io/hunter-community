@@ -112,6 +112,12 @@
       "search_investor_education",
       "get_product_guide",
       "get_risk_disclosure"
+    ],
+    "broker_account_readonly": [
+      "get_accounts",
+      "get_account_summary",
+      "get_positions",
+      "get_trades"
     ]
   }
 }

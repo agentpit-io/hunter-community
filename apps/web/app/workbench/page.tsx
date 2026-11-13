@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react'
 import TopNav from '../components/TopNav'
+import { BrokerConnectorPanel } from '../settings/BrokerConnectorPanel'
 
 type WorkbenchTab = 'market' | 'watchlist' | 'stock' | 'quant' | 'portfolio_review'
 
@@ -451,13 +452,13 @@ export default function BrokerDailyWorkbenchPage() {
             <div>
               <div className="flex items-center gap-2.5">
                 <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-900">
-                  HunterCode v3.3.0 · 券商数据信封认证
+                  HunterCode v3.4.0 · v3.3.0 · 券商数据信封认证
                 </span>
                 <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">
-                  正则数字回读 100% 校验
+                  正则数字回读 100% 校验 · AES-256-GCM 只读授权
                 </span>
                 <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-900">
-                  7P0+8P0+7P1 共 22 金融 SKILL 全量上线
+                  8 大券商 MCP + 22 金融 SKILL 全量上线
                 </span>
               </div>
               <h1 className="text-2xl font-bold mt-2 text-slate-900">
@@ -1919,6 +1920,11 @@ export default function BrokerDailyWorkbenchPage() {
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* 5.4 M4 合作券商数据源与只读授权管理 & 交割单手工导入面板 */}
+            <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm" data-testid="workbench-broker-connector-section">
+              <BrokerConnectorPanel />
             </div>
           </div>
         )}

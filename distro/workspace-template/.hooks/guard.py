@@ -144,8 +144,25 @@ HUNTER_MCP_UID_FIELD = {
     "hunter_user": "_hermes_user_id",
     "fin_memory": "_hermes_user_id",
     "hcapack": "hermes_user_id",
+    "broker_account_readonly": "_hermes_user_id",
 }
 HUNTER_MCP_SERVERS = tuple(HUNTER_MCP_UID_FIELD)
+
+# 阶段 M4：broker_account_readonly 工具对应的只读 OAuth Scope 映射
+BROKER_ACCOUNT_TOOL_SCOPE = {
+    "get_accounts": "account.read",
+    "get_account_summary": "summary.read",
+    "get_positions": "positions.read",
+    "get_trades": "trades.read",
+}
+
+# 阶段 M4（TC-SEC-03）：严禁任何实盘交易委托、撤单、改单或银证转账工具调用
+FORBIDDEN_LIVE_ORDER_RE = re.compile(
+    r"(?:^|__)(?:place_order|submit_order|cancel_order|modify_order|transfer_cash|"
+    r"live_order|execute_trade|buy_stock|sell_stock|margin_trade|short_sell|"
+    r"broker_trade|broker_order)(?:$|__)",
+    re.IGNORECASE,
+)
 
 # 写类工具：只有这两个目录放行
 WRITE_TOOLS = {"write_file", "edit_file", "search_replace", "parallel_edit_files"}
@@ -769,6 +786,101 @@ def log(workspace: str, rec: dict) -> None:
         pass
 
 
+def _broker_oauth_state_path(workspace: str) -> str:
+    return os.path.join(workspace, ".atomcode", "broker-oauth.json")
+
+
+def check_broker_oauth_scope(uid: str, tool_subname: str, workspace: str) -> tuple[bool, str]:
+    """核验用户对 `broker_account_readonly.*` 的有效 OAuth 只读授权与 Scope（TC-SEC-01 / TC-SEC-02）。
+
+    返回 `(allowed, reason_if_denied)`。
+    """
+    required_scope = BROKER_ACCOUNT_TOOL_SCOPE.get(tool_subname)
+    if not required_scope:
+        return False, (
+            f"安全门卫刚性拦截：`broker_account_readonly.{tool_subname}` 不在允许的 4 个只读账户工具清单中，"
+            "物理隔离实盘下单、撤单、改单与银证转账。"
+        )
+    if not uid:
+        return False, (
+            "安全门卫刚性拦截（403）：调用 `broker_account_readonly` 必须具备真实登录用户身份（_hermes_user_id），"
+            "当前未识别到登录用户，已拒绝访问。"
+        )
+
+    # 1. 优先检查环境变量显式注入的授权状态（供红队测试与离线沙盒使用）
+    env_status = (os.environ.get("HCA_BROKER_OAUTH_STATUS") or "").strip().lower()
+    if env_status:
+        if env_status != "authorized":
+            return False, (
+                f"安全门卫刚性拦截（403 尚未授权或授权已撤销）：用户 `{uid}` 的券商只读授权状态为 `{env_status}`，"
+                f"禁止调用 `broker_account_readonly.{tool_subname}`。"
+            )
+        env_scopes_raw = os.environ.get("HCA_BROKER_OAUTH_SCOPES") or "account.read,summary.read,positions.read,trades.read"
+        env_scopes = [s.strip() for s in env_scopes_raw.split(",") if s.strip()]
+        if required_scope not in env_scopes:
+            return False, (
+                f"安全门卫刚性拦截（403 Scope 不足）：用户 `{uid}` 缺少所需只读 Scope `{required_scope}`（已授权：{env_scopes}）。"
+            )
+        return True, ""
+
+    # 2. 检查工作区 `.atomcode/broker-oauth.json` 状态文件（若存在）
+    state_file = _broker_oauth_state_path(workspace)
+    if os.path.isfile(state_file):
+        try:
+            with open(state_file, encoding="utf-8") as f:
+                all_states = json.load(f)
+            user_rec = (all_states or {}).get(uid)
+            if not isinstance(user_rec, dict) or user_rec.get("status") != "authorized" or not user_rec.get("token_cipher"):
+                st = (user_rec or {}).get("status", "unauthorized")
+                return False, (
+                    f"安全门卫刚性拦截（403 尚未授权或授权已撤销）：用户 `{uid}` 当前状态为 `{st}`，"
+                    f"禁止调用 `broker_account_readonly.{tool_subname}`。"
+                )
+            scopes = user_rec.get("scopes") or []
+            if required_scope not in scopes:
+                return False, (
+                    f"安全门卫刚性拦截（403 Scope 不足）：用户 `{uid}` 缺少所需只读 Scope `{required_scope}`。"
+                )
+            return True, ""
+        except Exception:  # noqa: BLE001
+            return False, "安全门卫刚性拦截（403）：读取券商 OAuth 授权状态文件失败，默认关闭拒绝访问。"
+
+    # 3. 调后端 `/api/internal/broker/oauth-verify` 实时核验数据库中的 AES-256-GCM 授权状态
+    if HERMES_API_URL:
+        import urllib.error  # noqa: PLC0415
+        import urllib.parse
+        import urllib.request
+
+        qs = urllib.parse.urlencode({
+            "user_id": uid,
+            "scope": required_scope,
+            "tool_name": tool_subname,
+            "session_user_id": uid,
+        })
+        url = "{}/api/internal/broker/oauth-verify?{}".format(HERMES_API_URL, qs)
+        req = urllib.request.Request(url, headers={"X-Hunter-Internal-Key": HUNTER_INTERNAL_KEY})
+        try:
+            with urllib.request.urlopen(req, timeout=LOOKUP_TIMEOUT_S) as r:
+                body = json.loads(r.read().decode("utf-8")) or {}
+                if body.get("authorized") is True:
+                    return True, ""
+                return False, str(body.get("message") or "安全门卫刚性拦截（403）：尚未开启券商只读授权或授权已撤销。")
+        except urllib.error.HTTPError as e:
+            try:
+                err_body = json.loads(e.read().decode("utf-8")) or {}
+                msg = err_body.get("message")
+            except Exception:  # noqa: BLE001
+                msg = None
+            return False, msg or f"安全门卫刚性拦截（HTTP {e.code}）：尚未开启券商只读授权或授权已撤销。"
+        except Exception:  # noqa: BLE001
+            return False, "安全门卫刚性拦截（403）：无法连接券商授权核验服务，个人账户只读连接器默认关闭。"
+
+    # 4. 默认关闭（Default Closed）：无任何授权证明时 100% 拒绝
+    return False, (
+        f"安全门卫刚性拦截（403）：`broker_account_readonly` 默认关闭，用户 `{uid}` 尚未完成券商 OAuth 只读授权。"
+    )
+
+
 def main() -> int:
     raw = sys.stdin.read()
     try:
@@ -789,7 +901,15 @@ def main() -> int:
     verdict = None
     reason = ""
 
-    if tool in WRITE_TOOLS:
+    # TC-SEC-03：拦截任何试图发起实盘交易委托、撤单、改单或银证转账的工具调用
+    if FORBIDDEN_LIVE_ORDER_RE.search(tool):
+        reason = (
+            f"安全门卫刚性拦截（TC-SEC-03）：严禁发起任何实盘委托下单、撤单、改单或银证转账操作（`{tool}`）！"
+            "本平台所有券商连接器物理隔离实盘交易，仅支持只读投研分析与模拟演练（PAPER_MODE=PAPER）。"
+        )
+        verdict = decide("deny", reason)
+
+    elif tool in WRITE_TOOLS:
         targets = []
         collect_paths(args, targets)
         if not targets:
@@ -828,8 +948,9 @@ def main() -> int:
             verdict = decide("deny", reason)
 
     if verdict is None and tool.startswith("mcp__"):
-        # P0-5：给 hunter 系薄代理补用户身份（来源见文件头「身份从哪来」）
-        server = tool.split("__")[1] if "__" in tool else ""
+        parts = tool.split("__")
+        server = parts[1] if len(parts) > 1 else ""
+        tool_subname = parts[2] if len(parts) > 2 else ""
         field = HUNTER_MCP_UID_FIELD.get(server)
         if field:
             uid = lookup_user(ev.get("session_id") or "", workspace)
@@ -837,28 +958,45 @@ def main() -> int:
             if not uid:
                 uid = (os.environ.get("HUNTER_USER_ID") or "").strip()
                 source = "env"
-            # ⚠️ **无条件覆盖模型自己填的那一份**（I2 加严）。
-            # 原先是「参数里已经有就不动」——那等于模型可以自己指定
-            # `_hermes_user_id`，填上别人的 UUID 就能读到别人的持仓。
-            # 身份只能由这个 hook 决定，模型填什么都不算数。
-            supplied = args.get(field)
-            if uid:
-                new = dict(args)
-                new[field] = uid
-                verdict = rewrite(new)
-                reason = "注入 {}（来源：{}）".format(field, source)
-                if supplied and supplied != uid:
-                    reason += "；已覆盖模型自填的身份"
-            elif supplied:
-                # 查不到身份，但模型自己填了一个 —— **必须摘掉**。
-                # 放过去就等于让模型用一个我们没验证过的身份去读账本。
-                new = {k: v for k, v in args.items() if k != field}
-                verdict = rewrite(new)
-                reason = "查不到用户身份；已摘掉模型自填的 {}".format(field)
+
+            # M4 专项（TC-SEC-01 & TC-SEC-02）：针对 `broker_account_readonly` 强制覆写 `_hermes_user_id`、
+            # 抹除模型伪造的 `user_id`，并在内核外核验该用户的有效 OAuth 只读授权 Scope
+            if server == "broker_account_readonly":
+                supplied_uid = args.get("user_id") or args.get(field)
+                ok_oauth, deny_msg = check_broker_oauth_scope(uid, tool_subname, workspace)
+                if not ok_oauth:
+                    reason = deny_msg
+                    verdict = decide("deny", reason)
+                else:
+                    new = {k: v for k, v in args.items() if k != "user_id"}
+                    new[field] = uid
+                    verdict = rewrite(new)
+                    reason = "注入 {}（来源：{}）并通过 OAuth Scope 校验".format(field, source)
+                    if supplied_uid and supplied_uid != uid:
+                        reason += "；已强制覆写跨租户伪造身份 `{}` -> `{}`".format(supplied_uid, uid)
             else:
-                # 不注入。下游 MCP 会自己报「缺用户身份」，
-                # 这比默默用别人的账本强得多。
-                reason = "查不到用户身份，未注入 {}".format(field)
+                # ⚠️ **无条件覆盖模型自己填的那一份**（I2 加严）。
+                # 原先是「参数里已经有就不动」——那等于模型可以自己指定
+                # `_hermes_user_id`，填上别人的 UUID 就能读到别人的持仓。
+                # 身份只能由这个 hook 决定，模型填什么都不算数。
+                supplied = args.get(field)
+                if uid:
+                    new = dict(args)
+                    new[field] = uid
+                    verdict = rewrite(new)
+                    reason = "注入 {}（来源：{}）".format(field, source)
+                    if supplied and supplied != uid:
+                        reason += "；已覆盖模型自填的身份"
+                elif supplied:
+                    # 查不到身份，但模型自己填了一个 —— **必须摘掉**。
+                    # 放过去就等于让模型用一个我们没验证过的身份去读账本。
+                    new = {k: v for k, v in args.items() if k != field}
+                    verdict = rewrite(new)
+                    reason = "查不到用户身份；已摘掉模型自填的 {}".format(field)
+                else:
+                    # 不注入。下游 MCP 会自己报「缺用户身份」，
+                    # 这比默默用别人的账本强得多。
+                    reason = "查不到用户身份，未注入 {}".format(field)
 
     denied = bool(verdict) and "permissionDecision" in verdict.get("hookSpecificOutput", {})
     if not denied:

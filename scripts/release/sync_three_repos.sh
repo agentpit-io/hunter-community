@@ -165,6 +165,15 @@ if [ -f "${HCA_REPO}/apps/api/app/routers/daily_workflows.py" ]; then
   mkdir -p "${HUNTERCODE_REPO}/packages/hunter-broker/routers"
   cp -f "${HCA_REPO}/apps/api/app/routers/daily_workflows.py" "${HUNTERCODE_REPO}/packages/hunter-broker/routers/"
 fi
+if [ -f "${HCA_REPO}/apps/api/app/routers/broker_connector.py" ]; then
+  mkdir -p "${HUNTERCODE_REPO}/packages/hunter-broker/routers"
+  cp -f "${HCA_REPO}/apps/api/app/routers/broker_connector.py" "${HUNTERCODE_REPO}/packages/hunter-broker/routers/"
+fi
+if [ -d "${HCA_REPO}/distro/hooks/hookd" ]; then
+  mkdir -p "${HUNTERCODE_REPO}/packages/hunter-broker/hookd"
+  cp -rf "${HCA_REPO}/distro/hooks/hookd/"* "${HUNTERCODE_REPO}/packages/hunter-broker/hookd/" 2>/dev/null || true
+  rm -rf "${HUNTERCODE_REPO}/packages/hunter-broker/hookd/__pycache__"
+fi
 
 # 5.4 更新 huntercode-repo 版本号文件
 echo "${VER_NUM}" > "${HUNTERCODE_REPO}/VERSION"

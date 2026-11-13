@@ -521,6 +521,11 @@ app.include_router(fin_evolution_router.router, prefix="/api")
 from app.routers import daily_workflows as daily_workflows_router
 app.include_router(daily_workflows_router.router, prefix="/api")
 
+# M4：用户单独授权的券商账户只读连接器（OAuth AES-256-GCM 凭证托管）、一键撤销与交割单导入 API
+from app.routers import broker_connector as broker_connector_router
+app.include_router(broker_connector_router.router, prefix="/api")
+app.include_router(broker_connector_router.internal_router, prefix="/api")
+
 @app.get("/api/health")
 async def health():
     # hunter_api_key 字段让 docker healthcheck 和运维一眼看出 SaaS 功能可不可用

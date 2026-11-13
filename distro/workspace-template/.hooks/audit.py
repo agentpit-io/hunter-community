@@ -213,6 +213,23 @@ def main() -> int:
     if ev.get("_parse_error"):
         rec["parse_error"] = True
 
+    # 阶段 M4：如果是券商 MCP 调用（`mcp__broker_*`），提取信封元数据并写入 broker_audit.jsonl
+    is_broker_mcp = bool(tool and tool.startswith("mcp__broker_"))
+    if is_broker_mcp:
+        parts = tool.split("__")
+        mcp_srv = parts[1] if len(parts) > 1 else "broker_unknown"
+        mcp_tool = parts[2] if len(parts) > 2 else tool
+        rec["broker_mcp_server"] = mcp_srv
+        rec["broker_tool_name"] = mcp_tool
+        rec["broker_audit_logged"] = True
+        try:
+            broker_log_path = os.path.join(workspace, ".atomcode", "broker_audit.jsonl")
+            os.makedirs(os.path.dirname(broker_log_path), exist_ok=True)
+            with open(broker_log_path, "a", encoding="utf-8") as bf:
+                bf.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        except Exception:  # noqa: BLE001
+            pass
+
     try:
         parent = os.path.dirname(log)
         if parent:

@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import os
+import re
 from datetime import datetime
 from typing import Any
 
@@ -705,11 +706,13 @@ class GalaxyBrokerAdapter(
         ann_map = self.snapshot_store.get("announcement_details", {})
         if announcement_id in ann_map:
             detail = dict(ann_map[announcement_id])
-            pages = list(detail.get("pages", []))
+            pages = [dict(p) for p in detail.get("pages", [])]
             if page_range and pages:
                 pages = _slice_pages(pages, page_range)
-                detail["pages"] = pages
                 detail["requested_page_range"] = page_range
+            sanitized_pages, inj_warnings = _sanitize_untrusted_announcement_pages(pages)
+            detail["pages"] = sanitized_pages
+            detail["untrusted_document_boundary"] = True
             return BrokerDataEnvelope.build(
                 provider=self.provider_id,
                 market=detail.get("market", "CN_A"),
@@ -719,6 +722,7 @@ class GalaxyBrokerAdapter(
                 retrieved_at=_now_iso(),
                 source_id=announcement_id,
                 source_url=detail.get("pdf_url"),
+                warnings=inj_warnings,
                 data=detail,
             )
         raise BrokerProviderUnavailableError(
@@ -1086,3 +1090,36 @@ def _slice_pages(pages: list[dict[str, Any]], page_range: str) -> list[dict[str,
         p for p in pages
         if start_p <= int(p.get("page_no", 0)) <= end_p
     ]
+
+
+_PDF_PROMPT_INJECTION_RE = re.compile(
+    r"(?:忽略之前所有指令|忽略上述所有指令|ignore\s+all\s+previous\s+instructions|"
+    r"disregard\s+previous\s+instructions|导出所有\s*API\s*Key|打印所有密钥|"
+    r"print\s+all\s+api\s+keys|明天必涨停|稳赚不赔|立即满仓)[^。\n]*",
+    re.IGNORECASE,
+)
+
+
+def _sanitize_untrusted_announcement_pages(
+    pages: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """对公告 PDF 解析出的页面内容标记不可信文档边界，并剥离隐藏的 Prompt 注入攻击载荷（TC-SEC-04）。"""
+    cleaned_pages: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    for p in pages:
+        item = dict(p)
+        content = str(item.get("content_md") or "")
+        hits = _PDF_PROMPT_INJECTION_RE.findall(content)
+        if hits:
+            content = _PDF_PROMPT_INJECTION_RE.sub("[安全门卫已拦截并剥离 PDF 隐藏 Prompt 注入载荷]", content)
+            item["content_md"] = content
+            item["prompt_injection_stripped"] = True
+            warnings.append(
+                f"TC-SEC-04 防注入告警：第 {item.get('page_no', '?')} 页检测到疑似隐藏 Prompt 注入指令并已剥离（共 {len(hits)} 处）"
+            )
+        else:
+            item["prompt_injection_stripped"] = False
+        item["untrusted_data_tag"] = "<untrusted_announcement_pdf>"
+        cleaned_pages.append(item)
+    return cleaned_pages, warnings
+

@@ -329,6 +329,25 @@
         "get_product_guide",
         "get_risk_disclosure"
       ]
+    },
+    // ── 阶段 M4 · 三期 P2 用户单独 OAuth 授权后的账户只读连接器（默认关闭，由 hookd 强核验 Scope）──
+    "broker_account_readonly": {
+      "command": "${HCA_PYTHON:-python3}",
+      "args": ["${HCA_BROKER_MCP_DIR:-/opt/hca/mcp-servers}/broker_account_readonly/server.py"],
+      "env": {
+        "PYTHONPATH": "${HCA_BROKER_MCP_DIR:-/opt/hca/mcp-servers}:/opt/hca/mcp",
+        "HCA_MCP_MAX_BYTES": "${HCA_MCP_MAX_BYTES:-15000}",
+        "HERMES_API_URL": "${HERMES_API_URL:-http://api:8000}",
+        "HUNTER_INTERNAL_KEY": "${HUNTER_INTERNAL_KEY:-}",
+        "HUNTER_USER_ID": "${HUNTER_USER_ID:-}"
+      },
+      "timeout_ms": 120000,
+      "autoApprove": [
+        "get_accounts",
+        "get_account_summary",
+        "get_positions",
+        "get_trades"
+      ]
     }
   }
 }
