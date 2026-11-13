@@ -1,0 +1,352 @@
+# HunterCode Community Edition (AtomCode Unified v3.0.0) · Coolify 用编排
+# ══════════════════════════════════════════════════════════════════════
+# 用法：Coolify → 项目 → + New Resource → **Docker Compose** → 把这份文件整个粘进去
+#       → Save → Deploy。详细步骤（含域名、备份、升级、排查）见
+#       https://github.com/agentpit-io/hunter-community/blob/main/docs/deploy/coolify-dokploy.md
+#
+# 事实来源是仓库根目录的 docker-compose.yml。这里只做「Coolify / 公网场景」必须做的
+# 三件事，每一处都写了原因：
+#   ① 去掉所有 `ports:` 宿主端口映射 —— 对外访问由 Coolify 的反代按域名转发，
+#      映射端口等于把数据库和 api 直接暴露在服务器公网 IP 上。
+#   ② 用 Coolify 的 **magic environment variables** 生成随机密钥与域名，
+#      不让用户手填，也不写任何默认值。
+#   ③ `HUNTER_SINGLE_USER=0` + 必填 `HUNTER_SETUP_TOKEN` —— 公网实例的安全底线。
+#
+# ⚠️ 不要加 `container_name:` —— 容器名由 Coolify 统一管理，自己写会和它打架。
+# ⚠️ 不要加 `build:` 与任何仓库内文件的挂载 —— 服务器上没有本仓源码。
+#
+# Coolify 的 magic 变量（官方文档 https://coolify.io/docs/knowledge-base/docker/compose）：
+#   SERVICE_FQDN_<ID>_<PORT>   给服务分配域名并把反代指到容器的该端口。
+#                              <ID> 必须是**服务名**（连字符和点换成下划线）。
+#   SERVICE_PASSWORD_<ID>      32 位随机口令（不含符号）。<ID> 随便起，只要全文一致。
+#   SERVICE_PASSWORD_64_<ID>   64 位。
+#   生成的值会存进资源的 Environment Variables，**重新部署不会变**，可以在那里查看和改。
+#
+# 💡 JWT_SECRET **故意不在这里出现**。Coolify 是单机 Docker，三个容器可以共享一个卷：
+#    留空时 api 首启会生成一把 64 位随机串写进 hunter_secrets 卷，web 与 daemon
+#    只读挂同一个卷读回同一把。让用户在三处分别填同一个值，只会带来「填不一致 →
+#    对话莫名 401」的坑。同时 daemon 启动生成的令牌写入 hunter_daemon_token 卷（/run/hca），
+#    供 api 与 web 只读挂载访问。
+# ⚠️ HUNTER_INTERNAL_KEY 则是**显式注入**的：智能交易的 paper / fin-worker 只认环境
+#    变量、不读密钥卷，所以这一把必须由模板给全 api / web / daemon / paper /
+#    fin-worker 五个服务（同值，用同一个 magic 变量）。
+#
+# ── 智能交易（fin 链）· paper / temporal / temporal-ui / fin-worker / fin-init ──
+# 与仓库根 docker-compose.yml 的 `fin` profile 等价，这里默认常开：
+#   · temporal     智能交易链**唯一的上层调度权威**（六个交易时点 + 拉 K 线），
+#                  工作流状态存在 postgres 的 temporal 库，不碰业务账本。
+#   · paper        全栈唯一持有账本库运行期角色 fin_paper_rw 的服务；账本**只追加** ——
+#                  该角色在追加表上没有任何 UPDATE / DELETE，「唯一账本」是一条 GRANT。
+#   · fin-worker   推理区 → 执行区的桥，**不直连账本**，写账本只有 paper 的 HTTP 一个入口。
+#   · temporal-ui  排障面板，仅内网。
+#   · fin-init     一次性服务：等 api 迁移建出 fin_paper_rw 后给它设运行期口令，
+#                  paper 等它跑完才起（没有任何平台需要人工 provision）。
+
+services:
+  # ── web · 本应用唯一对外的服务 ───────────────────────────────
+  web:
+    image: ghcr.io/agentpit-io/hunter-community-web:3.0.0
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+      daemon:
+        condition: service_started
+    environment:
+      # 让 Coolify 给这个服务分配域名，反代到容器的 3000 端口。
+      # 想用自己的域名：部署后在资源的 Domains 里改。
+      SERVICE_FQDN_WEB_3000: ""
+      NODE_ENV: production
+      AGENT_BACKEND: atomcode
+      # BFF 要回调 api 查会话归属；不传会回落 127.0.0.1:8000 → 503
+      HERMES_API_URL: http://api:8000
+      # BFF 反代到 AtomCode daemon 对话引擎
+      ATOMCODE_DAEMON_URL: http://daemon:13456
+      ATOMCODE_TOKEN_FILE: /run/hca/daemon-token
+      ATOMCODE_WORKSPACE: /workspace
+      # 与 api / daemon / paper / fin-worker 同值（BFF 调 /api/internal/* 要用）
+      HUNTER_INTERNAL_KEY: ${SERVICE_PASSWORD_INTERNKEY}
+    group_add:
+      - "10001"
+    volumes:
+      - hunter_daemon_token:/run/hca:ro
+      # 只读 · web 的 BFF 调 /api/internal/ocr/extract 要和 api 用同一把
+      # HUNTER_INTERNAL_KEY，否则「上传图片没反应」（其实是 401）
+      - hunter_secrets:/opt/hunter-secrets:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  # ── api · 后端 + 自动迁移 + 首启向导 ─────────────────────────
+  api:
+    image: ghcr.io/agentpit-io/hunter-community-api:3.0.0
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      HUNTER_MINIMAL_BOOT: "1"
+      DATABASE_URL: postgresql://hunter:${SERVICE_PASSWORD_PGPASS}@postgres:5432/hunter
+      REDIS_URL: redis://redis:6379/0
+      # ⚠️ 与 web / daemon / paper / fin-worker 必须同值。这里**显式注入而不走
+      #    密钥卷** —— 智能交易的 paper / fin-worker 只读环境变量、不读密钥卷。
+      HUNTER_INTERNAL_KEY: ${SERVICE_PASSWORD_INTERNKEY}
+      # 首启向导第 0 步的初始化口令。**必须非空** —— 公网上不设口令等于
+      # 谁先打开谁就能配大模型、看别人的 key。部署后在 Environment Variables 里查。
+      HUNTER_SETUP_TOKEN: ${SERVICE_PASSWORD_SETUPTOKEN}
+      # ⚠️ 公网部署必须是 0。单用户模式不要账号密码，开着等于谁都能拿到 admin
+      HUNTER_SINGLE_USER: "0"
+      # open = 允许注册，第一个注册的账号自动是管理员。建好管理员后
+      # 建议在 Coolify 里改成 closed 再 Redeploy。
+      REGISTRATION_MODE: open
+      JWT_ACCESS_TTL: "3600"
+      JWT_REFRESH_TTL: "2592000"
+      # 独立运行模式 · 不指回项目方的演示站
+      HUNTER_UPSTREAM_URL: ""
+      # 留空即可 · 聊天用你自己的大模型 key。想解锁全部行情工具再到
+      # https://hunter.agentpit.io/dev/api-keys 免费申请
+      HUNTER_API_KEY: ""
+      LLM_PROVIDER: openai_compat
+      HUNTER_SKILLS_DIR: /opt/hunter-skills
+      HUNTER_USER_SKILLS_DIR: /opt/hunter-user-skills
+      AGENT_BACKEND: atomcode
+      ATOMCODE_DAEMON_URL: http://daemon:13456
+      ATOMCODE_TOKEN_FILE: /run/hca/daemon-token
+      # ⚠️ **api 也必须知道 shim 在哪**，不是只有 daemon 需要：向导保存后 api 走
+      # POST /live/provider 把 provider 的 baseURL 推给 daemon，推的就是这个值。
+      LLM_SHIM_URL: http://llm-shim:3999/v1
+      PAPER_BASE_URL: http://paper:8000
+      FIN_WORKER_URL: http://fin-worker:8300
+    group_add:
+      - "10001"
+    volumes:
+      - hunter_daemon_token:/run/hca:ro
+      - hunter_user_skills:/opt/hunter-user-skills
+      - hunter_packages:/opt/hunter-packages
+      # 自动生成的密钥 · api 可写（它是写方），web / daemon 只读挂同一个卷
+      - hunter_secrets:/opt/hunter-secrets
+      - hunter_experiments:/var/lib/hunter/experiments
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS --max-time 3 http://127.0.0.1:8000/api/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 40s
+
+  # ── daemon · AtomCode 5.1.0 对话内核（会话正文在卷里）─────────
+  daemon:
+    image: ghcr.io/agentpit-io/hunter-community-daemon:3.0.0
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+      llm-shim:
+        condition: service_healthy
+    environment:
+      HCA_DAEMON_PORT: "13456"
+      HCA_DAEMON_INTERNAL_PORT: "13457"
+      HCA_DAEMON_SERVICE_NAME: daemon
+      HCA_WORKSPACE: /workspace
+      ATOMCODE_HOME: /data/atomcode
+      HCA_WORKSPACE_REFRESH: "1"
+      HCA_CONFIG_REFRESH: "1"
+      HCA_HOOKD: "1"
+      HCA_HOOKD_PORT: "13458"
+      ATOMCODE_VERIFY: "off"
+      ATOMCODE_TODO: "0"
+      ATOMCODE_SUBAGENT: "0"
+      ATOMCODE_MEMORY_TOOL: "0"
+      ATOMCODE_REQUEST_USER_INPUT: "0"
+      ATOMCODE_TURN_MAX_ROUNDS: "30"
+      ATOMCODE_AI_SESSION_NAMING: "0"
+      HCA_LLM_BASE_URL: http://llm-shim:3999/v1
+      HCA_LLM_MODEL: hunter-chat
+      HCA_LLM_PROVIDER_NAME: hunter
+      HCA_LLM_CONTEXT_WINDOW: "1000000"
+      HCA_LLM_SYSTEM_PROMPT_FILE: /opt/hca/personas/hunter-research.md
+      HERMES_API_URL: http://api:8000
+      FIN_WORKER_URL: http://fin-worker:8300
+      # 与 api / web / paper / fin-worker 同值
+      HUNTER_INTERNAL_KEY: ${SERVICE_PASSWORD_INTERNKEY}
+      AKSHARE_MAX_ROWS: "50"
+      AKSHARE_MAX_BYTES: "15000"
+      HCA_MCP_MAX_BYTES: "15000"
+      HCA_LANG_HOOK: "1"
+      HCA_CTX_CAPABILITIES: "1"
+    volumes:
+      # ⚠️ 会话正文（/data/atomcode）与工作区资产（/workspace）必须落在持久化卷上。
+      - hunter_workspace:/workspace
+      - hunter_atomcode_home:/data
+      - hunter_daemon_token:/run/hca
+      - hunter_secrets:/opt/hunter-secrets:ro
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS --max-time 3 http://127.0.0.1:13456/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  # ── llm-shim · tool schema 清洗与 ToolCallIndexer 层 ──────────
+  llm-shim:
+    image: ghcr.io/agentpit-io/hunter-community-llm-shim:3.0.0
+    restart: unless-stopped
+    environment:
+      LLM_FIX_TOOL_INDEX: "1"
+      LLM_STRIP_THINK: "1"
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request as u;u.urlopen('http://127.0.0.1:3999/health',timeout=3)\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  # ── postgres ────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: hunter
+      POSTGRES_PASSWORD: ${SERVICE_PASSWORD_PGPASS}
+      POSTGRES_DB: hunter
+    volumes:
+      - hunter_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hunter"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── redis ───────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - hunter_redis:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── fin-init · 一次性 provision 账本库运行期角色 ─────────────────
+  fin-init:
+    image: postgres:16-alpine
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: hunter
+      PGDATABASE: hunter
+      PGPASSWORD: ${SERVICE_PASSWORD_PGPASS}
+      FIN_PAPER_PASSWORD: ${SERVICE_PASSWORD_FINPAPER}
+    command:
+      - /bin/sh
+      - -c
+      - |
+        until psql -tAc "SELECT rolname FROM pg_roles" 2>/dev/null | grep -qx fin_paper_rw; do
+          echo '[fin-init] 等待 api 迁移创建 fin_paper_rw …'; sleep 3
+        done
+        until printf "ALTER ROLE fin_paper_rw WITH LOGIN PASSWORD :'pw';\n" | psql -v ON_ERROR_STOP=1 -v pw="$FIN_PAPER_PASSWORD" >/dev/null 2>&1; do
+          echo '[fin-init] 设置 fin_paper_rw 口令失败，重试…'; sleep 3
+        done
+        echo '[fin-init] fin_paper_rw 运行期口令已就绪'
+
+  # ── paper · 唯一账本服务（只追加）─────────────────────────────────
+  paper:
+    image: ghcr.io/agentpit-io/hunter-community-paper:3.0.0
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      fin-init:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://fin_paper_rw:${SERVICE_PASSWORD_FINPAPER}@postgres:5432/hunter
+      PAPER_MODE: PAPER
+      HUNTER_INTERNAL_KEY: ${SERVICE_PASSWORD_INTERNKEY}
+      PAPER_QUOTE_URL: http://api:8000
+      PAPER_SNAPSHOT_STALE_SECONDS: "900"
+
+  # ── temporal · 智能交易链唯一的上层调度权威 ─────────────────────
+  temporal:
+    image: temporalio/auto-setup:1.25
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_USER: hunter
+      POSTGRES_PWD: ${SERVICE_PASSWORD_PGPASS}
+      POSTGRES_SEEDS: postgres
+      DBNAME: temporal
+      VISIBILITY_DBNAME: temporal_visibility
+    healthcheck:
+      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "temporal:7233"]
+      interval: 10s
+      timeout: 5s
+      start_period: 40s
+      retries: 12
+
+  # ── temporal-ui · 排障面板（仅内网，不对外）──────────────────────
+  temporal-ui:
+    image: temporalio/ui:2.34.0
+    restart: unless-stopped
+    depends_on:
+      temporal:
+        condition: service_started
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:8233
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
+  # ── fin-worker · 推理区 → 执行区的桥（不直连账本）────────────────
+  fin-worker:
+    image: ghcr.io/agentpit-io/hunter-community-fin-worker:3.0.0
+    restart: unless-stopped
+    depends_on:
+      paper:
+        condition: service_started
+      temporal:
+        condition: service_started
+    environment:
+      PAPER_BASE_URL: http://paper:8000
+      API_BASE_URL: http://api:8000
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: default
+      TEMPORAL_TASK_QUEUE: fin-trading
+      HUNTER_INTERNAL_KEY: ${SERVICE_PASSWORD_INTERNKEY}
+      FIN_WORKER_HTTP_PORT: "8300"
+      FIN_SAMPLE_CODE: "601398"
+      FIN_SAMPLE_STRATEGY_KEY: sample-fixed
+      FIN_SAMPLE_STRATEGY_VERSION: "1.0"
+      FIN_INTENT_TTL_SECONDS: "1800"
+      FIN_SCHEDULES_ENABLED: "1"
+
+volumes:
+  hunter_pg:
+  hunter_redis:
+  hunter_workspace:
+  hunter_atomcode_home:
+  hunter_daemon_token:
+  hunter_user_skills:
+  hunter_packages:
+  hunter_secrets:
+  hunter_experiments:

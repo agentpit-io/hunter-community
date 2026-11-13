@@ -1,0 +1,37 @@
+# 应用元信息 · 1Panel 应用商店
+# 格式依据:1Panel-dev/1Panel-appstore-skills · references/appstore-format.md
+# 参照的现有应用:apps/docmost、apps/twenty、apps/sub2api(2026-09-18 查阅)
+name: HunterCode
+tags:
+  - AI
+title: 自部署 AI 投研助手 · A股/港股/美股
+description: 自部署 AI 投研助手 · A股/港股/美股 · 数据与对话都在你自己的服务器上
+additionalProperties:
+  key: hunter-community
+  name: HunterCode
+  tags:
+    - AI
+  shortDescZh: 自部署 AI 投研助手 · A股/港股/美股
+  shortDescEn: Self-hosted AI investment research assistant for A-share, HK and US markets
+  description:
+    en: Self-hosted AI investment research assistant for A-share, HK and US markets; data and conversations stay on your own server
+    es-es: Asistente de investigacion de inversiones con IA autoalojado para los mercados de China continental, Hong Kong y EE. UU.
+    fa: 'دستیار پژوهش سرمایه‌گذاری مبتنی بر هوش مصنوعی و خودمیزبان برای بازارهای چین، هنگ‌کنگ و آمریکا'
+    ja: A株・香港株・米国株に対応したセルフホスト型 AI 投資リサーチアシスタント
+    ms: Pembantu penyelidikan pelaburan AI hos kendiri untuk pasaran A-share, Hong Kong dan AS
+    pt-br: Assistente de pesquisa de investimentos com IA auto-hospedado para os mercados da China continental, Hong Kong e EUA
+    ru: Самостоятельно размещаемый ИИ-ассистент для инвестиционных исследований по рынкам Китая, Гонконга и США
+    ko: A주, 홍콩, 미국 시장을 위한 셀프 호스팅 AI 투자 리서치 어시스턴트
+    zh-Hant: 自部署 AI 投研助理 · A股/港股/美股 · 資料與對話都在你自己的伺服器上
+    zh: 自部署 AI 投研助手 · A股/港股/美股 · 数据与对话都在你自己的服务器上
+    tr: A-hisseleri, Hong Kong ve ABD piyasalari icin kendi sunucunuzda calisan yapay zeka destekli yatirim arastirma asistani
+  type: website
+  crossVersionUpdate: true
+  limit: 0
+  recommend: 0
+  website: https://hunter.agentpit.io
+  github: https://github.com/agentpit-io/hunter-community
+  document: https://github.com/agentpit-io/hunter-community#readme
+  architectures:
+    - amd64
+    - arm64

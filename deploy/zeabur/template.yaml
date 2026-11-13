@@ -1,0 +1,582 @@
+# yaml-language-server: $schema=https://schema.zeabur.app/template.json
+#
+# HunterCode 社区版 (AtomCode Unified v3.0.0) · Zeabur 一键部署模板
+# ════════════════════════════════════════════════════════════════════════
+# 部署完成后打开绑定的域名，按首启向导（五步）配置大模型即可对话。
+# 初始化口令 HUNTER_SETUP_TOKEN 由模板随机生成，在 api 服务的「变量」里查看。
+#
+# ⚠️ 两条和本地 docker-compose.yml 不一样的地方，改动原因见 deploy/zeabur/README.md：
+#   1. 本地靠 hunter_secrets **共享卷** 让 api / web / daemon 拿到同一把
+#      JWT_SECRET 与 HUNTER_INTERNAL_KEY。**Zeabur 不支持跨服务共享卷**，
+#      所以这里改成由模板生成后经 expose 变量注入 —— 三个服务必须拿到同一个值。
+#   2. `${PASSWORD}` 是 **每个服务一个** 随机值，我们要五把互不相同的密钥，所以把它们
+#      「借位」定义在五个不同的服务上再 expose 出去：
+#          postgres  → POSTGRES_PASSWORD
+#          redis     → HUNTER_SETUP_TOKEN
+#          llm-shim  → JWT_SECRET
+#          api       → HUNTER_INTERNAL_KEY
+#          daemon    → FIN_PAPER_PASSWORD（智能交易账本库运行期角色口令）
+apiVersion: zeabur.com/v1
+kind: Template
+metadata:
+  name: HunterCode
+spec:
+  description: 自部署的 AI 投研助手 · A股/港股/美股 · AtomCode 5.1.0 对话内核 · 数据、对话和大模型 key 都留在你自己的实例上
+  icon: https://raw.githubusercontent.com/agentpit-io/hunter-community/main/deploy/zeabur/logo.png
+  coverImage: https://raw.githubusercontent.com/agentpit-io/hunter-community/main/deploy/zeabur/cover.webp
+  tags:
+    - AI
+    - Finance
+    - Tool
+  resourceRequirement:
+    minConfig:
+      cpu: 2
+      ram: 3
+    recommendedConfig:
+      cpu: 2
+      ram: 6
+  readme: |
+    ## HunterCode 社区版 (AtomCode v3.0.0)
+
+    自部署的 AI 投研助手：A 股 / 港股 / 美股行情、魔法筛选器、深度分析、
+    投资组合与自选股跟踪，基于 **AtomCode 5.1.0 Fork 提速底座**，全部跑在你自己的实例上。
+
+    还带一套**智能交易（模拟盘）**：`temporal` 是交易链唯一的上层调度权威，
+    `paper` 持有**只追加**的模拟账本（唯一能写账本的服务），`fin-worker` 把策略
+    意图经 paper 的 HTTP 落成成交 —— 它自己不碰账本。全部是模拟盘，不接实盘。
+
+    ### 部署之后做什么
+
+    1. 打开你绑定的域名，会自动进入**首启向导**。
+    2. 第 0 步要求输入**初始化口令** —— 打开 Zeabur 控制台里的 `api` 服务 →
+       「变量」→ 复制 `HUNTER_SETUP_TOKEN` 的值。
+    3. 第 1～5 步：选大模型厂商 → 填你自己的 API key → **当场跑连通/对话/工具调用
+       三项测试** → 选数据供给 → 完成。配置写进数据库并热生效，**不需要重启容器**。
+    4. 之后就能直接对话了。
+
+    ### 数据放在哪
+
+    | 内容 | 位置 |
+    |---|---|
+    | 业务数据（自选股、组合、研究台、配置、大模型 key 密文） | `postgres` 服务的卷 |
+    | 模拟账本与成交（`fin_*` 表） | `postgres` 服务的卷（与应用库同库） |
+    | 对话正文与会话 | `daemon` 服务的卷 `/data` |
+    | 你装的 SKILL、导入的数据包 | `api` 服务的两个卷 |
+
+    ### 升级
+
+    把六个 `ghcr.io/agentpit-io/hunter-community-*` 镜像的标签一起换成新版本再
+    重新部署即可（api / web / daemon / llm-shim / paper / fin-worker）。
+  variables:
+    - key: PUBLIC_DOMAIN
+      type: DOMAIN
+      name: 访问域名
+      description: 绑定一个域名来打开 HunterCode。部署完成后打开它，按首启向导配置大模型。
+
+  services:
+    # ── postgres · 业务数据 ────────────────────────────────────────────
+    - name: postgres
+      icon: https://raw.githubusercontent.com/zeabur/service-icons/main/marketplace/postgresql.svg
+      template: PREBUILT_V2
+      spec:
+        source:
+          image: postgres:16-alpine
+        ports:
+          - id: database
+            port: 5432
+            type: TCP
+        portForwarding:
+          enabled: false
+        healthCheck:
+          type: TCP
+          port: database
+        volumes:
+          - id: pgdata
+            dir: /var/lib/postgresql/data
+        env:
+          POSTGRES_USER:
+            default: hunter
+            expose: true
+          POSTGRES_PASSWORD:
+            default: ${PASSWORD}
+            expose: true
+          POSTGRES_DB:
+            default: hunter
+            expose: true
+          POSTGRES_HOST:
+            default: ${CONTAINER_HOSTNAME}
+            expose: true
+          POSTGRES_PORT:
+            default: ${DATABASE_PORT}
+            expose: true
+
+    # ── redis · 缓存 / 限流 ────────────────────────────────────────────
+    - name: redis
+      icon: https://raw.githubusercontent.com/zeabur/service-icons/main/marketplace/redis.svg
+      template: PREBUILT_V2
+      spec:
+        source:
+          image: redis:7-alpine
+        ports:
+          - id: database
+            port: 6379
+            type: TCP
+        portForwarding:
+          enabled: false
+        healthCheck:
+          type: TCP
+          port: database
+        volumes:
+          - id: redisdata
+            dir: /data
+        env:
+          REDIS_HOST:
+            default: ${CONTAINER_HOSTNAME}
+            expose: true
+          REDIS_PORT:
+            default: ${DATABASE_PORT}
+            expose: true
+          HUNTER_SETUP_TOKEN:
+            default: ${PASSWORD}
+            expose: true
+
+    # ── llm-shim · 洗 tool schema 与 ToolCallIndexer 的转发层 ──────────
+    - name: llm-shim
+      icon: https://raw.githubusercontent.com/agentpit-io/hunter-community/main/deploy/zeabur/logo.png
+      template: PREBUILT_V2
+      spec:
+        source:
+          image: ghcr.io/agentpit-io/hunter-community-llm-shim:3.0.0
+        ports:
+          - id: http
+            port: 3999
+            type: TCP
+        portForwarding:
+          enabled: false
+        healthCheck:
+          type: HTTP
+          port: http
+          http:
+            path: /health
+        env:
+          SHIM_HOST:
+            default: ${CONTAINER_HOSTNAME}
+            expose: true
+          SHIM_PORT:
+            default: ${HTTP_PORT}
+            expose: true
+          JWT_SECRET:
+            default: ${PASSWORD}
+            expose: true
+          LLM_FIX_TOOL_INDEX:
+            default: "1"
+          LLM_STRIP_THINK:
+            default: "1"
+          LLM_BASE_URL:
+            default: ""
+
+    # ── api · 后端 + 迁移 + 首启向导 ───────────────────────────────────
+    - name: api
+      icon: https://raw.githubusercontent.com/agentpit-io/hunter-community/main/deploy/zeabur/logo.png
+      template: PREBUILT_V2
+      dependencies:
+        - postgres
+        - redis
+        - llm-shim
+      spec:
+        source:
+          image: ghcr.io/agentpit-io/hunter-community-api:3.0.0
+        ports:
+          - id: http
+            port: 8000
+            type: TCP
+        portForwarding:
+          enabled: false
+        volumes:
+          - id: userskills
+            dir: /opt/hunter-user-skills
+          - id: packages
+            dir: /opt/hunter-packages
+        healthCheck:
+          type: HTTP
+          port: http
+          http:
+            path: /api/health
+        env:
+          API_HOST:
+            default: ${CONTAINER_HOSTNAME}
+            expose: true
+          API_PORT:
+            default: ${HTTP_PORT}
+            expose: true
+          HUNTER_INTERNAL_KEY:
+            default: ${PASSWORD}
+            expose: true
+          JWT_SECRET:
+            default: ${JWT_SECRET}
+          HUNTER_SETUP_TOKEN:
+            default: ${HUNTER_SETUP_TOKEN}
+          DATABASE_URL:
+            default: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+          REDIS_URL:
+            default: redis://${REDIS_HOST}:${REDIS_PORT}/0
+          HUNTER_SINGLE_USER:
+            default: "0"
+          REGISTRATION_MODE:
+            default: open
+          HUNTER_MINIMAL_BOOT:
+            default: "1"
+          JWT_ACCESS_TTL:
+            default: "3600"
+          JWT_REFRESH_TTL:
+            default: "2592000"
+          HUNTER_UPSTREAM_URL:
+            default: ""
+          LLM_PROVIDER:
+            default: openai_compat
+          HUNTER_SKILLS_DIR:
+            default: /opt/hunter-skills
+          HUNTER_USER_SKILLS_DIR:
+            default: /opt/hunter-user-skills
+          LLM_SHIM_URL:
+            default: http://${SHIM_HOST}:${SHIM_PORT}/v1
+          AGENT_BACKEND:
+            default: atomcode
+          ATOMCODE_DAEMON_URL:
+            default: http://daemon.zeabur.internal:13456
+          OPENCODE_URL:
+            default: http://daemon.zeabur.internal:13456
+          HUNTER_API_KEY:
+            default: ""
+        instructions:
+          - title: 首启向导的初始化口令（第 0 步要填）
+            content: ${HUNTER_SETUP_TOKEN}
+
+    # ── daemon · AtomCode 5.1.0 对话内核（会话正文在卷里）────────────
+    - name: daemon
+      icon: https://raw.githubusercontent.com/agentpit-io/hunter-community/main/deploy/zeabur/logo.png
+      template: PREBUILT_V2
+      dependencies:
+        - api
+        - llm-shim
+      spec:
+        source:
+          image: ghcr.io/agentpit-io/hunter-community-daemon:3.0.0
+        ports:
+          - id: http
+            port: 13456
+            type: TCP
+        portForwarding:
+          enabled: false
+        healthCheck:
+          type: HTTP
+          port: http
+          http:
+            path: /health
+        volumes:
+          - id: sessions
+            dir: /data
+        init:
+          - id: fix-owner
+            image: busybox:1.36
+            command:
+              - /bin/sh
+              - -c
+              - mkdir -p /mnt/sessions/atomcode /mnt/sessions/workspace && chown -R 10001:10001 /mnt/sessions
+            volumes:
+              - id: sessions
+                mountPath: /mnt/sessions
+        env:
+          DAEMON_HOST:
+            default: ${CONTAINER_HOSTNAME}
+            expose: true
+          DAEMON_PORT:
+            default: ${HTTP_PORT}
+            expose: true
+          HCA_DAEMON_PORT:
+            default: "13456"
+          HCA_DAEMON_INTERNAL_PORT:
+            default: "13457"
+          HCA_DAEMON_SERVICE_NAME:
+            default: daemon
+          HCA_WORKSPACE:
+            default: /data/workspace
+          ATOMCODE_HOME:
+            default: /data/atomcode
+          HCA_WORKSPACE_REFRESH:
+            default: "1"
+          HCA_CONFIG_REFRESH:
+            default: "1"
+          HCA_HOOKD:
+            default: "1"
+          HCA_HOOKD_PORT:
+            default: "13458"
+          ATOMCODE_VERIFY:
+            default: "off"
+          ATOMCODE_TODO:
+            default: "0"
+          ATOMCODE_SUBAGENT:
+            default: "0"
+          ATOMCODE_MEMORY_TOOL:
+            default: "0"
+          ATOMCODE_REQUEST_USER_INPUT:
+            default: "0"
+          ATOMCODE_TURN_MAX_ROUNDS:
+            default: "30"
+          ATOMCODE_AI_SESSION_NAMING:
+            default: "0"
+          JWT_SECRET:
+            default: ${JWT_SECRET}
+          HUNTER_INTERNAL_KEY:
+            default: ${HUNTER_INTERNAL_KEY}
+          HERMES_API_URL:
+            default: http://${API_HOST}:${API_PORT}
+          HCA_LLM_BASE_URL:
+            default: http://${SHIM_HOST}:${SHIM_PORT}/v1
+          LLM_SHIM_URL:
+            default: http://${SHIM_HOST}:${SHIM_PORT}/v1
+          HCA_LLM_MODEL:
+            default: hunter-chat
+          HCA_LLM_PROVIDER_NAME:
+            default: hunter
+          HCA_LLM_CONTEXT_WINDOW:
+            default: "1000000"
+          HCA_LLM_SYSTEM_PROMPT_FILE:
+            default: /opt/hca/personas/hunter-research.md
+          AKSHARE_MAX_ROWS:
+            default: "50"
+          AKSHARE_MAX_BYTES:
+            default: "15000"
+          HCA_MCP_MAX_BYTES:
+            default: "15000"
+          HCA_LANG_HOOK:
+            default: "1"
+          HCA_CTX_CAPABILITIES:
+            default: "1"
+          FIN_PAPER_PASSWORD:
+            default: ${PASSWORD}
+            expose: true
+
+    # ── web · 前端 + BFF（唯一对外的服务）──────────────────────────────
+    - name: web
+      icon: https://raw.githubusercontent.com/agentpit-io/hunter-community/main/deploy/zeabur/logo.png
+      template: PREBUILT_V2
+      domainKey: PUBLIC_DOMAIN
+      dependencies:
+        - api
+        - daemon
+      spec:
+        source:
+          image: ghcr.io/agentpit-io/hunter-community-web:3.0.0
+        ports:
+          - id: web
+            port: 3000
+            type: HTTP
+        healthCheck:
+          type: HTTP
+          port: web
+          http:
+            path: /
+        env:
+          NODE_ENV:
+            default: production
+          AGENT_BACKEND:
+            default: atomcode
+          HERMES_API_URL:
+            default: http://${API_HOST}:${API_PORT}
+          ATOMCODE_DAEMON_URL:
+            default: http://${DAEMON_HOST}:${DAEMON_PORT}
+          OPENCODE_URL:
+            default: http://${DAEMON_HOST}:${DAEMON_PORT}
+          HUNTER_INTERNAL_KEY:
+            default: ${HUNTER_INTERNAL_KEY}
+        instructions:
+          - title: 打开 HunterCode
+            content: ${ZEABUR_WEB_URL}
+
+    # ── paper · 唯一账本服务（只追加）──────────────────────────────────
+    - name: paper
+      icon: https://raw.githubusercontent.com/agentpit-io/hunter-community/main/deploy/zeabur/logo.png
+      template: PREBUILT_V2
+      dependencies:
+        - postgres
+        - api
+        - daemon
+      spec:
+        source:
+          image: ghcr.io/agentpit-io/hunter-community-paper:3.0.0
+        ports:
+          - id: http
+            port: 8000
+            type: TCP
+        portForwarding:
+          enabled: false
+        healthCheck:
+          type: HTTP
+          port: http
+          http:
+            path: /healthz
+        init:
+          - id: provision-role
+            image: postgres:16-alpine
+            command:
+              - /bin/sh
+              - -c
+              - |
+                export PGHOST="${POSTGRES_HOST}"; export PGPORT="${POSTGRES_PORT}"
+                export PGUSER="${POSTGRES_USER}"; export PGPASSWORD="${POSTGRES_PASSWORD}"
+                export PGDATABASE="${POSTGRES_DB}"
+                until psql -tAc "SELECT rolname FROM pg_roles" 2>/dev/null | grep -qx fin_paper_rw; do
+                  echo '[fin-init] 等待 api 迁移创建 fin_paper_rw …'; sleep 3
+                done
+                until printf "ALTER ROLE fin_paper_rw WITH LOGIN PASSWORD :'pw';\n" | psql -v ON_ERROR_STOP=1 -v pw="${FIN_PAPER_PASSWORD}" >/dev/null 2>&1; do
+                  echo '[fin-init] 设置 fin_paper_rw 口令失败，重试…'; sleep 3
+                done
+                echo '[fin-init] fin_paper_rw 运行期口令已就绪'
+        env:
+          PAPER_HOST:
+            default: ${CONTAINER_HOSTNAME}
+            expose: true
+          PAPER_PORT:
+            default: ${HTTP_PORT}
+            expose: true
+          DATABASE_URL:
+            default: postgresql://fin_paper_rw:${FIN_PAPER_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
+          PAPER_MODE:
+            default: PAPER
+          HUNTER_INTERNAL_KEY:
+            default: ${HUNTER_INTERNAL_KEY}
+          PAPER_QUOTE_URL:
+            default: http://${API_HOST}:${API_PORT}
+          PAPER_SNAPSHOT_STALE_SECONDS:
+            default: "900"
+
+    # ── temporal · 智能交易链唯一的上层调度权威 ────────────────────────
+    - name: temporal
+      template: PREBUILT_V2
+      dependencies:
+        - postgres
+      spec:
+        source:
+          image: temporalio/auto-setup:1.25
+        ports:
+          - id: grpc
+            port: 7233
+            type: TCP
+        portForwarding:
+          enabled: false
+        healthCheck:
+          type: TCP
+          port: grpc
+        env:
+          TEMPORAL_HOST:
+            default: ${CONTAINER_HOSTNAME}
+            expose: true
+          TEMPORAL_PORT:
+            default: ${GRPC_PORT}
+            expose: true
+          DB:
+            default: postgres12
+          DB_PORT:
+            default: "5432"
+          POSTGRES_USER:
+            default: ${POSTGRES_USER}
+          POSTGRES_PWD:
+            default: ${POSTGRES_PASSWORD}
+          POSTGRES_SEEDS:
+            default: ${POSTGRES_HOST}
+          DBNAME:
+            default: temporal
+          VISIBILITY_DBNAME:
+            default: temporal_visibility
+
+    # ── temporal-ui · 排障面板（仅内网，不对外）────────────────────────
+    - name: temporal-ui
+      template: PREBUILT_V2
+      dependencies:
+        - temporal
+      spec:
+        source:
+          image: temporalio/ui:2.34.0
+        ports:
+          - id: http
+            port: 8080
+            type: TCP
+        portForwarding:
+          enabled: false
+        healthCheck:
+          type: HTTP
+          port: http
+          http:
+            path: /
+        env:
+          TEMPORAL_ADDRESS:
+            default: ${TEMPORAL_HOST}:${TEMPORAL_PORT}
+          TEMPORAL_CORS_ORIGINS:
+            default: http://localhost:8233
+
+    # ── fin-worker · 推理区 → 执行区的桥（不直连账本）──────────────────
+    - name: fin-worker
+      icon: https://raw.githubusercontent.com/agentpit-io/hunter-community/main/deploy/zeabur/logo.png
+      template: PREBUILT_V2
+      dependencies:
+        - paper
+        - api
+        - temporal
+      spec:
+        source:
+          image: ghcr.io/agentpit-io/hunter-community-fin-worker:3.0.0
+        ports:
+          - id: http
+            port: 8300
+            type: TCP
+        portForwarding:
+          enabled: false
+        healthCheck:
+          type: TCP
+          port: http
+        env:
+          FIN_WORKER_HOST:
+            default: ${CONTAINER_HOSTNAME}
+            expose: true
+          FIN_WORKER_PORT:
+            default: ${HTTP_PORT}
+            expose: true
+          PAPER_BASE_URL:
+            default: http://${PAPER_HOST}:${PAPER_PORT}
+          API_BASE_URL:
+            default: http://${API_HOST}:${API_PORT}
+          TEMPORAL_ADDRESS:
+            default: ${TEMPORAL_HOST}:${TEMPORAL_PORT}
+          TEMPORAL_NAMESPACE:
+            default: default
+          TEMPORAL_TASK_QUEUE:
+            default: fin-trading
+          HUNTER_INTERNAL_KEY:
+            default: ${HUNTER_INTERNAL_KEY}
+          FIN_WORKER_HTTP_PORT:
+            default: "8300"
+          FIN_SAMPLE_CODE:
+            default: "601398"
+          FIN_SAMPLE_STRATEGY_KEY:
+            default: sample-fixed
+          FIN_SAMPLE_STRATEGY_VERSION:
+            default: "1.0"
+          FIN_INTENT_TTL_SECONDS:
+            default: "1800"
+          FIN_SCHEDULES_ENABLED:
+            default: "1"
+
+localization:
+  zh-CN:
+    description: 自部署的 AI 投研助手 · A股/港股/美股 · AtomCode 5.1.0 对话内核 · 数据、对话和大模型 key 都留在你自己的实例上
+    variables:
+      - key: PUBLIC_DOMAIN
+        name: 访问域名
+        description: 绑定一个域名来打开 HunterCode。部署完成后打开它，按首启向导配置大模型。
+  zh-TW:
+    description: 自部署的 AI 投研助手 · A股/港股/美股 · AtomCode 5.1.0 對話核心 · 資料、對話和大模型 key 都留在你自己的執行個體上
+    variables:
+      - key: PUBLIC_DOMAIN
+        name: 存取網域
+        description: 綁定一個網域來開啟 HunterCode。部署完成後開啟它，依首啟精靈設定大模型。

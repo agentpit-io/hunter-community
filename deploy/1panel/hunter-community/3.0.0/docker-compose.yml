@@ -1,0 +1,344 @@
+# Hunter Community Edition (AtomCode Unified v3.0.0) · 1Panel 应用商店编排
+#
+# 事实来源是仓库根目录的 docker-compose.yml(各个服务的镜像、环境变量、卷、
+# 依赖关系、健康检查全部以它为准)。这里只做「面板 / 公网场景」必须做的改动。
+#
+# ⚠️ 这个文件里**不要写 build:**,也**不要挂任何仓库内文件** —— 面板机器上
+#    没有 hunter-community 的源码目录,挂载会让容器起不来;有 build: 则会让
+#    面板在本地编译 Next.js(十几分钟甚至超时)。
+#
+# ⚠️ 服务间互相访问一律用 `${CONTAINER_NAME}-<服务>`,**不要用裸服务名**。
+#    1panel-network 是全面板共用的一张外部网络,compose 会把 `api`、`web`、
+#    `postgres`、`redis` 这类服务名当作网络别名注册上去 —— 面板里只要再装一个
+#    同样有 `api` 服务的应用,DNS 就会在两者之间随机解析,表现是「时好时坏的
+#    502 / 连错数据库」,而且完全查不出规律。容器名带上 ${CONTAINER_NAME}
+#    前缀(1Panel 保证同面板唯一)才不会撞。
+#
+# ⚠️ **web 必须排在第一个服务**。appstore 仓库的 Renovate 工作流
+#    (.github/workflows/renovate-app-version.sh)升级时取 `.services | keys | .[0]`
+#    的镜像标签,**拿它去重命名版本目录**。postgres 排第一的话,某次自动升级会把
+#    目录改成 `16-alpine`,整个应用的版本号就毁了。
+#
+# ── 智能交易(fin 链)· paper / temporal / temporal-ui / fin-worker / fin-init ──
+# 与仓库根 docker-compose.yml 的 `fin` profile 等价,面板场景默认常开:
+#   · temporal     智能交易链**唯一的上层调度权威**(六个交易时点 + 拉 K 线),
+#                  工作流状态存在 postgres 的 temporal 库,不碰业务账本。
+#   · paper        全栈唯一持有账本库运行期角色 fin_paper_rw 的服务;账本**只追加** ——
+#                  该角色在追加表上没有任何 UPDATE / DELETE,「唯一账本」是一条 GRANT。
+#   · fin-worker   推理区 → 执行区的桥,**不直连账本**,写账本只有 paper 的 HTTP 一个入口。
+#   · temporal-ui  排障面板,仅内网。
+#   · fin-init     一次性服务:等 api 迁移建出 fin_paper_rw 后给它设运行期口令,
+#                  paper 等它跑完才起(没有任何平台需要人工 provision)。
+
+services:
+  # ── 前端 · 本应用唯一对外暴露的服务 ──────────────────────────
+  # 它是主服务,所以用裸 ${CONTAINER_NAME};面板的「访问」按钮指向这里。
+  web:
+    image: ghcr.io/agentpit-io/hunter-community-web:3.0.0
+    container_name: ${CONTAINER_NAME}
+    restart: always
+    depends_on:
+      - api
+      - daemon
+    environment:
+      NODE_ENV: production
+      AGENT_BACKEND: atomcode
+      ATOMCODE_DAEMON_URL: http://${CONTAINER_NAME}-daemon:13456
+      ATOMCODE_TOKEN_FILE: /run/hca/daemon-token
+      ATOMCODE_WORKSPACE: /workspace
+      # BFF 要回调 api 查会话归属;不传会 503 ownership_unavailable
+      HERMES_API_URL: http://${CONTAINER_NAME}-api:8000
+      # 与 api / daemon / paper / fin-worker 同值(BFF 调 /api/internal/* 要用)
+      HUNTER_INTERNAL_KEY: ${HUNTER_INTERNAL_KEY}
+    group_add:
+      - "10001"
+    volumes:
+      - ./data/token:/run/hca:ro
+      - ./data/secrets:/opt/hunter-secrets:ro
+    ports:
+      - ${PANEL_APP_PORT_HTTP}:3000
+    networks:
+      - 1panel-network
+    labels:
+      createdBy: "Apps"
+
+  # ── API · 不对外映射端口 ──────────────────────────────────────
+  api:
+    image: ghcr.io/agentpit-io/hunter-community-api:3.0.0
+    container_name: ${CONTAINER_NAME}-api
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      HUNTER_MINIMAL_BOOT: "1"
+      DATABASE_URL: postgresql://hunter:${POSTGRES_PASSWORD}@${CONTAINER_NAME}-postgres:5432/hunter
+      REDIS_URL: redis://${CONTAINER_NAME}-redis:6379/0
+      HUNTER_INTERNAL_KEY: ${HUNTER_INTERNAL_KEY}
+      JWT_ACCESS_TTL: "3600"
+      JWT_REFRESH_TTL: "2592000"
+      HUNTER_SETUP_TOKEN: ${HUNTER_SETUP_TOKEN}
+      HUNTER_SINGLE_USER: "0"
+      REGISTRATION_MODE: ${REGISTRATION_MODE}
+      HUNTER_ADMIN_EMAILS: ${HUNTER_ADMIN_EMAILS}
+      HUNTER_API_KEY: ${HUNTER_API_KEY}
+      LLM_PROVIDER: openai_compat
+      HUNTER_SKILLS_DIR: /opt/hunter-skills
+      HUNTER_USER_SKILLS_DIR: /opt/hunter-user-skills
+      AGENT_BACKEND: atomcode
+      ATOMCODE_DAEMON_URL: http://${CONTAINER_NAME}-daemon:13456
+      ATOMCODE_TOKEN_FILE: /run/hca/daemon-token
+      LLM_SHIM_URL: http://${CONTAINER_NAME}-llm-shim:3999/v1
+      PAPER_BASE_URL: http://${CONTAINER_NAME}-paper:8000
+      FIN_WORKER_URL: http://${CONTAINER_NAME}-fin-worker:8300
+    group_add:
+      - "10001"
+    volumes:
+      - ./data/token:/run/hca:ro
+      - ./data/user-skills:/opt/hunter-user-skills
+      - ./data/packages:/opt/hunter-packages
+      - ./data/secrets:/opt/hunter-secrets
+      - ./data/experiments:/var/lib/hunter/experiments
+    networks:
+      - 1panel-network
+    labels:
+      createdBy: "Apps"
+
+  # ── AtomCode Daemon 对话引擎 · 不对外映射端口 ──────────────────
+  daemon:
+    image: ghcr.io/agentpit-io/hunter-community-daemon:3.0.0
+    container_name: ${CONTAINER_NAME}-daemon
+    restart: always
+    depends_on:
+      api:
+        condition: service_healthy
+      llm-shim:
+        condition: service_healthy
+    environment:
+      HCA_DAEMON_PORT: "13456"
+      HCA_DAEMON_INTERNAL_PORT: "13457"
+      HCA_DAEMON_SERVICE_NAME: ${CONTAINER_NAME}-daemon
+      HCA_WORKSPACE: /workspace
+      ATOMCODE_HOME: /data/atomcode
+      HCA_WORKSPACE_REFRESH: "1"
+      HCA_CONFIG_REFRESH: "1"
+      HCA_HOOKD: "1"
+      HCA_HOOKD_PORT: "13458"
+      ATOMCODE_VERIFY: "off"
+      ATOMCODE_TODO: "0"
+      ATOMCODE_SUBAGENT: "0"
+      ATOMCODE_MEMORY_TOOL: "0"
+      ATOMCODE_REQUEST_USER_INPUT: "0"
+      ATOMCODE_TURN_MAX_ROUNDS: "30"
+      ATOMCODE_AI_SESSION_NAMING: "0"
+      HCA_LLM_BASE_URL: http://${CONTAINER_NAME}-llm-shim:3999/v1
+      HCA_LLM_MODEL: hunter-chat
+      HCA_LLM_PROVIDER_NAME: hunter
+      HCA_LLM_CONTEXT_WINDOW: "1000000"
+      HCA_LLM_SYSTEM_PROMPT_FILE: /opt/hca/personas/hunter-research.md
+      HUNTER_INTERNAL_KEY: ${HUNTER_INTERNAL_KEY}
+      HERMES_API_URL: http://${CONTAINER_NAME}-api:8000
+      FIN_WORKER_URL: http://${CONTAINER_NAME}-fin-worker:8300
+      AKSHARE_MAX_ROWS: "50"
+      AKSHARE_MAX_BYTES: "15000"
+      HCA_MCP_MAX_BYTES: "15000"
+      HCA_LANG_HOOK: "1"
+      HCA_CTX_CAPABILITIES: "1"
+    volumes:
+      - ./data/workspace:/workspace
+      - ./data/atomcode:/data
+      - ./data/token:/run/hca
+      - ./data/secrets:/opt/hunter-secrets:ro
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - 1panel-network
+    labels:
+      createdBy: "Apps"
+
+  # ── LLM schema 清洗与 ToolCallIndexer 层 · 不对外映射端口 ──────
+  llm-shim:
+    image: ghcr.io/agentpit-io/hunter-community-llm-shim:3.0.0
+    container_name: ${CONTAINER_NAME}-llm-shim
+    restart: always
+    environment:
+      LLM_FIX_TOOL_INDEX: "1"
+      LLM_STRIP_THINK: "1"
+    networks:
+      - 1panel-network
+    labels:
+      createdBy: "Apps"
+
+  # ── 数据库 · 不对外映射端口 ───────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: ${CONTAINER_NAME}-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: hunter
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: hunter
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hunter"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - 1panel-network
+    labels:
+      createdBy: "Apps"
+
+  # ── Redis · 不对外映射端口 ────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: ${CONTAINER_NAME}-redis
+    restart: always
+    volumes:
+      - ./data/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - 1panel-network
+    labels:
+      createdBy: "Apps"
+
+  # ── fin-init · 一次性 provision 账本库运行期角色 ────────────────
+  fin-init:
+    image: postgres:16-alpine
+    container_name: ${CONTAINER_NAME}-fin-init
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: ${CONTAINER_NAME}-postgres
+      PGPORT: "5432"
+      PGUSER: hunter
+      PGDATABASE: hunter
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      FIN_PAPER_PASSWORD: ${FIN_PAPER_PASSWORD}
+    command:
+      - /bin/sh
+      - -c
+      - |
+        until psql -tAc "SELECT rolname FROM pg_roles" 2>/dev/null | grep -qx fin_paper_rw; do
+          echo '[fin-init] 等待 api 迁移创建 fin_paper_rw …'; sleep 3
+        done
+        until printf "ALTER ROLE fin_paper_rw WITH LOGIN PASSWORD :'pw';\n" | psql -v ON_ERROR_STOP=1 -v pw="$FIN_PAPER_PASSWORD" >/dev/null 2>&1; do
+          echo '[fin-init] 设置 fin_paper_rw 口令失败，重试…'; sleep 3
+        done
+        echo '[fin-init] fin_paper_rw 运行期口令已就绪'
+    networks:
+      - 1panel-network
+    labels:
+      createdBy: "Apps"
+
+  # ── paper · 唯一账本服务(只追加) ──────────────────────────────
+  paper:
+    image: ghcr.io/agentpit-io/hunter-community-paper:3.0.0
+    container_name: ${CONTAINER_NAME}-paper
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      fin-init:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://fin_paper_rw:${FIN_PAPER_PASSWORD}@${CONTAINER_NAME}-postgres:5432/hunter
+      PAPER_MODE: PAPER
+      HUNTER_INTERNAL_KEY: ${HUNTER_INTERNAL_KEY}
+      PAPER_QUOTE_URL: http://${CONTAINER_NAME}-api:8000
+      PAPER_SNAPSHOT_STALE_SECONDS: "900"
+    networks:
+      - 1panel-network
+    labels:
+      createdBy: "Apps"
+
+  # ── temporal · 智能交易链唯一的上层调度权威 ────────────────────
+  temporal:
+    image: temporalio/auto-setup:1.25
+    container_name: ${CONTAINER_NAME}-temporal
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_USER: hunter
+      POSTGRES_PWD: ${POSTGRES_PASSWORD}
+      POSTGRES_SEEDS: ${CONTAINER_NAME}-postgres
+      DBNAME: temporal
+      VISIBILITY_DBNAME: temporal_visibility
+    healthcheck:
+      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "${CONTAINER_NAME}-temporal:7233"]
+      interval: 10s
+      timeout: 5s
+      start_period: 40s
+      retries: 12
+    networks:
+      - 1panel-network
+    labels:
+      createdBy: "Apps"
+
+  # ── temporal-ui · 排障面板(仅内网,不对外) ─────────────────────
+  temporal-ui:
+    image: temporalio/ui:2.34.0
+    container_name: ${CONTAINER_NAME}-temporal-ui
+    restart: always
+    depends_on:
+      temporal:
+        condition: service_started
+    environment:
+      TEMPORAL_ADDRESS: ${CONTAINER_NAME}-temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:8233
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+    networks:
+      - 1panel-network
+    labels:
+      createdBy: "Apps"
+
+  # ── fin-worker · 推理区 → 执行区的桥(不直连账本) ───────────────
+  fin-worker:
+    image: ghcr.io/agentpit-io/hunter-community-fin-worker:3.0.0
+    container_name: ${CONTAINER_NAME}-fin-worker
+    restart: always
+    depends_on:
+      paper:
+        condition: service_started
+      temporal:
+        condition: service_started
+    environment:
+      PAPER_BASE_URL: http://${CONTAINER_NAME}-paper:8000
+      API_BASE_URL: http://${CONTAINER_NAME}-api:8000
+      TEMPORAL_ADDRESS: ${CONTAINER_NAME}-temporal:7233
+      TEMPORAL_NAMESPACE: default
+      TEMPORAL_TASK_QUEUE: fin-trading
+      HUNTER_INTERNAL_KEY: ${HUNTER_INTERNAL_KEY}
+      FIN_WORKER_HTTP_PORT: "8300"
+      FIN_SAMPLE_CODE: "601398"
+      FIN_SAMPLE_STRATEGY_KEY: sample-fixed
+      FIN_SAMPLE_STRATEGY_VERSION: "1.0"
+      FIN_INTENT_TTL_SECONDS: "1800"
+      FIN_SCHEDULES_ENABLED: "1"
+    networks:
+      - 1panel-network
+    labels:
+      createdBy: "Apps"
+
+networks:
+  1panel-network:
+    external: true

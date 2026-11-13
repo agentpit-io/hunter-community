@@ -1,212 +1,242 @@
-# HunterCode · AtomCode 发行版
+<div align="right">
 
-> **HunterCode 投研终端的 AtomCode 国内发行版** —— 把 HunterCode 的投研技能、行情 MCP 与
-> Web 终端，搭在国产开源对话内核 [AtomCode](https://atomgit.com/atomgit_atomcode/atomcode) 上，
-> 面向私募机构私有化部署与个人桌面：**仓位数据不出硬盘**。
+**🌏 中文(当前) · [English](./README_EN.md)**
 
-[![版本](https://img.shields.io/badge/版本-v0.2.0%20预发布-orange)](https://github.com/agentpit-io/huntercode-atomcode/releases)
-[![底座](https://img.shields.io/badge/AtomCode-v5.1.0-blue)](pins.lock)
-[![许可证](https://img.shields.io/badge/License-Apache--2.0-green)](LICENSE)
+</div>
 
-> **v0.2.0 是预发布版**：功能已经能完整走通（回归清单见
-> [`docs/regression-report.md`](docs/regression-report.md)，连续 4 小时浸泡见
-> [`docs/stability-report.md`](docs/stability-report.md)），但已知缺陷都公开摆在
-> [`docs/开发文档/待办池.md`](docs/开发文档/待办池.md) 里，**上生产前请先读一遍那份清单**。
-> 这一版做了什么：[`docs/发布说明-v0.2.0.md`](docs/发布说明-v0.2.0.md)（性能轮：
-> 工具调用次数已不高于 opencode 版，逐题实测见
-> [`docs/开发文档/I2-性能优化报告.md`](docs/开发文档/I2-性能优化报告.md)）。
-> 和 opencode 版怎么选：[`docs/对比-opencode版.md`](docs/对比-opencode版.md)。
-> 主仓在 [GitCode](https://gitcode.com/agentpit-io/huntercode-atomcode)，
-> [GitHub](https://github.com/agentpit-io/huntercode-atomcode) 为镜像。
+<div align="center">
+
+<img src="./docs/assets/logo.png" alt="HunterCode" width="160" height="160" />
+
+# HunterCode · AtomCode Unified (`v3.0.0`)
+
+### Community & AtomCode Edition
+
+**自部署的 AI 投研助手 · A股 / 港股 / 美股 · AtomCode 5.1.0 提速内核 · 数据和对话都在你自己的机器上**
+
+HunterCode 是腾讯 WorkBuddy 金融版的开源本地替代方案 · 面向私募机构私有化部署与专业个人投资者<br>
+<sub>腾讯、WorkBuddy 是腾讯公司的商标。HunterCode 与腾讯公司无隶属、合作或授权关系。</sub>
+
+[![Version](https://img.shields.io/badge/version-v3.0.0-blue)](https://github.com/agentpit-io/hunter-community/releases)
+[![Kernel](https://img.shields.io/badge/AtomCode-v5.1.0_Fork-0A7E8C)](./pins.lock)
+[![License](https://img.shields.io/badge/license-Apache_2.0-green)](./LICENSE)
+[![CI](https://github.com/agentpit-io/hunter-community/actions/workflows/ci.yml/badge.svg)](https://github.com/agentpit-io/hunter-community/actions/workflows/ci.yml)
+[![Stars](https://img.shields.io/github/stars/agentpit-io/hunter-community?style=social)](https://github.com/agentpit-io/hunter-community/stargazers)
+[![GitCode](https://img.shields.io/badge/GitCode-huntercode--atomcode-C71D23)](https://gitcode.com/agentpit-io/huntercode-atomcode)
+
+<img src="./docs/screenshots/hunter-demo-0919-v2.gif" alt="HunterCode 演示:功能总览 → 选股器扫描 A股/港股/美股 → 小鹿智能体研究台" width="760" />
+
+[**🚀 在线演示**](https://hunter-community.agentpit.io) &nbsp;·&nbsp; [**⚡ 5 分钟部署**](#-5-分钟跑起来) &nbsp;·&nbsp; [**📖 产品说明书**](./doc/产品说明书.md) &nbsp;·&nbsp; [**帮助中心**](https://hunter-community.agentpit.io/help/index.html) &nbsp;·&nbsp; [**运维手册**](./docs/部署与运维.md) &nbsp;·&nbsp; [**💬 讨论区**](https://github.com/agentpit-io/hunter-community/discussions)
+
+🚀 **2026-11-13 里程碑发布 `v3.0.0`：全面统一为 AtomCode 5.1.0 Fork 提速内核 + 智能炒股五期自进化闭环 + 默认 Google Gemini 4 Argon（`gemini-4-argon`）+ 全链路大模型日志诊断！**  
+`hunter-community` 与 `huntercode-atomcode`（GitHub & GitCode）自 `v3.0.0` 起实现**双仓同源同 SHA 统一**（原 OpenCode v2.2 分支归档于 `legacy/opencode-v2.2`）。
+
+🏆 [入围世界人工智能开源大赛(GOAI)总决赛 · 赛道二 TOP 15](https://mp.weixin.qq.com/s/n8olfrqdP0-rkj6mU_N6Hg) · [与 WorkBuddy 金融版逐项对比(附官方来源)](https://www.agentpit.io/compare/workbuddy) · [完整演示视频 3 分钟](https://www.agentpit.io/media/huntercode-demo-0919.mp4)
+
+</div>
+
+> **⚠️ 免责声明**:本项目是投研分析工具,所有输出为 AI 生成内容,仅供研究参考,不构成任何投资建议。投资有风险,决策需谨慎。
 
 ---
 
-## 这是什么
+## 🎉 `v3.0.0` 四大核心升级亮点
 
-[HunterCode 社区版](https://github.com/agentpit-io/hunter-community)（猎鹿人）是一个开源的 AI 投研终端：
-自选股、龙虎榜、深度分析、组合建议、Kronos 预测……底座用的是 opencode。
+1. **全面采用 AtomCode 5.1.0 Fork 提速对话内核（`daemon` 服务彻底替代 `opencode`）**
+   - **国产开源高性能底座**：基于 [AtomCode](https://atomgit.com/atomgit_atomcode/atomcode) v5.1.0 投研定制版（内置 `--system-prompt-file` 领域人设替换与 `--tools-deny` 编码工具裁剪），常驻内存相比旧版 OpenCode 降低 70% 以上，彻底消除多轮工具重复调用。
+   - **5 组领域 Hook 常驻加速（`hookd`）**：`guard`（写路径门禁与 `_hermes_user_id` 身份自动注入）、`context`（每轮注入真实交易日历与盘中时段）、`lang`（中文与合规署名硬约束）、`audit`（全量工具调用落盘 `AUDIT.jsonl`）、`budget`（Token 预算门禁）。
+   - **11 个 MCP Server + 16KB 三档大小闸（`hca_size_guard`）**：涵盖 AKShare、Kronos、TrueSource、UZI、自选股、投资组合、选股器、用户文档检索、运行期控制通道（`runtime_control`）与经验库（`fin_memory`），所有宽表返回自动执行三档降级裁剪，永不撑爆上下文。
+   - **`llm-shim` 智能协议清洗**：内置 `ToolCallIndexer`（自动修复多工具并发流式 `index`）、`<think>` 标签剥离与 100 条环形诊断追踪队列（`GET /trace`）。
+2. **智能炒股一至五期完整闭环（`paper` + `fin-worker` + `temporal`）**
+   - **唯一只追加账本（`paper`）**：由受限数据库角色 `fin_paper_rw`（无 `UPDATE`/`DELETE` 权限）守护，内置 A 股六条确定性风控，绑数据源快照撮合。
+   - **Temporal 六大交易时点调度**：09:15 / 09:30 / 11:30 / 13:00 / 14:55 / 15:30 全自动驱动，崩溃按历史恢复。
+   - **经验库与受控自进化闭环**：盘后复盘自动沉淀经验 → 生成白名单参数提案 → 独立影子盘验证 → 收紧方向自动生效（`L12`–`L15`），全程留痕可回滚，`PAPER_MODE` 恒为模拟盘。
+3. **新版策略中心 + 多模态文档解析 + Gemini 4 Argon 默认模型**
+   - **策略中心**：小鹿智能体自然语言规则识别、可视化规则编辑、防过拟合评分与多版本实验对照。
+   - **文档深度解析**：对话框支持上传 PDF 财报/研报、Excel 交割单、Word 纪要与 Markdown 笔记，内置三级解析引擎与右侧原文页码溯源抽屉。
+   - **Gemini 4 Argon 默认底座**：默认模型与内置免费额度全线升级为谷歌旗舰推理模型 **`gemini-4-argon`**（聊天框展示为 `Hunter-Gemini 4 Argon（谷歌 4.0）`）。
+4. **全链路大模型调用日志跟踪与一键下载**
+   - 设置页「大模型」标签页新增 **「大模型调用日志与问题跟踪」** 卡片，支持「⚡ 实测一次大模型并记录日志」与「📥 下载诊断日志文件（.log）」，自动脱敏 API Key，排障一目了然。
 
-本仓库是**同一套投研能力换一个对话内核**的发行版：底座换成 AtomCode（国产、开源、MIT、
-可完全离线跑），面向国内私有化场景。上层的 Web 终端、SKILL、MCP、数据库沿用 HunterCode 社区版。
+---
 
-**为什么值得做**：
+## ⏱ 30 秒看懂
 
-- **数据不出硬盘** —— 私募最在意的一条。对话内核、MCP、数据库全在自己机器上，只有大模型调用出网（也可换本地 Ollama）。
-- **国产底座** —— AtomCode 由 AtomGit 团队维护，代码与发布都在国内，不依赖境外服务可用性。
-- **一套技能两个底座** —— SKILL 与 MCP 都是标准格式，社区版（opencode）与本发行版（AtomCode）共用。
+**它是什么** —— 一个跑在你自己电脑或服务器上的金融 AI 投研终端。你给它一个大模型 key（或直接用内置免费额度），它就能查行情、拉新闻、读 PDF 财报、做个股深度分析、预测走势、管理自选和持仓、跑模拟盘智能交易，并按你写的 SKILL（分析方法论）工作。对话、持仓、投资论点与模拟账本全部存在本地数据库，**仓位数据不出硬盘**。
 
-## 快速开始
+**它不是什么** —— 不接券商实盘交易，不替你做决策，不保证预测准确。它是把公开数据、分析方法论和大模型组织起来的研究助手。
 
-一条命令装完（Linux + Docker，装完直接能用）：
+**适合谁** —— 会用 Docker（或使用桌面启动器）的个人投资者、私募研究员、小型量化团队；想掌控自己的数据，或想把自己的数据源和方法论接进来的人。
+
+---
+
+## ☁️ 一键部署到云平台
+
+不想自己管服务器的，可以直接使用 `deploy/` 下已全面升级为 **`v3.0.0` AtomCode 内核**的云平台模板（均已通过 `python3 deploy/tools/validate-templates.py` 57 项静态校验与等价 Compose 验证）：
+
+| 平台 | 适合谁 | 说明 |
+|---|---|---|
+| [Zeabur](deploy/zeabur/template.yaml) | 国内外都能用，能力最全 | 模板自动生成密钥、绑域名、挂卷，内置 `daemon` 与智能炒股 `fin` 全栈 |
+| [Sealos](deploy/sealos/index.yaml) | 国内用户 | K8s 模板，postgres / redis 走 KubeBlocks，`daemon` 使用 StatefulSet 持久化 |
+| [Railway](deploy/railway/services.yaml) | 海外用户 | 服务搭建清单，双栈 IPv6 兼容，`daemon` + `fin` 全套变量引用 |
+| [1Panel](deploy/1panel/hunter-community/3.0.0/docker-compose.yml) | 自有服务器 + 国产面板 | `3.0.0` 应用包，表单里填端口和口令即可 |
+| [Coolify / Dokploy](deploy/coolify/docker-compose.yml) | 自有服务器 + 自托管 PaaS | **两份可以整段粘贴的 `v3.0.0` compose** |
+
+**公网部署必看**：这些平台上的实例一创建就在公网上。模板都默认关掉了单用户免登录（`HUNTER_SINGLE_USER=0`）并生成了一道初始化口令 `HUNTER_SETUP_TOKEN`，向导第 0 步要填它。
+
+---
+
+## 🖥 桌面启动器（推荐给不熟悉命令行的用户）
+
+**下载 → 填一把 key → 等几分钟，整套 HunterCode v3.0.0（AtomCode 内核）自动装好，全程不用敲一条命令。**
+
+桌面启动器 `HunterLauncher v0.2.0` 已全面适配 AtomCode `v3.0.0`，支持**全新安装**与**老用户从 OpenCode v1.x/v2.x 一键无感换核升级**（自动 `pg_dump` 备份、自动通过 `--remove-orphans` 卸载旧 `opencode` 容器并拉起 `daemon` 容器，原有自选股与持仓数据 100% 保留）。
+启动器仓库：[agentpit-io/HunterLauncher](https://github.com/agentpit-io/HunterLauncher) · 图文说明：[www.agentpit.io/hunter-community](https://www.agentpit.io/hunter-community)
+
+| 平台 | 直接下载（国内可达） | 其他来源 |
+|---|---|---|
+| **macOS** 12+ · Intel / Apple 芯片通用 | [hunter-launcher-latest-universal.dmg](https://www.agentpit.io/media/hunter-launcher/latest/hunter-launcher-latest-universal.dmg) | [GitHub Releases](https://github.com/agentpit-io/HunterLauncher/releases) |
+| **Windows** 10 / 11 · x64 · **推荐** | [hunter-launcher-latest-x64-setup.exe](https://www.agentpit.io/media/hunter-launcher/latest/hunter-launcher-latest-x64-setup.exe) | [GitHub Releases](https://github.com/agentpit-io/HunterLauncher/releases) |
+| **Windows** · 组策略分发 | [hunter-launcher-latest-x64.msi](https://www.agentpit.io/media/hunter-launcher/latest/hunter-launcher-latest-x64.msi) | [GitHub Releases](https://github.com/agentpit-io/HunterLauncher/releases) |
+| **Linux** x64 | [hunter-launcher-latest-amd64.deb](https://www.agentpit.io/media/hunter-launcher/latest/hunter-launcher-latest-amd64.deb) / [.AppImage](https://www.agentpit.io/media/hunter-launcher/latest/hunter-launcher-latest-amd64.AppImage) | [GitHub Releases](https://github.com/agentpit-io/HunterLauncher/releases) |
+
+---
+
+## 🚀 5 分钟跑起来
+
+**准备**：Docker Desktop（Windows / macOS）或 Docker Engine + Compose v2（Linux） · 磁盘 10 GB · 内存 4 GB · 能访问 `ghcr.io`（国内可使用 `deploy/install.sh` 或配置腾讯云镜像源）
+
+六个核心服务（`postgres`、`redis`、`api`、`web`、`daemon`、`llm-shim`）以及智能炒股扩展服务（`paper`、`fin-worker`）的镜像均同时提供 **`linux/amd64` 与 `linux/arm64`**。
+
+### 方式 A：预构建镜像开箱即用（推荐）
+
+```bash
+git clone https://github.com/agentpit-io/hunter-community
+cd hunter-community
+docker compose up -d
+open http://localhost:3100          # 浏览器里完成首启向导，不用改任何文件
+```
+
+如果要同时开启**智能炒股（模拟盘 + 经验库自进化）**全栈：
+
+```bash
+bash scripts/fin_provision_paper_role.sh
+docker compose --profile fin up -d
+```
+
+### 方式 B：服务器一键安装 / 升级 / 回滚脚本（支持源码构建与自检）
 
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/agentpit-io/huntercode-atomcode/main/deploy/install.sh
 bash install.sh
 ```
 
-交互里只有四个问题：装到哪 → **模型通道三选一**（默认 OneAPI · Gemini 3.8）→
-网关地址 → API key。key 会**真的去打一次接口**校验（不是本地格式检查），
-装完自检不过脚本直接失败退出 —— 不会给你一个"起来了但用不了"的栈。
+支持无人值守安装、一键升级（`bash deploy/install.sh --upgrade`）与 60 秒一键回滚（`bash deploy/install.sh --rollback`）。
 
-无人值守：
+### 从 v2.x / v1.x（OpenCode 版）升级到 v3.0.0（AtomCode 统一版）
 
 ```bash
-bash install.sh --non-interactive --yes \
-  --dir /opt/hca --channel oneapi --api-key-file /root/hca-key \
-  --web-port 3200 --admin-email it@yourfund.com
+git pull
+# 若 .env 中写死了旧版 HUNTER_VERSION / FIN_TAG，请改为 3.0.0
+docker compose --profile fin pull
+docker compose --profile fin up -d --remove-orphans
 ```
 
-装完会打印访问地址与管理员口令文件位置。升级 / 回滚：
-
-```bash
-bash deploy/install.sh --upgrade        # 数据卷不动，升级前自动存回滚点
-bash deploy/install.sh --rollback       # 回到升级前
-```
-
-已经 clone 了仓库的话，`bash deploy/install.sh` 会直接用当前这份代码；
-只想起一套开发环境就 `cp deploy/env.example deploy/.env` 之后 `bash deploy/up.sh`。
-
-**装完应该看到**（数字都是真查出来的）：
-
-```
-  hook 注册      : 8 条
-  MCP            : 9/9 connected，工具 28 个
-  技能           : 6 个
-  网页           : HTTP 200
-  网页→daemon    : model=oneapi/hunter-chat
-  对外端口       : 0.0.0.0:3200
-```
-
-| 想做什么 | 看哪份文档 |
-|---|---|
-| 部署、备份、升级、排障 | [`docs/部署与运维.md`](docs/部署与运维.md)（面向私募 IT） |
-| 加技能 / 加数据源 / 加约束 / 跟上游升级 | [`docs/开发者指南.md`](docs/开发者指南.md) |
-| 15 分钟演示 | [`docs/demo-script.md`](docs/demo-script.md) |
-| 五个 hook 怎么设计的、为什么 | [`docs/hooks-design.md`](docs/hooks-design.md) |
-| 这版都测了什么、结果如何 | [`docs/regression-report.md`](docs/regression-report.md) |
-
-## 现在能用什么
-
-* **对话式投研** —— 网页终端（`http://<你的机器>:3200`），问行情、问财务、写论点、做复核；
-  每次取数都是一次工具调用，卡片上能看到工具名、参数与返回。
-* **9 个数据源 MCP / 28 个工具** —— akshare（全市场数据）、自选、组合、筛选、
-  龙虎榜与深度分析、Kronos（K 线预测）、一手信号等。
-* **6 个投研技能** —— 深度分析、投资人辩论、龙虎榜、风险画像、杀猪盘检测、UZI 全维扫描。
-* **五个 hook**（发行版自己的约束层，不改内核）——
-  写类工具只放行 `reports/` 与 `theses/`；`bash`/`bash_start` 只放行只读与纯计算；
-  取数一律走 MCP（写爬虫、直接 `import akshare` 都拦）；每轮注入真实日期与交易时段；
-  语言硬约束；每次工具调用落审计（工具名 / 参数摘要 / 耗时 / 结果大小 / 会话 / 用户）。
-* **一键安装 / 升级 / 回滚**，模型通道三选一，国内镜像与 npm 源可配。
-
-**还没有的**（都写在 [`待办池`](docs/开发文档/待办池.md) 里，不藏）：多工作区 / 多用户隔离、
-语言守卫的出口强校验、MCP 返回超 16 KB 被内核截断的根治、Ollama 通道的真机验证。
-
-## 架构
-
-```
-┌───────────────────────────────────────────────────────────────────────┐
-│  浏览器  http://<你的机器>:3200                                        │
-└────────────────────────────┬──────────────────────────────────────────┘
-                             │
-┌────────────────────────────▼──────────────────────────────────────────┐
-│  apps/web · Next.js 终端（来自 HunterCode 社区版，尽量零改动）          │
-│    app/api/opencode/[...path]/route.ts                                │
-│      └─ AGENT_BACKEND=opencode | atomcode  ← 适配层落在这里             │
-│         把 AtomCode 的 SSE 事件归一成前端现有事件                       │
-└──────────┬───────────────────────────────────┬────────────────────────┘
-           │                                   │
-┌──────────▼───────────────┐   ┌───────────────▼────────────────────────┐
-│ apps/api · FastAPI        │   │ atomcode daemon（官方二进制 v5.1.0）    │
-│  用户/自选/组合/回测/额度  │   │   GET  /live        SSE 事件流          │
-│  postgres + redis         │   │   POST /live/message                    │
-└──────────▲───────────────┘   │   POST /chat        （无 MCP，见 M0 报告）│
-           │                   │   .atomcode.md  .hooks.json  .mcp.json   │
-           │ 内部接口           │   .atomcode/skills/                      │
-           │                   └───────────────┬────────────────────────┘
-           │                                   │ stdio MCP
-           │       ┌───────────────────────────┴────────────────────────┐
-           └───────┤ tools/opencode-mcp/  uzi · watchlist · portfolio     │
-                   │                      screener · hunter_cap · hunter_user│
-                   │ tools/akshare-mcp  kronos-mcp  truesource-mcp        │
-                   └──────────────────────────────────────────────────────┘
-```
-
-四个外部面，**不改 AtomCode 内核**：
-
-| 面 | 我们放什么 |
-|---|---|
-| daemon HTTP/SSE API | Web 转发层对接 `/live`（MCP 只在这条通道上） |
-| MCP（stdio） | 9 个 MCP，行情、自选、组合、筛选、AKShare、Kronos |
-| Skill | 6 个投研 SKILL，目录式 `SKILL.md` |
-| Hook（`.hooks.json`，8 事件，shell） | **五组实现、8 条注册**：`guard`（PreToolUse 硬约束 + 身份注入 + 给审计留起始记录）、`context`（注入真实日期与交易时段）、`lang`（语言硬约束）、`audit`（PostToolUse / PostToolUseFailure 落审计）、`budget`（Stop 记账 + 超限拦截，**默认关**）。设计与上游契约的坑见 [`docs/hooks-design.md`](docs/hooks-design.md) |
-
-## 与上下游的关系
-
-| 项目 | 关系 |
-|---|---|
-| [AtomCode](https://atomgit.com/atomgit_atomcode/atomcode)（MIT） | **对话内核底座**。以官方二进制形式依赖，版本与 sha256 锁在 [`pins.lock`](pins.lock)，源码不包含在本仓库 |
-| [HunterCode 社区版](https://github.com/agentpit-io/hunter-community)（Apache-2.0） | **Web / API / SKILL / MCP 的来源**。2026-09-22 从 `1875679` 一次性导入，之后独立演进，**不做持续同步**（见 [`docs/来源说明.md`](docs/来源说明.md)） |
-| hunter-community.agentpit.io | 社区版在线演示站，跑的是 opencode 版，与本发行版并行 |
-
-## 文档
-
-| 文档 | 内容 |
-|---|---|
-| [`docs/开发文档/总进度表.md`](docs/开发文档/总进度表.md) | M0–M5 里程碑与状态 |
-| [`docs/开发文档/M0-预研结论.md`](docs/开发文档/M0-预研结论.md) | 底座实测结论：权限档、MCP、hook、技能、多会话 |
-| [`docs/开发文档/M1-成果与测试报告.md`](docs/开发文档/M1-成果与测试报告.md) | 底座集成：daemon 镜像、9 个 MCP、技能转换、工作区、compose，以及 6 个技能的真实模型验收 |
-| [`docs/开发文档/M2-成果与测试报告.md`](docs/开发文档/M2-成果与测试报告.md) | 领域改造：投研人设、guard / context hook、编码向开关，以及 A/B 评测与 fork 决策 |
-| [`docs/coding-bias-analysis.md`](docs/coding-bias-analysis.md) | AtomCode 5.1.0 的编码倾向逐条分析：来源、触发条件、能不能关、怎么关 |
-| [`docs/开发文档/M3-成果与测试报告.md`](docs/开发文档/M3-成果与测试报告.md) | Web 接入：`AGENT_BACKEND=atomcode` 转发层、compose 纳入 web/api/pg/redis、真浏览器验收 |
-| [`docs/开发文档/M4-成果与测试报告.md`](docs/开发文档/M4-成果与测试报告.md) | hook 全量、一键部署、回归与发布 |
-| [`docs/部署与运维.md`](docs/部署与运维.md) | 面向私募 IT：硬件要求、备份、升级回滚、安全、国内网络、离网部署、排障 |
-| [`docs/开发者指南.md`](docs/开发者指南.md) | 架构、四个外部面、怎么加技能/MCP/hook、怎么跟上游升级 |
-| [`docs/hooks-design.md`](docs/hooks-design.md) | 五个 hook 的设计、opencode 插件映射表、上游契约的 12 个坑 |
-| [`docs/regression-report.md`](docs/regression-report.md) | 回归清单：每项通过/失败 + 实测数字 + 证据路径 |
-| [`docs/demo-script.md`](docs/demo-script.md) | 15 分钟演示脚本 |
-| [`docs/开发文档/待办池.md`](docs/开发文档/待办池.md) | 发现但当轮不做的问题（P0/P1/P2） |
-| [`docs/daemon-api.md`](docs/daemon-api.md) | AtomCode daemon API 实测手册（65 个端点、`/chat` 22 种 + `/live` 28 种 SSE 事件、真实样例） |
-| [`docs/来源说明.md`](docs/来源说明.md) | 导入清单、MCP 清单与缺口 |
-| [`docs/questions-for-atomgit.md`](docs/questions-for-atomgit.md) | 上游文档与实现不符之处 |
-| [`docs/design/`](docs/design/) | 开发计划 v0.2 与技术方案 v0.1 |
-| [`docs/evidence/`](docs/evidence/) | 实测原始输出（SSE 抓包、hook 输入、MCP 返回） |
-
-## 许可证
-
-本仓库采用 **Apache License 2.0**（见 [`LICENSE`](LICENSE)）。
-AtomCode 为 MIT，HunterCode 社区版为 Apache-2.0，两者版权声明保留在 [`NOTICE`](NOTICE)。
-
-HunterCode、Hunter、AgentPit、猎鹿人 是 AgentPit 团队的商标。对外分发 / 托管服务 /
-商业发布请去掉这些名称与 Logo，可注明「based on HunterCode」。
+> [!TIP]
+> **`--remove-orphans` 会自动停止并清理旧版 `opencode` 容器**，并拉起全新的 AtomCode `daemon` 容器。`api` 启动时会自动补齐 `0001`~`0056` 全部增量数据库迁移，您原有的用户账号、自选股、组合持仓与智能炒股账本数据 100% 原样保留！
 
 ---
 
-## English
+## 🏗 架构（AtomCode v3.0.0 统一架构）
 
-**HunterCode · AtomCode Distribution** — the HunterCode investment-research terminal,
-rebuilt on [AtomCode](https://atomgit.com/atomgit_atomcode/atomcode), an open-source (MIT)
-coding-agent kernel developed and released inside mainland China.
+```
+┌───────────────────────────────────────────────────────────────────────────┐
+│  浏览器  http://localhost:3100  (或服务器 :3200)                           │
+└──────────────────────────────┬────────────────────────────────────────────┘
+                               │
+┌──────────────────────────────▼────────────────────────────────────────────┐
+│  apps/web · Next.js 15 终端                                               │
+│    · 对话流式终端（富卡片 / PDF·Excel 上传与原文页码抽屉）                   │
+│    · 策略中心（选股器 / 小鹿规则编辑 / 过拟合评分 / 实验台）                 │
+│    · 智能炒股 7 大页面（总览 / 持仓 / 委托 / 报告 / 成长自进化 / 规则 / 帮助）│
+│    · app/api/opencode/[...path]/route.ts → AGENT_BACKEND=atomcode         │
+└──────────┬───────────────────────────────────────┬────────────────────────┘
+           │                                       │ Bearer daemon-token
+┌──────────▼───────────────────┐   ┌───────────────▼────────────────────────┐
+│ apps/api · FastAPI            │   │ daemon · AtomCode 5.1.0 Fork 底座      │
+│  · 认证 / 自选 / 组合 / 行情   │   │   GET/POST /live/*   SSE 对话与热切换  │
+│  · 0001~0056 自动数据库迁移    │   │   hookd 常驻进程 (guard/context/lang/  │
+│  · PDF 三级解析 / 交割单诊断   │   │                  audit/budget)        │
+│  · 全链路大模型日志记录与导出  │   │   11 个 stdio MCP + 16KB 三档大小闸    │
+└──────┬───────────────▲───────┘   └───────────────┬────────────────────────┘
+       │               │                           │
+       ▼               │                           ▼
+┌──────────────┐   ┌───┴───────────────────┐   ┌────────────────────────────┐
+│ paper (账本) │   │ fin-worker + temporal │   │ llm-shim (:3999)           │
+│ fin_paper_rw │◄──┤ 六时点调度 · 盘后复盘 │   │  · ToolCallIndexer 索引修复│
+│ 只追加无删改 │   │ 经验库 · 影子验证生效 │   │  · Schema 清洗 · /trace 队列│
+└──────────────┘   └───────────────────────┘   └───────────┬────────────────┘
+                                                           ▼
+                                               Google Gemini 4 Argon / 自带网关
+```
 
-**Status: v0.2.0 pre-release.** The stack works end to end (see
-[`docs/regression-report.md`](docs/regression-report.md) and a 4-hour soak test in
-[`docs/stability-report.md`](docs/stability-report.md)); known defects are listed
-openly in [`docs/开发文档/待办池.md`](docs/开发文档/待办池.md) — read that before
-putting it in front of real money.
+---
 
-**Why**: the target users are China-based hedge funds and individual investors who need the
-whole stack — agent kernel, market-data MCP servers, database — to run on their own hardware,
-so position data never leaves the disk. Only the LLM call goes out, and that can be pointed at
-a local Ollama instead.
+## 🔑 数据供给与大模型配置
 
-**How it is put together**: the web terminal (Next.js), API (FastAPI), 6 investment-research
-skills, and 9 stdio MCP servers come from
-[HunterCode Community Edition](https://github.com/agentpit-io/hunter-community) (Apache-2.0),
-imported once at commit `1875679` and evolving independently from there — there is no ongoing
-sync. AtomCode is consumed as an **official prebuilt binary** (v5.1.0, sha256 pinned in
-[`pins.lock`](pins.lock)); its source is not vendored here. We deliberately do not patch the
-AtomCode kernel — the distribution rides on its four public surfaces: the daemon HTTP/SSE API,
-MCP, hooks, and skills.
+1. **默认旗舰模型（Gemini 4 Argon）**：
+   - 推荐使用 **HunterCode 内置免费额度**：[免费申请一把 `hunt_tools_` 平台 key](https://hunter.agentpit.io/dev/api-keys)，在首启向导第 2 步选择第一张卡片，或点击对话页顶部横幅「⚡ 一键开启内置免费大模型」，即可直接使用 **`gemini-4-argon`**（每日 1000 万 Token 额度，同时解锁平台数据供给）。
+   - 也支持自带任意 OpenAI 兼容 Key（DeepSeek、Claude、Qwen、OpenRouter、OneAPI、本地 Ollama 等），向导内当场实测连通性、对话与工具调用，热生效无需重启容器。
+2. **全链路日志与排障**：
+   - 在「设置 → 大模型」页面底部，可随时查看最近的大模型调用追踪记录（阶段、模型、耗时、状态码），点击「⚡ 实测一次大模型并记录日志」或「📥 下载诊断日志文件」即可获取脱敏 `.log` 文件。
 
-Primary repository is on [GitCode](https://gitcode.com/agentpit-io/huntercode-atomcode);
-this GitHub repository is a mirror. Licensed under Apache-2.0; see [`NOTICE`](NOTICE) for
-third-party copyright (AtomCode is MIT).
+---
+
+## 📚 核心文档索引
+
+| 文档 | 内容 |
+|---|---|
+| [`CHANGELOG.md`](./CHANGELOG.md) | `v3.0.0` 及历次版本完整更新日志 |
+| [`doc/产品说明书.md`](./doc/产品说明书.md) | 产品全功能说明书 |
+| [`docs/部署与运维.md`](./docs/部署与运维.md) | 硬件要求、安装、备份、升级回滚、安全与排障手册 |
+| [`docs/开发者指南.md`](./docs/开发者指南.md) | AtomCode 四个外部面、如何新增 SKILL / MCP / Hook |
+| [`docs/hooks-design.md`](./docs/hooks-design.md) | 五组领域 Hook 的设计原理与契约说明 |
+| [`docs/fork-patches.md`](./docs/fork-patches.md) | AtomCode 5.1.0 Fork 二进制补丁说明（系统提示词替换与工具裁剪） |
+| [`docs/个人本地部署.md`](./docs/个人本地部署.md) | 个人本地部署记忆系统与受控自进化指南 |
+
+---
+
+## 🤝 参与贡献与致谢
+
+- 完整贡献流程见 [CONTRIBUTING.md](./CONTRIBUTING.md)，安全漏洞上报见 [SECURITY.md](./SECURITY.md)。
+- 镜像仓库同步维护于：
+  - GitHub 主仓：[https://github.com/agentpit-io/hunter-community](https://github.com/agentpit-io/hunter-community)
+  - GitHub AtomCode 仓：[https://github.com/agentpit-io/huntercode-atomcode](https://github.com/agentpit-io/huntercode-atomcode)
+  - GitCode 国内主仓：[https://gitcode.com/agentpit-io/huntercode-atomcode](https://gitcode.com/agentpit-io/huntercode-atomcode)
+
+<!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
+<!-- prettier-ignore-start -->
+<!-- markdownlint-disable -->
+<table>
+  <tbody>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/forever-ivy"><img src="https://avatars.githubusercontent.com/u/187021713?v=4?s=72" width="72px;" alt="Ziggy xuan"/><br /><sub><b>Ziggy xuan</b></sub></a><br /><a href="https://github.com/agentpit-io/hunter-community/commits?author=forever-ivy" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/cnYui"><img src="https://avatars.githubusercontent.com/u/132864240?v=4?s=72" width="72px;" alt="Yui(ゆい)"/><br /><sub><b>Yui(ゆい)</b></sub></a><br /><a href="https://github.com/agentpit-io/hunter-community/commits?author=cnYui" title="Code">💻</a> <a href="https://github.com/agentpit-io/hunter-community/commits?author=cnYui" title="Tests">⚠️</a> <a href="#infra-cnYui" title="Infrastructure (Hosting, Build-Tools, etc)">🚇</a> <a href="https://github.com/agentpit-io/hunter-community/commits?author=cnYui" title="Documentation">📖</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/ZGRX"><img src="https://avatars.githubusercontent.com/u/146192810?v=4?s=72" width="72px;" alt="Ricey"/><br /><sub><b>Ricey</b></sub></a><br /><a href="#maintenance-ZGRX" title="Maintenance">🚧</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/fatihcvs"><img src="https://avatars.githubusercontent.com/u/105765934?v=4?s=72" width="72px;" alt="fatihcvs"/><br /><sub><b>fatihcvs</b></sub></a><br /><a href="https://github.com/agentpit-io/hunter-community/commits?author=fatihcvs" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://fastinfer.org/"><img src="https://avatars.githubusercontent.com/u/26088029?v=4?s=72" width="72px;" alt="Amir Fathi"/><br /><sub><b>Amir Fathi</b></sub></a><br /><a href="https://github.com/agentpit-io/hunter-community/commits?author=AmirF194" title="Code">💻</a></td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/hangeaiagent"><img src="https://avatars.githubusercontent.com/u/203139500?v=4?s=72" width="72px;" alt="hangeaiagent"/><br /><sub><b>hangeaiagent</b></sub></a><br /><a href="https://github.com/agentpit-io/hunter-community/commits?author=hangeaiagent" title="Code">💻</a></td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- markdownlint-restore -->
+<!-- prettier-ignore-end -->
+
+<!-- ALL-CONTRIBUTORS-LIST:END -->
+
+---
+
+## 📄 许可证与商标
+
+代码遵循 [Apache License 2.0](./LICENSE)，AtomCode 遵循 MIT，详见 [NOTICE](./NOTICE)。  
+HunterCode · Hunter · AgentPit · 猎鹿人 是 AgentPit 团队的商标。自用 fork、内部部署无需改名；对外分发、提供托管服务或商业发布请去掉上述名称与 Logo，可注明「based on HunterCode Community Edition」。

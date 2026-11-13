@@ -274,6 +274,7 @@ def check_sealos_k8s(docs: list) -> None:
         "defaults.app_name": "huntercode-abcd1234", "defaults.app_host": "huntercode-abcd1234",
         "defaults.jwt_secret": "x" * 48, "defaults.internal_key": "y" * 48,
         "defaults.setup_token_gen": "z" * 16, "inputs.setup_token": "z" * 16,
+        "defaults.fin_paper_password": "p" * 24,
         "inputs.session_volume_size": "5", "inputs.data_volume_size": "3",
         "SEALOS_NAMESPACE": "ns-demo", "SEALOS_CLOUD_DOMAIN": "sealos.io",
         "SEALOS_CERT_SECRET_NAME": "wildcard-cert", "SEALOS_SERVICE_ACCOUNT": "sa-demo",
@@ -333,9 +334,9 @@ def check_1panel() -> None:
         if compose.exists():
             doc = yaml.safe_load(compose.read_text(encoding="utf-8"))
             svcs = set((doc.get("services") or {}).keys())
-            want = {"postgres", "redis", "api", "web", "opencode", "llm-shim"}
+            want = {"postgres", "redis", "api", "web", "daemon", "llm-shim"}
             if want <= svcs:
-                ok(f"{v.name}/docker-compose.yml 六个服务齐全")
+                ok(f"{v.name}/docker-compose.yml 六个核心服务齐全")
             else:
                 bad(f"{v.name}/docker-compose.yml 缺服务：{sorted(want - svcs)}")
             # 只看**真的有 build: 段**的服务，不要拿字符串去 grep 全文 ——
@@ -358,7 +359,7 @@ def check_1panel() -> None:
 
 
 # ══════════════════════════════════════════════════════════════════════
-IMAGES = ("api", "web", "opencode", "llm-shim")
+IMAGES = ("api", "web", "daemon", "llm-shim", "paper", "fin-worker")
 
 
 def check_railway() -> None:
@@ -370,9 +371,9 @@ def check_railway() -> None:
     doc = yaml.safe_load(f.read_text(encoding="utf-8"))
     svcs = {s["name"]: s for s in doc.get("services") or []}
 
-    want = {"postgres", "redis", "llmshim", "api", "opencode", "web"}
+    want = {"postgres", "redis", "llmshim", "api", "daemon", "web"}
     (ok if want <= set(svcs) else bad)(
-        f"六个服务齐全：{sorted(svcs)}" if want <= set(svcs) else f"少了服务：{sorted(want - set(svcs))}")
+        f"六个核心服务齐全：{sorted(svcs)}" if want <= set(svcs) else f"少了服务：{sorted(want - set(svcs))}")
 
     # 服务名不能带连字符 —— 引用变量 ${{名.变量}} 里带连字符能不能解析官方没写
     bads = [n for n in svcs if "-" in n]
@@ -399,7 +400,7 @@ def check_railway() -> None:
         else f"PGDATA={pgdata!r} 不是 {mp} 的子目录 —— postgres 会因 lost+found 无限重启")
 
     # 非 root 镜像 + 卷 → 必须 RAILWAY_RUN_UID=0
-    for n in ("postgres", "redis", "opencode"):
+    for n in ("postgres", "redis", "daemon"):
         v = env[n].get("RAILWAY_RUN_UID")
         (ok if v == "0" else bad)(f"{n} 设了 RAILWAY_RUN_UID=0" if v == "0"
                                   else f"{n} 没设 RAILWAY_RUN_UID=0 —— 卷是 root 属主的，写不进去")
@@ -410,19 +411,19 @@ def check_railway() -> None:
         f"api 的卷挂在 {amp}（没遮住镜像的 /opt/hunter-data）" if amp != "/opt/hunter-data"
         else "api 的卷挂在 /opt/hunter-data，会把镜像自带的向导预设遮掉")
 
-    # 两个必设、且最容易被漏掉的跨服务地址
-    for n, k in (("api", "LLM_SHIM_URL"), ("api", "OPENCODE_URL"),
-                 ("opencode", "HERMES_API_URL"), ("web", "HERMES_API_URL"),
-                 ("web", "OPENCODE_URL")):
+    # 必设且最容易被漏掉的跨服务地址
+    for n, k in (("api", "LLM_SHIM_URL"), ("api", "ATOMCODE_DAEMON_URL"),
+                 ("daemon", "HERMES_API_URL"), ("web", "HERMES_API_URL"),
+                 ("web", "ATOMCODE_DAEMON_URL")):
         v = env[n].get(k, "")
         (ok if v.startswith("http") else bad)(f"{n}.{k} 已设" if v.startswith("http")
                                               else f"{n}.{k} 没设或不是 http 地址")
 
     # 三家必须同值的密钥
-    same = (env["opencode"].get("JWT_SECRET") == "${{api.JWT_SECRET}}"
-            and env["opencode"].get("HUNTER_INTERNAL_KEY") == "${{api.HUNTER_INTERNAL_KEY}}"
+    same = (env["daemon"].get("JWT_SECRET") == "${{api.JWT_SECRET}}"
+            and env["daemon"].get("HUNTER_INTERNAL_KEY") == "${{api.HUNTER_INTERNAL_KEY}}"
             and env["web"].get("HUNTER_INTERNAL_KEY") == "${{api.HUNTER_INTERNAL_KEY}}")
-    (ok if same else bad)("opencode / web 用引用变量取 api 的那把密钥（不会填错）" if same
+    (ok if same else bad)("daemon / web 用引用变量取 api 的那把密钥（不会填错）" if same
                           else "密钥没用引用变量 —— 三处填不一致就会「服务全绿但一对话 401」")
 
     (ok if env["api"].get("HUNTER_SINGLE_USER") == "0" else bad)(
@@ -444,10 +445,10 @@ def check_paas_compose() -> None:
         return
     ca, cb = (yaml.safe_load(f.read_text(encoding="utf-8")) for f in (a, b))
 
-    want = {"web", "api", "opencode", "llm-shim", "postgres", "redis"}
+    want = {"web", "api", "daemon", "llm-shim", "postgres", "redis"}
     for name, c in (("coolify", ca), ("dokploy", cb)):
         got = set(c.get("services") or {})
-        (ok if want <= got else bad)(f"{name}：六个服务齐全" if want <= got
+        (ok if want <= got else bad)(f"{name}：六个核心服务齐全" if want <= got
                                      else f"{name}：少了 {sorted(want - got)}")
         builds = [n for n, v in (c["services"] or {}).items() if v.get("build")]
         (ok if not builds else bad)(f"{name}：没有服务带 build:" if not builds
@@ -462,10 +463,10 @@ def check_paas_compose() -> None:
         (ok if not rel else bad)(f"{name}：没有相对路径挂载" if not rel
                                  else f"{name}：有相对路径挂载(平台上没有本仓源码)：{rel}")
         # 三家共享密钥卷
-        shared = [n for n in ("api", "web", "opencode")
+        shared = [n for n in ("api", "web", "daemon")
                   if any("hunter_secrets" in m for m in (c["services"][n].get("volumes") or []))]
         (ok if len(shared) == 3 else bad)(
-            f"{name}：api/web/opencode 三家共挂 hunter_secrets 卷" if len(shared) == 3
+            f"{name}：api/web/daemon 三家共挂 hunter_secrets 卷" if len(shared) == 3
             else f"{name}：只有 {shared} 挂了密钥卷 —— 少一家就会一对话 401")
         (ok if (c["services"]["api"]["environment"].get("HUNTER_SINGLE_USER") == "0") else bad)(
             f"{name}：关掉了单用户模式" if c["services"]["api"]["environment"].get("HUNTER_SINGLE_USER") == "0"

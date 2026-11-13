@@ -1,0 +1,1180 @@
+apiVersion: app.sealos.io/v1
+kind: Template
+metadata:
+  name: hunter-community
+spec:
+  title: 'HunterCode'
+  url: 'https://hunter-community.agentpit.io'
+  gitRepo: 'https://github.com/agentpit-io/hunter-community'
+  author: 'agentpit-io'
+  description: 'Self-hosted AI investment research assistant (AtomCode 5.1.0 Unified v3.0.0) for A-share / HK / US markets. Bring your own LLM key — data, conversations and keys all stay on your instance.'
+  readme: 'https://raw.githubusercontent.com/agentpit-io/hunter-community/main/deploy/sealos/README.md'
+  icon: 'https://raw.githubusercontent.com/agentpit-io/hunter-community/main/deploy/sealos/logo.png'
+  screenshots:
+    - 'https://raw.githubusercontent.com/agentpit-io/hunter-community/main/deploy/sealos/website-screenshot.webp'
+  templateType: inline
+  locale: en
+  i18n:
+    zh:
+      title: 'HunterCode'
+      description: '自部署的 AI 投研助手（AtomCode 5.1.0 统一版 v3.0.0）· A股/港股/美股 · 用你自己的大模型 key，数据、对话和密钥都留在你自己的实例上。'
+      readme: 'https://raw.githubusercontent.com/agentpit-io/hunter-community/main/deploy/sealos/README_zh.md'
+  categories:
+    - ai
+    - tool
+
+  defaults:
+    app_name:
+      type: string
+      value: huntercode-${{ random(8) }}
+    app_host:
+      type: string
+      value: huntercode-${{ random(8) }}
+    jwt_secret:
+      type: string
+      value: ${{ random(48) }}
+    internal_key:
+      type: string
+      value: ${{ random(48) }}
+    setup_token_gen:
+      type: string
+      value: ${{ random(16) }}
+    fin_paper_password:
+      type: string
+      value: ${{ random(24) }}
+
+  inputs:
+    setup_token:
+      description: 'Setup token for the first-run wizard. Auto-generated — copy it before deploying, step 0 of the wizard asks for it.'
+      type: string
+      default: ${{ defaults.setup_token_gen }}
+      required: true
+    session_volume_size:
+      description: 'Disk for conversations and sessions (GiB). All chat content lives here.'
+      type: string
+      default: '5'
+      required: false
+    data_volume_size:
+      description: 'Disk for user-installed SKILLs and imported data packages (GiB).'
+      type: string
+      default: '3'
+      required: false
+
+---
+# ══════════════════════════════════════════════════════════════════════
+# postgres · 业务数据（自选股 / 组合 / 研究台 / 配置 / 大模型 key 密文）
+# ══════════════════════════════════════════════════════════════════════
+apiVersion: apps.kubeblocks.io/v1alpha1
+kind: Cluster
+metadata:
+  finalizers:
+    - cluster.kubeblocks.io/finalizer
+  labels:
+    kb.io/database: postgresql-16.4.0
+    clusterdefinition.kubeblocks.io/name: postgresql
+    clusterversion.kubeblocks.io/name: postgresql-16.4.0
+  annotations: {}
+  name: ${{ defaults.app_name }}-pg
+spec:
+  affinity:
+    nodeLabels: {}
+    podAntiAffinity: Preferred
+    tenancy: SharedNode
+    topologyKeys: []
+  clusterDefinitionRef: postgresql
+  clusterVersionRef: postgresql-16.4.0
+  componentSpecs:
+    - componentDefRef: postgresql
+      disableExporter: true
+      enabledLogs:
+        - running
+      name: postgresql
+      replicas: 1
+      resources:
+        limits:
+          cpu: 1000m
+          memory: 1024Mi
+        requests:
+          cpu: 100m
+          memory: 102Mi
+      serviceAccountName: ${{ defaults.app_name }}-pg
+      switchPolicy:
+        type: Noop
+      volumeClaimTemplates:
+        - name: data
+          spec:
+            accessModes:
+              - ReadWriteOnce
+            resources:
+              requests:
+                storage: 5Gi
+            storageClassName: openebs-backup
+  terminationPolicy: Delete
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    sealos-db-provider-cr: ${{ defaults.app_name }}-pg
+    app.kubernetes.io/instance: ${{ defaults.app_name }}-pg
+    app.kubernetes.io/managed-by: kbcli
+  name: ${{ defaults.app_name }}-pg
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  labels:
+    sealos-db-provider-cr: ${{ defaults.app_name }}-pg
+    app.kubernetes.io/instance: ${{ defaults.app_name }}-pg
+    app.kubernetes.io/managed-by: kbcli
+  name: ${{ defaults.app_name }}-pg
+rules:
+  - apiGroups:
+      - '*'
+    resources:
+      - '*'
+    verbs:
+      - '*'
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  labels:
+    sealos-db-provider-cr: ${{ defaults.app_name }}-pg
+    app.kubernetes.io/instance: ${{ defaults.app_name }}-pg
+    app.kubernetes.io/managed-by: kbcli
+  name: ${{ defaults.app_name }}-pg
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ${{ defaults.app_name }}-pg
+subjects:
+  - kind: ServiceAccount
+    name: ${{ defaults.app_name }}-pg
+
+---
+# ══════════════════════════════════════════════════════════════════════
+# redis · 缓存与限流
+# ══════════════════════════════════════════════════════════════════════
+apiVersion: apps.kubeblocks.io/v1alpha1
+kind: Cluster
+metadata:
+  finalizers:
+    - cluster.kubeblocks.io/finalizer
+  labels:
+    kb.io/database: redis-7.2.7
+    app.kubernetes.io/instance: ${{ defaults.app_name }}-redis
+    app.kubernetes.io/version: 7.2.7
+    clusterversion.kubeblocks.io/name: redis-7.2.7
+    clusterdefinition.kubeblocks.io/name: redis
+  annotations: {}
+  name: ${{ defaults.app_name }}-redis
+spec:
+  affinity:
+    podAntiAffinity: Preferred
+    tenancy: SharedNode
+    topologyKeys:
+      - kubernetes.io/hostname
+  clusterDefinitionRef: redis
+  componentSpecs:
+    - componentDef: redis-7
+      name: redis
+      replicas: 1
+      enabledLogs:
+        - running
+      resources:
+        limits:
+          cpu: 1000m
+          memory: 1024Mi
+        requests:
+          cpu: 100m
+          memory: 102Mi
+      serviceAccountName: ${{ defaults.app_name }}-redis
+      serviceVersion: 7.2.7
+      switchPolicy:
+        type: Noop
+      volumeClaimTemplates:
+        - name: data
+          spec:
+            accessModes:
+              - ReadWriteOnce
+            resources:
+              requests:
+                storage: 2Gi
+            storageClassName: openebs-backup
+    - componentDef: redis-sentinel-7
+      name: redis-sentinel
+      replicas: 1
+      resources:
+        limits:
+          cpu: 100m
+          memory: 100Mi
+        requests:
+          cpu: 10m
+          memory: 10Mi
+      serviceAccountName: ${{ defaults.app_name }}-redis
+      serviceVersion: 7.2.7
+      volumeClaimTemplates:
+        - name: data
+          spec:
+            accessModes:
+              - ReadWriteOnce
+            resources:
+              requests:
+                storage: 2Gi
+  terminationPolicy: Delete
+  topology: replication
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    sealos-db-provider-cr: ${{ defaults.app_name }}-redis
+    app.kubernetes.io/instance: ${{ defaults.app_name }}-redis
+    app.kubernetes.io/managed-by: kbcli
+  name: ${{ defaults.app_name }}-redis
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  labels:
+    sealos-db-provider-cr: ${{ defaults.app_name }}-redis
+    app.kubernetes.io/instance: ${{ defaults.app_name }}-redis
+    app.kubernetes.io/managed-by: kbcli
+  name: ${{ defaults.app_name }}-redis
+rules:
+  - apiGroups:
+      - '*'
+    resources:
+      - '*'
+    verbs:
+      - '*'
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  labels:
+    sealos-db-provider-cr: ${{ defaults.app_name }}-redis
+    app.kubernetes.io/instance: ${{ defaults.app_name }}-redis
+    app.kubernetes.io/managed-by: kbcli
+  name: ${{ defaults.app_name }}-redis
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ${{ defaults.app_name }}-redis
+subjects:
+  - kind: ServiceAccount
+    name: ${{ defaults.app_name }}-redis
+
+---
+# ══════════════════════════════════════════════════════════════════════
+# llm-shim · 洗 tool schema 与 ToolCallIndexer 的转发层
+# ══════════════════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${{ defaults.app_name }}-llm-shim
+  annotations:
+    originImageName: ghcr.io/agentpit-io/hunter-community-llm-shim:3.0.0
+    deploy.cloud.sealos.io/minReplicas: '1'
+    deploy.cloud.sealos.io/maxReplicas: '1'
+  labels:
+    cloud.sealos.io/app-deploy-manager: ${{ defaults.app_name }}-llm-shim
+    app: ${{ defaults.app_name }}-llm-shim
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  selector:
+    matchLabels:
+      app: ${{ defaults.app_name }}-llm-shim
+  template:
+    metadata:
+      labels:
+        app: ${{ defaults.app_name }}-llm-shim
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: ${{ defaults.app_name }}-llm-shim
+          image: ghcr.io/agentpit-io/hunter-community-llm-shim:3.0.0
+          env:
+            - name: LLM_BASE_URL
+              value: ''
+            - name: LLM_FIX_TOOL_INDEX
+              value: '1'
+            - name: LLM_STRIP_THINK
+              value: '1'
+          ports:
+            - name: http
+              containerPort: 3999
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3999
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3999
+            periodSeconds: 30
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          imagePullPolicy: IfNotPresent
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${{ defaults.app_name }}-llm-shim
+  labels:
+    cloud.sealos.io/app-deploy-manager: ${{ defaults.app_name }}-llm-shim
+spec:
+  ports:
+    - port: 3999
+      targetPort: 3999
+      name: http
+  selector:
+    app: ${{ defaults.app_name }}-llm-shim
+
+---
+# ══════════════════════════════════════════════════════════════════════
+# api · 后端 + 启动时自动迁移 + 首启向导
+# ══════════════════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ${{ defaults.app_name }}-api
+  annotations:
+    originImageName: ghcr.io/agentpit-io/hunter-community-api:3.0.0
+    deploy.cloud.sealos.io/minReplicas: '1'
+    deploy.cloud.sealos.io/maxReplicas: '1'
+  labels:
+    cloud.sealos.io/app-deploy-manager: ${{ defaults.app_name }}-api
+    app: ${{ defaults.app_name }}-api
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  minReadySeconds: 10
+  serviceName: ${{ defaults.app_name }}-api
+  selector:
+    matchLabels:
+      app: ${{ defaults.app_name }}-api
+  template:
+    metadata:
+      labels:
+        app: ${{ defaults.app_name }}-api
+    spec:
+      terminationGracePeriodSeconds: 10
+      automountServiceAccountToken: false
+      containers:
+        - name: ${{ defaults.app_name }}-api
+          image: ghcr.io/agentpit-io/hunter-community-api:3.0.0
+          env:
+            - name: PG_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: ${{ defaults.app_name }}-pg-conn-credential
+                  key: host
+            - name: PG_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: ${{ defaults.app_name }}-pg-conn-credential
+                  key: port
+            - name: PG_USER
+              valueFrom:
+                secretKeyRef:
+                  name: ${{ defaults.app_name }}-pg-conn-credential
+                  key: username
+            - name: PG_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ${{ defaults.app_name }}-pg-conn-credential
+                  key: password
+            - name: DATABASE_URL
+              value: postgresql://$(PG_USER):$(PG_PASSWORD)@$(PG_HOST):$(PG_PORT)/postgres
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ${{ defaults.app_name }}-redis-redis-account-default
+                  key: password
+            - name: REDIS_URL
+              value: redis://default:$(REDIS_PASSWORD)@${{ defaults.app_name }}-redis-redis-redis.${{ SEALOS_NAMESPACE }}.svc:6379/0
+            - name: JWT_SECRET
+              value: ${{ defaults.jwt_secret }}
+            - name: HUNTER_INTERNAL_KEY
+              value: ${{ defaults.internal_key }}
+            - name: HUNTER_SETUP_TOKEN
+              value: ${{ inputs.setup_token }}
+            - name: HUNTER_SINGLE_USER
+              value: '0'
+            - name: REGISTRATION_MODE
+              value: open
+            - name: HUNTER_MINIMAL_BOOT
+              value: '1'
+            - name: JWT_ACCESS_TTL
+              value: '3600'
+            - name: JWT_REFRESH_TTL
+              value: '2592000'
+            - name: HUNTER_UPSTREAM_URL
+              value: ''
+            - name: LLM_PROVIDER
+              value: openai_compat
+            - name: HUNTER_SKILLS_DIR
+              value: /opt/hunter-skills
+            - name: HUNTER_USER_SKILLS_DIR
+              value: /opt/hunter-user-skills
+            - name: HUNTER_PACKAGES_DIR
+              value: /opt/hunter-packages
+            - name: LLM_SHIM_URL
+              value: http://${{ defaults.app_name }}-llm-shim.${{ SEALOS_NAMESPACE }}.svc:3999/v1
+            - name: AGENT_BACKEND
+              value: atomcode
+            - name: ATOMCODE_DAEMON_URL
+              value: http://${{ defaults.app_name }}-daemon.${{ SEALOS_NAMESPACE }}.svc:13456
+            - name: OPENCODE_URL
+              value: http://${{ defaults.app_name }}-daemon.${{ SEALOS_NAMESPACE }}.svc:13456
+            - name: HUNTER_API_KEY
+              value: ''
+          ports:
+            - name: http
+              containerPort: 8000
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            failureThreshold: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+            periodSeconds: 30
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1024Mi
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - name: userskills
+              mountPath: /opt/hunter-user-skills
+            - name: packages
+              mountPath: /opt/hunter-packages
+      volumes: []
+  volumeClaimTemplates:
+    - metadata:
+        annotations:
+          path: /opt/hunter-user-skills
+          value: '${{ inputs.data_volume_size }}'
+        name: userskills
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: ${{ inputs.data_volume_size }}Gi
+    - metadata:
+        annotations:
+          path: /opt/hunter-packages
+          value: '${{ inputs.data_volume_size }}'
+        name: packages
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: ${{ inputs.data_volume_size }}Gi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${{ defaults.app_name }}-api
+  labels:
+    cloud.sealos.io/app-deploy-manager: ${{ defaults.app_name }}-api
+spec:
+  ports:
+    - port: 8000
+      targetPort: 8000
+      name: http
+  selector:
+    app: ${{ defaults.app_name }}-api
+
+---
+# ══════════════════════════════════════════════════════════════════════
+# daemon · AtomCode 5.1.0 对话内核
+#
+# ⚠️ 会话正文与工作区落在 /data PVC 上。
+# ⚠️ fsGroup: 10001 不能省：daemon 容器以 uid 10001(hca) 运行。
+# ══════════════════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ${{ defaults.app_name }}-daemon
+  annotations:
+    originImageName: ghcr.io/agentpit-io/hunter-community-daemon:3.0.0
+    deploy.cloud.sealos.io/minReplicas: '1'
+    deploy.cloud.sealos.io/maxReplicas: '1'
+  labels:
+    cloud.sealos.io/app-deploy-manager: ${{ defaults.app_name }}-daemon
+    app: ${{ defaults.app_name }}-daemon
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  minReadySeconds: 10
+  serviceName: ${{ defaults.app_name }}-daemon
+  selector:
+    matchLabels:
+      app: ${{ defaults.app_name }}-daemon
+  template:
+    metadata:
+      labels:
+        app: ${{ defaults.app_name }}-daemon
+    spec:
+      terminationGracePeriodSeconds: 10
+      automountServiceAccountToken: false
+      securityContext:
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+      containers:
+        - name: ${{ defaults.app_name }}-daemon
+          image: ghcr.io/agentpit-io/hunter-community-daemon:3.0.0
+          env:
+            - name: HCA_DAEMON_PORT
+              value: '13456'
+            - name: HCA_DAEMON_INTERNAL_PORT
+              value: '13457'
+            - name: HCA_DAEMON_SERVICE_NAME
+              value: ${{ defaults.app_name }}-daemon
+            - name: HCA_WORKSPACE
+              value: /data/workspace
+            - name: ATOMCODE_HOME
+              value: /data/atomcode
+            - name: HCA_WORKSPACE_REFRESH
+              value: '1'
+            - name: HCA_CONFIG_REFRESH
+              value: '1'
+            - name: HCA_HOOKD
+              value: '1'
+            - name: HCA_HOOKD_PORT
+              value: '13458'
+            - name: ATOMCODE_VERIFY
+              value: 'off'
+            - name: ATOMCODE_TODO
+              value: '0'
+            - name: ATOMCODE_SUBAGENT
+              value: '0'
+            - name: ATOMCODE_MEMORY_TOOL
+              value: '0'
+            - name: ATOMCODE_REQUEST_USER_INPUT
+              value: '0'
+            - name: ATOMCODE_TURN_MAX_ROUNDS
+              value: '30'
+            - name: ATOMCODE_AI_SESSION_NAMING
+              value: '0'
+            - name: JWT_SECRET
+              value: ${{ defaults.jwt_secret }}
+            - name: HUNTER_INTERNAL_KEY
+              value: ${{ defaults.internal_key }}
+            - name: HERMES_API_URL
+              value: http://${{ defaults.app_name }}-api.${{ SEALOS_NAMESPACE }}.svc:8000
+            - name: HCA_LLM_BASE_URL
+              value: http://${{ defaults.app_name }}-llm-shim.${{ SEALOS_NAMESPACE }}.svc:3999/v1
+            - name: LLM_SHIM_URL
+              value: http://${{ defaults.app_name }}-llm-shim.${{ SEALOS_NAMESPACE }}.svc:3999/v1
+            - name: HCA_LLM_MODEL
+              value: hunter-chat
+            - name: HCA_LLM_PROVIDER_NAME
+              value: hunter
+            - name: HCA_LLM_CONTEXT_WINDOW
+              value: '1000000'
+            - name: HCA_LLM_SYSTEM_PROMPT_FILE
+              value: /opt/hca/personas/hunter-research.md
+            - name: AKSHARE_MAX_ROWS
+              value: '50'
+            - name: AKSHARE_MAX_BYTES
+              value: '15000'
+            - name: HCA_MCP_MAX_BYTES
+              value: '15000'
+            - name: HCA_LANG_HOOK
+              value: '1'
+            - name: HCA_CTX_CAPABILITIES
+              value: '1'
+          ports:
+            - name: http
+              containerPort: 13456
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 13456
+            failureThreshold: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 13456
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: 2000m
+              memory: 1536Mi
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - name: sessions
+              mountPath: /data
+      volumes: []
+  volumeClaimTemplates:
+    - metadata:
+        annotations:
+          path: /data
+          value: '${{ inputs.session_volume_size }}'
+        name: sessions
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: ${{ inputs.session_volume_size }}Gi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${{ defaults.app_name }}-daemon
+  labels:
+    cloud.sealos.io/app-deploy-manager: ${{ defaults.app_name }}-daemon
+spec:
+  ports:
+    - port: 13456
+      targetPort: 13456
+      name: http
+  selector:
+    app: ${{ defaults.app_name }}-daemon
+
+---
+# ══════════════════════════════════════════════════════════════════════
+# web · 前端 + BFF（唯一挂 Ingress 的服务）
+# ══════════════════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${{ defaults.app_name }}
+  annotations:
+    originImageName: ghcr.io/agentpit-io/hunter-community-web:3.0.0
+    deploy.cloud.sealos.io/minReplicas: '1'
+    deploy.cloud.sealos.io/maxReplicas: '1'
+  labels:
+    cloud.sealos.io/app-deploy-manager: ${{ defaults.app_name }}
+    app: ${{ defaults.app_name }}
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  selector:
+    matchLabels:
+      app: ${{ defaults.app_name }}
+  template:
+    metadata:
+      labels:
+        app: ${{ defaults.app_name }}
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: ${{ defaults.app_name }}
+          image: ghcr.io/agentpit-io/hunter-community-web:3.0.0
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: AGENT_BACKEND
+              value: atomcode
+            - name: HERMES_API_URL
+              value: http://${{ defaults.app_name }}-api.${{ SEALOS_NAMESPACE }}.svc:8000
+            - name: ATOMCODE_DAEMON_URL
+              value: http://${{ defaults.app_name }}-daemon.${{ SEALOS_NAMESPACE }}.svc:13456
+            - name: OPENCODE_URL
+              value: http://${{ defaults.app_name }}-daemon.${{ SEALOS_NAMESPACE }}.svc:13456
+            - name: HUNTER_INTERNAL_KEY
+              value: ${{ defaults.internal_key }}
+          ports:
+            - name: http
+              containerPort: 3000
+          startupProbe:
+            httpGet:
+              path: /
+              port: 3000
+            failureThreshold: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 192Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+          imagePullPolicy: IfNotPresent
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${{ defaults.app_name }}
+  labels:
+    cloud.sealos.io/app-deploy-manager: ${{ defaults.app_name }}
+spec:
+  ports:
+    - port: 3000
+      targetPort: 3000
+      name: http
+  selector:
+    app: ${{ defaults.app_name }}
+
+---
+# ══════════════════════════════════════════════════════════════════════
+# 智能交易（fin 链）· paper / temporal / temporal-ui / fin-worker
+# ══════════════════════════════════════════════════════════════════════
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${{ defaults.app_name }}-paper
+  annotations:
+    originImageName: ghcr.io/agentpit-io/hunter-community-paper:3.0.0
+    deploy.cloud.sealos.io/minReplicas: '1'
+    deploy.cloud.sealos.io/maxReplicas: '1'
+  labels:
+    cloud.sealos.io/app-deploy-manager: ${{ defaults.app_name }}-paper
+    app: ${{ defaults.app_name }}-paper
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  minReadySeconds: 10
+  selector:
+    matchLabels:
+      app: ${{ defaults.app_name }}-paper
+  template:
+    metadata:
+      labels:
+        app: ${{ defaults.app_name }}-paper
+    spec:
+      automountServiceAccountToken: false
+      initContainers:
+        - name: fin-init
+          image: postgres:16-alpine
+          command:
+            - /bin/sh
+            - -c
+            - |
+              until psql -tAc "SELECT rolname FROM pg_roles" 2>/dev/null | grep -qx fin_paper_rw; do
+                echo '[fin-init] 等待 api 迁移创建 fin_paper_rw …'; sleep 3
+              done
+              until printf "ALTER ROLE fin_paper_rw WITH LOGIN PASSWORD :'pw';\n" | psql -v ON_ERROR_STOP=1 -v pw="$FIN_PAPER_PASSWORD" >/dev/null 2>&1; do
+                echo '[fin-init] 设置 fin_paper_rw 口令失败，重试…'; sleep 3
+              done
+              echo '[fin-init] fin_paper_rw 运行期口令已就绪'
+          env:
+            - name: PGHOST
+              valueFrom:
+                secretKeyRef:
+                  name: ${{ defaults.app_name }}-pg-conn-credential
+                  key: host
+            - name: PGPORT
+              valueFrom:
+                secretKeyRef:
+                  name: ${{ defaults.app_name }}-pg-conn-credential
+                  key: port
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: ${{ defaults.app_name }}-pg-conn-credential
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ${{ defaults.app_name }}-pg-conn-credential
+                  key: password
+            - name: PGDATABASE
+              value: postgres
+            - name: FIN_PAPER_PASSWORD
+              value: ${{ defaults.fin_paper_password }}
+      containers:
+        - name: ${{ defaults.app_name }}-paper
+          image: ghcr.io/agentpit-io/hunter-community-paper:3.0.0
+          env:
+            - name: PG_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: ${{ defaults.app_name }}-pg-conn-credential
+                  key: host
+            - name: FIN_PAPER_PASSWORD
+              value: ${{ defaults.fin_paper_password }}
+            - name: DATABASE_URL
+              value: postgresql://fin_paper_rw:$(FIN_PAPER_PASSWORD)@$(PG_HOST):5432/postgres
+            - name: PAPER_MODE
+              value: PAPER
+            - name: HUNTER_INTERNAL_KEY
+              value: ${{ defaults.internal_key }}
+            - name: PAPER_QUOTE_URL
+              value: http://${{ defaults.app_name }}-api.${{ SEALOS_NAMESPACE }}.svc:8000
+            - name: PAPER_SNAPSHOT_STALE_SECONDS
+              value: '900'
+          ports:
+            - name: http
+              containerPort: 8000
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            failureThreshold: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          imagePullPolicy: IfNotPresent
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${{ defaults.app_name }}-paper
+  labels:
+    cloud.sealos.io/app-deploy-manager: ${{ defaults.app_name }}-paper
+spec:
+  ports:
+    - port: 8000
+      targetPort: 8000
+      name: http
+  selector:
+    app: ${{ defaults.app_name }}-paper
+
+---
+# temporal · 智能交易链唯一的上层调度权威
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${{ defaults.app_name }}-temporal
+  annotations:
+    originImageName: temporalio/auto-setup:1.25
+    deploy.cloud.sealos.io/minReplicas: '1'
+    deploy.cloud.sealos.io/maxReplicas: '1'
+  labels:
+    cloud.sealos.io/app-deploy-manager: ${{ defaults.app_name }}-temporal
+    app: ${{ defaults.app_name }}-temporal
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  selector:
+    matchLabels:
+      app: ${{ defaults.app_name }}-temporal
+  template:
+    metadata:
+      labels:
+        app: ${{ defaults.app_name }}-temporal
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: ${{ defaults.app_name }}-temporal
+          image: temporalio/auto-setup:1.25
+          env:
+            - name: DB
+              value: postgres12
+            - name: DB_PORT
+              value: '5432'
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: ${{ defaults.app_name }}-pg-conn-credential
+                  key: username
+            - name: POSTGRES_PWD
+              valueFrom:
+                secretKeyRef:
+                  name: ${{ defaults.app_name }}-pg-conn-credential
+                  key: password
+            - name: POSTGRES_SEEDS
+              valueFrom:
+                secretKeyRef:
+                  name: ${{ defaults.app_name }}-pg-conn-credential
+                  key: host
+            - name: DBNAME
+              value: temporal
+            - name: VISIBILITY_DBNAME
+              value: temporal_visibility
+          ports:
+            - name: grpc
+              containerPort: 7233
+          startupProbe:
+            tcpSocket:
+              port: 7233
+            failureThreshold: 30
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: 7233
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1024Mi
+          imagePullPolicy: IfNotPresent
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${{ defaults.app_name }}-temporal
+  labels:
+    cloud.sealos.io/app-deploy-manager: ${{ defaults.app_name }}-temporal
+spec:
+  ports:
+    - port: 7233
+      targetPort: 7233
+      name: grpc
+  selector:
+    app: ${{ defaults.app_name }}-temporal
+
+---
+# temporal-ui · 排障面板（仅集群内，不对外）
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${{ defaults.app_name }}-temporal-ui
+  annotations:
+    originImageName: temporalio/ui:2.34.0
+    deploy.cloud.sealos.io/minReplicas: '1'
+    deploy.cloud.sealos.io/maxReplicas: '1'
+  labels:
+    cloud.sealos.io/app-deploy-manager: ${{ defaults.app_name }}-temporal-ui
+    app: ${{ defaults.app_name }}-temporal-ui
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  selector:
+    matchLabels:
+      app: ${{ defaults.app_name }}-temporal-ui
+  template:
+    metadata:
+      labels:
+        app: ${{ defaults.app_name }}-temporal-ui
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: ${{ defaults.app_name }}-temporal-ui
+          image: temporalio/ui:2.34.0
+          env:
+            - name: TEMPORAL_ADDRESS
+              value: ${{ defaults.app_name }}-temporal.${{ SEALOS_NAMESPACE }}.svc:7233
+            - name: TEMPORAL_CORS_ORIGINS
+              value: http://localhost:8233
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+          imagePullPolicy: IfNotPresent
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${{ defaults.app_name }}-temporal-ui
+  labels:
+    cloud.sealos.io/app-deploy-manager: ${{ defaults.app_name }}-temporal-ui
+spec:
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http
+  selector:
+    app: ${{ defaults.app_name }}-temporal-ui
+
+---
+# fin-worker · 推理区 → 执行区的桥（不直连账本）
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${{ defaults.app_name }}-fin-worker
+  annotations:
+    originImageName: ghcr.io/agentpit-io/hunter-community-fin-worker:3.0.0
+    deploy.cloud.sealos.io/minReplicas: '1'
+    deploy.cloud.sealos.io/maxReplicas: '1'
+  labels:
+    cloud.sealos.io/app-deploy-manager: ${{ defaults.app_name }}-fin-worker
+    app: ${{ defaults.app_name }}-fin-worker
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  selector:
+    matchLabels:
+      app: ${{ defaults.app_name }}-fin-worker
+  template:
+    metadata:
+      labels:
+        app: ${{ defaults.app_name }}-fin-worker
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: ${{ defaults.app_name }}-fin-worker
+          image: ghcr.io/agentpit-io/hunter-community-fin-worker:3.0.0
+          env:
+            - name: PAPER_BASE_URL
+              value: http://${{ defaults.app_name }}-paper.${{ SEALOS_NAMESPACE }}.svc:8000
+            - name: API_BASE_URL
+              value: http://${{ defaults.app_name }}-api.${{ SEALOS_NAMESPACE }}.svc:8000
+            - name: TEMPORAL_ADDRESS
+              value: ${{ defaults.app_name }}-temporal.${{ SEALOS_NAMESPACE }}.svc:7233
+            - name: TEMPORAL_NAMESPACE
+              value: default
+            - name: TEMPORAL_TASK_QUEUE
+              value: fin-trading
+            - name: HUNTER_INTERNAL_KEY
+              value: ${{ defaults.internal_key }}
+            - name: FIN_WORKER_HTTP_PORT
+              value: '8300'
+            - name: FIN_SAMPLE_CODE
+              value: '601398'
+            - name: FIN_SAMPLE_STRATEGY_KEY
+              value: sample-fixed
+            - name: FIN_SAMPLE_STRATEGY_VERSION
+              value: '1.0'
+            - name: FIN_INTENT_TTL_SECONDS
+              value: '1800'
+            - name: FIN_SCHEDULES_ENABLED
+              value: '1'
+          ports:
+            - name: http
+              containerPort: 8300
+          readinessProbe:
+            tcpSocket:
+              port: 8300
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          imagePullPolicy: IfNotPresent
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${{ defaults.app_name }}-fin-worker
+  labels:
+    cloud.sealos.io/app-deploy-manager: ${{ defaults.app_name }}-fin-worker
+spec:
+  ports:
+    - port: 8300
+      targetPort: 8300
+      name: http
+  selector:
+    app: ${{ defaults.app_name }}-fin-worker
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ${{ defaults.app_name }}
+  labels:
+    cloud.sealos.io/app-deploy-manager: ${{ defaults.app_name }}
+    cloud.sealos.io/app-deploy-manager-domain: ${{ defaults.app_host }}
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/proxy-body-size: 32m
+    nginx.ingress.kubernetes.io/proxy-read-timeout: '600'
+    nginx.ingress.kubernetes.io/proxy-send-timeout: '600'
+    nginx.ingress.kubernetes.io/proxy-buffering: 'off'
+    nginx.ingress.kubernetes.io/server-snippet: |
+      client_header_buffer_size 64k;
+      large_client_header_buffers 4 128k;
+    nginx.ingress.kubernetes.io/ssl-redirect: 'false'
+    nginx.ingress.kubernetes.io/backend-protocol: HTTP
+    nginx.ingress.kubernetes.io/client-body-buffer-size: 64k
+    nginx.ingress.kubernetes.io/proxy-buffer-size: 64k
+spec:
+  rules:
+    - host: ${{ defaults.app_host }}.${{ SEALOS_CLOUD_DOMAIN }}
+      http:
+        paths:
+          - pathType: Prefix
+            path: /
+            backend:
+              service:
+                name: ${{ defaults.app_name }}
+                port:
+                  number: 3000
+  tls:
+    - hosts:
+        - ${{ defaults.app_host }}.${{ SEALOS_CLOUD_DOMAIN }}
+      secretName: ${{ SEALOS_CERT_SECRET_NAME }}
+
+---
+# App · Sealos 界面用的应用元信息（必须是最后一个资源）
+apiVersion: app.sealos.io/v1
+kind: App
+metadata:
+  name: ${{ defaults.app_name }}
+  labels:
+    cloud.sealos.io/app-deploy-manager: ${{ defaults.app_name }}
+spec:
+  data:
+    url: https://${{ defaults.app_host }}.${{ SEALOS_CLOUD_DOMAIN }}
+  displayType: normal
+  icon: 'https://raw.githubusercontent.com/agentpit-io/hunter-community/main/deploy/sealos/logo.png'
+  name: 'HunterCode'
+  type: link

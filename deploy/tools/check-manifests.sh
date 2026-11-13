@@ -5,11 +5,11 @@
 # 合成那一步失败时**单架构的镜像照样能拉**,只有 arm64 用户会发现拉不到 —— 而我们手上
 # 没有 arm64 机器。匿名取一次 manifest 是唯一不需要 arm64 机器也能验的那一层。
 #
-#   bash deploy/tools/check-manifests.sh 1.1.0
+#   bash deploy/tools/check-manifests.sh 3.0.0
 #
-# 四行都应该是 `HTTP 200  架构: linux/amd64, linux/arm64`。
+# 六行都应该是 `HTTP 200  架构: linux/amd64, linux/arm64`。
 TAG="${1:?用法: check-manifests.sh <标签>}"
-for img in api web opencode llm-shim; do
+for img in api web daemon llm-shim paper fin-worker; do
   repo="agentpit-io/hunter-community-$img"
   tok=$(curl -s "https://ghcr.io/token?scope=repository:$repo:pull&service=ghcr.io" \
         | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')

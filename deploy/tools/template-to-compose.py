@@ -217,9 +217,11 @@ def translate_zeabur(rng: Rng, web_port: int, debug_ports: bool) -> tuple[dict, 
             for m in rule.get("volumes") or []:
                 vol = f"zb_{name.replace('-', '_')}_{m['id']}"
                 init_vols.append(f"{vol}:{m['mountPath']}")
+            init_scope = {**exposed, **local[name], **resolved[name]}
+            init_cmd = [subst(str(x), init_scope)[0] for x in rule["command"]]
             out["services"][init_name] = {
                 "image": rule.get("image", spec["source"]["image"]),
-                "command": rule["command"],
+                "command": init_cmd,
                 "volumes": init_vols,
                 "restart": "no",
             }
@@ -257,12 +259,14 @@ def translate_zeabur(rng: Rng, web_port: int, debug_ports: bool) -> tuple[dict, 
         out["services"][name] = svc
 
     secret_note = [
-        "Zeabur · 模板里的四个随机密钥由 ${PASSWORD} 生成（每个服务一把）：",
+        "Zeabur · 模板里的五个随机密钥由 ${PASSWORD} 生成（每个服务一把）：",
         f"  postgres.POSTGRES_PASSWORD   = {mask(passwords['postgres'])}",
         f"  redis.HUNTER_SETUP_TOKEN     = {mask(passwords['redis'])}",
         f"  llm-shim.JWT_SECRET          = {mask(passwords['llm-shim'])}",
         f"  api.HUNTER_INTERNAL_KEY      = {mask(passwords['api'])}",
-        "四个值互不相同，且 api/opencode 拿到同一把 JWT_SECRET、api/web/opencode 拿到同一把 HUNTER_INTERNAL_KEY。",
+        f"  daemon.FIN_PAPER_PASSWORD    = {mask(passwords['daemon'])}",
+        "五个值互不相同，且 api/daemon 拿到同一把 JWT_SECRET、api/web/daemon 拿到同一把 HUNTER_INTERNAL_KEY、"
+        "paper 与 fin-init 拿到同一把 FIN_PAPER_PASSWORD。",
     ]
     return out, secret_note + notes
 
@@ -645,6 +649,9 @@ def translate_railway(rng: Rng, web_port: int, debug_ports: bool) -> tuple[dict,
         env = dict(resolved[name])
         svc: dict = {"image": s["image"], "restart": "unless-stopped", "environment": env}
 
+        if s.get("command"):
+            svc["command"] = s["command"]
+
         # RAILWAY_RUN_UID=0 → 容器以 root 跑（Railway 的卷是 root 属主的，官方给的办法）
         uid = env.get("RAILWAY_RUN_UID")
         if uid is not None:
@@ -656,22 +663,12 @@ def translate_railway(rng: Rng, web_port: int, debug_ports: bool) -> tuple[dict,
             vname = f"rw_{name}"
             out["volumes"][vname] = None
             svc["volumes"] = [f"{vname}:{vol['mountPath']}"]
-            # ⚠️ Railway 的卷和 K8s 的 PVC 一样,挂上去就是个**空目录**;
-            # 而 Docker 的具名卷首次挂载会把镜像里该路径的内容与属主拷进卷。
-            # 不模拟这一条,「把卷挂到了镜像里本来有东西的路径上」这种错误在本机
-            # 一点症状都没有,到了平台上才发现文件不见了(M4 实测踩过一次:
-            # api 的卷原本挂在 /opt/hunter-data,那是随镜像分发的静态数据目录)。
-            #
-            # 只在**首次**清空(打一个 marker),否则 `docker compose start` 会把
-            # 一次性服务也拉起来,每次重启都清一遍卷 —— M3 在 Sealos 的模拟上踩过。
             init_name = f"{name}-emptyvol"
             out["services"][init_name] = {
                 "image": "busybox:1.36",
                 "command": ["/bin/sh", "-c",
                             "[ -f /mnt/lost+found/.done ] && exit 0; "
                             "rm -rf /mnt/..?* /mnt/.[!.]* /mnt/* 2>/dev/null; "
-                            # Railway 的卷是 ext4 块设备,根目录天生带 lost+found ——
-                            # 少了它,「把卷直接当 PGDATA」这个必炸的配置在本机一点症状都没有
                             "mkdir -p /mnt/lost+found && touch /mnt/lost+found/.done; "
                             "echo '[init] 模拟 Railway 空卷(ext4 · 带 lost+found):已清空'"],
                 "volumes": [f"{vname}:/mnt"],
@@ -681,28 +678,30 @@ def translate_railway(rng: Rng, web_port: int, debug_ports: bool) -> tuple[dict,
 
         if s.get("public"):
             svc["ports"] = [f"{web_port}:{s['listenPort']}"]
-        elif debug_ports:
+        elif debug_ports and s.get("listenPort"):
             svc["ports"] = [str(s["listenPort"])]
 
+        lp = s.get("listenPort")
         hcp = s.get("healthcheckPath")
-        test = http_probe(s["listenPort"], hcp) if hcp else tcp_probe(s["listenPort"])
-        svc["healthcheck"] = {
-            "test": ["CMD-SHELL", test],
-            "interval": "10s", "timeout": "5s", "retries": 12, "start_period": "20s",
-        }
+        if lp:
+            test = http_probe(lp, hcp) if hcp else tcp_probe(lp)
+            svc["healthcheck"] = {
+                "test": ["CMD-SHELL", test],
+                "interval": "10s", "timeout": "5s", "retries": 12, "start_period": "20s",
+            }
         out["services"][name] = svc
 
-    # Railway **没有**服务间的启动顺序编排：六个服务同时起。这里照搬（不写 depends_on）——
-    # 这恰恰是云平台上的真实情形，api 会先于 postgres 就绪启动，靠 connect_with_retry 顶住。
-    notes.insert(0, "Railway 无启动顺序编排 → 生成的 compose 里**没有 depends_on**，六个服务同时起")
+    notes.insert(0, "Railway 无启动顺序编排 → 生成的 compose 里**没有 depends_on**，所有服务同时起")
 
     api_env = resolved["api"]
+    fin_env = resolved["fininit"]
     notes.append(
-        "Railway · 三把密钥由 ${{secret(N)}} 在部署时生成（每处独立求值）："
+        "Railway · 四把密钥由 ${{secret(N)}} 在部署时生成（每处独立求值）："
         f"JWT_SECRET={mask(api_env['JWT_SECRET'])} · "
         f"HUNTER_INTERNAL_KEY={mask(api_env['HUNTER_INTERNAL_KEY'])} · "
-        f"HUNTER_SETUP_TOKEN={mask(api_env['HUNTER_SETUP_TOKEN'])}；"
-        "opencode / web 用引用变量 ${{api.X}} 取同一个值"
+        f"HUNTER_SETUP_TOKEN={mask(api_env['HUNTER_SETUP_TOKEN'])} · "
+        f"FIN_PAPER_PASSWORD={mask(fin_env['FIN_PAPER_PASSWORD'])}；"
+        "daemon / web / paper / finworker 用引用变量取同一个值"
     )
     notes.append("监听地址全部设成 `::`（Railway 老环境私有网络 IPv6-only）——"
                  "这一套等价栈就是在验证四个镜像绑 `::` 之后还能不能互通")
@@ -741,7 +740,7 @@ def _paas_common(path: str, project: str, resolve, rng: Rng,
             if val is None:
                 raise SystemExit(f"❌ 变量 {key} 没人给值 —— 平台不会生成它,文档里也没让用户填")
             seen[key] = val
-            notes.append(f"{key} → {mask(val) if 'PASSWORD' in key or 'TOKEN' in key else val}")
+            notes.append(f"{key} → {mask(val) if any(t in key for t in ('PASSWORD', 'TOKEN', 'KEY')) else val}")
         return seen[key]
 
     # ⚠️ 先 load 再替换,**不要在原始文本上替换** —— 文件头的注释里就写着
@@ -765,9 +764,10 @@ def _paas_common(path: str, project: str, resolve, rng: Rng,
     # 其余服务一律不映射 —— 与这两个平台上的实际情形一致(只有绑了域名的服务对外)。
     out["services"]["web"].setdefault("ports", []).append(f"{web_port}:3000")
     if debug_ports:
-        for name, port in (("api", 8000), ("opencode", 3901), ("llm-shim", 3999),
+        for name, port in (("api", 8000), ("daemon", 13456), ("llm-shim", 3999),
                            ("postgres", 5432), ("redis", 6379)):
-            out["services"][name].setdefault("ports", []).append(str(port))
+            if name in out["services"]:
+                out["services"][name].setdefault("ports", []).append(str(port))
 
     # 具名卷在这两个平台上由 docker 自己管(Coolify 只在 Persistent Storage 里只读展示),
     # 翻译时原样保留 —— 这正是「compose 语义平台」相对 K8s 的优势,不需要任何模拟。
@@ -792,8 +792,9 @@ def translate_coolify(rng: Rng, web_port: int, debug_ports: bool) -> tuple[dict,
     out, notes = _paas_common("deploy/coolify/docker-compose.yml", "hunter-tpl-coolify",
                               resolve, rng, web_port, debug_ports)
     notes.insert(0, "Coolify · 随机值由平台的 magic 变量生成并持久化(重新部署不变)")
-    notes.append("JWT_SECRET / HUNTER_INTERNAL_KEY 不在 compose 里 —— "
-                 "由 api 首启生成写进 hunter_secrets 卷,web/opencode 只读挂同一个卷")
+    notes.append("JWT_SECRET 不在 compose 里 —— 由 api 首启生成写进 hunter_secrets 卷,"
+                 "web/daemon 只读挂同一个卷;"
+                 "HUNTER_INTERNAL_KEY 显式注入(paper/fin-worker 不读密钥卷)")
     return out, notes
 
 
@@ -804,11 +805,15 @@ def translate_dokploy(rng: Rng, web_port: int, debug_ports: bool) -> tuple[dict,
             return rng.token(48)          # openssl rand -hex 24
         if key == "HUNTER_SETUP_TOKEN":
             return rng.token(24)          # openssl rand -hex 12
+        if key == "FIN_PAPER_PASSWORD":
+            return rng.token(48)          # openssl rand -hex 24 · 账本库运行期角色口令
+        if key == "HUNTER_INTERNAL_KEY":
+            return rng.token(48)          # openssl rand -hex 24 · 服务间共享口令
         return None
 
     out, notes = _paas_common("deploy/dokploy/docker-compose.yml", "hunter-tpl-dokploy",
                               resolve, rng, web_port, debug_ports)
-    notes.insert(0, "Dokploy · 两个值由用户在 Environment 页签里填(平台写进 .env,"
+    notes.insert(0, "Dokploy · 四个值由用户在 Environment 页签里填(平台写进 .env,"
                     "compose 的 ${VAR} 插值读它);这里模拟用户 openssl rand 生成")
     return out, notes
 

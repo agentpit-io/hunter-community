@@ -1,0 +1,338 @@
+# HunterCode Community Edition (AtomCode Unified v3.0.0) · Dokploy 用编排
+# ══════════════════════════════════════════════════════════════════════
+# 用法：Dokploy → Project → Create Service → **Compose** → Provider 选 Raw
+#       → 把这份文件整个粘进 Compose File → 到 **Environment** 页签填四个变量
+#       → **Domains** 页签给 web 服务加域名（Container Port 填 3000）→ Deploy。
+#       详细步骤见
+#       https://github.com/agentpit-io/hunter-community/blob/main/docs/deploy/coolify-dokploy.md
+#
+# ⚠️ **Dokploy 不会把 Environment 页签里的变量自动注入容器**（官方文档原文：
+#    "Environment variables set in the UI are written to the `.env` file, but are
+#    **not automatically injected into containers**"）。它写的是同目录的 `.env`，
+#    而 compose 的 `${VAR}` 插值**读的正是这个 .env** —— 所以下面这种写法是对的，
+#    不需要额外的 env_file。
+#
+# Environment 页签里要填的**四个**：
+#
+#     POSTGRES_PASSWORD=<自己生成，如 openssl rand -hex 24>
+#     HUNTER_SETUP_TOKEN=<自己生成，如 openssl rand -hex 12>
+#     FIN_PAPER_PASSWORD=<自己生成，如 openssl rand -hex 24>    # 账本库运行期角色
+#     HUNTER_INTERNAL_KEY=<自己生成，如 openssl rand -hex 24>   # 服务间共享口令
+#
+# Dokploy 没有 Coolify 那种「magic 变量」自动生成随机值，所以这四个要自己生成。
+# **不要留空**：HUNTER_SETUP_TOKEN 为空 = 公网上谁先打开谁就能配大模型。
+# （HUNTER_INTERNAL_KEY 这里独立成一个变量，而不是像 Coolify 那样靠密钥卷共享：
+#  智能交易的 paper / fin-worker 只认环境变量、不读密钥卷，必须由模板显式给全
+#  api / web / daemon / paper / fin-worker 五个服务。）
+#
+# 其余与 Coolify 版完全一致（同镜像、同环境变量、同卷、同依赖），
+# 差别只有「随机值谁来生成」和域名的绑定方式。
+
+services:
+  # ── web · 本应用唯一对外的服务（在 Domains 页签里选它）────────
+  web:
+    image: ghcr.io/agentpit-io/hunter-community-web:3.0.0
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+      daemon:
+        condition: service_started
+    environment:
+      # 域名不在这里配 —— Dokploy 在 Domains 页签里选服务 web + Container Port 3000，
+      # 部署时自动往这个服务加 Traefik 标签并把它接进 dokploy-network，
+      # 不需要你写 labels，也不需要 ports:（官方文档 Method 1）。
+      NODE_ENV: production
+      AGENT_BACKEND: atomcode
+      # BFF 要回调 api 查会话归属；不传会回落 127.0.0.1:8000 → 503
+      HERMES_API_URL: http://api:8000
+      # BFF 反代到 AtomCode daemon 对话引擎
+      ATOMCODE_DAEMON_URL: http://daemon:13456
+      ATOMCODE_TOKEN_FILE: /run/hca/daemon-token
+      ATOMCODE_WORKSPACE: /workspace
+      # 与 api / daemon / paper / fin-worker 同值（BFF 调 /api/internal/* 要用）
+      HUNTER_INTERNAL_KEY: ${HUNTER_INTERNAL_KEY}
+    group_add:
+      - "10001"
+    volumes:
+      - hunter_daemon_token:/run/hca:ro
+      # 只读 · web 的 BFF 调 /api/internal/ocr/extract 要和 api 用同一把
+      # HUNTER_INTERNAL_KEY，否则「上传图片没反应」（其实是 401）
+      - hunter_secrets:/opt/hunter-secrets:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  # ── api · 后端 + 自动迁移 + 首启向导 ─────────────────────────
+  api:
+    image: ghcr.io/agentpit-io/hunter-community-api:3.0.0
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      HUNTER_MINIMAL_BOOT: "1"
+      DATABASE_URL: postgresql://hunter:${POSTGRES_PASSWORD}@postgres:5432/hunter
+      REDIS_URL: redis://redis:6379/0
+      # ⚠️ 与 web / daemon / paper / fin-worker 必须同值。这里**显式注入而不走
+      #    密钥卷** —— 智能交易的 paper / fin-worker 只读环境变量、不读密钥卷。
+      HUNTER_INTERNAL_KEY: ${HUNTER_INTERNAL_KEY}
+      # 首启向导第 0 步的初始化口令。**必须非空** —— 公网上不设口令等于
+      # 谁先打开谁就能配大模型、看别人的 key。部署后在 Environment Variables 里查。
+      HUNTER_SETUP_TOKEN: ${HUNTER_SETUP_TOKEN}
+      # ⚠️ 公网部署必须是 0。单用户模式不要账号密码，开着等于谁都能拿到 admin
+      HUNTER_SINGLE_USER: "0"
+      # open = 允许注册，第一个注册的账号自动是管理员。建好管理员后
+      # 建议在 Dokploy 里改成 closed 再 Redeploy。
+      REGISTRATION_MODE: open
+      JWT_ACCESS_TTL: "3600"
+      JWT_REFRESH_TTL: "2592000"
+      # 独立运行模式 · 不指回项目方的演示站
+      HUNTER_UPSTREAM_URL: ""
+      # 留空即可 · 聊天用你自己的大模型 key。想解锁全部行情工具再到
+      # https://hunter.agentpit.io/dev/api-keys 免费申请
+      HUNTER_API_KEY: ""
+      LLM_PROVIDER: openai_compat
+      HUNTER_SKILLS_DIR: /opt/hunter-skills
+      HUNTER_USER_SKILLS_DIR: /opt/hunter-user-skills
+      AGENT_BACKEND: atomcode
+      ATOMCODE_DAEMON_URL: http://daemon:13456
+      ATOMCODE_TOKEN_FILE: /run/hca/daemon-token
+      # ⚠️ **api 也必须知道 shim 在哪**，不是只有 daemon 需要：向导保存后 api 走
+      # POST /live/provider 把 provider 的 baseURL 推给 daemon，推的就是这个值。
+      LLM_SHIM_URL: http://llm-shim:3999/v1
+      PAPER_BASE_URL: http://paper:8000
+      FIN_WORKER_URL: http://fin-worker:8300
+    group_add:
+      - "10001"
+    volumes:
+      - hunter_daemon_token:/run/hca:ro
+      - hunter_user_skills:/opt/hunter-user-skills
+      - hunter_packages:/opt/hunter-packages
+      # 自动生成的密钥 · api 可写（它是写方），web / daemon 只读挂同一个卷
+      - hunter_secrets:/opt/hunter-secrets
+      - hunter_experiments:/var/lib/hunter/experiments
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS --max-time 3 http://127.0.0.1:8000/api/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 40s
+
+  # ── daemon · AtomCode 5.1.0 对话内核（会话正文在卷里）─────────
+  daemon:
+    image: ghcr.io/agentpit-io/hunter-community-daemon:3.0.0
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+      llm-shim:
+        condition: service_healthy
+    environment:
+      HCA_DAEMON_PORT: "13456"
+      HCA_DAEMON_INTERNAL_PORT: "13457"
+      HCA_DAEMON_SERVICE_NAME: daemon
+      HCA_WORKSPACE: /workspace
+      ATOMCODE_HOME: /data/atomcode
+      HCA_WORKSPACE_REFRESH: "1"
+      HCA_CONFIG_REFRESH: "1"
+      HCA_HOOKD: "1"
+      HCA_HOOKD_PORT: "13458"
+      ATOMCODE_VERIFY: "off"
+      ATOMCODE_TODO: "0"
+      ATOMCODE_SUBAGENT: "0"
+      ATOMCODE_MEMORY_TOOL: "0"
+      ATOMCODE_REQUEST_USER_INPUT: "0"
+      ATOMCODE_TURN_MAX_ROUNDS: "30"
+      ATOMCODE_AI_SESSION_NAMING: "0"
+      HCA_LLM_BASE_URL: http://llm-shim:3999/v1
+      HCA_LLM_MODEL: hunter-chat
+      HCA_LLM_PROVIDER_NAME: hunter
+      HCA_LLM_CONTEXT_WINDOW: "1000000"
+      HCA_LLM_SYSTEM_PROMPT_FILE: /opt/hca/personas/hunter-research.md
+      HERMES_API_URL: http://api:8000
+      FIN_WORKER_URL: http://fin-worker:8300
+      # 与 api / web / paper / fin-worker 同值
+      HUNTER_INTERNAL_KEY: ${HUNTER_INTERNAL_KEY}
+      AKSHARE_MAX_ROWS: "50"
+      AKSHARE_MAX_BYTES: "15000"
+      HCA_MCP_MAX_BYTES: "15000"
+      HCA_LANG_HOOK: "1"
+      HCA_CTX_CAPABILITIES: "1"
+    volumes:
+      # ⚠️ 会话正文（/data/atomcode）与工作区资产（/workspace）必须落在持久化卷上。
+      - hunter_workspace:/workspace
+      - hunter_atomcode_home:/data
+      - hunter_daemon_token:/run/hca
+      - hunter_secrets:/opt/hunter-secrets:ro
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS --max-time 3 http://127.0.0.1:13456/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  # ── llm-shim · tool schema 清洗与 ToolCallIndexer 层 ──────────
+  llm-shim:
+    image: ghcr.io/agentpit-io/hunter-community-llm-shim:3.0.0
+    restart: unless-stopped
+    environment:
+      LLM_FIX_TOOL_INDEX: "1"
+      LLM_STRIP_THINK: "1"
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request as u;u.urlopen('http://127.0.0.1:3999/health',timeout=3)\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  # ── postgres ────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: hunter
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: hunter
+    volumes:
+      - hunter_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hunter"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── redis ───────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - hunter_redis:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── fin-init · 一次性 provision 账本库运行期角色 ─────────────────
+  fin-init:
+    image: postgres:16-alpine
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: hunter
+      PGDATABASE: hunter
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      FIN_PAPER_PASSWORD: ${FIN_PAPER_PASSWORD}
+    command:
+      - /bin/sh
+      - -c
+      - |
+        until psql -tAc "SELECT rolname FROM pg_roles" 2>/dev/null | grep -qx fin_paper_rw; do
+          echo '[fin-init] 等待 api 迁移创建 fin_paper_rw …'; sleep 3
+        done
+        until printf "ALTER ROLE fin_paper_rw WITH LOGIN PASSWORD :'pw';\n" | psql -v ON_ERROR_STOP=1 -v pw="$FIN_PAPER_PASSWORD" >/dev/null 2>&1; do
+          echo '[fin-init] 设置 fin_paper_rw 口令失败，重试…'; sleep 3
+        done
+        echo '[fin-init] fin_paper_rw 运行期口令已就绪'
+
+  # ── paper · 唯一账本服务（只追加）─────────────────────────────────
+  paper:
+    image: ghcr.io/agentpit-io/hunter-community-paper:3.0.0
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      fin-init:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://fin_paper_rw:${FIN_PAPER_PASSWORD}@postgres:5432/hunter
+      PAPER_MODE: PAPER
+      HUNTER_INTERNAL_KEY: ${HUNTER_INTERNAL_KEY}
+      PAPER_QUOTE_URL: http://api:8000
+      PAPER_SNAPSHOT_STALE_SECONDS: "900"
+
+  # ── temporal · 智能交易链唯一的上层调度权威 ─────────────────────
+  temporal:
+    image: temporalio/auto-setup:1.25
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_USER: hunter
+      POSTGRES_PWD: ${POSTGRES_PASSWORD}
+      POSTGRES_SEEDS: postgres
+      DBNAME: temporal
+      VISIBILITY_DBNAME: temporal_visibility
+    healthcheck:
+      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "temporal:7233"]
+      interval: 10s
+      timeout: 5s
+      start_period: 40s
+      retries: 12
+
+  # ── temporal-ui · 排障面板（仅内网，不对外）──────────────────────
+  temporal-ui:
+    image: temporalio/ui:2.34.0
+    restart: unless-stopped
+    depends_on:
+      temporal:
+        condition: service_started
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:8233
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
+  # ── fin-worker · 推理区 → 执行区的桥（不直连账本）────────────────
+  fin-worker:
+    image: ghcr.io/agentpit-io/hunter-community-fin-worker:3.0.0
+    restart: unless-stopped
+    depends_on:
+      paper:
+        condition: service_started
+      temporal:
+        condition: service_started
+    environment:
+      PAPER_BASE_URL: http://paper:8000
+      API_BASE_URL: http://api:8000
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: default
+      TEMPORAL_TASK_QUEUE: fin-trading
+      HUNTER_INTERNAL_KEY: ${HUNTER_INTERNAL_KEY}
+      FIN_WORKER_HTTP_PORT: "8300"
+      FIN_SAMPLE_CODE: "601398"
+      FIN_SAMPLE_STRATEGY_KEY: sample-fixed
+      FIN_SAMPLE_STRATEGY_VERSION: "1.0"
+      FIN_INTENT_TTL_SECONDS: "1800"
+      FIN_SCHEDULES_ENABLED: "1"
+
+volumes:
+  hunter_pg:
+  hunter_redis:
+  hunter_workspace:
+  hunter_atomcode_home:
+  hunter_daemon_token:
+  hunter_user_skills:
+  hunter_packages:
+  hunter_secrets:
+  hunter_experiments:

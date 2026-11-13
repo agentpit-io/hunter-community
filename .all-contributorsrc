@@ -1,0 +1,75 @@
+{
+  "projectName": "hunter-community",
+  "projectOwner": "agentpit-io",
+  "repoType": "github",
+  "repoHost": "https://github.com",
+  "files": [
+    "README.md",
+    "README_EN.md"
+  ],
+  "imageSize": 72,
+  "commit": false,
+  "commitConvention": "angular",
+  "contributorsPerLine": 7,
+  "linkToUsage": false,
+  "contributors": [
+    {
+      "login": "forever-ivy",
+      "name": "Ziggy xuan",
+      "avatar_url": "https://avatars.githubusercontent.com/u/187021713?v=4",
+      "profile": "https://github.com/forever-ivy",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "cnYui",
+      "name": "Yui(ゆい)",
+      "avatar_url": "https://avatars.githubusercontent.com/u/132864240?v=4",
+      "profile": "https://github.com/cnYui",
+      "contributions": [
+        "code",
+        "test",
+        "infra",
+        "doc"
+      ]
+    },
+    {
+      "login": "ZGRX",
+      "name": "Ricey",
+      "avatar_url": "https://avatars.githubusercontent.com/u/146192810?v=4",
+      "profile": "https://github.com/ZGRX",
+      "contributions": [
+        "maintenance"
+      ]
+    },
+    {
+      "login": "fatihcvs",
+      "name": "fatihcvs",
+      "avatar_url": "https://avatars.githubusercontent.com/u/105765934?v=4",
+      "profile": "https://github.com/fatihcvs",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "AmirF194",
+      "name": "Amir Fathi",
+      "avatar_url": "https://avatars.githubusercontent.com/u/26088029?v=4",
+      "profile": "https://fastinfer.org/",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "hangeaiagent",
+      "name": "hangeaiagent",
+      "avatar_url": "https://avatars.githubusercontent.com/u/203139500?v=4",
+      "profile": "https://github.com/hangeaiagent",
+      "contributions": [
+        "code"
+      ]
+    }
+  ],
+  "commitType": "docs"
+}

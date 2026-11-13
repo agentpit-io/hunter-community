@@ -1,0 +1,233 @@
+# 版本级表单 · 1Panel 安装应用时渲染成表单,值写进安装目录的 .env
+#
+# 约束(来自 1Panel-dev/1Panel-appstore-skills · references/appstore-format.md):
+#  · docker-compose.yml 里出现的每一个 ${...} 都必须在这里声明 envKey,
+#    ${CONTAINER_NAME} 等面板内置变量除外;
+#  · 对外端口必须 type: number + rule: paramPort;
+#  · 密钥类必须 type: password;
+#  · 每个 label 要覆盖 appstore 全量语言集。
+#
+# ⚠️ 这里**故意没有** JWT_SECRET 字段:它由 api 容器首启自动生成并写进
+#    ./data/secrets/secrets.env,web 与 daemon 只读挂同一个目录读回来。
+#    做成表单项只会多出「多处填不一致 → 对话莫名 401」的坑。
+# ⚠️ HUNTER_INTERNAL_KEY 则**有**字段(见下):智能交易的 paper / fin-worker
+#    只认环境变量、不读密钥目录,所以这一把必须由表单给全五个服务。用户不用
+#    手填 —— 它是 random 字段。
+# ⚠️ 这里也**故意没有** HUNTER_SINGLE_USER:面板部署面向公网,必须是 0,
+#    在 compose 里写死。做成可改项等于给用户留一个「谁都能拿 admin token」的开关。
+additionalProperties:
+  formFields:
+    # ── 对外访问端口 ──────────────────────────────────────────
+    # 只有 web(容器内 3000)需要对外;postgres / redis / api / daemon /
+    # llm-shim 一律不映射到宿主。默认 3180 是为了避开面板上常见的 3000 / 8080,
+    # 也避开本项目本机 compose 用的 3100。
+    - envKey: PANEL_APP_PORT_HTTP
+      type: number
+      rule: paramPort
+      default: 3180
+      required: true
+      edit: true
+      labelZh: Web 访问端口
+      labelEn: Web Port
+      label:
+        en: Web Port
+        es-es: Puerto web
+        fa: 'پورت وب'
+        ja: Web ポート
+        ko: 웹 포트
+        ms: Port Web
+        pt-br: Porta Web
+        ru: Веб-порт
+        tr: Web Bağlantı Noktası
+        zh-Hant: Web 存取連接埠
+        zh: Web 访问端口
+      description:
+        zh: "浏览器访问用的宿主机端口,有效范围 1-65535。建议再用面板的「网站」功能反代并开 HTTPS。"
+        zh-Hant: "瀏覽器存取用的主機連接埠,有效範圍 1-65535。建議再用面板的「網站」功能反向代理並啟用 HTTPS。"
+        en: "Host port for browser access, valid range: 1-65535. Putting a 1Panel website reverse proxy with HTTPS in front of it is recommended."
+    # ── 首启向导初始化口令 ────────────────────────────────────
+    - envKey: HUNTER_SETUP_TOKEN
+      type: password
+      rule: paramCommon
+      default: change-me-on-install
+      random: true
+      required: true
+      edit: true
+      labelZh: 首启向导初始化口令
+      labelEn: Setup Wizard Token
+      label:
+        en: Setup Wizard Token
+        es-es: Token del asistente de configuracion
+        fa: 'توکن راه‌اندازی اولیه'
+        ja: 初期設定ウィザードのトークン
+        ko: 초기 설정 마법사 토큰
+        ms: Token Wizard Persediaan
+        pt-br: Token do assistente de configuracao
+        ru: Токен мастера первичной настройки
+        tr: Kurulum Sihirbazi Anahtari
+        zh-Hant: 首啟精靈初始化口令
+        zh: 首启向导初始化口令
+      description:
+        zh: "第一次打开站点会进入配置向导,第 0 步要输入的就是这个口令。装完可在「应用 → 参数」里随时查看。留空会让任何先打开页面的人都能配置你的大模型,所以这里必填,建议直接用自动生成的随机值。"
+        zh-Hant: "第一次開啟網站會進入設定精靈,第 0 步要輸入的就是這個口令。安裝後可在「應用 → 參數」中隨時查看。留空會讓任何先開啟頁面的人都能設定你的大模型,所以這裡必填,建議直接使用自動產生的隨機值。"
+        en: "The first visit opens the setup wizard and step 0 asks for this token. You can look it up any time under App - Parameters. Leaving it empty would let whoever opens the page first configure your LLM, so it is required here; keep the generated random value."
+    # ── 数据库密码 ────────────────────────────────────────────
+    - envKey: POSTGRES_PASSWORD
+      type: password
+      rule: paramCommon
+      default: change-me-on-install
+      random: true
+      required: true
+      edit: true
+      labelZh: 数据库密码
+      labelEn: Database Password
+      label:
+        en: Database Password
+        es-es: Contraseña de la base de datos
+        fa: 'رمز عبور پایگاه داده'
+        ja: データベースパスワード
+        ko: 데이터베이스 비밀번호
+        ms: Kata Laluan Pangkalan Data
+        pt-br: Senha do Banco de Dados
+        ru: Пароль базы данных
+        tr: Veritabani Parolasi
+        zh-Hant: 資料庫密碼
+        zh: 数据库密码
+      description:
+        zh: "应用自带的 PostgreSQL 16 的密码,不对外映射端口,只在应用内部网络里用。这个值会被拼进 DATABASE_URL,所以只允许字母数字和 . - _(rule: paramCommon),不要改成含 @ / # : 的密码,否则连接串会被解析错。安装后修改需要同时清空数据目录,请勿随意改动。"
+        zh-Hant: "應用自帶的 PostgreSQL 16 密碼,不對外映射連接埠,只在應用內部網路使用。這個值會被拼進 DATABASE_URL,因此只允許字母數字與 . - _,不要改成含 @ / # : 的密碼。安裝後修改需要同時清空資料目錄,請勿隨意改動。"
+        en: "Password of the bundled PostgreSQL 16. The port is not published; it is only used inside the app network. The value is embedded in DATABASE_URL, so keep it to letters, digits and . - _ ; characters such as @ / # : would break the connection string. Changing it after installation also requires wiping the data directory."
+    # ── 注册策略 ──────────────────────────────────────────────
+    - envKey: REGISTRATION_MODE
+      type: select
+      default: open
+      required: true
+      edit: true
+      values:
+        - label: open
+          value: open
+        - label: invite
+          value: invite
+        - label: closed
+          value: closed
+      labelZh: 注册策略
+      labelEn: Registration Mode
+      label:
+        en: Registration Mode
+        es-es: Modo de registro
+        fa: 'حالت ثبت‌نام'
+        ja: 登録ポリシー
+        ko: 가입 정책
+        ms: Mod Pendaftaran
+        pt-br: Modo de registro
+        ru: Режим регистрации
+        tr: Kayit Modu
+        zh-Hant: 註冊策略
+        zh: 注册策略
+      description:
+        zh: "本应用以多用户模式运行(HUNTER_SINGLE_USER=0,面向公网的安全底线)。open = 允许注册,第一个注册的账号自动成为管理员;管理员建好之后建议改成 closed 再重建容器。invite = 仅邀请。"
+        zh-Hant: "本應用以多使用者模式執行(HUNTER_SINGLE_USER=0)。open = 允許註冊,第一個註冊的帳號自動成為管理員;管理員建立後建議改成 closed 再重建容器。invite = 僅邀請。"
+        en: "The app runs in multi-user mode (HUNTER_SINGLE_USER=0). open means registration is allowed and the first account becomes the administrator; switch to closed and recreate the containers once that account exists. invite means invitation only."
+    # ── 可选 · 平台 key ───────────────────────────────────────
+    - envKey: HUNTER_API_KEY
+      type: password
+      rule: paramCommon
+      default: ""
+      required: false
+      edit: true
+      labelZh: HunterCode 平台 Key(可选)
+      labelEn: HunterCode Platform Key (optional)
+      label:
+        en: HunterCode Platform Key (optional)
+        es-es: Clave de plataforma HunterCode (opcional)
+        fa: '(اختیاری) کلید پلتفرم HunterCode'
+        ja: HunterCode プラットフォームキー(任意)
+        ko: HunterCode 플랫폼 키(선택)
+        ms: Kunci Platform HunterCode (pilihan)
+        pt-br: Chave da plataforma HunterCode (opcional)
+        ru: Ключ платформы HunterCode (необязательно)
+        tr: HunterCode Platform Anahtari (istege bagli)
+        zh-Hant: HunterCode 平台 Key(選填)
+        zh: HunterCode 平台 Key(可选)
+      description:
+        zh: "留空也能跑。填了可解锁行情数据、工具与预测等平台侧能力;不填时聊天用你自己的大模型 Key,工具可以之后在界面左下角「解锁全部工具」里再填。"
+        zh-Hant: "留空也能執行。填寫後可解鎖行情資料、工具與預測等平台側能力;不填時聊天使用你自己的大模型 Key。"
+        en: "Optional. Fills in platform-side market data, tools and forecasting. Leave it empty to run with your own LLM key only; the key can also be entered later in the web UI."
+    # ── 可选 · 管理员邮箱 ─────────────────────────────────────
+    - envKey: HUNTER_ADMIN_EMAILS
+      type: text
+      default: ""
+      required: false
+      edit: true
+      labelZh: 管理员邮箱(可选,逗号分隔)
+      labelEn: Administrator Emails (optional, comma separated)
+      label:
+        en: Administrator Emails (optional, comma separated)
+        es-es: Correos de administrador (opcional, separados por comas)
+        fa: '(اختیاری) ایمیل‌های مدیر، جداشده با کاما'
+        ja: 管理者メールアドレス(任意・カンマ区切り)
+        ko: 관리자 이메일(선택, 쉼표 구분)
+        ms: E-mel Pentadbir (pilihan, dipisahkan koma)
+        pt-br: E-mails de administrador (opcional, separados por virgula)
+        ru: Электронная почта администраторов (необязательно, через запятую)
+        tr: Yonetici E-postalari (istege bagli, virgulle ayrilmis)
+        zh-Hant: 管理員信箱(選填,逗號分隔)
+        zh: 管理员邮箱(可选,逗号分隔)
+      description:
+        zh: "这些邮箱注册的账号直接具备管理员权限。留空则第一个注册的账号自动成为管理员。"
+        zh-Hant: "這些信箱註冊的帳號直接具備管理員權限。留空則第一個註冊的帳號自動成為管理員。"
+        en: "Accounts registered with these addresses get administrator rights. Leave it empty and the first registered account becomes the administrator."
+    # ── 智能交易 · 账本库运行期角色口令 ───────────────────────
+    # `0023_fin_core.sql` 建 `fin_paper_rw` 角色时故意不写密码(密码不进仓库),
+    # 由 fin-init 一次性服务在建出角色后 ALTER ROLE 设上 —— 这里必须给一个值。
+    - envKey: FIN_PAPER_PASSWORD
+      type: password
+      rule: paramCommon
+      default: change-me-on-install
+      random: true
+      required: true
+      edit: true
+      labelZh: 账本库角色口令
+      labelEn: Ledger Role Password
+      label:
+        en: Ledger Role Password
+        es-es: Contraseña del rol del libro mayor
+        fa: 'رمز عبور نقش دفتر کل'
+        ja: 台帳ロールのパスワード
+        ko: 원장 역할 비밀번호
+        ms: Kata Laluan Peranan Lejar
+        pt-br: Senha do perfil do razao
+        ru: Пароль роли реестра
+        tr: Defter Rolu Parolasi
+        zh-Hant: 帳本庫角色密碼
+        zh: 账本库角色口令
+      description:
+        zh: "智能交易的 paper 服务用这个口令以受限角色(只增不改)连账本库。由 fin-init 一次性服务在 api 迁移建出角色后设置;留空会让 paper 连不上库而反复重启,请保留自动生成的随机值。"
+        zh-Hant: "智能交易的 paper 服務以這個密碼用受限角色(只增不改)連線帳本庫。由 fin-init 一次性服務在 api 遷移建出角色後設定;留空會讓 paper 連不上庫而反覆重啟。"
+        en: "Paper service uses this to connect to the ledger DB as a restricted (append-only) role. A one-shot fin-init service sets it after the api migration creates the role; leaving it empty makes paper crash-loop."
+    # ── 智能交易 · 服务间共享口令 ─────────────────────────────
+    - envKey: HUNTER_INTERNAL_KEY
+      type: password
+      rule: paramCommon
+      default: change-me-on-install
+      random: true
+      required: true
+      edit: true
+      labelZh: 服务间共享口令
+      labelEn: Internal Shared Key
+      label:
+        en: Internal Shared Key
+        es-es: Clave interna compartida
+        fa: 'کلید مشترک داخلی'
+        ja: サービス間共有キー
+        ko: 서비스 간 공유 키
+        ms: Kunci Kongsi Dalaman
+        pt-br: Chave interna compartilhada
+        ru: Общий внутренний ключ
+        tr: Dahili Paylasilan Anahtar
+        zh-Hant: 服務間共用口令
+        zh: 服务间共享口令
+      description:
+        zh: "api / web / daemon / paper / fin-worker 五个服务共用的内部口令,用于 /api/internal/* 与智能交易链的鉴权。智能交易的 paper / fin-worker 不读密钥目录,只认环境变量,所以必须由表单给全五个服务。留空会让对话与账本链路一律 401,请保留自动生成的随机值。"
+        zh-Hant: "api / web / daemon / paper / fin-worker 五個服務共用的內部口令,用於 /api/internal/* 與智能交易鏈的鑑權。paper / fin-worker 不讀密鑰目錄,只認環境變數,所以必須由表單給全五個服務。"
+        en: "Shared internal key for api / web / daemon / paper / fin-worker, used to authorize /api/internal/* and the trading chain. paper / fin-worker only read env vars (not the secrets dir), so all five services get it from this form field."
