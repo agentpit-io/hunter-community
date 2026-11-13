@@ -317,6 +317,9 @@ def test_仓库里六个技能都映射得到工具() -> None:
         "daily_market_brief", "watchlist_daily_brief", "announcement_impact",
         "earnings_review", "technical_dashboard", "fundamental_scorecard",
         "portfolio_risk_check", "after_close_review",
+        "factor_research", "etf_dca_planner", "investment_thesis_tracker",
+        "stock_screener_builder", "news_signal_digest", "trading_journal",
+        "backtest_quality_auditor",
     ]:
         assert required in names, f"缺少技能: {required}"
     assert sum(len(x.unmapped) for x in logs) == 0

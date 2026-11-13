@@ -16,10 +16,12 @@
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
+
+from app.services.market_time import market_tz
 
 MarketCode = Literal["CN_A", "HK", "US", "FUND", "BOND", "FUTURES", "OPTION", "OTHER"]
 AdjustmentType = Literal["前复权", "后复权", "不复权", "qfq", "hfq", "none", "N/A"]
@@ -47,18 +49,14 @@ def _parse_iso_dt(value: str | datetime | None, field_name: str) -> datetime | N
 
     if dt.tzinfo is None:
         # 默认按东八区（上海/香港时间）解释无时区时间戳
-        from datetime import timedelta
-
-        dt = dt.replace(tzinfo=timezone(timedelta(hours=8)))
+        dt = dt.replace(tzinfo=market_tz("CN_A"))
     return dt
 
 
 def format_iso_dt(dt: datetime) -> str:
     """格式化为带时区的 ISO-8601 字符串。"""
     if dt.tzinfo is None:
-        from datetime import timedelta
-
-        dt = dt.replace(tzinfo=timezone(timedelta(hours=8)))
+        dt = dt.replace(tzinfo=market_tz("CN_A"))
     return dt.isoformat(timespec="seconds")
 
 

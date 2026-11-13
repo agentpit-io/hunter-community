@@ -1,9 +1,9 @@
 ---
 name: uzi
-description: A 股、港股与美股的投研总调度技能（覆盖全部 22 个金融技能），统筹深度研究、日常晨报、自选股排雷、公告解读、财报体检、56项技术面看板、90项基本面评分卡、组合风险巡检、盘后复盘、大佬评审团、龙虎榜分析与杀猪盘识别。
+description: A 股、港股与美股的投研总调度技能（覆盖全部 22 个金融技能），统筹深度研究、日常晨报、自选股排雷、公告解读、财报体检、56项技术面看板、90项基本面评分卡、组合风险巡检、盘后复盘、量化因子研究、ETF定投规划、投资论点跟踪、回测审计、大佬评审团、龙虎榜分析与杀猪盘识别。
 user-invocable: true
 allowed-tools: mcp__uzi__stock_deep_analysis mcp__broker_market__get_quote mcp__broker_fundamental__get_financial_ratios mcp__broker_disclosure__search_announcements
-version: 3.2.0
+version: 3.3.0
 author: FloatFu-true & HunterCode Team
 license: MIT
 metadata:

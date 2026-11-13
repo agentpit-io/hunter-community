@@ -95,6 +95,23 @@
       "get_valuation",
       "get_shareholders",
       "get_corporate_actions"
+    ],
+    "broker_funds": [
+      "get_etf_quote",
+      "get_fund_nav",
+      "get_etf_holdings",
+      "get_fund_fee",
+      "get_bond_data"
+    ],
+    "broker_research": [
+      "get_research_reports",
+      "get_consensus_estimates",
+      "get_sector_data"
+    ],
+    "broker_education": [
+      "search_investor_education",
+      "get_product_guide",
+      "get_risk_disclosure"
     ]
   }
 }

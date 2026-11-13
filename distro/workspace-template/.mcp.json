@@ -278,6 +278,57 @@
         "get_shareholders",
         "get_corporate_actions"
       ]
+    },
+    // ── 阶段 M3 · 二期 P1 券商专属只读 MCP 服务群（3 个）──────────────────────
+    "broker_funds": {
+      "command": "${HCA_PYTHON:-python3}",
+      "args": ["${HCA_BROKER_MCP_DIR:-/opt/hca/mcp-servers}/broker_funds/server.py"],
+      "env": {
+        "PYTHONPATH": "${HCA_BROKER_MCP_DIR:-/opt/hca/mcp-servers}:/opt/hca/mcp",
+        "HCA_MCP_MAX_BYTES": "${HCA_MCP_MAX_BYTES:-15000}",
+        "BROKER_GATEWAY_URL": "${BROKER_GATEWAY_URL:-}",
+        "BROKER_API_KEY": "${BROKER_API_KEY:-}"
+      },
+      "timeout_ms": 120000,
+      "autoApprove": [
+        "get_etf_quote",
+        "get_fund_nav",
+        "get_etf_holdings",
+        "get_fund_fee",
+        "get_bond_data"
+      ]
+    },
+    "broker_research": {
+      "command": "${HCA_PYTHON:-python3}",
+      "args": ["${HCA_BROKER_MCP_DIR:-/opt/hca/mcp-servers}/broker_research/server.py"],
+      "env": {
+        "PYTHONPATH": "${HCA_BROKER_MCP_DIR:-/opt/hca/mcp-servers}:/opt/hca/mcp",
+        "HCA_MCP_MAX_BYTES": "${HCA_MCP_MAX_BYTES:-15000}",
+        "BROKER_GATEWAY_URL": "${BROKER_GATEWAY_URL:-}",
+        "BROKER_API_KEY": "${BROKER_API_KEY:-}"
+      },
+      "timeout_ms": 120000,
+      "autoApprove": [
+        "get_research_reports",
+        "get_consensus_estimates",
+        "get_sector_data"
+      ]
+    },
+    "broker_education": {
+      "command": "${HCA_PYTHON:-python3}",
+      "args": ["${HCA_BROKER_MCP_DIR:-/opt/hca/mcp-servers}/broker_education/server.py"],
+      "env": {
+        "PYTHONPATH": "${HCA_BROKER_MCP_DIR:-/opt/hca/mcp-servers}:/opt/hca/mcp",
+        "HCA_MCP_MAX_BYTES": "${HCA_MCP_MAX_BYTES:-15000}",
+        "BROKER_GATEWAY_URL": "${BROKER_GATEWAY_URL:-}",
+        "BROKER_API_KEY": "${BROKER_API_KEY:-}"
+      },
+      "timeout_ms": 120000,
+      "autoApprove": [
+        "search_investor_education",
+        "get_product_guide",
+        "get_risk_disclosure"
+      ]
     }
   }
 }

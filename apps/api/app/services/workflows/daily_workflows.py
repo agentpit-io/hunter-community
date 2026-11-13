@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import os
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from typing import Any
 
 from app.providers.broker.envelope import MarketCode, format_iso_dt
@@ -31,10 +31,11 @@ from app.services.fundamentals import (
     default_fundamental_raw_input,
 )
 from app.services.indicators import calculate_all_56_indicators
+from app.services.market_time import market_tz
 
 from .number_verifier import verify_and_guard_report_numbers
 
-CN_TZ = timezone(timedelta(hours=8))
+CN_TZ = market_tz("CN_A")
 
 # 盘中异动解释流：同标的+同事件类型的频率限制缓存（symbol:event_key -> list[timestamp]）
 _INTRADAY_THROTTLE_STATE: dict[str, list[float]] = {}

@@ -13,15 +13,20 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from typing import Any
 
 import httpx
 
+from app.services.market_time import market_tz
+
 from .base import (
     DisclosureProvider,
+    EducationProvider,
     FundamentalProvider,
+    FundsProvider,
     MarketDataProvider,
+    ResearchProvider,
     SecurityMasterProvider,
 )
 from .envelope import (
@@ -31,7 +36,7 @@ from .envelope import (
     format_iso_dt,
 )
 
-CN_TZ = timezone(timedelta(hours=8))
+CN_TZ = market_tz("CN_A")
 
 
 class BrokerProviderUnavailableError(RuntimeError):
@@ -94,6 +99,9 @@ class GalaxyBrokerAdapter(
     SecurityMasterProvider,
     FundamentalProvider,
     DisclosureProvider,
+    FundsProvider,
+    ResearchProvider,
+    EducationProvider,
 ):
     """合作证券公司官方只读接口标准适配器。"""
 
@@ -775,6 +783,290 @@ class GalaxyBrokerAdapter(
         raise BrokerProviderUnavailableError(
             f"合作券商主源未命中新闻 `{news_id}`",
             code="BROKER_NEWS_DETAIL_MISS",
+            provider=self.provider_id,
+        )
+
+    # ── 5. FundsProvider (P1) ────────────────────────────────────────────────
+
+    def get_etf_quote(
+        self,
+        symbol: str,
+        market: MarketCode = "FUND",
+        as_of: str | None = None,
+    ) -> BrokerDataEnvelope:
+        self._check_available("funds/get_etf_quote")
+        std_sym, _, _ = normalize_symbol(symbol, "CN_A")
+        etf_quotes = self.snapshot_store.get("etf_quotes", {})
+        if std_sym in etf_quotes or symbol in etf_quotes:
+            item = dict(etf_quotes.get(std_sym) or etf_quotes[symbol])
+            return BrokerDataEnvelope.build(
+                provider=self.provider_id,
+                market=market,
+                symbol=std_sym,
+                as_of=as_of or item.get("as_of", "2026-11-13T15:00:00+08:00"),
+                retrieved_at=_now_iso(),
+                data=item,
+            )
+        raise BrokerProviderUnavailableError(
+            f"合作券商主源未命中 ETF 行情 `{std_sym}`",
+            code="BROKER_ETF_QUOTE_MISS",
+            provider=self.provider_id,
+        )
+
+    def get_fund_nav(
+        self,
+        symbol: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> BrokerDataEnvelope:
+        self._check_available("funds/get_fund_nav")
+        std_sym, _, _ = normalize_symbol(symbol, "CN_A")
+        nav_map = self.snapshot_store.get("fund_nav", {})
+        if std_sym in nav_map or symbol in nav_map:
+            item = dict(nav_map.get(std_sym) or nav_map[symbol])
+            return BrokerDataEnvelope.build(
+                provider=self.provider_id,
+                market="FUND",
+                symbol=std_sym,
+                as_of=item.get("as_of", "2026-11-13T15:00:00+08:00"),
+                retrieved_at=_now_iso(),
+                data=item,
+            )
+        raise BrokerProviderUnavailableError(
+            f"合作券商主源未命中基金历史净值 `{std_sym}`",
+            code="BROKER_FUND_NAV_MISS",
+            provider=self.provider_id,
+        )
+
+    def get_etf_holdings(
+        self,
+        symbol: str,
+        as_of: str | None = None,
+    ) -> BrokerDataEnvelope:
+        self._check_available("funds/get_etf_holdings")
+        std_sym, _, _ = normalize_symbol(symbol, "CN_A")
+        holdings_map = self.snapshot_store.get("etf_holdings", {})
+        if std_sym in holdings_map or symbol in holdings_map:
+            item = dict(holdings_map.get(std_sym) or holdings_map[symbol])
+            return BrokerDataEnvelope.build(
+                provider=self.provider_id,
+                market="FUND",
+                symbol=std_sym,
+                as_of=as_of or item.get("as_of", "2026-11-13T15:00:00+08:00"),
+                published_at=item.get("published_at"),
+                retrieved_at=_now_iso(),
+                data=item,
+            )
+        raise BrokerProviderUnavailableError(
+            f"合作券商主源未命中 ETF 申赎成分清单 `{std_sym}`",
+            code="BROKER_ETF_HOLDINGS_MISS",
+            provider=self.provider_id,
+        )
+
+    def get_fund_fee(
+        self,
+        symbol: str,
+    ) -> BrokerDataEnvelope:
+        self._check_available("funds/get_fund_fee")
+        std_sym, _, _ = normalize_symbol(symbol, "CN_A")
+        fee_map = self.snapshot_store.get("fund_fees", {})
+        if std_sym in fee_map or symbol in fee_map:
+            item = dict(fee_map.get(std_sym) or fee_map[symbol])
+            return BrokerDataEnvelope.build(
+                provider=self.provider_id,
+                market="FUND",
+                symbol=std_sym,
+                as_of=item.get("as_of", "2026-11-13T15:00:00+08:00"),
+                retrieved_at=_now_iso(),
+                data=item,
+            )
+        raise BrokerProviderUnavailableError(
+            f"合作券商主源未命中基金费率结构 `{std_sym}`",
+            code="BROKER_FUND_FEE_MISS",
+            provider=self.provider_id,
+        )
+
+    def get_bond_data(
+        self,
+        symbol: str,
+        as_of: str | None = None,
+    ) -> BrokerDataEnvelope:
+        self._check_available("funds/get_bond_data")
+        std_sym, _, _ = normalize_symbol(symbol, "CN_A")
+        bond_map = self.snapshot_store.get("bond_data", {})
+        if std_sym in bond_map or symbol in bond_map:
+            item = dict(bond_map.get(std_sym) or bond_map[symbol])
+            return BrokerDataEnvelope.build(
+                provider=self.provider_id,
+                market="BOND",
+                symbol=std_sym,
+                as_of=as_of or item.get("as_of", "2026-11-13T15:00:00+08:00"),
+                retrieved_at=_now_iso(),
+                data=item,
+            )
+        raise BrokerProviderUnavailableError(
+            f"合作券商主源未命中可转债/债券数据 `{std_sym}`",
+            code="BROKER_BOND_DATA_MISS",
+            provider=self.provider_id,
+        )
+
+    # ── 6. ResearchProvider (P1) ─────────────────────────────────────────────
+
+    def get_research_reports(
+        self,
+        symbol: str | None = None,
+        sector: str | None = None,
+        query: str | None = None,
+        as_of: str | None = None,
+    ) -> BrokerDataEnvelope:
+        self._check_available("research/get_research_reports")
+        if "research_reports" in self.snapshot_store:
+            rows = [dict(r) for r in self.snapshot_store["research_reports"]]
+            if symbol:
+                std_sym, bare, _ = normalize_symbol(symbol)
+                rows = [r for r in rows if r.get("symbol") in (std_sym, bare, symbol)]
+            if sector:
+                rows = [r for r in rows if sector in str(r.get("sector", ""))]
+            if query:
+                q = query.strip().lower()
+                rows = [
+                    r for r in rows
+                    if q in str(r.get("title", "")).lower() or q in str(r.get("summary", "")).lower()
+                ]
+            env = BrokerDataEnvelope.build(
+                provider=self.provider_id,
+                market="CN_A",
+                symbol=symbol,
+                as_of=as_of or "2026-11-13T15:00:00+08:00",
+                retrieved_at=_now_iso(),
+                data=rows,
+            )
+            if as_of:
+                env = env.filter_point_in_time(as_of)
+            return env
+        raise BrokerProviderUnavailableError(
+            "合作券商主源未配置合规授权研报摘要网关",
+            code="BROKER_RESEARCH_REPORTS_MISS",
+            provider=self.provider_id,
+        )
+
+    def get_consensus_estimates(
+        self,
+        symbol: str,
+        market: MarketCode = "CN_A",
+        as_of: str | None = None,
+    ) -> BrokerDataEnvelope:
+        self._check_available("research/get_consensus_estimates")
+        std_sym, _, mkt = normalize_symbol(symbol, market)
+        consensus_map = self.snapshot_store.get("consensus_estimates", {})
+        if std_sym in consensus_map or symbol in consensus_map:
+            item = dict(consensus_map.get(std_sym) or consensus_map[symbol])
+            return BrokerDataEnvelope.build(
+                provider=self.provider_id,
+                market=mkt,
+                symbol=std_sym,
+                as_of=as_of or item.get("as_of", "2026-11-13T15:00:00+08:00"),
+                published_at=item.get("published_at"),
+                retrieved_at=_now_iso(),
+                data=item,
+            )
+        raise BrokerProviderUnavailableError(
+            f"合作券商主源未命中分析师一致预期 `{std_sym}`",
+            code="BROKER_CONSENSUS_MISS",
+            provider=self.provider_id,
+        )
+
+    def get_sector_data(
+        self,
+        sector_code: str,
+        as_of: str | None = None,
+    ) -> BrokerDataEnvelope:
+        self._check_available("research/get_sector_data")
+        sector_map = self.snapshot_store.get("sector_data", {})
+        if sector_code in sector_map:
+            item = dict(sector_map[sector_code])
+            return BrokerDataEnvelope.build(
+                provider=self.provider_id,
+                market="CN_A",
+                symbol=sector_code,
+                as_of=as_of or item.get("as_of", "2026-11-13T15:00:00+08:00"),
+                retrieved_at=_now_iso(),
+                data=item,
+            )
+        raise BrokerProviderUnavailableError(
+            f"合作券商主源未命中行业景气度数据 `{sector_code}`",
+            code="BROKER_SECTOR_DATA_MISS",
+            provider=self.provider_id,
+        )
+
+    # ── 7. EducationProvider (P1) ────────────────────────────────────────────
+
+    def search_investor_education(
+        self,
+        query: str,
+        category: str | None = None,
+    ) -> BrokerDataEnvelope:
+        self._check_available("education/search_investor_education")
+        if "investor_education" in self.snapshot_store:
+            rows = [dict(r) for r in self.snapshot_store["investor_education"]]
+            if category:
+                rows = [r for r in rows if category in str(r.get("category", ""))]
+            if query:
+                q = query.strip().lower()
+                rows = [
+                    r for r in rows
+                    if q in str(r.get("title", "")).lower() or q in str(r.get("summary", "")).lower()
+                ]
+            return BrokerDataEnvelope.build(
+                provider=self.provider_id,
+                market="CN_A",
+                as_of="2026-11-13T15:00:00+08:00",
+                retrieved_at=_now_iso(),
+                data=rows,
+            )
+        raise BrokerProviderUnavailableError(
+            "合作券商主源未配置投教知识库网关",
+            code="BROKER_EDUCATION_SEARCH_MISS",
+            provider=self.provider_id,
+        )
+
+    def get_product_guide(
+        self,
+        product_type: str,
+    ) -> BrokerDataEnvelope:
+        self._check_available("education/get_product_guide")
+        guides = self.snapshot_store.get("product_guides", {})
+        if product_type in guides:
+            return BrokerDataEnvelope.build(
+                provider=self.provider_id,
+                market="CN_A",
+                as_of="2026-11-13T15:00:00+08:00",
+                retrieved_at=_now_iso(),
+                data=dict(guides[product_type]),
+            )
+        raise BrokerProviderUnavailableError(
+            f"合作券商主源未命中业务规则说明 `{product_type}`",
+            code="BROKER_PRODUCT_GUIDE_MISS",
+            provider=self.provider_id,
+        )
+
+    def get_risk_disclosure(
+        self,
+        risk_type: str,
+    ) -> BrokerDataEnvelope:
+        self._check_available("education/get_risk_disclosure")
+        disclosures = self.snapshot_store.get("risk_disclosures", {})
+        if risk_type in disclosures:
+            return BrokerDataEnvelope.build(
+                provider=self.provider_id,
+                market="CN_A",
+                as_of="2026-11-13T15:00:00+08:00",
+                retrieved_at=_now_iso(),
+                data=dict(disclosures[risk_type]),
+            )
+        raise BrokerProviderUnavailableError(
+            f"合作券商主源未命中风险揭示书 `{risk_type}`",
+            code="BROKER_RISK_DISCLOSURE_MISS",
             provider=self.provider_id,
         )
 

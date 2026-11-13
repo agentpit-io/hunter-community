@@ -13,13 +13,18 @@
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from typing import Any, Callable
+
+from app.services.market_time import market_tz
 
 from .base import (
     DisclosureProvider,
+    EducationProvider,
     FundamentalProvider,
+    FundsProvider,
     MarketDataProvider,
+    ResearchProvider,
     SecurityMasterProvider,
 )
 from .envelope import (
@@ -32,7 +37,7 @@ from .envelope import (
 from .galaxy_adapter import BrokerProviderUnavailableError, GalaxyBrokerAdapter
 from .public_adapter import PublicFallbackAdapter
 
-CN_TZ = timezone(timedelta(hours=8))
+CN_TZ = market_tz("CN_A")
 
 
 def _now_iso() -> str:
@@ -58,8 +63,11 @@ class BrokerDataRouter(
     SecurityMasterProvider,
     FundamentalProvider,
     DisclosureProvider,
+    FundsProvider,
+    ResearchProvider,
+    EducationProvider,
 ):
-    """P0 四大业务域多源主备路由器。"""
+    """P0 + P1 七大业务域多源主备路由器。"""
 
     provider_id: str = "broker_router"
     provider_name: str = "券商主备数据源路由器"
@@ -419,6 +427,148 @@ class BrokerDataRouter(
         return self._route_call(
             "get_news_detail",
             news_id,
+        )
+
+    # ── 5. FundsProvider (P1) ────────────────────────────────────────────────
+
+    def get_etf_quote(
+        self,
+        symbol: str,
+        market: MarketCode = "FUND",
+        as_of: str | None = None,
+    ) -> BrokerDataEnvelope:
+        return self._route_call(
+            "get_etf_quote",
+            symbol,
+            market=market,
+            as_of=as_of,
+            symbol=symbol,
+        )
+
+    def get_fund_nav(
+        self,
+        symbol: str,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> BrokerDataEnvelope:
+        return self._route_call(
+            "get_fund_nav",
+            symbol,
+            start_date=start_date,
+            end_date=end_date,
+            market="FUND",
+            symbol=symbol,
+        )
+
+    def get_etf_holdings(
+        self,
+        symbol: str,
+        as_of: str | None = None,
+    ) -> BrokerDataEnvelope:
+        return self._route_call(
+            "get_etf_holdings",
+            symbol,
+            as_of=as_of,
+            market="FUND",
+            symbol=symbol,
+        )
+
+    def get_fund_fee(
+        self,
+        symbol: str,
+    ) -> BrokerDataEnvelope:
+        return self._route_call(
+            "get_fund_fee",
+            symbol,
+            market="FUND",
+            symbol=symbol,
+        )
+
+    def get_bond_data(
+        self,
+        symbol: str,
+        as_of: str | None = None,
+    ) -> BrokerDataEnvelope:
+        return self._route_call(
+            "get_bond_data",
+            symbol,
+            as_of=as_of,
+            market="BOND",
+            symbol=symbol,
+        )
+
+    # ── 6. ResearchProvider (P1) ─────────────────────────────────────────────
+
+    def get_research_reports(
+        self,
+        symbol: str | None = None,
+        sector: str | None = None,
+        query: str | None = None,
+        as_of: str | None = None,
+    ) -> BrokerDataEnvelope:
+        return self._route_call(
+            "get_research_reports",
+            symbol=symbol,
+            sector=sector,
+            query=query,
+            as_of=as_of,
+        )
+
+    def get_consensus_estimates(
+        self,
+        symbol: str,
+        market: MarketCode = "CN_A",
+        as_of: str | None = None,
+    ) -> BrokerDataEnvelope:
+        return self._route_call(
+            "get_consensus_estimates",
+            symbol,
+            market=market,
+            as_of=as_of,
+            symbol=symbol,
+        )
+
+    def get_sector_data(
+        self,
+        sector_code: str,
+        as_of: str | None = None,
+    ) -> BrokerDataEnvelope:
+        return self._route_call(
+            "get_sector_data",
+            sector_code,
+            as_of=as_of,
+            symbol=sector_code,
+        )
+
+    # ── 7. EducationProvider (P1) ────────────────────────────────────────────
+
+    def search_investor_education(
+        self,
+        query: str,
+        category: str | None = None,
+    ) -> BrokerDataEnvelope:
+        return self._route_call(
+            "search_investor_education",
+            query,
+            category=category,
+        )
+
+    def get_product_guide(
+        self,
+        product_type: str,
+    ) -> BrokerDataEnvelope:
+        return self._route_call(
+            "get_product_guide",
+            product_type,
+        )
+
+    def get_risk_disclosure(
+        self,
+        risk_type: str,
+    ) -> BrokerDataEnvelope:
+        return self._route_call(
+            "get_risk_disclosure",
+            risk_type,
         )
 
 
