@@ -37,13 +37,10 @@ ARG ATOMCODE_BIN_SHA256_ARM64="19e0daf2d96bbf50e490ef56c1ef72cdbf5b10a208401e056
 WORKDIR /fetch
 RUN set -eux; \
     if [ -n "${NPM_REGISTRY}" ]; then npm config set registry "${NPM_REGISTRY}"; fi; \
-    ARCH="${TARGETARCH:-}"; \
-    if [ -z "${ARCH}" ]; then \
-        case "$(uname -m)" in \
-            aarch64|arm64) ARCH="arm64" ;; \
-            *) ARCH="amd64" ;; \
-        esac; \
-    fi; \
+    case "$(uname -m)" in \
+        aarch64|arm64) ARCH="arm64" ;; \
+        *) ARCH="${TARGETARCH:-amd64}" ;; \
+    esac; \
     if [ "${ARCH}" = "arm64" ] && [ "${ATOMCODE_NPM_VERSION}" = "5.1.0-linux-x64" ]; then \
         NPM_VER="5.1.0-linux-arm64"; \
         BIN_SHA="${ATOMCODE_BIN_SHA256_ARM64}"; \
