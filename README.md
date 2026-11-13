@@ -44,7 +44,7 @@ HunterCode 是腾讯 WorkBuddy 金融版的开源本地替代方案 · 面向私
 1. **全面采用 AtomCode 5.1.0 Fork 提速对话内核（`daemon` 服务彻底替代 `opencode`）**
    - **国产开源高性能底座**：基于 [AtomCode](https://atomgit.com/atomgit_atomcode/atomcode) v5.1.0 投研定制版（内置 `--system-prompt-file` 领域人设替换与 `--tools-deny` 编码工具裁剪），常驻内存相比旧版 OpenCode 降低 70% 以上，彻底消除多轮工具重复调用。
    - **5 组领域 Hook 常驻加速（`hookd`）**：`guard`（写路径门禁与 `_hermes_user_id` 身份自动注入）、`context`（每轮注入真实交易日历与盘中时段）、`lang`（中文与合规署名硬约束）、`audit`（全量工具调用落盘 `AUDIT.jsonl`）、`budget`（Token 预算门禁）。
-   - **11 个 MCP Server + 16KB 三档大小闸（`hca_size_guard`）**：涵盖 AKShare、Kronos、TrueSource、UZI、自选股、投资组合、选股器、用户文档检索、运行期控制通道（`runtime_control`）与经验库（`fin_memory`），所有宽表返回自动执行三档降级裁剪，永不撑爆上下文。
+   - **12 个 MCP Server + 16KB 三档大小闸（`hca_size_guard`）**：涵盖 `hcapack`、AKShare、Kronos、TrueSource、UZI、自选股（`watchlist`）、投资组合（`portfolio`）、选股器（`screener`）、能力目录（`hunter_cap`）、用户数据源（`hunter_user`）、运行期控制通道（`runtime_control`）与经验库（`fin_memory`），所有宽表返回自动执行三档降级裁剪，永不撑爆上下文。
    - **`llm-shim` 智能协议清洗**：内置 `ToolCallIndexer`（自动修复多工具并发流式 `index`）、`<think>` 标签剥离与 100 条环形诊断追踪队列（`GET /trace`）。
 2. **智能炒股一至五期完整闭环（`paper` + `fin-worker` + `temporal`）**
    - **唯一只追加账本（`paper`）**：由受限数据库角色 `fin_paper_rw`（无 `UPDATE`/`DELETE` 权限）守护，内置 A 股六条确定性风控，绑数据源快照撮合。
@@ -166,7 +166,7 @@ docker compose --profile fin up -d --remove-orphans
 │  · 认证 / 自选 / 组合 / 行情   │   │   GET/POST /live/*   SSE 对话与热切换  │
 │  · 0001~0056 自动数据库迁移    │   │   hookd 常驻进程 (guard/context/lang/  │
 │  · PDF 三级解析 / 交割单诊断   │   │                  audit/budget)        │
-│  · 全链路大模型日志记录与导出  │   │   11 个 stdio MCP + 16KB 三档大小闸    │
+│  · 全链路大模型日志记录与导出  │   │   12 个 stdio MCP + 16KB 三档大小闸    │
 └──────┬───────────────▲───────┘   └───────────────┬────────────────────────┘
        │               │                           │
        ▼               │                           ▼

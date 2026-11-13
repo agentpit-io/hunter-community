@@ -1,7 +1,7 @@
 {
   // HunterCode · AtomCode 发行版 · MCP 挂载清单（M1）
   //
-  // 全部 stdio —— AtomCode 5.1.0 支持 stdio 与 Streamable HTTP，我们这 9 个恰好全是 stdio。
+  // 全部 stdio —— AtomCode 5.1.0 支持 stdio 与 Streamable HTTP，我们这 12 个恰好全是 stdio。
   //
   // ${VAR} / ${VAR:-默认值} **由 AtomCode 自己展开**，这份文件原样铺进工作区、不预渲染。
   // 上游 mcp/config.rs:315-336 对 command / args / env 三处都调 expand_env_vars，
