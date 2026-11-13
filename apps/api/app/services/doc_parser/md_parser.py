@@ -29,6 +29,7 @@ def parse_md_bytes(raw_bytes: bytes, filename: str) -> ParsedDocument:
             break
         except UnicodeDecodeError:
             continue
+    text = text.replace("\x00", "").encode("utf-8", "replace").decode("utf-8")
     if not text.strip():
         raise ValueError("Markdown/文本文件内容为空或编码无法识别")
 

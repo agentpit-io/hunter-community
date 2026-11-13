@@ -28,7 +28,7 @@ async function handle(req: Request, segs: string[]): Promise<Response> {
   const target = `${API}/api/${segs.map(encodeURIComponent).join('/')}${url.search}`
 
   const headers = new Headers()
-  for (const h of ['authorization', 'content-type', 'accept']) {
+  for (const h of ['authorization', 'content-type', 'accept', 'x-hunter-user-id', 'x-user-key']) {
     const v = req.headers.get(h)
     if (v) headers.set(h, v)
   }

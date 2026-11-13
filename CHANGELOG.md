@@ -3,6 +3,12 @@
 All notable changes to HunterCode · Community Edition follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.3] - 2026-11-13
+
+### Fixed
+- **对话框图文 PDF 上传 HTTP 500（`HL-S68BMN`）**：修复含内嵌子集字体/CMap 的 PDF（如《A股收盘日刊》）提取出 `\x00`（NUL 空字节）或非法 UTF-8 surrogate 字符导致 `psycopg2` 抛出 `ValueError: A string literal cannot contain NUL (0x00) characters` 的问题；
+- **旧版数据库升级表结构自愈**：在 `chat_files` 与 `database.init_db` 中对 `chat_uploaded_files` / `chat_uploaded_file_pages` 全部字段执行幂等 `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`，并在入库异常时支持表结构自愈重试。
+
 ## [2.2.2] - 2026-11-12
 
 > **新增功能 · 对话框支持导入 PDF 财报/研报、Excel 交割单、Word 纪要与 Markdown 策略笔记进行深度投研分析。**

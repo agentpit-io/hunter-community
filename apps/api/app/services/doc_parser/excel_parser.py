@@ -74,16 +74,16 @@ def _detect_portfolio_rows(df: pd.DataFrame) -> list[dict[str, Any]]:
 
 
 def _df_to_md_table(df: pd.DataFrame, max_rows: int = 80) -> str:
-    """将 DataFrame 前 max_rows 行转为标准 Markdown 表格（严防 NaN 露出，NaN 统一转 '—'）"""
+    """将 DataFrame 前 max_rows 行转为标准 Markdown 表格（严防 NaN 与 NUL 露出，NaN 统一转 '—'）"""
     sub = df.head(max_rows).copy()
     sub = sub.fillna("—")
-    headers = [str(c).replace("|", "｜").replace("\n", " ").strip() for c in sub.columns]
+    headers = [str(c).replace("\x00", "").replace("|", "｜").replace("\n", " ").strip() for c in sub.columns]
     lines = [
         "| " + " | ".join(headers) + " |",
         "| " + " | ".join(["---"] * len(headers)) + " |",
     ]
     for _, row in sub.iterrows():
-        vals = [str(v).replace("|", "｜").replace("\n", " ").strip() for v in row.values]
+        vals = [str(v).replace("\x00", "").replace("|", "｜").replace("\n", " ").strip() for v in row.values]
         lines.append("| " + " | ".join(vals) + " |")
     if len(df) > max_rows:
         lines.append(
