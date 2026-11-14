@@ -12,7 +12,7 @@ from typing import Optional
 
 from loguru import logger
 
-from app import activities, config, schedules
+from app import activities, config, schedules, temporal_status
 from app.workflows import ALL_WORKFLOWS
 
 
@@ -102,6 +102,7 @@ async def run_worker_forever() -> None:
     from temporalio.worker import Worker
 
     client = await connect_with_retry()
+    temporal_status.mark_connected()  # `/healthz` 的 temporal_connected 读的就是它
     await ensure_schedules(client)
     # 同步 Activity 必须配一个 executor（Temporal Python SDK 的要求：
     # 「Activity xxx is not async so an activity_executor must be present」）。
@@ -121,4 +122,5 @@ async def run_worker_forever() -> None:
     try:
         await worker.run()
     finally:
+        temporal_status.mark_disconnected()
         executor.shutdown(wait=False)

@@ -26,7 +26,7 @@ from temporalio.common import WorkflowIDReusePolicy
 from temporalio.exceptions import WorkflowAlreadyStartedError
 from temporalio.service import RPCError
 
-from app import config, runtime_control
+from app import config, runtime_control, temporal_status
 from app.points import ALL_POINTS, BY_KEY as BY_KEYS, resolve_point_key
 
 app = FastAPI(
@@ -61,7 +61,9 @@ def _require_key(request: Request) -> None:
 @app.get("/healthz")
 async def healthz() -> dict:
     """免密钥：只回「进程活着 + 各市场时点定义」，不含任何账本数据。"""
-    connected = _client is not None
+    # 读 Worker 侧发布的连接标志，而不是本模块的 `_client`：后者只在手工触发 / 控制端点
+    # 第一次被调用时才惰性创建，用它判断会让一个已连上、正在监听的 Worker 恒报 false。
+    connected = temporal_status.is_connected()
     return {
         "ok": True,
         "service": "fin-worker",
