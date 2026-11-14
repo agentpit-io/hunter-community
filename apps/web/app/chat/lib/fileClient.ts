@@ -36,16 +36,39 @@ export async function uploadChatFile(
   file: File,
   sessionId?: string,
 ): Promise<UploadedAttachment> {
-  const form = new FormData()
-  form.append('file', file)
-  if (sessionId) form.append('session_id', sessionId)
+  if (typeof window !== 'undefined' && !getToken()) {
+    try {
+      const { ensureLocalSession } = await import('../../lib/localSession')
+      await ensureLocalSession()
+    } catch { /* ignore */ }
+  }
+  const makeForm = () => {
+    const f = new FormData()
+    f.append('file', file)
+    if (sessionId) f.append('session_id', sessionId)
+    return f
+  }
 
-  const res = await fetch('/api/chat/files/upload', {
+  let res = await fetch('/api/chat/files/upload', {
     method: 'POST',
     headers: authHeaders(false),
-    body: form,
+    body: makeForm(),
     credentials: 'same-origin',
   })
+  if (res.status === 401 && typeof window !== 'undefined') {
+    try {
+      const { ensureLocalSession } = await import('../../lib/localSession')
+      const fresh = await ensureLocalSession(true)
+      if (fresh) {
+        res = await fetch('/api/chat/files/upload', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${fresh}` },
+          body: makeForm(),
+          credentials: 'same-origin',
+        })
+      }
+    } catch { /* ignore */ }
+  }
 
   if (!res.ok) {
     const rawText = await res.text().catch(() => '')

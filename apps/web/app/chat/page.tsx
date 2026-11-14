@@ -57,12 +57,19 @@ function ChatPageInner() {
   const [pendingDebateTpl, setPendingDebateTpl] = useState<string | null>(null)
 
   useEffect(() => {
-    const token = localStorage.getItem('hunter_token')
-    if (!token) {
-      router.push('/login')
-      return
-    }
-    setReady(true)
+    let cancelled = false
+    ;(async () => {
+      let token = localStorage.getItem('hunter_token')
+      if (!token) {
+        const { ensureLocalSession } = await import('../lib/localSession')
+        token = await ensureLocalSession()
+      }
+      if (cancelled) return
+      if (!token) {
+        router.push('/login')
+        return
+      }
+      setReady(true)
 
     // 首启向导(M2 · 设计方案 4.1)· 没配大模型就把人送去 /setup。
     //
@@ -131,6 +138,8 @@ function ChatPageInner() {
       }
       router.replace('/chat', { scroll: false })
     }
+    })()
+    return () => { cancelled = true }
   }, [router, searchParams])
 
   useEffect(() => {

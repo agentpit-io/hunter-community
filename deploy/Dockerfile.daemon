@@ -211,6 +211,8 @@ COPY distro/workspace-template /opt/hca/workspace-template
 COPY distro/mcp-tools.json     /opt/hca/mcp-tools.json
 COPY distro/mcp-servers        /opt/hca/mcp-servers
 COPY apps/api/app/providers/broker /opt/hca/mcp-servers/app/providers/broker
+COPY apps/api/app/services/market_time.py /opt/hca/mcp-servers/app/services/market_time.py
+COPY apps/api/app/services/mcp_crypto.py  /opt/hca/mcp-servers/app/services/mcp_crypto.py
 # 可整体替换内置编码人设的领域人设（**只有 fork 二进制认**，见 docs/fork-patches.md）。
 # 官方二进制上这个目录躺着不用 —— 烤进镜像是为了两种二进制共用同一份镜像层，
 # 换二进制（deploy/Dockerfile.daemon-fork 叠一层）时不必重建下面所有层。

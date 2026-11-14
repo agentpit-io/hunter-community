@@ -30,7 +30,40 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Any
 
-from loguru import logger
+try:
+    from loguru import logger
+except ImportError:  # pragma: no cover - hca-daemon venv fallback
+    import logging as _logging
+
+    class _StdLoggerAdapter:
+        def __init__(self) -> None:
+            self._log = _logging.getLogger("hunter.broker.account_readonly")
+
+        def debug(self, msg: str, *args: Any) -> None:
+            try:
+                self._log.debug(msg.format(*args) if args else msg)
+            except Exception:
+                pass
+
+        def info(self, msg: str, *args: Any) -> None:
+            try:
+                self._log.info(msg.format(*args) if args else msg)
+            except Exception:
+                pass
+
+        def warning(self, msg: str, *args: Any) -> None:
+            try:
+                self._log.warning(msg.format(*args) if args else msg)
+            except Exception:
+                pass
+
+        def error(self, msg: str, *args: Any) -> None:
+            try:
+                self._log.error(msg.format(*args) if args else msg)
+            except Exception:
+                pass
+
+    logger = _StdLoggerAdapter()  # type: ignore[assignment]
 
 from app.services.market_time import market_tz
 from app.services.mcp_crypto import decrypt, encrypt, key_hint

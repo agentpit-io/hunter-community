@@ -36,7 +36,8 @@ async function tryRefresh(): Promise<string | null> {
     if (!rt) return null
     try {
       const base = process.env.NEXT_PUBLIC_API_URL || ''
-      const r = await fetch(`${base}/api/auth/refresh`, {
+      const f = (window as any).__hunterOriginalFetch || fetch
+      const r = await f(`${base}/api/auth/refresh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refresh_token: rt }),
@@ -132,6 +133,32 @@ export default function AuthGuard() {
     void ensureLocalSession()
 
     window.fetch = async (...args) => {
+      const preUrl = (typeof args[0] === 'string' ? args[0] : (args[0] as Request).url) || ''
+      const isOurApi = preUrl.includes('/api/') && !preUrl.includes('/api/auth/')
+      if (isOurApi && typeof window !== 'undefined') {
+        const curTok = localStorage.getItem('hunter_token') || ''
+        let tokExpired = !curTok
+        if (curTok) {
+          try {
+            const payload = JSON.parse(atob(curTok.split('.')[1]))
+            const expMs = Number(payload?.exp || 0) * 1000
+            if (expMs && expMs - Date.now() <= 60_000) tokExpired = true
+          } catch {
+            tokExpired = true
+          }
+        }
+        if (tokExpired) {
+          const bootTok = (await tryRefresh()) || (await ensureLocalSession(true))
+          if (bootTok) {
+            const [input, init] = args as [RequestInfo | URL, RequestInit | undefined]
+            const headers = new Headers(
+              init?.headers ?? (input instanceof Request ? input.headers : undefined),
+            )
+            headers.set('Authorization', `Bearer ${bootTok}`)
+            args = [input, { ...(init || {}), headers }] as any
+          }
+        }
+      }
       const res = await original.apply(window, args as Parameters<typeof fetch>)
       // 401 · 后端标准未授权
       // 503 ownership_unavailable · BFF 的 /api/opencode 把下游 401 掩盖成 503
@@ -156,7 +183,7 @@ export default function AuthGuard() {
           || code === 'ownership_unavailable'
       } catch {
         // Non-JSON 401 · treat as needLogin too when we have a stored token
-        needLogin = res.status === 401 && !!localStorage.getItem('hunter_token')
+        needLogin = res.status === 401
       }
       if (!needLogin) return res
 

@@ -53,10 +53,17 @@ export default function HomeHero({ onPick }: Props) {
   const [skills, setSkills] = useState<SkillItem[]>([])
 
   useEffect(() => {
-    // 空态首屏加载 SKILL · 拉失败悄悄降级到兜底
-    listSkills()
-      .then((d) => setSkills((d.items || []).filter((s) => s.enabled).slice(0, 4)))
-      .catch(() => setSkills([]))
+    // 空态首屏加载 SKILL · 先确保本地 token 有效，避免首屏并发撞上过期 token 报 401
+    ;(async () => {
+      try {
+        const { ensureLocalSession } = await import('../../lib/localSession')
+        await ensureLocalSession()
+        const d = await listSkills()
+        setSkills((d.items || []).filter((s) => s.enabled).slice(0, 4))
+      } catch {
+        setSkills([])
+      }
+    })()
   }, [])
 
   // 优先用 SKILL · 不足 4 张用兜底补齐（去重按 title）

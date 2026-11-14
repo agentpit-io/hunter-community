@@ -167,33 +167,39 @@ export default function ChatSidebar({ currentSessionId, onSelectSession, onNewSe
   }
 
   useEffect(() => {
-    // 账号信息直接从 JWT 解 —— 登录只写 hunter_token(见 app/login·app/sso),
-    // 从来没有写过 hunter_email,读它永远是空,底部会一直显示占位的"用户"。
-    let email = ''
-    let admin = false
-    try {
-      const token = localStorage.getItem('hunter_token') || ''
-      if (token) {
-        const payload = JSON.parse(atob(token.split('.')[1]))
-        email = payload.email || ''
-        // 与主侧栏 (app/components/Sidebar.tsx) 及后端 _require_admin 同一口径
-        admin = payload.role === 'ADMIN' || payload.email === 'hangeaiagent@gmail.com'
+    // 账号信息直接从 JWT 解 —— 单用户模式下先等 ensureLocalSession 拿到有效 token，
+    // 避免与 ChatWorkspace 首屏并发撞上过期 token 产生多笔 401 红字。
+    ;(async () => {
+      if (!localStorage.getItem('hunter_token')) {
+        const { ensureLocalSession } = await import('../../lib/localSession')
+        await ensureLocalSession()
       }
-    } catch {
-      /* token 损坏时退回未登录展示 */
-    }
-    setUserEmail(email)
-    setUserInitial(email ? email[0].toUpperCase() : 'U')
-    setIsAdmin(admin)
-    load()
-    // 没走过引导的用户弹一次 3 步向导(可跳过, 跳过也算走过)
-    if (email) {
-      getProfile()
-        .then((d) => {
-          if (!d.profile?.onboarded) { setWizard(true); setShowProfile(true) }
-        })
-        .catch(() => { /* 画像服务不可用时不打扰用户 */ })
-    }
+      let email = ''
+      let admin = false
+      try {
+        const token = localStorage.getItem('hunter_token') || ''
+        if (token) {
+          const payload = JSON.parse(atob(token.split('.')[1]))
+          email = payload.email || ''
+          // 与主侧栏 (app/components/Sidebar.tsx) 及后端 _require_admin 同一口径
+          admin = payload.role === 'ADMIN' || payload.email === 'hangeaiagent@gmail.com'
+        }
+      } catch {
+        /* token 损坏时退回未登录展示 */
+      }
+      setUserEmail(email)
+      setUserInitial(email ? email[0].toUpperCase() : 'U')
+      setIsAdmin(admin)
+      await load()
+      // 没走过引导的用户弹一次 3 步向导(可跳过, 跳过也算走过)
+      if (email) {
+        getProfile()
+          .then((d) => {
+            if (!d.profile?.onboarded) { setWizard(true); setShowProfile(true) }
+          })
+          .catch(() => { /* 画像服务不可用时不打扰用户 */ })
+      }
+    })()
     // 60s 刷一次
     const t = setInterval(load, 60_000)
     return () => clearInterval(t)

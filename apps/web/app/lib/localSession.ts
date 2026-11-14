@@ -37,7 +37,17 @@ export async function ensureLocalSession(force = false): Promise<string | null> 
   if (typeof window === 'undefined') return null
   if (!force) {
     const existing = localStorage.getItem('hunter_token')
-    if (existing) return existing
+    if (existing) {
+      try {
+        const payload = JSON.parse(atob(existing.split('.')[1]))
+        const expMs = Number(payload?.exp || 0) * 1000
+        if (!expMs || expMs - Date.now() > 60_000) {
+          return existing
+        }
+      } catch {
+        /* 无法解析时强制刷新 */
+      }
+    }
   }
   if (multiUser) return null
   if (inflight) return inflight
