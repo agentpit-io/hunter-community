@@ -44,6 +44,7 @@ def test_p1_mcp_tools_list_contract() -> None:
         "get_etf_holdings",
         "get_fund_fee",
         "get_bond_data",
+        "calculate_etf_dca",
     ]
     assert [t["name"] for t in RES_TOOLS] == [
         "get_research_reports",

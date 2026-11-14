@@ -24,6 +24,11 @@ from typing import Any
 
 from app.providers.broker.envelope import MarketCode, format_iso_dt
 from app.providers.broker.galaxy_adapter import normalize_symbol
+from app.providers.broker.live_public_fetcher import (
+    BUILTIN_FIXTURE_SYMBOLS,
+    build_live_fundamental_90_input,
+    fetch_live_kline,
+)
 from app.providers.broker.public_adapter import build_deterministic_kline_series
 from app.providers.broker.router import BrokerDataRouter, get_default_broker_router
 from app.services.fundamentals import (
@@ -924,10 +929,18 @@ def run_stock_research_workbench_bundle(
     ob_env = rt.get_orderbook(sym, market=market, levels=5)
     ann_env = rt.search_announcements(symbol=sym)
 
-    bars = build_deterministic_kline_series(sym, adjustment=adjustment, bars=260)
+    bars: list[dict[str, Any]] = []
+    if sym not in BUILTIN_FIXTURE_SYMBOLS:
+        bars = fetch_live_kline(sym, market=market, adjustment=adjustment, bars=260)
+    if not bars:
+        bars = build_deterministic_kline_series(sym, adjustment=adjustment, bars=260)
     tech_56 = calculate_all_56_indicators(bars, adjustment=adjustment, symbol=sym)
 
-    raw_fund = default_fundamental_raw_input(sym, restated=restated)
+    raw_fund = None
+    if sym not in BUILTIN_FIXTURE_SYMBOLS:
+        raw_fund = build_live_fundamental_90_input(sym, market=market)
+    if raw_fund is None:
+        raw_fund = default_fundamental_raw_input(sym, restated=restated)
     fund_90 = calculate_all_90_fundamentals(raw_fund, symbol=sym)
 
     prof_d = prof_env.data if (prof_env.ok and isinstance(prof_env.data, dict)) else {}

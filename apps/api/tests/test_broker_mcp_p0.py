@@ -49,6 +49,7 @@ def test_p0_mcp_tools_registration_consistency() -> None:
             "get_market_status",
             "get_market_overview",
             "get_market_calendar",
+            "get_technical_indicators",
         ],
         "broker_disclosure": [
             "search_announcements",
@@ -62,6 +63,7 @@ def test_p0_mcp_tools_registration_consistency() -> None:
             "get_valuation",
             "get_shareholders",
             "get_corporate_actions",
+            "get_fundamental_scorecard",
         ],
     }
 

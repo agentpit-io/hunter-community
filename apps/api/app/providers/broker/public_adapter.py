@@ -36,6 +36,19 @@ from .envelope import (
     format_iso_dt,
 )
 from .galaxy_adapter import _slice_pages, normalize_symbol
+from .live_public_fetcher import (
+    BUILTIN_FIXTURE_SYMBOLS,
+    build_live_fundamental_90_input,
+    fetch_live_announcements_and_research,
+    fetch_live_financial_statements_and_ratios,
+    fetch_live_kline,
+    fetch_live_quote_and_orderbook,
+    fetch_live_sector_data,
+    fetch_live_security_profile,
+    fetch_live_security_search,
+    fetch_live_shareholders_and_actions,
+    fetch_live_valuation,
+)
 
 CN_TZ = market_tz("CN_A")
 
@@ -434,6 +447,13 @@ class PublicFallbackAdapter(
             if asset_type and prof.get("asset_type") != asset_type:
                 continue
             results.append(dict(prof))
+            existing_syms.add(sym)
+
+        if q:
+            for item in fetch_live_security_search(q, market=market, asset_type=asset_type):
+                if item["symbol"] not in existing_syms:
+                    results.append(item)
+                    existing_syms.add(item["symbol"])
 
         return BrokerDataEnvelope.build(
             provider=self.provider_id,
@@ -510,6 +530,18 @@ class PublicFallbackAdapter(
             finally:
                 conn.close()
 
+        live_prof = fetch_live_security_profile(std_sym, market=std_mkt)
+        if live_prof:
+            return BrokerDataEnvelope.build(
+                provider=self.provider_id,
+                market=std_mkt,
+                symbol=std_sym,
+                currency=live_prof.get("currency", "CNY"),
+                as_of="2026-11-13T15:00:00+08:00",
+                retrieved_at=_now_iso(),
+                data=live_prof,
+            )
+
         return BrokerDataEnvelope.build(
             provider=self.provider_id,
             market=std_mkt,
@@ -535,6 +567,9 @@ class PublicFallbackAdapter(
         std_sym, _, std_mkt = normalize_symbol(symbol, market)
         prof = REAL_SECURITY_PROFILES.get(std_sym, {})
         q = REAL_QUOTES_SNAPSHOT.get(std_sym, {})
+        if std_sym not in REAL_SECURITY_PROFILES and std_sym not in REAL_QUOTES_SNAPSHOT:
+            prof = fetch_live_security_profile(std_sym, std_mkt) or {}
+            q = fetch_live_quote_and_orderbook(std_sym, std_mkt) or {}
         is_halted = bool(q.get("halted", False) or prof.get("status") == "停牌")
         is_st = bool(prof.get("is_st", False))
         status_data = {
@@ -597,6 +632,12 @@ class PublicFallbackAdapter(
     ) -> BrokerDataEnvelope:
         std_sym, _, std_mkt = normalize_symbol(symbol, market)
         raw = dict(REAL_QUOTES_SNAPSHOT.get(std_sym, {}))
+        if not raw and std_sym not in BUILTIN_FIXTURE_SYMBOLS:
+            live_q = fetch_live_quote_and_orderbook(std_sym, std_mkt)
+            if live_q:
+                raw = dict(live_q)
+                for k in ("bids", "asks", "spread", "imbalance_ratio"):
+                    raw.pop(k, None)
         if not raw:
             # 用确定性 K 线最后一根构造收盘快照
             klines = build_deterministic_kline_series(std_sym, bars=5)
@@ -659,7 +700,11 @@ class PublicFallbackAdapter(
         if not adjustment or adjustment == "N/A":
             raise ValueError("调用 `get_kline` 必须显式指定复权方式（前复权 / 后复权 / 不复权）")
         std_sym, _, std_mkt = normalize_symbol(symbol, market)
-        rows = build_deterministic_kline_series(std_sym, adjustment=adjustment, bars=260)
+        rows: list[dict[str, Any]] = []
+        if std_sym not in BUILTIN_FIXTURE_SYMBOLS:
+            rows = fetch_live_kline(std_sym, market=std_mkt, adjustment=adjustment, bars=260)
+        if not rows:
+            rows = build_deterministic_kline_series(std_sym, adjustment=adjustment, bars=260)
         if start:
             rows = [r for r in rows if r["date"] >= start[:10]]
         if end:
@@ -684,6 +729,25 @@ class PublicFallbackAdapter(
         levels: int = 5,
     ) -> BrokerDataEnvelope:
         std_sym, _, std_mkt = normalize_symbol(symbol, market)
+        lvl_cnt = max(1, min(10, int(levels)))
+        if std_sym not in BUILTIN_FIXTURE_SYMBOLS:
+            live_ob = fetch_live_quote_and_orderbook(std_sym, std_mkt, levels=lvl_cnt)
+            if live_ob and live_ob.get("bids") and live_ob.get("asks"):
+                return BrokerDataEnvelope.build(
+                    provider=self.provider_id,
+                    market=std_mkt,
+                    symbol=std_sym,
+                    as_of=live_ob.get("_as_of") or "2026-11-13T15:00:00+08:00",
+                    retrieved_at=_now_iso(),
+                    data={
+                        "symbol": std_sym,
+                        "levels": len(live_ob["bids"]),
+                        "bids": live_ob["bids"],
+                        "asks": live_ob["asks"],
+                        "spread": live_ob.get("spread"),
+                        "imbalance_ratio": live_ob.get("imbalance_ratio"),
+                    },
+                )
         q_env = self.get_quote(std_sym, std_mkt)
         q = q_env.data or {}
         last_p = q.get("last_price")
@@ -869,6 +933,34 @@ class PublicFallbackAdapter(
         as_of: str | None = None,
     ) -> BrokerDataEnvelope:
         std_sym, _, std_mkt = normalize_symbol(symbol, market)
+        if std_sym not in BUILTIN_FIXTURE_SYMBOLS:
+            live_fin = fetch_live_financial_statements_and_ratios(std_sym, std_mkt)
+            if live_fin and live_fin.get("statements"):
+                rows = [dict(r) for r in live_fin["statements"]]
+                if report_period:
+                    rows = [r for r in rows if r["report_period"] == report_period]
+                if statement_type and statement_type != "all":
+                    rows = [r for r in rows if r.get("statement_type") in (statement_type, "all")]
+                latest_pub = rows[-1]["published_at"] if rows else "2026-10-28T18:00:00+08:00"
+                latest_period = rows[-1]["report_period"] if rows else (report_period or "2026Q3")
+                any_restated = any(bool(r.get("restated")) for r in rows)
+                env = BrokerDataEnvelope.build(
+                    provider=self.provider_id,
+                    market=std_mkt,
+                    symbol=std_sym,
+                    currency="CNY",
+                    unit="元",
+                    as_of=as_of or "2026-11-13T15:00:00+08:00",
+                    published_at=latest_pub if not as_of else None,
+                    retrieved_at=_now_iso(),
+                    report_period=latest_period,
+                    restated=any_restated,
+                    data=rows,
+                )
+                if as_of:
+                    env = env.filter_point_in_time(as_of)
+                return env
+
         all_statements = [
             {
                 "symbol": std_sym,
@@ -977,6 +1069,28 @@ class PublicFallbackAdapter(
         as_of: str | None = None,
     ) -> BrokerDataEnvelope:
         std_sym, _, std_mkt = normalize_symbol(symbol, market)
+        if std_sym not in BUILTIN_FIXTURE_SYMBOLS:
+            live_fin = fetch_live_financial_statements_and_ratios(std_sym, std_mkt)
+            if live_fin and live_fin.get("ratios"):
+                ratios = [dict(r) for r in live_fin["ratios"]]
+                if report_period:
+                    ratios = [r for r in ratios if r["report_period"] == report_period]
+                latest_period = ratios[-1]["report_period"] if ratios else (report_period or "2026Q3")
+                env = BrokerDataEnvelope.build(
+                    provider=self.provider_id,
+                    market=std_mkt,
+                    symbol=std_sym,
+                    unit="%",
+                    as_of=as_of or "2026-11-13T15:00:00+08:00",
+                    retrieved_at=_now_iso(),
+                    report_period=latest_period,
+                    restated=False,
+                    data=ratios,
+                )
+                if as_of:
+                    env = env.filter_point_in_time(as_of)
+                return env
+
         ratios = [
             {
                 "symbol": std_sym,
@@ -1035,6 +1149,20 @@ class PublicFallbackAdapter(
         as_of: str | None = None,
     ) -> BrokerDataEnvelope:
         std_sym, _, std_mkt = normalize_symbol(symbol, market)
+        if std_sym not in BUILTIN_FIXTURE_SYMBOLS:
+            live_val = fetch_live_valuation(std_sym, std_mkt)
+            if live_val:
+                val_data = dict(live_val)
+                target_as_of = as_of or val_data.get("as_of") or "2026-11-13T15:00:00+08:00"
+                val_data["as_of"] = target_as_of
+                return BrokerDataEnvelope.build(
+                    provider=self.provider_id,
+                    market=std_mkt,
+                    symbol=std_sym,
+                    as_of=target_as_of,
+                    retrieved_at=_now_iso(),
+                    data=val_data,
+                )
         val_data = {
             "symbol": std_sym,
             "as_of": as_of or "2026-11-13T15:00:00+08:00",
@@ -1065,6 +1193,25 @@ class PublicFallbackAdapter(
         as_of: str | None = None,
     ) -> BrokerDataEnvelope:
         std_sym, _, std_mkt = normalize_symbol(symbol, market)
+        if std_sym not in BUILTIN_FIXTURE_SYMBOLS:
+            live_sh = fetch_live_shareholders_and_actions(std_sym, std_mkt)
+            if live_sh and live_sh.get("shareholders"):
+                sh_data = dict(live_sh["shareholders"])
+                pub_at = sh_data.get("published_at") or "2026-10-28T18:00:00+08:00"
+                env = BrokerDataEnvelope.build(
+                    provider=self.provider_id,
+                    market=std_mkt,
+                    symbol=std_sym,
+                    as_of=as_of or "2026-11-13T15:00:00+08:00",
+                    published_at=pub_at,
+                    retrieved_at=_now_iso(),
+                    report_period=sh_data.get("report_period") or "2026Q3",
+                    data=sh_data,
+                )
+                if as_of:
+                    env = env.filter_point_in_time(as_of)
+                return env
+
         sh_data = {
             "symbol": std_sym,
             "report_period": "2026Q3",
@@ -1104,6 +1251,23 @@ class PublicFallbackAdapter(
         end_date: str | None = None,
     ) -> BrokerDataEnvelope:
         std_sym, _, std_mkt = normalize_symbol(symbol, market)
+        if std_sym not in BUILTIN_FIXTURE_SYMBOLS:
+            live_sh = fetch_live_shareholders_and_actions(std_sym, std_mkt)
+            if live_sh and live_sh.get("corporate_actions") is not None:
+                actions = [dict(a) for a in live_sh["corporate_actions"]]
+                if start_date:
+                    actions = [a for a in actions if a["ex_date"] >= start_date[:10]]
+                if end_date:
+                    actions = [a for a in actions if a["ex_date"] <= end_date[:10]]
+                return BrokerDataEnvelope.build(
+                    provider=self.provider_id,
+                    market=std_mkt,
+                    symbol=std_sym,
+                    as_of="2026-11-13T15:00:00+08:00",
+                    retrieved_at=_now_iso(),
+                    data=actions,
+                )
+
         actions = [
             {
                 "symbol": std_sym,
@@ -1155,6 +1319,36 @@ class PublicFallbackAdapter(
         as_of: str | None = None,
     ) -> BrokerDataEnvelope:
         std_sym = normalize_symbol(symbol)[0] if symbol else "600036.SH"
+        q_norm = (query or "").strip().lower()
+        if std_sym not in BUILTIN_FIXTURE_SYMBOLS and q_norm != "oversized_annual_dump":
+            live_ar = fetch_live_announcements_and_research(std_sym)
+            if live_ar and live_ar.get("announcements"):
+                rows = [dict(r) for r in live_ar["announcements"]]
+                if category:
+                    rows = [r for r in rows if category in r["category"]]
+                if q_norm:
+                    filtered = [
+                        r for r in rows
+                        if q_norm in r["title"].lower() or q_norm in r["summary"].lower() or q_norm in r["category"].lower()
+                    ]
+                    if filtered:
+                        rows = filtered
+                if start_date:
+                    rows = [r for r in rows if r["published_at"] >= start_date]
+                if end_date:
+                    rows = [r for r in rows if r["published_at"] <= end_date + "T23:59:59+08:00"]
+                env = BrokerDataEnvelope.build(
+                    provider=self.provider_id,
+                    market="CN_A",
+                    symbol=std_sym,
+                    as_of=as_of or "2026-11-13T15:00:00+08:00",
+                    retrieved_at=_now_iso(),
+                    data=rows,
+                )
+                if as_of:
+                    env = env.filter_point_in_time(as_of)
+                return env
+
         base_announcements = [
             {
                 "announcement_id": "ANN-20261028-600036-Q3",
@@ -1748,6 +1942,31 @@ class PublicFallbackAdapter(
         as_of: str | None = None,
     ) -> BrokerDataEnvelope:
         std_sym = normalize_symbol(symbol)[0] if symbol else "600036.SH"
+        if symbol and std_sym not in BUILTIN_FIXTURE_SYMBOLS:
+            live_ar = fetch_live_announcements_and_research(std_sym)
+            if live_ar and live_ar.get("research_reports"):
+                reports = [dict(r) for r in live_ar["research_reports"]]
+                if sector:
+                    sec_f = [r for r in reports if sector in r["sector"]]
+                    if sec_f:
+                        reports = sec_f
+                if query:
+                    q = query.strip().lower()
+                    q_f = [r for r in reports if q in r["title"].lower() or q in r["summary"].lower()]
+                    if q_f:
+                        reports = q_f
+                env = BrokerDataEnvelope.build(
+                    provider=self.provider_id,
+                    market="CN_A",
+                    symbol=std_sym,
+                    as_of=as_of or "2026-11-13T15:00:00+08:00",
+                    retrieved_at=_now_iso(),
+                    data=reports,
+                )
+                if as_of:
+                    env = env.filter_point_in_time(as_of)
+                return env
+
         reports = [
             {
                 "report_id": "RES-20261029-600036-01",
@@ -1825,6 +2044,23 @@ class PublicFallbackAdapter(
         as_of: str | None = None,
     ) -> BrokerDataEnvelope:
         std_sym, _, mkt = normalize_symbol(symbol, market)
+        if std_sym not in BUILTIN_FIXTURE_SYMBOLS:
+            live_ar = fetch_live_announcements_and_research(std_sym, market=mkt)
+            if live_ar and live_ar.get("consensus"):
+                payload = dict(live_ar["consensus"])
+                payload["as_of"] = as_of or payload.get("as_of") or "2026-11-13T15:00:00+08:00"
+                return BrokerDataEnvelope.build(
+                    provider=self.provider_id,
+                    market=mkt,
+                    symbol=std_sym,
+                    currency="CNY",
+                    unit="元/股",
+                    as_of=payload["as_of"],
+                    published_at=payload.get("published_at") or "2026-11-10T18:00:00+08:00",
+                    retrieved_at=_now_iso(),
+                    data=payload,
+                )
+
         consensus_catalog = {
             "600036.SH": {
                 "symbol": "600036.SH",
@@ -1919,6 +2155,17 @@ class PublicFallbackAdapter(
         as_of: str | None = None,
     ) -> BrokerDataEnvelope:
         sec = (sector_code or "SW_BANK").strip()
+        if sec != "SW_BANK" and "银行" not in sec and "BANK" not in sec.upper():
+            live_sec = fetch_live_sector_data(sec, as_of=as_of)
+            if live_sec:
+                return BrokerDataEnvelope.build(
+                    provider=self.provider_id,
+                    market="CN_A",
+                    symbol=sec,
+                    as_of=live_sec.get("as_of") or as_of or "2026-11-13T15:00:00+08:00",
+                    retrieved_at=_now_iso(),
+                    data=live_sec,
+                )
         payload = {
             "sector_code": sec,
             "sector_name": "银行（申万一级）" if "BANK" in sec.upper() or "银行" in sec else sec,

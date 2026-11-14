@@ -15,6 +15,7 @@ hunter:
     - broker_market_get_quote
     - broker_market_get_kline
     - broker_market_get_orderbook
+    - broker_market_get_technical_indicators
 ---
 
 # 7 大类 56 项技术指标确定性看板（`technical_dashboard`）
@@ -25,8 +26,8 @@ hunter:
 
 ## 二、标准执行步骤（代码算真值 · AI 写客观解读）
 
-1. **Step 1：拉取带复权因子的 K 线与实时报价（`broker_market`）**
-   - 调用 `broker_market_get_quote` 与 `broker_market_get_kline`（显式指定 `adjustment="qfq"` 前复权，获取近 250 日 K 线）。
+1. **Step 1：拉取带复权因子的 K 线、实时报价与 56 项技术指标计算结果（`broker_market`）**
+   - 调用 `broker_market_get_quote` 与 `broker_market_get_technical_indicators`（显式指定 `adjustment="前复权"`，一次性获取后端确定性计算引擎算出的 56 项技术指标与多空信号冲突列表）；按需补充 `broker_market_get_kline` 与 `broker_market_get_orderbook`。
    - **复权方式前置检查**：计算技术指标必须明确复权方式（默认前复权 `qfq`），防止除权除息缺口导致均线与 MACD 失真。
 2. **Step 2：读取 7 大类 56 项技术指标确定性计算结果**
    - 依托后端 `services/indicators/calculator.py` 确定性计算引擎输出的 7 大类 56 项指标结构化 JSON（**严禁大模型自己心算任何一项技术指标**）：

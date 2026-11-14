@@ -241,7 +241,8 @@
         "get_orderbook",
         "get_market_status",
         "get_market_overview",
-        "get_market_calendar"
+        "get_market_calendar",
+        "get_technical_indicators"
       ]
     },
     "broker_disclosure": {
@@ -276,7 +277,8 @@
         "get_financial_ratios",
         "get_valuation",
         "get_shareholders",
-        "get_corporate_actions"
+        "get_corporate_actions",
+        "get_fundamental_scorecard"
       ]
     },
     // ── 阶段 M3 · 二期 P1 券商专属只读 MCP 服务群（3 个）──────────────────────
@@ -295,7 +297,8 @@
         "get_fund_nav",
         "get_etf_holdings",
         "get_fund_fee",
-        "get_bond_data"
+        "get_bond_data",
+        "calculate_etf_dca"
       ]
     },
     "broker_research": {

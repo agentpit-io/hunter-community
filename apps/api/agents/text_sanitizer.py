@@ -27,8 +27,10 @@ import re
 # ── 基础字符类 ────────────────────────────────────────────────────
 _CJK = re.compile(r"[一-鿿]")
 _EN_TOKEN = re.compile(r"[A-Za-z][A-Za-z'’\-]*")
-# 中文字符 + 中文标点 + 换行 —— 英文 run 在这些位置必须断开
-_HARD_BREAK = re.compile(r"[一-鿿　-〿＀-￯\n]")
+# 行内反引号代码块（如 `as_of: 2026-11-13`、`akshare_public_fallback`）属于技术标识，不计入英文散文词
+_INLINE_CODE = re.compile(r"`[^`\n]+`")
+# 中文字符 + 中文标点 + 换行 + 表格竖线/括号/分号 —— 英文 run 在这些位置必须断开
+_HARD_BREAK = re.compile(r"[一-鿿　-〿＀-￯\n|()\[\]{};]")
 # 句子切分：中文句末标点后、英文句末标点+空格后、markdown 项目符号前
 _SENT_SPLIT = re.compile(r"(?<=[。！？；;])|(?<=[.!?])\s+")
 
@@ -96,9 +98,10 @@ def chinese_char_count(text: str) -> int:
 
 
 def _english_runs(text: str) -> list[list[str]]:
-    """切出「连续英文词序列」· 中文字符/中文标点/换行处断开。"""
+    """切出「连续英文词序列」· 先剥离行内反引号代码块，再在中文字符/中文标点/换行/括号/竖线处断开。"""
+    cleaned = _INLINE_CODE.sub("｜", text or "")
     runs: list[list[str]] = []
-    for seg in _HARD_BREAK.split(text or ""):
+    for seg in _HARD_BREAK.split(cleaned):
         words = [w.lower() for w in _EN_TOKEN.findall(seg)]
         if words:
             runs.append(words)
@@ -196,6 +199,15 @@ def _split_sentences(line: str) -> list[str]:
     return [p for p in parts if p != ""]
 
 
+def _is_predominantly_chinese_sentence(s: str) -> bool:
+    """判断单句是否以中文为主体（汉字数 >= 8 且汉字数多于英文单词数）。"""
+    cjk_cnt = chinese_char_count(s)
+    if cjk_cnt < 8:
+        return False
+    en_cnt = len(_EN_TOKEN.findall(_INLINE_CODE.sub(" ", s or "")))
+    return cjk_cnt > en_cnt
+
+
 def strip_english_prose(text: str) -> str:
     """逐行逐句丢弃英文散文，保留中文内容与含术语/数字的行。
 
@@ -223,7 +235,11 @@ def strip_english_prose(text: str) -> str:
         if not has_english_prose(line):
             kept_lines.append(line)
             continue
-        kept = [s for s in _split_sentences(line) if not has_english_prose(s)]
+        kept = [
+            s
+            for s in _split_sentences(line)
+            if not has_english_prose(s) or _is_predominantly_chinese_sentence(s)
+        ]
         rebuilt = "".join(kept).strip()
         # 这一行本来就混了英文散文 —— 残料只在「含中文」或「含数字（是数据）」
         # 时才保留，纯英文碎片（'* **Input'、'Role:' 之类）一律丢掉。

@@ -2,7 +2,7 @@
 name: etf_dca_planner
 description: ETF 定投计算器与计划助手。调用确定性定投计算器完成正向现金流与历史净值回测（累计投入、总份额、期末市值、持仓均价、IRR、最大回撤）、目标金额反推与一次性买入对比，强制附带历史假设免责声明。
 user-invocable: true
-allowed-tools: mcp__broker_funds__get_etf_quote mcp__broker_funds__get_fund_nav mcp__broker_funds__get_fund_fee mcp__broker_education__get_risk_disclosure
+allowed-tools: mcp__broker_funds__calculate_etf_dca mcp__broker_funds__get_etf_quote mcp__broker_funds__get_fund_nav mcp__broker_funds__get_fund_fee mcp__broker_education__get_risk_disclosure
 version: 3.3.0
 author: HunterCode Team
 license: MIT
@@ -14,6 +14,7 @@ hunter:
   category: 量化研究
   prompt_tpl: 测算 {ETF代码与定投参数} 的历史定投收益率、IRR、最大回撤与目标反推计划
   needs_tools:
+    - broker_funds_calculate_etf_dca
     - broker_funds_get_etf_quote
     - broker_funds_get_fund_nav
     - broker_funds_get_fund_fee
@@ -28,9 +29,9 @@ hunter:
 
 ## 二、标准执行步骤（四步确定性测算）
 
-1. **Step 1：获取 ETF 行情、IOPV 折溢价与费率结构（`broker_funds`）**
-   - 调用 `mcp__broker_funds__get_etf_quote` 查看当前二级市场价格、IOPV 参考净值、折溢价率与规模流动性；
-   - 调用 `mcp__broker_funds__get_fund_fee` 获取管理费率、托管费率与申购费率。
+1. **Step 1：调用确定性定投计算器与行情费率工具（`broker_funds`）**
+   - **优先调用 `mcp__broker_funds__calculate_etf_dca`** 一站式获取正向定投回测、目标反推、定投 vs 一次性买入对比、ETF 费率与风险揭示；
+   - 按需补充调用 `mcp__broker_funds__get_etf_quote` 与 `mcp__broker_funds__get_fund_fee`。
 2. **Step 2：拉取历史真实净值并运行正向定投回测（`services/etf_dca`）**
    - 调用 `mcp__broker_funds__get_fund_nav` 获取区间单位净值与分红序列；
    - 由后端确定性引擎算出：**累计投入本金、累计手续费、期末总份额、持仓单位成本、期末总市值、年化内部收益率（XIRR）、最大回撤**。
@@ -61,6 +62,7 @@ $ARGUMENTS
 
 | 正文里的写法 | 实际要调的工具 |
 |---|---|
+| `broker_funds_calculate_etf_dca` | `mcp__broker_funds__calculate_etf_dca` |
 | `broker_funds_get_etf_quote` | `mcp__broker_funds__get_etf_quote` |
 | `broker_funds_get_fund_nav` | `mcp__broker_funds__get_fund_nav` |
 | `broker_funds_get_fund_fee` | `mcp__broker_funds__get_fund_fee` |

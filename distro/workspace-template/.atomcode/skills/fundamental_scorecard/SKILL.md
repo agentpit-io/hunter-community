@@ -2,7 +2,7 @@
 name: fundamental_scorecard
 description: 6 大维度 90 项基本面体检评分卡。调用券商财务与估值接口及 90 项基本面确定性计算引擎，输出盈利能力、成长能力、偿债安全、现金流质量、估值水平、公司治理六维客观评分卡、同行业分位数与财报重述比对。
 user-invocable: true
-allowed-tools: mcp__broker_security__get_security_profile mcp__broker_fundamental__get_financial_statements mcp__broker_fundamental__get_financial_ratios mcp__broker_fundamental__get_valuation mcp__broker_fundamental__get_shareholders mcp__broker_fundamental__get_corporate_actions
+allowed-tools: mcp__broker_security__get_security_profile mcp__broker_fundamental__get_fundamental_scorecard mcp__broker_fundamental__get_financial_statements mcp__broker_fundamental__get_financial_ratios mcp__broker_fundamental__get_valuation mcp__broker_fundamental__get_shareholders mcp__broker_fundamental__get_corporate_actions mcp__broker_research__get_sector_data
 version: 3.2.0
 author: HunterCode Team
 license: MIT
@@ -15,11 +15,13 @@ hunter:
   prompt_tpl: 给 {股票} 生成 6 大维度 90 项基本面体检评分卡与行业分位对比
   needs_tools:
     - broker_security_get_security_profile
+    - broker_fundamental_get_fundamental_scorecard
     - broker_fundamental_get_financial_statements
     - broker_fundamental_get_financial_ratios
     - broker_fundamental_get_valuation
     - broker_fundamental_get_shareholders
     - broker_fundamental_get_corporate_actions
+    - broker_research_get_sector_data
 ---
 
 # 6 大维度 90 项基本面体检评分卡（`fundamental_scorecard`）
@@ -32,7 +34,8 @@ hunter:
 
 1. **Step 1：拉取全套基本面与治理数据（`broker_fundamental` & `broker_security`）**
    - 调用 `mcp__broker_security__get_security_profile` 获取所属申万/中信行业分类、上市状态；
-   - 调用 `mcp__broker_fundamental__get_financial_statements`、`mcp__broker_fundamental__get_financial_ratios`、`mcp__broker_fundamental__get_valuation`、`mcp__broker_fundamental__get_shareholders`、`mcp__broker_fundamental__get_corporate_actions`。
+   - **优先调用 `mcp__broker_fundamental__get_fundamental_scorecard`** 直接获取后端确定性计算引擎算出的 6 大维度 90 项指标真值、六维得分与同行业可比基准；
+   - 按需补充调用 `mcp__broker_fundamental__get_financial_statements`、`mcp__broker_fundamental__get_financial_ratios`、`mcp__broker_fundamental__get_valuation`、`mcp__broker_fundamental__get_shareholders`、`mcp__broker_fundamental__get_corporate_actions`、`mcp__broker_research__get_sector_data`。
    - **严格核验 Point-in-Time 披露时间（`published_at`）与报告期（`report_period`）**，防止将未披露信息混入历史分析。
 2. **Step 2：读取 6 大维度 90 项基本面计算引擎结果**
    - 依托后端 `services/fundamentals/calculator.py` 计算出的 6 大维度 90 项指标真值与客观评分（0～100 分）：
@@ -67,12 +70,14 @@ $ARGUMENTS
 
 | 正文里的写法 | 实际要调的工具 |
 |---|---|
+| `broker_fundamental_get_fundamental_scorecard` | `mcp__broker_fundamental__get_fundamental_scorecard` |
 | `broker_fundamental_get_financial_statements` | `mcp__broker_fundamental__get_financial_statements` |
 | `broker_fundamental_get_corporate_actions` | `mcp__broker_fundamental__get_corporate_actions` |
 | `broker_fundamental_get_financial_ratios` | `mcp__broker_fundamental__get_financial_ratios` |
 | `broker_security_get_security_profile` | `mcp__broker_security__get_security_profile` |
 | `broker_fundamental_get_shareholders` | `mcp__broker_fundamental__get_shareholders` |
 | `broker_fundamental_get_valuation` | `mcp__broker_fundamental__get_valuation` |
+| `broker_research_get_sector_data` | `mcp__broker_research__get_sector_data` |
 
 **按右边那一列调。** 左边是 HunterCode opencode 版的命名，这套发行版里不存在。
 

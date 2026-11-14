@@ -20,6 +20,10 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from _shared import dump_guarded_envelope, get_router, run_stdio_mcp_server  # noqa: E402
+from app.providers.broker.envelope import BrokerDataEnvelope, format_iso_dt  # noqa: E402
+from app.services.indicators import calculate_all_56_indicators  # noqa: E402
+from app.services.market_time import market_tz  # noqa: E402
+from datetime import datetime  # noqa: E402
 
 SERVER_NAME = "broker_market"
 SERVER_VERSION = "3.1.0"
@@ -106,6 +110,25 @@ TOOLS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "name": "get_technical_indicators",
+        "description": "调用确定性计算引擎（app/services/indicators/）计算 7 大类 56 项技术指标与多空冲突告警（严禁大模型心算 MA/MACD/RSI/KDJ）",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "description": "证券代码，如 600588.SH / 600036.SH"},
+                "market": {"type": "string", "enum": ["CN_A", "HK", "US"], "default": "CN_A"},
+                "adjustment": {
+                    "type": "string",
+                    "enum": ["前复权", "后复权", "不复权", "qfq", "hfq", "none"],
+                    "default": "前复权",
+                    "description": "复权方式（必填，默认前复权）",
+                },
+                "bars": {"type": "integer", "default": 260, "description": "K 线根数（默认 260）"},
+            },
+            "required": ["symbol"],
+        },
+    },
 ]
 
 
@@ -149,6 +172,40 @@ def call_tool_sync(name: str, arguments: dict[str, Any], *, max_bytes: int | Non
             market=arguments.get("market", "CN_A"),
             start_date=arguments.get("start_date"),
             end_date=arguments.get("end_date"),
+        )
+    elif name == "get_technical_indicators":
+        adj = arguments.get("adjustment", "前复权")
+        mkt = arguments.get("market", "CN_A")
+        k_env = router.get_kline(
+            symbol=str(arguments["symbol"]),
+            market=mkt,
+            adjustment=adj,
+        )
+        bars_list = k_env.data if isinstance(k_env.data, list) else []
+        res56 = calculate_all_56_indicators(bars_list, adjustment=adj, symbol=k_env.meta.symbol or str(arguments["symbol"]))
+        res56.pop("by_category", None)
+        compact_ind: dict[str, dict[str, Any]] = {}
+        for i_code, i_item in (res56.get("indicators") or {}).items():
+            entry: dict[str, Any] = {
+                "name": i_item.get("name"),
+                "category": i_item.get("category"),
+                "value": i_item.get("value"),
+                "unit": i_item.get("unit"),
+                "percentile_20d": i_item.get("percentile_20d"),
+                "signal_state": i_item.get("signal_state"),
+            }
+            if i_item.get("missing_reason"):
+                entry["missing_reason"] = i_item["missing_reason"]
+            compact_ind[i_code] = entry
+        res56["indicators"] = compact_ind
+        env = BrokerDataEnvelope.build(
+            provider=k_env.meta.provider,
+            market=mkt,
+            symbol=k_env.meta.symbol or str(arguments["symbol"]),
+            as_of=k_env.meta.as_of or "2026-11-13T15:00:00+08:00",
+            retrieved_at=format_iso_dt(datetime.now(market_tz("CN_A"))),
+            adjustment=adj,
+            data=res56,
         )
     else:
         raise ValueError(f"未知工具名: {name}")

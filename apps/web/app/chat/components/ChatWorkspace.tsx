@@ -726,6 +726,10 @@ export default function ChatWorkspace({
   const reconcileMessages = useCallback(async (sid: string) => {
     if (!sid) return
     try {
+      // 短暂等待 300ms，让 SSE 末尾 delta 与后端出口语言守卫 applyLangGuard 事件先落地，
+      // 避免立刻拉取时拿到半截快照导致前端流式文本跳变或闪烁回退。
+      await new Promise((r) => setTimeout(r, 300))
+      if (sidRef.current !== sid) return
       const server = await listMessages(sid)
       if (!server || server.length === 0) return
       // 拉的这段时间用户可能已经切走了。这份是 sid 的消息,再 setMessages
@@ -733,12 +737,32 @@ export default function ChatWorkspace({
       // 更糟,是实打实的串会话。校验放在这里,所有调用点一起受保护。
       if (sidRef.current !== sid) return
       setMessages((prev) => {
+        const prevById = new Map<string, Message>()
+        for (const m of prev) {
+          if (m && m.id) prevById.set(m.id, m)
+        }
         // 只补 opencode 的消息;debate / kpred 是我们本地注入的,
         // 服务端没有,不能被这次覆盖冲掉
         const localOnly = prev.filter(
           (m) => m.id.startsWith('kpred_') || m.id.startsWith('debate_'),
         )
-        const merged = [...server, ...localOnly]
+        const reconciledServer = server.map((srvMsg) => {
+          const localMsg = prevById.get(srvMsg.id)
+          if (!localMsg || srvMsg.role !== 'assistant') return srvMsg
+          const getFullText = (msg: Message) =>
+            (msg.parts || [])
+              .filter((p: any) => p.type === 'text')
+              .map((p: any) => p.text || '')
+              .join('')
+          const localText = getFullText(localMsg)
+          const srvText = getFullText(srvMsg)
+          // 若本地已经收到更完整的同轮流式/净化后文本，而服务端快照尚短或为空，保留本地 parts 防闪烁跳变
+          if (localText && (!srvText || localText.length > srvText.length)) {
+            return { ...srvMsg, parts: localMsg.parts }
+          }
+          return srvMsg
+        })
+        const merged = [...reconciledServer, ...localOnly]
         return merged.sort(
           (a, b) => (a.time?.created || 0) - (b.time?.created || 0),
         )

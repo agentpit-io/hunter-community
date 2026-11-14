@@ -20,6 +20,19 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from _shared import dump_guarded_envelope, get_router, run_stdio_mcp_server  # noqa: E402
+from app.providers.broker.envelope import BrokerDataEnvelope, format_iso_dt  # noqa: E402
+from app.providers.broker.galaxy_adapter import normalize_symbol  # noqa: E402
+from app.providers.broker.live_public_fetcher import (  # noqa: E402
+    BUILTIN_FIXTURE_SYMBOLS,
+    build_live_fundamental_90_input,
+    fetch_live_sector_data,
+)
+from app.services.fundamentals import (  # noqa: E402
+    calculate_all_90_fundamentals,
+    default_fundamental_raw_input,
+)
+from app.services.market_time import market_tz  # noqa: E402
+from datetime import datetime  # noqa: E402
 
 SERVER_NAME = "broker_fundamental"
 SERVER_VERSION = "3.1.0"
@@ -102,6 +115,20 @@ TOOLS: list[dict[str, Any]] = [
             "required": ["symbol"],
         },
     },
+    {
+        "name": "get_fundamental_scorecard",
+        "description": "调用确定性计算引擎（app/services/fundamentals/）执行 6 大维度 90 项基本面体检评分卡（严禁大模型心算 ROE/净现比/Z-Score/F-Score）",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "description": "证券代码，如 600588.SH / 600036.SH"},
+                "market": {"type": "string", "enum": ["CN_A", "HK", "US"], "default": "CN_A"},
+                "report_period": {"type": "string", "description": "报告期，如 2026Q3（可选）"},
+                "as_of": {"type": "string", "description": "观察时点（ISO-8601，可选）"},
+            },
+            "required": ["symbol"],
+        },
+    },
 ]
 
 
@@ -141,6 +168,37 @@ def call_tool_sync(name: str, arguments: dict[str, Any], *, max_bytes: int | Non
             market=arguments.get("market", "CN_A"),
             start_date=arguments.get("start_date"),
             end_date=arguments.get("end_date"),
+        )
+    elif name == "get_fundamental_scorecard":
+        std_sym, _, std_mkt = normalize_symbol(str(arguments["symbol"]), arguments.get("market", "CN_A"))
+        raw_input = None
+        if std_sym not in BUILTIN_FIXTURE_SYMBOLS:
+            raw_input = build_live_fundamental_90_input(std_sym, market=std_mkt)
+        if raw_input is None:
+            raw_input = default_fundamental_raw_input(std_sym, restated=True)
+        res90 = calculate_all_90_fundamentals(raw_input, symbol=std_sym)
+        res90.pop("by_dimension", None)
+        compact_metrics: dict[str, dict[str, Any]] = {}
+        for m_code, m_item in (res90.get("metrics") or {}).items():
+            compact_metrics[m_code] = {
+                "name": m_item.get("name"),
+                "value": m_item.get("value"),
+                "unit": m_item.get("unit"),
+            }
+        res90["metrics"] = compact_metrics
+        sec_bench = fetch_live_sector_data(std_sym)
+        if sec_bench:
+            res90["sector_benchmark"] = sec_bench
+        env = BrokerDataEnvelope.build(
+            provider="akshare_public_fallback",
+            market=std_mkt,
+            symbol=std_sym,
+            as_of=arguments.get("as_of") or "2026-11-13T15:00:00+08:00",
+            published_at=res90.get("published_at"),
+            retrieved_at=format_iso_dt(datetime.now(market_tz("CN_A"))),
+            report_period=res90.get("report_period"),
+            restated=res90.get("restated"),
+            data=res90,
         )
     else:
         raise ValueError(f"未知工具名: {name}")
