@@ -181,6 +181,7 @@ fi
 if [ -d "${HCA_REPO}/examples/csdn_broker_notebooks" ]; then
   mkdir -p "${HUNTERCODE_REPO}/examples/csdn_broker_notebooks"
   cp -rf "${HCA_REPO}/examples/csdn_broker_notebooks/"* "${HUNTERCODE_REPO}/examples/csdn_broker_notebooks/" 2>/dev/null || true
+  rm -rf "${HUNTERCODE_REPO}/examples/csdn_broker_notebooks/__pycache__"
 fi
 if [ -f "${HCA_REPO}/docs/开发文档/HunterCode_证券公司接口与金融SKILL_全链路验收总结报告.md" ]; then
   cp -f "${HCA_REPO}/docs/开发文档/HunterCode_证券公司接口与金融SKILL_全链路验收总结报告.md" "${HUNTERCODE_REPO}/docs-hunter/broker-specs/"
