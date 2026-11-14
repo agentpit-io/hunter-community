@@ -32,8 +32,38 @@ except ImportError:                                            # pragma: no cove
     def _fit(text, tool="", max_bytes=None):                   # type: ignore[misc]
         return text
 
-HERMES_API   = os.getenv("HERMES_API_URL",      "http://172.17.0.1:8000")
-INTERNAL_KEY = os.getenv("HUNTER_INTERNAL_KEY", "hunter-internal-2026")
+HERMES_API = os.getenv("HERMES_API_URL", "http://172.17.0.1:8000")
+
+
+def _resolve_internal_key(default: str = "hunter-internal-2026") -> str:
+    """读取内部鉴权密钥：优先环境变量 HUNTER_INTERNAL_KEY，为空时回退读取共享密钥卷。"""
+    val = (os.getenv("HUNTER_INTERNAL_KEY") or "").strip()
+    if val:
+        return val
+    key_file = (os.getenv("HUNTER_INTERNAL_KEY_FILE") or "/opt/hunter-secrets/internal_key").strip()
+    try:
+        if os.path.isfile(key_file):
+            with open(key_file, encoding="utf-8") as f:
+                v = f.read().strip().strip("'\"")
+                if v:
+                    return v
+    except OSError:
+        pass
+    sec_file = (os.getenv("HUNTER_SECRETS_FILE") or "/opt/hunter-secrets/secrets.env").strip()
+    try:
+        if os.path.isfile(sec_file):
+            with open(sec_file, encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    if line.startswith("HUNTER_INTERNAL_KEY="):
+                        v = line.split("=", 1)[1].strip().strip("'\"")
+                        if v:
+                            return v
+    except OSError:
+        pass
+    return default
+
+
+INTERNAL_KEY = _resolve_internal_key("hunter-internal-2026")
 
 server = Server("portfolio-mcp")
 
@@ -117,7 +147,8 @@ async def list_tools():
 
 
 def _headers(args: dict) -> dict:
-    h = {"X-Hunter-Internal-Key": INTERNAL_KEY}
+    key = INTERNAL_KEY if (INTERNAL_KEY and INTERNAL_KEY != "hunter-internal-2026") else _resolve_internal_key(INTERNAL_KEY or "hunter-internal-2026")
+    h = {"X-Hunter-Internal-Key": key}
     uid = (args or {}).get("_hermes_user_id") or os.getenv("HUNTER_USER_ID", "")
     if uid:
         h["X-Hunter-User-Id"] = uid
@@ -133,6 +164,14 @@ async def call_tool(name: str, args: dict):
         async with httpx.AsyncClient(timeout=45) as c:
             r = await c.post(url, json=body, headers=_headers(args))
         text = r.text
+        if r.status_code >= 400:
+            try:
+                data = json.loads(text)
+                if isinstance(data, dict) and "detail" in data and "error" not in data:
+                    data["error"] = data["detail"]
+                    text = json.dumps(data, ensure_ascii=False)
+            except Exception:
+                pass
     except Exception as e:
         text = json.dumps({"error": f"hermes-api call failed: {type(e).__name__}: {e}",
                             "hermes_api": HERMES_API, "tool": name},

@@ -34,10 +34,11 @@ interface RebalanceData {
 }
 
 export default function PortfolioRebalanceCard({ data }: { data: RebalanceData }) {
-  if (data.error) {
-    return <div style={errStyle}><b>⚠</b> {data.error}</div>
+  const errMsg = data?.error || (data as any)?.detail
+  if (errMsg) {
+    return <div style={errStyle}><b>⚠</b> {String(errMsg)}</div>
   }
-  if (data.empty) {
+  if (data?.empty) {
     return (
       <div style={darkCard}>
         <div style={{ padding: '32px 24px', textAlign: 'center', color: '#f4eee7' }}>

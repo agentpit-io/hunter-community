@@ -45,8 +45,38 @@ except ImportError:                                            # pragma: no cove
     def _fit(text, tool="", max_bytes=None):                   # type: ignore[misc]
         return text
 
-HERMES_API   = os.getenv("HERMES_API_URL",      "http://172.17.0.1:8000")
-INTERNAL_KEY = os.getenv("HUNTER_INTERNAL_KEY", "hunter-internal-2026")
+HERMES_API = os.getenv("HERMES_API_URL", "http://172.17.0.1:8000")
+
+
+def _resolve_internal_key(default: str = "hunter-internal-2026") -> str:
+    """读取内部鉴权密钥：优先环境变量 HUNTER_INTERNAL_KEY，为空时回退读取共享密钥卷。"""
+    val = (os.getenv("HUNTER_INTERNAL_KEY") or "").strip()
+    if val:
+        return val
+    key_file = (os.getenv("HUNTER_INTERNAL_KEY_FILE") or "/opt/hunter-secrets/internal_key").strip()
+    try:
+        if os.path.isfile(key_file):
+            with open(key_file, encoding="utf-8") as f:
+                v = f.read().strip().strip("'\"")
+                if v:
+                    return v
+    except OSError:
+        pass
+    sec_file = (os.getenv("HUNTER_SECRETS_FILE") or "/opt/hunter-secrets/secrets.env").strip()
+    try:
+        if os.path.isfile(sec_file):
+            with open(sec_file, encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    if line.startswith("HUNTER_INTERNAL_KEY="):
+                        v = line.split("=", 1)[1].strip().strip("'\"")
+                        if v:
+                            return v
+    except OSError:
+        pass
+    return default
+
+
+INTERNAL_KEY = _resolve_internal_key("hunter-internal-2026")
 
 
 def _http_timeout() -> float:
@@ -137,8 +167,9 @@ async def call_tool(name: str, arguments: dict):
             return [TextContent(type="text", text=json.dumps(
                 {"error": "code 必填 · 如 601899 / 00700 / AAPL"}, ensure_ascii=False))]
 
+        key = INTERNAL_KEY if (INTERNAL_KEY and INTERNAL_KEY != "hunter-internal-2026") else _resolve_internal_key(INTERNAL_KEY or "hunter-internal-2026")
         headers = {
-            "X-Hunter-Internal-Key": INTERNAL_KEY,
+            "X-Hunter-Internal-Key": key,
             "X-Hunter-User-Id":      user_id,
             "Content-Type":          "application/json",
         }

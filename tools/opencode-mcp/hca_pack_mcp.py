@@ -69,7 +69,37 @@ except ImportError:                                  # pragma: no cover
 mcp = MCPServer("hcapack")
 
 HERMES_API = (os.getenv("HERMES_API_URL") or "http://api:8000").rstrip("/")
-INTERNAL_KEY = os.getenv("HUNTER_INTERNAL_KEY") or ""
+
+
+def _resolve_internal_key(default: str = "") -> str:
+    """读取内部鉴权密钥：优先环境变量 HUNTER_INTERNAL_KEY，为空时回退读取共享密钥卷。"""
+    val = (os.getenv("HUNTER_INTERNAL_KEY") or "").strip()
+    if val:
+        return val
+    key_file = (os.getenv("HUNTER_INTERNAL_KEY_FILE") or "/opt/hunter-secrets/internal_key").strip()
+    try:
+        if os.path.isfile(key_file):
+            with open(key_file, encoding="utf-8") as f:
+                v = f.read().strip().strip("'\"")
+                if v:
+                    return v
+    except OSError:
+        pass
+    sec_file = (os.getenv("HUNTER_SECRETS_FILE") or "/opt/hunter-secrets/secrets.env").strip()
+    try:
+        if os.path.isfile(sec_file):
+            with open(sec_file, encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    if line.startswith("HUNTER_INTERNAL_KEY="):
+                        v = line.split("=", 1)[1].strip().strip("'\"")
+                        if v:
+                            return v
+    except OSError:
+        pass
+    return default
+
+
+INTERNAL_KEY = _resolve_internal_key("")
 USER_ID = os.getenv("HUNTER_USER_ID") or ""
 WORKSPACE = os.path.normpath(os.getenv("HCA_WORKSPACE") or "/workspace")
 HTTP_TIMEOUT = float(os.getenv("HCA_PACK_TIMEOUT", "45"))
@@ -89,8 +119,9 @@ def _api(tool: str, body: dict, uid: str = "") -> dict:
     # 它把 `_` 开头的字段从 body 里剔掉再发）。这里干脆一开始就不往 body 里放。
     data = json.dumps({k: v for k, v in body.items() if not k.startswith("_")}).encode()
     headers = {"Content-Type": "application/json"}
-    if INTERNAL_KEY:
-        headers["X-Hunter-Internal-Key"] = INTERNAL_KEY
+    key = INTERNAL_KEY or _resolve_internal_key("")
+    if key:
+        headers["X-Hunter-Internal-Key"] = key
     if who:
         headers["X-Hunter-User-Id"] = who
     req = urllib.request.Request(f"{HERMES_API}/api/internal/watchlist/{tool}",

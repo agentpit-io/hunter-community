@@ -102,7 +102,12 @@ git -C "${HUNTERCODE_REPO}" pull --ff-only origin dev || true
 # 5.1 同步 MCP 工具脚本至 huntercode-repo/mcp/
 mkdir -p "${HUNTERCODE_REPO}/mcp"
 if [ -d "${HCA_REPO}/tools" ]; then
-  for mcp_file in "${HCA_REPO}"/tools/*_mcp.py "${HCA_REPO}"/tools/hca_size_guard.py; do
+  for mcp_file in \
+    "${HCA_REPO}"/tools/*_mcp.py \
+    "${HCA_REPO}"/tools/hca_size_guard.py \
+    "${HCA_REPO}"/tools/opencode-mcp/*_mcp.py \
+    "${HCA_REPO}"/tools/opencode-mcp/hca_size_guard.py \
+    "${HCA_REPO}"/tools/opencode-mcp/hca_news_date.py; do
     if [ -f "${mcp_file}" ]; then
       cp -f "${mcp_file}" "${HUNTERCODE_REPO}/mcp/"
     fi
@@ -196,6 +201,10 @@ fi
 if [ -f "${HCA_REPO}/deploy/daemon/entrypoint.sh" ]; then
   mkdir -p "${HUNTERCODE_REPO}/deploy/daemon"
   cp -f "${HCA_REPO}/deploy/daemon/entrypoint.sh" "${HUNTERCODE_REPO}/deploy/daemon/entrypoint.sh"
+fi
+if [ -f "${HCA_REPO}/deploy/daemon/hca-init.py" ]; then
+  mkdir -p "${HUNTERCODE_REPO}/deploy/daemon"
+  cp -f "${HCA_REPO}/deploy/daemon/hca-init.py" "${HUNTERCODE_REPO}/deploy/daemon/hca-init.py"
 fi
 
 # 5.4 更新 huntercode-repo 版本号文件

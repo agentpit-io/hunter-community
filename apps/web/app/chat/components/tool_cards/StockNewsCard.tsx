@@ -17,6 +17,8 @@ interface NewsData {
   code: string
   name: string
   items: NewsItem[]
+  error?: string
+  detail?: string
 }
 
 const IMPACT_STYLE = {
@@ -27,7 +29,16 @@ const IMPACT_STYLE = {
 }
 
 export default function StockNewsCard({ data }: { data: NewsData }) {
-  if (!data.items || data.items.length === 0) {
+  const errMsg = data?.error || (data as any)?.detail
+  if (errMsg) {
+    return (
+      <div style={errStyle}>
+        <b>⚠ 无法拉取 {data?.name || data?.code || '该股票'} 新闻</b><br />
+        <span style={{ color: HUNTER.INK_F, fontSize: 12 }}>{String(errMsg)}</span>
+      </div>
+    )
+  }
+  if (!data?.items || data.items.length === 0) {
     return (
       <div style={cardStyle}>
         <div style={{ padding: '16px 20px', textAlign: 'center', color: HUNTER.INK_F, fontSize: 13 }}>
@@ -116,4 +127,9 @@ const cardStyle: React.CSSProperties = {
   borderRadius: 14,
   overflow: 'hidden',
   boxShadow: '0 4px 18px rgba(40,35,27,.04)',
+}
+const errStyle: React.CSSProperties = {
+  margin: '12px 0', padding: '14px 18px',
+  background: '#fbeaea', border: '1px solid #f3c9c9', borderRadius: 10,
+  fontSize: 13, color: HUNTER.UP,
 }

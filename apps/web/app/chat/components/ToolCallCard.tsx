@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import React, { useState } from 'react'
 import { ChevronDown, ChevronUp, Wrench, CheckCircle2, XCircle, Loader2, ExternalLink } from 'lucide-react'
 import type { MessagePartTool } from '../lib/types'
 import { HUNTER } from '../../lib/hunter-theme'
@@ -105,10 +105,37 @@ function tryRenderRichCard(part: MessagePartTool, turnText?: string): React.Reac
   return null
 }
 
+/**
+ * 富卡片渲染错误边界 —— try/catch 只能捕获同步函数调用，无法捕获 React 子组件渲染期异常。
+ * 一旦富卡片因非预期数据格式在 render 期抛错，自动回退为通用折叠工具卡，绝不让整个对话页白屏。
+ */
+class RichCardErrorBoundary extends React.Component<
+  { fallback: React.ReactNode; toolName: string; children: React.ReactNode },
+  { hasError: boolean }
+> {
+  constructor(props: { fallback: React.ReactNode; toolName: string; children: React.ReactNode }) {
+    super(props)
+    this.state = { hasError: false }
+  }
+
+  static getDerivedStateFromError(): { hasError: boolean } {
+    return { hasError: true }
+  }
+
+  componentDidCatch(error: unknown) {
+    console.error('[ToolCallCard] rich card render boundary caught:', this.props.toolName, error)
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return this.props.fallback
+    }
+    return this.props.children
+  }
+}
+
 export default function ToolCallCard({ part, onOpenArtifact, turnText }: Props) {
-  // 富卡片优先 · 5 tool 之一且完成时直接渲染
-  const rich = tryRenderRichCard(part, turnText)
-  if (rich) return <>{rich}</>
+  // 遵守 React Hooks 规则：useState 必须在任何条件 return 之前调用
   const [open, setOpen] = useState(false)
   const state = part.state
   const args = fmtArgs(state?.input)
@@ -120,7 +147,7 @@ export default function ToolCallCard({ part, onOpenArtifact, turnText }: Props) 
     ? state.time.end - state.time.start
     : null
 
-  return (
+  const fallbackCard = (
     <div style={{ margin: '10px 0' }}>
       <div
         onClick={() => setOpen(!open)}
@@ -265,4 +292,16 @@ export default function ToolCallCard({ part, onOpenArtifact, turnText }: Props) 
       )}
     </div>
   )
+
+  // 富卡片优先 · 7 tool 之一且完成时直接渲染（由 ErrorBoundary 兜底保护）
+  const rich = tryRenderRichCard(part, turnText)
+  if (rich) {
+    return (
+      <RichCardErrorBoundary fallback={fallbackCard} toolName={part.tool}>
+        {rich}
+      </RichCardErrorBoundary>
+    )
+  }
+
+  return fallbackCard
 }

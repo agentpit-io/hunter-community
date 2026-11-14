@@ -30,15 +30,16 @@ interface DigestData {
 }
 
 export default function WatchlistDigestCard({ data }: { data: DigestData }) {
-  if (data.error) {
+  const errMsg = data?.error || (data as any)?.detail
+  if (errMsg) {
     return (
       <div style={errStyle}>
         <b>⚠ 自选股日报生成失败</b><br />
-        <span style={{ color: HUNTER.INK_F, fontSize: 12 }}>{data.error}</span>
+        <span style={{ color: HUNTER.INK_F, fontSize: 12 }}>{String(errMsg)}</span>
       </div>
     )
   }
-  if (data.empty) {
+  if (data?.empty) {
     return (
       <div style={cardStyle}>
         <div style={{

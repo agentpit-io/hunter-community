@@ -115,7 +115,37 @@ EVENT = "PreToolUse"
 # 身份反查（见文件头「身份从哪来」）。超时给得很短：guard 的 timeout_ms 是 5000，
 # 反查是本地 compose 内网的一跳，慢到 2 秒就说明 api 有问题，宁可回落也不要拖垮对话。
 HERMES_API_URL = (os.environ.get("HERMES_API_URL") or "").rstrip("/")
-HUNTER_INTERNAL_KEY = os.environ.get("HUNTER_INTERNAL_KEY") or ""
+
+
+def _resolve_internal_key(default: str = "") -> str:
+    """读取内部鉴权密钥：优先环境变量 HUNTER_INTERNAL_KEY，为空时回退读取共享密钥卷。"""
+    val = (os.environ.get("HUNTER_INTERNAL_KEY") or "").strip()
+    if val:
+        return val
+    key_file = (os.environ.get("HUNTER_INTERNAL_KEY_FILE") or "/opt/hunter-secrets/internal_key").strip()
+    try:
+        if os.path.isfile(key_file):
+            with open(key_file, encoding="utf-8") as f:
+                v = f.read().strip().strip("'\"")
+                if v:
+                    return v
+    except OSError:
+        pass
+    sec_file = (os.environ.get("HUNTER_SECRETS_FILE") or "/opt/hunter-secrets/secrets.env").strip()
+    try:
+        if os.path.isfile(sec_file):
+            with open(sec_file, encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    if line.startswith("HUNTER_INTERNAL_KEY="):
+                        v = line.split("=", 1)[1].strip().strip("'\"")
+                        if v:
+                            return v
+    except OSError:
+        pass
+    return default
+
+
+HUNTER_INTERNAL_KEY = _resolve_internal_key("")
 LOOKUP_TIMEOUT_S = 2.0
 # 反查结果缓存在工作区里 —— hook 是**一次调用一个进程**，进程内缓存活不过一次调用。
 LOOKUP_CACHE_TTL_S = 300
@@ -408,7 +438,8 @@ def _cache_write(workspace: str, sid: str, uid: str) -> None:
 def lookup_user(session_id: str, workspace: str) -> str:
     """session_id → hermes user_id。查不到返回空串，**不抛异常、不猜**。"""
     sid = (session_id or "").strip()
-    if not sid or not HERMES_API_URL or not HUNTER_INTERNAL_KEY:
+    internal_key = HUNTER_INTERNAL_KEY or _resolve_internal_key("")
+    if not sid or not HERMES_API_URL or not internal_key:
         return ""
     # ⚠️ 缓存必须查在 import 之前（I2）。这三个 import 在容器里实测要 **530 ms**
     # （`python -X importtime`：urllib.request 累计 532 ms，主要是 http.client →
@@ -421,7 +452,7 @@ def lookup_user(session_id: str, workspace: str) -> str:
     import urllib.parse
     import urllib.request
     url = "{}/api/internal/session/{}/user".format(HERMES_API_URL, urllib.parse.quote(sid, safe=""))
-    req = urllib.request.Request(url, headers={"X-Hunter-Internal-Key": HUNTER_INTERNAL_KEY})
+    req = urllib.request.Request(url, headers={"X-Hunter-Internal-Key": internal_key})
     try:
         with urllib.request.urlopen(req, timeout=LOOKUP_TIMEOUT_S) as r:
             uid = str((json.loads(r.read().decode("utf-8")) or {}).get("user_id") or "").strip()
@@ -858,7 +889,8 @@ def check_broker_oauth_scope(uid: str, tool_subname: str, workspace: str) -> tup
             "session_user_id": uid,
         })
         url = "{}/api/internal/broker/oauth-verify?{}".format(HERMES_API_URL, qs)
-        req = urllib.request.Request(url, headers={"X-Hunter-Internal-Key": HUNTER_INTERNAL_KEY})
+        internal_key = HUNTER_INTERNAL_KEY or _resolve_internal_key("")
+        req = urllib.request.Request(url, headers={"X-Hunter-Internal-Key": internal_key})
         try:
             with urllib.request.urlopen(req, timeout=LOOKUP_TIMEOUT_S) as r:
                 body = json.loads(r.read().decode("utf-8")) or {}

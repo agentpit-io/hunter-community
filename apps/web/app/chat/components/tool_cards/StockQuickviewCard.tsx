@@ -30,20 +30,33 @@ interface QuickviewData {
 }
 
 export default function StockQuickviewCard({ data }: { data: QuickviewData }) {
-  const [inWl, setInWl] = useState(data.in_watchlist)
+  const [inWl, setInWl] = useState(Boolean(data?.in_watchlist))
   const [addBusy, setAddBusy] = useState(false)
 
-  if (data.error) {
+  const errMsg =
+    data?.error ||
+    (data as any)?.detail ||
+    (!data?.price || typeof data.price.change_pct !== 'number' ? '行情数据暂不可用' : '')
+
+  if (errMsg) {
     return (
       <div style={errStyle}>
-        <b>无法拉取 {data.code} 行情</b><br />
-        <span style={{ color: HUNTER.INK_F, fontSize: 12 }}>{data.error}</span>
+        <b>无法拉取 {data?.code || '该股票'} 行情</b><br />
+        <span style={{ color: HUNTER.INK_F, fontSize: 12 }}>{String(errMsg)}</span>
       </div>
     )
   }
 
-  const isUp = data.price.change_pct > 0
-  const chgColor = upDnColor(data.price.change_pct)
+  const price = data.price
+  const changePct = Number(price?.change_pct ?? 0)
+  const currentPrice = Number(price?.current ?? 0)
+  const changeVal = Number(price?.change ?? 0)
+  const openPrice = Number(price?.open ?? 0)
+  const highPrice = Number(price?.high ?? 0)
+  const lowPrice = Number(price?.low ?? 0)
+  const volumeVal = Number(price?.volume ?? 0)
+  const isUp = changePct > 0
+  const chgColor = upDnColor(changePct)
 
   const handleAddWatchlist = async () => {
     if (inWl || addBusy) return
@@ -51,15 +64,16 @@ export default function StockQuickviewCard({ data }: { data: QuickviewData }) {
     try {
       const token = localStorage.getItem('hunter_token') || ''
       const market = data.market || 'A'
-      const exchange = data.market_suffix || (data.code.startsWith('6') ? 'SH' : 'SZ')
+      const codeStr = data.code || ''
+      const exchange = data.market_suffix || (codeStr.startsWith('6') ? 'SH' : 'SZ')
       const res = await fetch('/api/watchlist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: token ? `Bearer ${token}` : '' },
-        body: JSON.stringify({ code: data.code, name: data.name, market, exchange, asset_type: 'stock' }),
+        body: JSON.stringify({ code: codeStr, name: data.name || codeStr, market, exchange, asset_type: 'stock' }),
       })
       if (res.ok) {
         setInWl(true)
-        toast(`✓ 已把 ${data.name} 加入自选`, 'ok')
+        toast(`✓ 已把 ${data.name || codeStr} 加入自选`, 'ok')
       } else {
         const t = await res.text().catch(() => '')
         toast(`加自选失败: ${t.slice(0, 80)}`, 'err')
@@ -72,15 +86,19 @@ export default function StockQuickviewCard({ data }: { data: QuickviewData }) {
   }
 
   const handleAction = (key: string) => {
-    const act = data.actions.find(a => a.key === key)
-    if (!act) return
+    const actions = Array.isArray(data.actions) ? data.actions : []
+    const act = actions.find(a => a.key === key)
+    if (!act) {
+      if (key === 'add_watchlist') handleAddWatchlist()
+      return
+    }
     if (key === 'add_watchlist') { handleAddWatchlist(); return }
     if (key === 'deep_analysis' && act.hint) { goChat(act.hint); return }
     if (key === 'view_news' && act.prefill) { goChat(act.prefill); return }
   }
 
   // 52 周条位置（百分比）
-  const rangePos = data.range_52w.position != null
+  const rangePos = data.range_52w?.position != null
     ? Math.round(data.range_52w.position * 100)
     : null
 
@@ -89,7 +107,7 @@ export default function StockQuickviewCard({ data }: { data: QuickviewData }) {
       {/* 头部 · 名称 + 市场 + 自选态 */}
       <div style={{ padding: '16px 18px 14px' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
-          <span style={{ fontFamily: HUNTER.SERIF, fontSize: 18, fontWeight: 700 }}>{data.name}</span>
+          <span style={{ fontFamily: HUNTER.SERIF, fontSize: 18, fontWeight: 700 }}>{data.name || data.code}</span>
           <span style={{ fontFamily: 'ui-monospace, menlo, monospace', fontSize: 11.5, color: HUNTER.INK_F }}>
             {data.code}{data.market_suffix ? `.${data.market_suffix}` : ''}
           </span>
@@ -106,10 +124,10 @@ export default function StockQuickviewCard({ data }: { data: QuickviewData }) {
         {/* 价格行 */}
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 12 }}>
           <span style={{ fontFamily: HUNTER.SERIF, fontSize: 28, fontWeight: 700 }}>
-            ¥{data.price.current.toFixed(2)}
+            ¥{currentPrice.toFixed(2)}
           </span>
           <span style={{ fontSize: 15, fontWeight: 700, color: chgColor }}>
-            {data.price.change >= 0 ? '+' : ''}{data.price.change.toFixed(2)} ({fmtPct(data.price.change_pct)})
+            {changeVal >= 0 ? '+' : ''}{changeVal.toFixed(2)} ({fmtPct(changePct)})
           </span>
           <span style={{ color: chgColor, fontSize: 14 }}>{isUp ? '↑' : '↓'}</span>
         </div>
@@ -119,14 +137,14 @@ export default function StockQuickviewCard({ data }: { data: QuickviewData }) {
           display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)',
           gap: 6, fontSize: 11.5, color: HUNTER.INK_F,
         }}>
-          <div>开 <b style={{ color: HUNTER.INK, fontVariantNumeric: 'tabular-nums' }}>{data.price.open.toFixed(2)}</b></div>
-          <div>高 <b style={{ color: HUNTER.INK, fontVariantNumeric: 'tabular-nums' }}>{data.price.high.toFixed(2)}</b></div>
-          <div>低 <b style={{ color: HUNTER.INK, fontVariantNumeric: 'tabular-nums' }}>{data.price.low.toFixed(2)}</b></div>
-          <div>量 <b style={{ color: HUNTER.INK, fontVariantNumeric: 'tabular-nums' }}>{fmtVolume(data.price.volume)}</b></div>
+          <div>开 <b style={{ color: HUNTER.INK, fontVariantNumeric: 'tabular-nums' }}>{openPrice.toFixed(2)}</b></div>
+          <div>高 <b style={{ color: HUNTER.INK, fontVariantNumeric: 'tabular-nums' }}>{highPrice.toFixed(2)}</b></div>
+          <div>低 <b style={{ color: HUNTER.INK, fontVariantNumeric: 'tabular-nums' }}>{lowPrice.toFixed(2)}</b></div>
+          <div>量 <b style={{ color: HUNTER.INK, fontVariantNumeric: 'tabular-nums' }}>{fmtVolume(volumeVal)}</b></div>
         </div>
 
         {/* 52 周区间 */}
-        {rangePos != null && (
+        {rangePos != null && data.range_52w && (
           <div style={{
             marginTop: 12, padding: '8px 12px', background: HUNTER.PAPER2,
             borderRadius: 8, fontSize: 11,
@@ -149,8 +167,8 @@ export default function StockQuickviewCard({ data }: { data: QuickviewData }) {
               display: 'flex', justifyContent: 'space-between',
               color: HUNTER.INK_F, fontFamily: 'ui-monospace, menlo, monospace', marginTop: 3,
             }}>
-              <span>{data.range_52w.low.toFixed(2)}</span>
-              <span>{data.range_52w.high.toFixed(2)}</span>
+              <span>{Number(data.range_52w?.low ?? 0).toFixed(2)}</span>
+              <span>{Number(data.range_52w?.high ?? 0).toFixed(2)}</span>
             </div>
           </div>
         )}

@@ -117,33 +117,38 @@ export HUNTER_SECRET_SRC_JWT_SECRET HUNTER_SECRET_SRC_HUNTER_INTERNAL_KEY
 # 值只含 [A-Za-z0-9](生成时已去掉 base64 的 `+` `/` `=`),不需要引号也不会被
 # shell 解释。别往里加注释、空格或引号,读它的那几个脚本都按这个格式来。
 #
-# **属主 1001:1001 + 权限 640,不是随手定的**,三个容器的运行用户不一样:
-#   · api      镜像没有 USER 指令        → root(uid 0)  ← 写这个文件的是它
-#   · opencode 镜像 USER=hunter          → uid 1001     ← 只读挂载,要读它
-#   · web      镜像 USER=nextjs(-u 1001)→ uid 1001     ← 同上
-# root 怎么都读得到,所以属主给 1001、组内可读(640)正好覆盖另外两个容器。
-# 留 600 + root 属主的话,opencode 验不了签、web 调 /api/internal/* 401,
-# 表现是「对话莫名 401」「上传图片没反应」,极难往密钥文件上想。
+# **属主 1001:10001 + 权限 640,不是随手定的**,三个容器的运行用户不一样:
+#   · api      镜像没有 USER 指令        → root(uid 0)        ← 写这个文件的是它
+#   · web      镜像 USER=nextjs(-u 1001)→ uid 1001           ← 只读挂载,按 owner(1001) 读
+#   · daemon   镜像 USER=hca            → uid 10001:gid 10001← 只读挂载,按 group(10001) 读
+# root 怎么都读得到,所以属主给 1001、属组给 10001、权限 640 正好覆盖 web 与 daemon 两个容器。
+# 留 1001:1001 + 640 的话,daemon(uid=10001,gid=10001) 读 secrets.env 会 Permission denied,
+# 表现是「MCP 调 /api/internal/* 报 internal auth failed」「对话莫名失败」。
 _persist_secrets() {
     _want="JWT_SECRET=$JWT_SECRET
 HUNTER_INTERNAL_KEY=$HUNTER_INTERNAL_KEY"
     if [ -r "$HUNTER_SECRETS_FILE" ] && [ "$(cat "$HUNTER_SECRETS_FILE")" = "$_want" ]; then
+        if chown 1001:10001 "$HUNTER_SECRETS_FILE" 2>/dev/null && chmod 640 "$HUNTER_SECRETS_FILE" 2>/dev/null; then
+            :
+        else
+            chmod 644 "$HUNTER_SECRETS_FILE" 2>/dev/null || true
+        fi
         _perm_note="$(_perm_of "$HUNTER_SECRETS_FILE")"
         return 0
     fi
     mkdir -p "$HUNTER_SECRETS_DIR" 2>/dev/null || return 1
     _tmp="$HUNTER_SECRETS_FILE.tmp.$$"
     ( umask 077; printf '%s\n' "$_want" > "$_tmp" ) 2>/dev/null || return 1
-    if chown 1001:1001 "$_tmp" 2>/dev/null && chmod 640 "$_tmp" 2>/dev/null; then
-        _perm_note="属主 1001:1001 · 权限 640"
+    if chown 1001:10001 "$_tmp" 2>/dev/null && chmod 640 "$_tmp" 2>/dev/null; then
+        _perm_note="属主 1001:10001 · 权限 640"
     else
         # 只读挂载、平台不给 chown(K8s 上常见)、或者本来就不是 root 在跑。
         # 降级成 644:所有容器都读得到。宁可放宽到「同机进程可读」,也不能让
         # 服务之间密钥对不上 —— 那会表现成一堆莫名其妙的 401。
         chmod 644 "$_tmp" 2>/dev/null || true
-        _perm_note="⚠ chown 1001 失败 · 降级为权限 644(opencode/web 才读得到)"
-        echo "[boot] WARN  无法把 $HUNTER_SECRETS_FILE 的属主改成 1001:1001," >&2
-        echo "[boot] WARN    已降级为 644 让 opencode(uid 1001)与 web(uid 1001)能读。" >&2
+        _perm_note="⚠ chown 1001:10001 失败 · 降级为权限 644(daemon/web 才读得到)"
+        echo "[boot] WARN  无法把 $HUNTER_SECRETS_FILE 的属主改成 1001:10001," >&2
+        echo "[boot] WARN    已降级为 644 让 daemon(gid 10001)与 web(uid 1001)能读。" >&2
     fi
     mv "$_tmp" "$HUNTER_SECRETS_FILE" 2>/dev/null || { rm -f "$_tmp" 2>/dev/null; return 1; }
     return 0

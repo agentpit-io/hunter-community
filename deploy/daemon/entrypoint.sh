@@ -40,6 +40,28 @@ MCP_RETRY_WAIT="${HCA_MCP_RETRY_WAIT:-15}"            # 两次重挂之间等多
 
 log() { printf '[entrypoint] %s\n' "$*"; }
 
+# ── 0.5 加载共享密钥卷（确保 hca-init.py / hookd.py / atomcode daemon 均继承）────
+HUNTER_SECRETS_FILE="${HUNTER_SECRETS_FILE:-/opt/hunter-secrets/secrets.env}"
+HUNTER_INTERNAL_KEY_FILE="${HUNTER_INTERNAL_KEY_FILE:-/opt/hunter-secrets/internal_key}"
+if [ -z "${HUNTER_INTERNAL_KEY:-}" ] && [ -r "$HUNTER_INTERNAL_KEY_FILE" ]; then
+  HUNTER_INTERNAL_KEY="$(tr -d '\r\n' < "$HUNTER_INTERNAL_KEY_FILE" | sed "s/^['\"]//;s/['\"]$//")"
+fi
+if [ -r "$HUNTER_SECRETS_FILE" ]; then
+  if [ -z "${HUNTER_INTERNAL_KEY:-}" ]; then
+    HUNTER_INTERNAL_KEY="$(sed -n 's/^HUNTER_INTERNAL_KEY=//p' "$HUNTER_SECRETS_FILE" | head -n 1 | tr -d '\r\n' | sed "s/^['\"]//;s/['\"]$//")"
+  fi
+  if [ -z "${JWT_SECRET:-}" ]; then
+    JWT_SECRET="$(sed -n 's/^JWT_SECRET=//p' "$HUNTER_SECRETS_FILE" | head -n 1 | tr -d '\r\n' | sed "s/^['\"]//;s/['\"]$//")"
+  fi
+fi
+export HUNTER_INTERNAL_KEY="${HUNTER_INTERNAL_KEY:-}"
+export JWT_SECRET="${JWT_SECRET:-}"
+if [ -n "$HUNTER_INTERNAL_KEY" ]; then
+  log "HUNTER_INTERNAL_KEY 已就位（长度 ${#HUNTER_INTERNAL_KEY}）"
+else
+  log "⚠ HUNTER_INTERNAL_KEY 为空（$HUNTER_SECRETS_FILE 不可读或未设置）"
+fi
+
 # ── 1. 初始化 ────────────────────────────────────────────────────────────────
 python3 /opt/hca/bin/hca-init.py
 

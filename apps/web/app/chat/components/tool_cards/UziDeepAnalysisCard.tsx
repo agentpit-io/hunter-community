@@ -103,8 +103,11 @@ export default function UziDeepAnalysisCard(
     ? Math.round((dimsCovered.length / (dimsCovered.length + dimsMissing.length)) * 100)
     : 0
   // 工具失败时 duration_ms 根本不存在 · 原来直接 toFixed 会在头部显示 "NaNs"
-  const durationLabel = Number.isFinite(data.duration_ms) ? `${(data.duration_ms / 1000).toFixed(1)}s` : '—'
-  const failed = typeof data.error === 'string' && data.error.length > 0
+  const durationLabel = Number.isFinite(data?.duration_ms) ? `${(data.duration_ms / 1000).toFixed(1)}s` : '—'
+  const errStr =
+    (typeof data?.error === 'string' && data.error.length > 0 ? data.error : '') ||
+    (!data?.markdown && typeof data?.detail === 'string' && data.detail.length > 0 ? data.detail : '')
+  const failed = errStr.length > 0
 
   const copyMarkdown = async () => {
     try {
@@ -215,7 +218,7 @@ export default function UziDeepAnalysisCard(
             {data.markdown}
           </ReactMarkdown>
         ) : failed ? (
-          <FailedNotice error={data.error!} detail={data.detail} />
+          <FailedNotice error={errStr} detail={data?.error ? data?.detail : undefined} />
         ) : (
           <EmptyReportNotice durationLabel={durationLabel} coverage={coverage} />
         )}

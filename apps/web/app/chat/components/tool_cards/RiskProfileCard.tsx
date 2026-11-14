@@ -47,11 +47,12 @@ const TOL_COLOR: Record<string, string> = {
 }
 
 export default function RiskProfileCard({ data }: { data: Data }) {
-  if (data.error) {
-    return <div style={errStyle}><b>⚠</b> {data.error}</div>
+  const errMsg = data?.error || (data as any)?.detail || (!data?.profile ? '风险画像数据暂不可用' : '')
+  if (errMsg) {
+    return <div style={errStyle}><b>⚠</b> {String(errMsg)}</div>
   }
   const p = data.profile
-  const hasChanges = data.changes && data.changes.length > 0
+  const hasChanges = Array.isArray(data.changes) && data.changes.length > 0
 
   return (
     <div style={darkCard}>

@@ -75,6 +75,8 @@ def run_guard(session_id: str, tool: str, tool_input: dict, workspace: Path, env
     # 显式清掉，免得开发机上恰好设了这几个变量让用例失真
     env.pop("HERMES_API_URL", None)
     env.pop("HUNTER_INTERNAL_KEY", None)
+    env.pop("HUNTER_INTERNAL_KEY_FILE", None)
+    env.pop("HUNTER_SECRETS_FILE", None)
     env.pop("HUNTER_USER_ID", None)
     env.update(env_extra)
     payload = json.dumps({
@@ -224,5 +226,20 @@ def test_fin_memory_and_doc_tools_receive_session_identity(api, tmp_path):
         env,
     )
     assert injected(f_res) == {"file_id": "f_1", "keyword": "营收", "_hermes_user_id": "u-bob"}
+
+
+def test_internal_key_falls_back_to_secrets_env_when_env_is_empty(api, tmp_path):
+    """当环境变量 HUNTER_INTERNAL_KEY 为空串时，guard 自动回退读取 secrets.env 中的密钥。"""
+    sec_file = tmp_path / "secrets.env"
+    sec_file.write_text(f"JWT_SECRET=dummy\nHUNTER_INTERNAL_KEY={INTERNAL_KEY}\n", encoding="utf-8")
+    env = {
+        "HERMES_API_URL": f"http://127.0.0.1:{api.server_port}",
+        "HUNTER_INTERNAL_KEY": "",
+        "HUNTER_SECRETS_FILE": str(sec_file),
+        "HUNTER_INTERNAL_KEY_FILE": str(tmp_path / "missing_key"),
+    }
+    res, _ = run_guard("sess-alice", "mcp__watchlist__stock_quickview", {"code": "600519"}, tmp_path, env)
+    assert injected(res) == {"code": "600519", "_hermes_user_id": "u-alice"}
+
 
 
