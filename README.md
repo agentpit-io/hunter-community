@@ -8,16 +8,16 @@
 
 <img src="./docs/assets/logo.png" alt="HunterCode" width="160" height="160" />
 
-# HunterCode · AtomCode Unified (`v3.0.0`)
+# HunterCode · AtomCode Unified (`v3.5.0`)
 
 ### Community & AtomCode Edition
 
-**自部署的 AI 投研助手 · A股 / 港股 / 美股 · AtomCode 5.1.0 提速内核 · 数据和对话都在你自己的机器上**
+**自部署的 AI 投研助手 · A股 / 港股 / 美股 · AtomCode 5.1.0 提速内核 · 20 个 MCP + 22 个金融 SKILL · 数据和对话都在你自己的机器上**
 
-HunterCode 是腾讯 WorkBuddy 金融版的开源本地替代方案 · 面向私募机构私有化部署与专业个人投资者<br>
+HunterCode 是腾讯 WorkBuddy 金融版的开源本地替代方案 · 面向私募机构私有化部署、证券公司接口联调与专业个人投资者<br>
 <sub>腾讯、WorkBuddy 是腾讯公司的商标。HunterCode 与腾讯公司无隶属、合作或授权关系。</sub>
 
-[![Version](https://img.shields.io/badge/version-v3.0.0-blue)](https://github.com/agentpit-io/hunter-community/releases)
+[![Version](https://img.shields.io/badge/version-v3.5.0-blue)](https://github.com/agentpit-io/hunter-community/releases)
 [![Kernel](https://img.shields.io/badge/AtomCode-v5.1.0_Fork-0A7E8C)](./pins.lock)
 [![License](https://img.shields.io/badge/license-Apache_2.0-green)](./LICENSE)
 [![CI](https://github.com/agentpit-io/hunter-community/actions/workflows/ci.yml/badge.svg)](https://github.com/agentpit-io/hunter-community/actions/workflows/ci.yml)
@@ -28,7 +28,7 @@ HunterCode 是腾讯 WorkBuddy 金融版的开源本地替代方案 · 面向私
 
 [**🚀 在线演示**](https://hunter-community.agentpit.io) &nbsp;·&nbsp; [**⚡ 5 分钟部署**](#-5-分钟跑起来) &nbsp;·&nbsp; [**📖 产品说明书**](./doc/产品说明书.md) &nbsp;·&nbsp; [**帮助中心**](https://hunter-community.agentpit.io/help/index.html) &nbsp;·&nbsp; [**运维手册**](./docs/部署与运维.md) &nbsp;·&nbsp; [**💬 讨论区**](https://github.com/agentpit-io/hunter-community/discussions)
 
-🚀 **2026-11-13 里程碑发布 `v3.0.0`：全面统一为 AtomCode 5.1.0 Fork 提速内核 + 智能炒股五期自进化闭环 + 默认 Google Gemini 4 Argon（`gemini-4-argon`）+ 全链路大模型日志诊断！**  
+🚀 **2026-11-14 里程碑发布 `v3.5.0`：全面建成证券公司接口适配层（20 个 MCP 服务 · 66 个工具）+ 56 项技术指标/90 项基本面/ETF 定投确定性计算引擎 + 22 个金融 SKILL + 每日三段式工作流与五大工作台 + CSDN 实战示例包！**  
 `hunter-community` 与 `huntercode-atomcode`（GitHub & GitCode）自 `v3.0.0` 起实现**双仓同源同 SHA 统一**（原 OpenCode v2.2 分支归档于 `legacy/opencode-v2.2`）。
 
 🏆 [入围世界人工智能开源大赛(GOAI)总决赛 · 赛道二 TOP 15](https://mp.weixin.qq.com/s/n8olfrqdP0-rkj6mU_N6Hg) · [与 WorkBuddy 金融版逐项对比(附官方来源)](https://www.agentpit.io/compare/workbuddy) · [完整演示视频 3 分钟](https://www.agentpit.io/media/huntercode-demo-0919.mp4)
@@ -36,6 +36,27 @@ HunterCode 是腾讯 WorkBuddy 金融版的开源本地替代方案 · 面向私
 </div>
 
 > **⚠️ 免责声明**:本项目是投研分析工具,所有输出为 AI 生成内容,仅供研究参考,不构成任何投资建议。投资有风险,决策需谨慎。
+
+---
+
+## 🎉 `v3.5.0` 证券公司接口与金融 SKILL 体系核心全景（20 个 MCP + 22 个金融 SKILL）
+
+### 1. 20 个标准 MCP 服务（12 个既有服务 + 8 个新增证券公司专属只读 MCP · 共 66 个工具）
+
+| 类别 | MCP 服务名称 | 核心功能与工具集 |
+|---|---|---|
+| **既有核心 MCP（12 个）** | `hcapack`、`akshare`、`kronos`、`truesource`、`uzi`、`watchlist`、`portfolio`、`screener`、`hunter_cap`、`hunter_user`、`runtime_control`、`fin_memory` | 个股快照、情报聚合、公开行情、K线预测、自选股管理与 PDF 页码检索、组合压力测试、市场筛选、技能安装、自定义源、工作流控制与投研经验记忆库 |
+| **P0 券商核心只读 MCP（4 个）** | `broker_security`、`broker_market`、`broker_disclosure`、`broker_fundamental` | 证券主数据与历史指数成分（`search_security`/`get_security_profile`/`get_security_status`/`get_index_constituents`）；实时/延时报价、前/后/不复权 K 线、五档盘口、市场状态与交易日历（`get_quote`/`get_kline`/`get_orderbook`/`get_market_status`/`get_market_overview`/`get_market_calendar`）；公告检索与 PDF 页码定位（`search_announcements`/`get_announcement`/`search_news`/`get_news_detail`）；Point-in-Time 三大财报、财务比率、估值分位、股东与分红送转（`get_financial_statements`/`get_financial_ratios`/`get_valuation`/`get_shareholders`/`get_corporate_actions`） |
+| **P1 券商进阶只读 MCP（3 个）** | `broker_funds`、`broker_research`、`broker_education` | ETF 报价/IOPV、基金净值、ETF 申赎成分、基金费率与可转债（`get_etf_quote`/`get_fund_nav`/`get_etf_holdings`/`get_fund_fee`/`get_bond_data`）；合规授权研报、盈利一致预期与行业拥挤度（`get_research_reports`/`get_consensus_estimates`/`get_sector_data`）；投教检索、产品百科与风险揭示书（`search_investor_education`/`get_product_guide`/`get_risk_disclosure`） |
+| **P2 账户只读连接器（1 个）** | `broker_account_readonly`（默认关闭，需用户单独 OAuth 授权） | 脱敏账户列表、资金概览、持仓快照、历史成交记录（`get_accounts`/`get_account_summary`/`get_positions`/`get_trades`），AES-256-GCM 凭证加密托管 + 一键撤销 + Excel/CSV 交割单手工导入兜底，**物理级 0 交易下单接口** |
+
+### 2. 22 个金融投研 SKILL（7 个既有升级 + 8 个 P0 日常 + 7 个 P1 进阶）
+
+| 分组 | 技能名称（共 22 个） | 核心场景说明 |
+|---|---|---|
+| **既有升级技能（7 个）** | `uzi`、`deep_analysis`、`investor_panel`、`lhb_analyzer`、`risk_profile`、`trap_detector`、`market-event-analyst` | 全面升级接入 `BrokerDataEnvelope` 统一数据信封与【已核实事实 / 逻辑推断 / 待核实问题】三栏证据格式 |
+| **P0 股民日常高频技能（8 个）** | `daily_market_brief`（市场晨报）、`watchlist_daily_brief`（自选股日报）、`announcement_impact`（公告 PDF 页码解读）、`earnings_review`（财报质量体检）、`technical_dashboard`（56项技术看板）、`fundamental_scorecard`（90项基本面评分卡）、`portfolio_risk_check`（组合风险巡检）、`after_close_review`（15:30 盘后复盘） | 覆盖盘前（08:30）、盘中异动解释、盘后复盘（15:30）全天候日常投研闭环 |
+| **P1 进阶与量化研究技能（7 个）** | `factor_research`（因子 IC/分层检验）、`etf_dca_planner`（ETF 定投正向/反推规划）、`investment_thesis_tracker`（投资论点与反证跟踪）、`stock_screener_builder`（自然语言选股构建）、`news_signal_digest`（多源新闻水位线去重）、`trading_journal`（交易计划与交割单复盘）、`backtest_quality_auditor`（回测未来函数与幸存者偏差审计） | 配套「市场」「自选股」「个股研究」「量化与 ETF 定投」「组合复盘与只读授权」五大工作台与 `examples/csdn_broker_notebooks/` 实战包 |
 
 ---
 

@@ -3,6 +3,52 @@
 All notable changes to HunterCode · Community Edition follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.0] - 2026-11-14
+
+> **里程碑正式版 · HunterCode × 证券公司接口与金融 SKILL 体系工程（M0–M5 全链路收官版）。**
+>
+> **核心升级亮点（`v3.0.2` → `v3.5.0` 全链路汇总）**：
+> 1. **20 个标准 MCP 服务（12 个既有服务 + 8 个新增证券公司专属只读 MCP，共 66 个工具）**：
+>    - **12 个既有 MCP**：`hcapack`、`akshare`、`kronos`、`truesource`、`uzi`、`watchlist`、`portfolio`、`screener`、`hunter_cap`、`hunter_user`、`runtime_control`、`fin_memory`；
+>    - **4 个 P0 券商核心只读 MCP（`v3.1.0`）**：`broker_security`（主数据与指数成分）、`broker_market`（实时/延时快照、前后不复权 K 线、五档盘口、A/H/美股交易日历）、`broker_disclosure`（全市场公告检索、PDF 原文页码定位、财经快讯）、`broker_fundamental`（Point-in-Time 三大财务报表、核心财务比率、估值历史分位、股东与分红送转）；
+>    - **3 个 P1 券商进阶只读 MCP（`v3.3.0`）**：`broker_funds`（ETF 报价/IOPV、历史净值、申赎成分、基金费率、可转债数据）、`broker_research`（合规授权研报摘要、盈利一致预期、行业景气度与拥挤度）、`broker_education`（投资者教育检索、金融产品规则百科、标准合规风险揭示书）；
+>    - **1 个 P2 用户单独授权账户只读 MCP（`v3.4.0`）**：`broker_account_readonly`（默认关闭；用户单独 OAuth 授权后提供 `get_accounts`、`get_account_summary`、`get_positions`、`get_trades` 4 个 100% 只读工具，凭证采用 AES-256-GCM 加密托管并支持一键撤销与 Excel/CSV 交割单手工导入兜底）。
+> 2. **统一数据信封（`BrokerDataEnvelope`）与三大确定性计算引擎**：
+>    - 强制分离 `as_of`（行情业务时间）、`published_at`（公告/财报披露时间，防前视偏差）、`retrieved_at`（接口抓取时间），缺失数据一律返回 `null`（前端显示 `—`）并列出 `missing_fields`，严禁填 `0` 或跨源取均值；
+>    - **7 大类 56 项技术指标确定性计算引擎**（`apps/api/app/services/indicators/`）：涵盖趋势型（18）、超买超卖型（11）、能量型（7）、成交量型（6）、通道路径型（6）、波动率型（4）、市场广度型（4）及多空信号冲突诊断；
+>    - **6 大维度 90 项基本面体检计算引擎**（`apps/api/app/services/fundamentals/`）：涵盖盈利（18）、成长（15）、偿债（16）、现金流（15）、估值（14）、治理（12）及会计准则重述对比与六维评分卡；
+>    - **ETF 定投计算器引擎**（`apps/api/app/services/etf_dca/`）：支持正向历史回测（XIRR、最大回撤、分红再投）、目标金额反推、定投 vs 一次性买入同区间对比，强制附带历史假设免责声明。
+> 3. **22 个金融投研 SKILL（7 个既有升级 + 8 个 P0 日常 + 7 个 P1 进阶）与第三方安全扫描器**：
+>    - **7 个既有升级 SKILL**：`uzi`、`deep_analysis`、`investor_panel`、`lhb_analyzer`、`risk_profile`、`trap_detector`、`market-event-analyst`；
+>    - **8 个 P0 日常高频 SKILL（`v3.2.0`）**：`daily_market_brief`、`watchlist_daily_brief`、`announcement_impact`、`earnings_review`、`technical_dashboard`、`fundamental_scorecard`、`portfolio_risk_check`、`after_close_review`；
+>    - **7 个 P1 进阶与量化 SKILL（`v3.3.0`）**：`factor_research`、`etf_dca_planner`、`investment_thesis_tracker`、`stock_screener_builder`、`news_signal_digest`、`trading_journal`、`backtest_quality_auditor`；
+>    - **第三方金融 SKILL 许可证与安全静态扫描器（`tools/skill_security_scanner.py`，`v3.5.0`）**：自动检查开源许可证（MIT / Apache-2.0）、拦截未授权 vendored 文件、拦截危险命令与外发窃密脚本、拦截硬编码 API Key 及违规荐股承诺词，22 个金融 SKILL 100% 扫描通过。
+> 4. **每日三段式自动工作流、五大投研工作台、CSDN 实战示例包与 `HunterLauncher` 适配**：
+>    - 盘前观察卡（08:30）、盘中异动解释（交易时段，带频率节流与断流告警）、盘后复盘与经验沉淀（15:30）全链路闭环；
+>    - Web 端上线「市场工作台」「自选股工作台」「个股研究工作台」「量化研究与 ETF 定投工作台」「组合复盘与券商只读授权工作台」五大工作台；
+>    - 新增 `examples/csdn_broker_notebooks/` 5 套 CSDN × 证券公司金融数据实战脚本与 Jupyter Notebook；
+>    - 桌面端 `HunterLauncher` 同步适配 `v3.5.0`（20 个 MCP + 22 个金融 SKILL）。
+
+## [3.4.0] - 2026-11-14
+
+> **阶段 M4 · 用户单独授权的账户只读连接器（`broker_account_readonly`）、AES-256-GCM 凭证托管、交割单导入与 `hookd` 五道合规门卫。**
+
+## [3.3.0] - 2026-11-14
+
+> **阶段 M3 · 3 个 P1 券商 MCP（`broker_funds`/`broker_research`/`broker_education`）、ETF 定投计算器、7 个 P1 进阶金融 SKILL 与量化/组合复盘工作台。**
+
+## [3.2.0] - 2026-11-14
+
+> **阶段 M2 · 8 个 P0 日常股民 SKILL、7 个既有技能升级、每日三段式工作流（盘前/盘中/盘后）与三大基础工作台。**
+
+## [3.1.0] - 2026-11-14
+
+> **阶段 M1 · 4 个 P0 券商只读 MCP（`broker_security`/`broker_market`/`broker_disclosure`/`broker_fundamental`）、主备数据源路由器与 56 项技术 / 90 项基本面计算引擎。**
+
+## [3.0.2] - 2026-11-14
+
+> **阶段 M0 · 核平 12 个既有 MCP 计数口径、实现券商统一数据信封（`BrokerDataEnvelope`）、开源 SKILL 许可证 SBOM 清单与三仓同步底座。**
+
 ## [3.0.0] - 2026-11-13
 
 > **里程碑大版本 · AtomCode 5.1.0 内核全面统一版（`hunter-community` 与 `huntercode-atomcode` 双仓同源合一）。**

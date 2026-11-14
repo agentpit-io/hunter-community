@@ -10,7 +10,7 @@ export default function BrokerSettingsStandalonePage() {
       <header style={{ borderBottom: '1px solid var(--border)', padding: '12px 24px', display: 'flex', alignItems: 'center', gap: 12 }}>
         <Link href="/workbench" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: 'var(--text)', textDecoration: 'none' }}>
           <Activity size={18} style={{ color: 'var(--blue)' }} />
-          <span style={{ fontWeight: 600 }}>猎鹿人 · Hunter-AtomCode v3.4.0</span>
+          <span style={{ fontWeight: 600 }}>猎鹿人 · Hunter-AtomCode v3.5.0</span>
         </Link>
         <span style={{ flex: 1 }} />
         <Link href="/settings" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 13, color: 'var(--blue)', textDecoration: 'none' }}>

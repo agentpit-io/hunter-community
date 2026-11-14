@@ -174,6 +174,17 @@ if [ -d "${HCA_REPO}/distro/hooks/hookd" ]; then
   cp -rf "${HCA_REPO}/distro/hooks/hookd/"* "${HUNTERCODE_REPO}/packages/hunter-broker/hookd/" 2>/dev/null || true
   rm -rf "${HUNTERCODE_REPO}/packages/hunter-broker/hookd/__pycache__"
 fi
+if [ -f "${HCA_REPO}/tools/skill_security_scanner.py" ]; then
+  mkdir -p "${HUNTERCODE_REPO}/packages/hunter-broker/tools"
+  cp -f "${HCA_REPO}/tools/skill_security_scanner.py" "${HUNTERCODE_REPO}/packages/hunter-broker/tools/"
+fi
+if [ -d "${HCA_REPO}/examples/csdn_broker_notebooks" ]; then
+  mkdir -p "${HUNTERCODE_REPO}/examples/csdn_broker_notebooks"
+  cp -rf "${HCA_REPO}/examples/csdn_broker_notebooks/"* "${HUNTERCODE_REPO}/examples/csdn_broker_notebooks/" 2>/dev/null || true
+fi
+if [ -f "${HCA_REPO}/docs/开发文档/HunterCode_证券公司接口与金融SKILL_全链路验收总结报告.md" ]; then
+  cp -f "${HCA_REPO}/docs/开发文档/HunterCode_证券公司接口与金融SKILL_全链路验收总结报告.md" "${HUNTERCODE_REPO}/docs-hunter/broker-specs/"
+fi
 
 # 5.4 更新 huntercode-repo 版本号文件
 echo "${VER_NUM}" > "${HUNTERCODE_REPO}/VERSION"

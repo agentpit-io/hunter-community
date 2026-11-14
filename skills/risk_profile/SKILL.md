@@ -2,6 +2,8 @@
 name: risk_profile
 description: "读/改风险偏好 + 现金 + 单票/HK 上限 · 接入券商数据信封与三栏证据格式 · 供组合建议与组合风险巡检自动应用"
 version: 3.2.0
+author: HunterCode Team
+license: MIT
 hunter:
   display_name: "风险画像"
   icon: "🎚"

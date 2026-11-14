@@ -477,6 +477,15 @@ def build(
     for d in skill_dirs:
         out_dir = dst / d.name
         log = SkillLog(name=d.name, src=d / "SKILL.md", dst=out_dir / "SKILL.md")
+        if src.resolve() == DEFAULT_SRC.resolve():
+            try:
+                from tools.skill_security_scanner import scan_skill_dir
+                scan_rep = scan_skill_dir(d)
+                if not scan_rep.passed:
+                    err_msg = "; ".join(f"[{i.rule_id}] {i.message}" for i in scan_rep.issues)
+                    raise BuildError(f"安全与许可证扫描未通过: {err_msg}")
+            except ImportError:
+                pass
         try:
             rendered = render_skill((d / "SKILL.md").read_text(encoding="utf-8"), servers, log)
         except BuildError as e:

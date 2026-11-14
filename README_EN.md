@@ -8,16 +8,16 @@
 
 <img src="./docs/assets/logo.png" alt="HunterCode" width="160" height="160" />
 
-# HunterCode · AtomCode Unified (`v3.0.0`)
+# HunterCode · AtomCode Unified (`v3.5.0`)
 
 ### Community & AtomCode Edition
 
-**Self-hosted AI investment research assistant for A-shares, Hong Kong and US stocks · Powered by AtomCode 5.1.0 · Your data and chats stay on your machine**
+**Self-hosted AI investment research assistant for A-shares, Hong Kong and US stocks · Powered by AtomCode 5.1.0 · 20 MCP Servers + 22 Finance SKILLs · Your data and chats stay on your machine**
 
-HunterCode is an open-source, local alternative to Tencent WorkBuddy Finance Edition · built for hedge-fund researchers and serious individual investors<br>
+HunterCode is an open-source, local alternative to Tencent WorkBuddy Finance Edition · built for hedge-fund researchers, brokerage integrations, and serious individual investors<br>
 <sub>Tencent and WorkBuddy are trademarks of Tencent. HunterCode is not affiliated with, partnered with, or endorsed by Tencent.</sub>
 
-[![Version](https://img.shields.io/badge/version-v3.0.0-blue)](https://github.com/agentpit-io/hunter-community/releases)
+[![Version](https://img.shields.io/badge/version-v3.5.0-blue)](https://github.com/agentpit-io/hunter-community/releases)
 [![Kernel](https://img.shields.io/badge/AtomCode-v5.1.0_Fork-0A7E8C)](./pins.lock)
 [![License](https://img.shields.io/badge/license-Apache_2.0-green)](./LICENSE)
 [![CI](https://github.com/agentpit-io/hunter-community/actions/workflows/ci.yml/badge.svg)](https://github.com/agentpit-io/hunter-community/actions/workflows/ci.yml)
@@ -28,12 +28,27 @@ HunterCode is an open-source, local alternative to Tencent WorkBuddy Finance Edi
 
 [**🚀 Live demo**](https://hunter-community.agentpit.io) &nbsp;·&nbsp; [**⚡ Deploy in 5 min**](#-deploy-in-5-minutes) &nbsp;·&nbsp; [**📖 Docs**](./docs/部署与运维.md) &nbsp;·&nbsp; [**💬 Discussions**](https://github.com/agentpit-io/hunter-community/discussions)
 
-🚀 **2026-11-13 Milestone Release `v3.0.0`: Full Unification on the AtomCode 5.1.0 Fork Accelerated Kernel + Phase 1–5 Autonomous Paper Trading & Self-Evolution Loop + Default Google Gemini 4 Argon (`gemini-4-argon`) + End-to-End LLM Call Trace & Diagnostics!**  
+🚀 **2026-11-14 Milestone Release `v3.5.0`: Full Brokerage Interface Layer (20 MCP Servers · 66 Tools) + Deterministic 56 Technical / 90 Fundamental / ETF DCA Engines + 22 Finance SKILLs + 3 Daily Workflows & 5 Research Workbenches + CSDN Developer Notebooks!**  
 Starting with `v3.0.0`, `hunter-community` and `huntercode-atomcode` (GitHub & GitCode) share the **exact same source tree and Commit SHA** (the legacy OpenCode v2.2 branch is archived at `legacy/opencode-v2.2`).
 
 </div>
 
 > **⚠️ Disclaimer**: this is a research tool. All output is AI-generated, for research reference only, and is not investment advice. Investing involves risk.
+
+---
+
+## 🎉 What's New in `v3.5.0` (20 MCP Servers + 22 Finance SKILLs)
+
+1. **20 MCP Servers (12 Core + 8 Brokerage Read-Only MCPs · 66 Tools Total)**:
+   - **12 Core MCPs**: `hcapack`, `akshare`, `kronos`, `truesource`, `uzi`, `watchlist`, `portfolio`, `screener`, `hunter_cap`, `hunter_user`, `runtime_control`, `fin_memory`.
+   - **4 P0 Brokerage MCPs (`v3.1.0`)**: `broker_security`, `broker_market`, `broker_disclosure`, `broker_fundamental` (with strict `BrokerDataEnvelope` timestamp separation `as_of` / `published_at` / `retrieved_at` and `null` missing-value discipline).
+   - **3 P1 Brokerage MCPs (`v3.3.0`)**: `broker_funds` (ETF quotes/IOPV, fund NAV, ETF holdings, fees, convertible bonds), `broker_research` (licensed research summaries, consensus estimates, sector crowding), `broker_education` (investor education, product guides, risk disclosures).
+   - **1 P2 User-Authorized Account Read-Only MCP (`v3.4.0`)**: `broker_account_readonly` (`get_accounts`, `get_account_summary`, `get_positions`, `get_trades` — disabled by default, AES-256-GCM encrypted token custody, one-click revocation, Excel/CSV settlement import fallback, zero live order placement).
+2. **22 Finance SKILLs & Static Security Scanner (`tools/skill_security_scanner.py`)**:
+   - **7 Upgraded Core SKILLs**: `uzi`, `deep_analysis`, `investor_panel`, `lhb_analyzer`, `risk_profile`, `trap_detector`, `market-event-analyst`.
+   - **8 P0 Daily Investor SKILLs (`v3.2.0`)**: `daily_market_brief`, `watchlist_daily_brief`, `announcement_impact`, `earnings_review`, `technical_dashboard`, `fundamental_scorecard`, `portfolio_risk_check`, `after_close_review`.
+   - **7 P1 Advanced & Quant SKILLs (`v3.3.0`)**: `factor_research`, `etf_dca_planner`, `investment_thesis_tracker`, `stock_screener_builder`, `news_signal_digest`, `trading_journal`, `backtest_quality_auditor`.
+   - **CSDN × Brokerage Developer Pack (`examples/csdn_broker_notebooks/`)**: 5 executable scripts & Jupyter Notebooks covering market quotes/calendars, 56 technical indicators, 90 fundamental metrics & PDF disclosure citations, factor IC & backtest quality auditing, and ETF DCA & daily workflows.
 
 ---
 

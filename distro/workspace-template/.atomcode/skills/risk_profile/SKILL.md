@@ -4,6 +4,8 @@ description: "读/改风险偏好 + 现金 + 单票/HK 上限 · 接入券商数
 user-invocable: true
 allowed-tools: mcp__portfolio__update_risk_profile mcp__portfolio__portfolio_stress
 version: 3.2.0
+author: HunterCode Team
+license: MIT
 hunter:
   display_name: "风险画像"
   icon: "🎚"

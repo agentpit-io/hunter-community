@@ -452,7 +452,7 @@ export default function BrokerDailyWorkbenchPage() {
             <div>
               <div className="flex items-center gap-2.5">
                 <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-900">
-                  HunterCode v3.4.0 · v3.3.0 · 券商数据信封认证
+                  HunterCode v3.5.0 · v3.4.0 · v3.3.0 · 券商数据信封认证
                 </span>
                 <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">
                   正则数字回读 100% 校验 · AES-256-GCM 只读授权
