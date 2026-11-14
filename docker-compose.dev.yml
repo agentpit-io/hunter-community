@@ -39,7 +39,7 @@ services:
     volumes:
       - ./scripts/llm-shim:/app:ro
 
-  daemon:
+  opencode:
     image: hunter-community-daemon:dev
     build:
       context: .

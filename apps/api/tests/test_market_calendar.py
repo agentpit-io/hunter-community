@@ -128,6 +128,7 @@ def test_manual_seed_has_source_and_date():
 # ── 端点：hk/us 不再 501 ───────────────────────────────────────────────────
 @pytest.fixture
 def client(monkeypatch):
+    monkeypatch.setattr(internal_etl, "_INTERNAL_KEY", KEY)
     app = FastAPI()
     app.include_router(internal_etl.router)
     return TestClient(app)

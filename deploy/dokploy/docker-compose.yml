@@ -1,4 +1,4 @@
-# HunterCode Community Edition (AtomCode Unified v3.0.0) · Dokploy 用编排
+# HunterCode Community Edition (AtomCode Unified v3.5.0) · Dokploy 用编排
 # ══════════════════════════════════════════════════════════════════════
 # 用法：Dokploy → Project → Create Service → **Compose** → Provider 选 Raw
 #       → 把这份文件整个粘进 Compose File → 到 **Environment** 页签填四个变量
@@ -31,7 +31,7 @@
 services:
   # ── web · 本应用唯一对外的服务（在 Domains 页签里选它）────────
   web:
-    image: ghcr.io/agentpit-io/hunter-community-web:3.0.0
+    image: ghcr.io/agentpit-io/hunter-community-web:3.5.0
     restart: unless-stopped
     depends_on:
       api:
@@ -68,7 +68,7 @@ services:
 
   # ── api · 后端 + 自动迁移 + 首启向导 ─────────────────────────
   api:
-    image: ghcr.io/agentpit-io/hunter-community-api:3.0.0
+    image: ghcr.io/agentpit-io/hunter-community-api:3.5.0
     restart: unless-stopped
     depends_on:
       postgres:
@@ -126,7 +126,7 @@ services:
 
   # ── daemon · AtomCode 5.1.0 对话内核（会话正文在卷里）─────────
   daemon:
-    image: ghcr.io/agentpit-io/hunter-community-daemon:3.0.0
+    image: ghcr.io/agentpit-io/hunter-community-daemon:3.5.0
     restart: unless-stopped
     depends_on:
       api:
@@ -182,7 +182,7 @@ services:
 
   # ── llm-shim · tool schema 清洗与 ToolCallIndexer 层 ──────────
   llm-shim:
-    image: ghcr.io/agentpit-io/hunter-community-llm-shim:3.0.0
+    image: ghcr.io/agentpit-io/hunter-community-llm-shim:3.5.0
     restart: unless-stopped
     environment:
       LLM_FIX_TOOL_INDEX: "1"
@@ -250,7 +250,7 @@ services:
 
   # ── paper · 唯一账本服务（只追加）─────────────────────────────────
   paper:
-    image: ghcr.io/agentpit-io/hunter-community-paper:3.0.0
+    image: ghcr.io/agentpit-io/hunter-community-paper:3.5.0
     restart: unless-stopped
     depends_on:
       postgres:
@@ -305,7 +305,7 @@ services:
 
   # ── fin-worker · 推理区 → 执行区的桥（不直连账本）────────────────
   fin-worker:
-    image: ghcr.io/agentpit-io/hunter-community-fin-worker:3.0.0
+    image: ghcr.io/agentpit-io/hunter-community-fin-worker:3.5.0
     restart: unless-stopped
     depends_on:
       paper:

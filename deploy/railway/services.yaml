@@ -1,4 +1,4 @@
-# HunterCode (AtomCode Unified v3.0.0) · Railway 手工搭建清单
+# HunterCode (AtomCode Unified v3.5.0) · Railway 手工搭建清单
 # ══════════════════════════════════════════════════════════════════════
 # ⚠️ **这不是 Railway 能直接吃的文件。** Railway 的模板没有「模板文件」这种东西 ——
 #    官方流程是「在控制台里建好一个项目 → Settings → Generate Template from Project」
@@ -26,7 +26,7 @@
 apiVersion: hunter-community/railway-spec/v1
 platform: railway
 template:
-  name: HunterCode Community (AtomCode v3.0.0)
+  name: HunterCode Community (AtomCode v3.5.0)
   description: 自托管的 AI 投研助手 · A 股 / 港股 / 美股 · AtomCode 5.1.0 对话内核与工具链
   icon: https://raw.githubusercontent.com/agentpit-io/hunter-community/main/deploy/zeabur/logo.png
   # 唯一对外的服务。Railway 上点 web 服务的 Settings → Networking → Generate Domain。
@@ -93,7 +93,7 @@ services:
 
   # ── llmshim ─────────────────────────────────────────────────────────
   - name: llmshim
-    image: ghcr.io/agentpit-io/hunter-community-llm-shim:3.0.0
+    image: ghcr.io/agentpit-io/hunter-community-llm-shim:3.5.0
     listenPort: 3999
     public: false
     healthcheckPath: /health
@@ -116,7 +116,7 @@ services:
 
   # ── api ─────────────────────────────────────────────────────────────
   - name: api
-    image: ghcr.io/agentpit-io/hunter-community-api:3.0.0
+    image: ghcr.io/agentpit-io/hunter-community-api:3.5.0
     listenPort: 8000
     public: false
     healthcheckPath: /api/health
@@ -166,7 +166,7 @@ services:
 
   # ── daemon (AtomCode 5.1.0 对话内核) ─────────────────────────────────
   - name: daemon
-    image: ghcr.io/agentpit-io/hunter-community-daemon:3.0.0
+    image: ghcr.io/agentpit-io/hunter-community-daemon:3.5.0
     listenPort: 13456
     public: false
     healthcheckPath: /health
@@ -215,7 +215,7 @@ services:
 
   # ── web（唯一对外）──────────────────────────────────────────────────
   - name: web
-    image: ghcr.io/agentpit-io/hunter-community-web:3.0.0
+    image: ghcr.io/agentpit-io/hunter-community-web:3.5.0
     listenPort: 3000
     public: true
     healthcheckPath: /
@@ -269,7 +269,7 @@ services:
 
   # ── paper · 唯一账本服务（只追加）────────────────────────────────────
   - name: paper
-    image: ghcr.io/agentpit-io/hunter-community-paper:3.0.0
+    image: ghcr.io/agentpit-io/hunter-community-paper:3.5.0
     listenPort: 8000
     public: false
     healthcheckPath: /healthz
@@ -310,7 +310,7 @@ services:
 
   # ── finworker · 推理区 → 执行区的桥（不直连账本）────────────────────
   - name: finworker
-    image: ghcr.io/agentpit-io/hunter-community-fin-worker:3.0.0
+    image: ghcr.io/agentpit-io/hunter-community-fin-worker:3.5.0
     listenPort: 8300
     public: false
     healthcheckPath: null

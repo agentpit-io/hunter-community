@@ -74,6 +74,8 @@ USER_SKILLS_DIR = _pick(str(REPO / "user-skills"), "/opt/hunter-user-skills")
 # 那份表错了会被另一个脚本抓到,不会两边一起错。
 def _known_tools() -> set[str]:
     import importlib.util
+    import json
+    out: set[str] = set()
     # 与 SKILLS_DIR 同一个坑:管道进容器时 REPO 解成 `/`,
     # 于是这里读不到注册表、返回空集,**23 处引用全被误报成"工具不存在"**。
     # 而失败信息长得像"SKILL 写错了工具名",完全指不到真正的原因。
@@ -82,16 +84,27 @@ def _known_tools() -> set[str]:
         REPO / "apps" / "api" / "app" / "services" / "tool_catalog.py",
         Path("/app/app/services/tool_catalog.py"),
     ) if p.is_file()), None)
-    if tc is None:
-        return set()
-    # 直接 import 会拖起 app 包的依赖,这里只按文件加载这一个模块。
-    # **必须先塞进 sys.modules 再 exec** —— dataclass 解析 `list[str]` 这类注解时
-    # 要回查 sys.modules[cls.__module__],不注册就 AttributeError: NoneType。
-    spec = importlib.util.spec_from_file_location("_tool_catalog", tc)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["_tool_catalog"] = mod
-    spec.loader.exec_module(mod)
-    return {t.key for t in mod.CATALOG}
+    if tc is not None:
+        # 直接 import 会拖起 app 包的依赖,这里只按文件加载这一个模块。
+        # **必须先塞进 sys.modules 再 exec** —— dataclass 解析 `list[str]` 这类注解时
+        # 要回查 sys.modules[cls.__module__],不注册就 AttributeError: NoneType。
+        spec = importlib.util.spec_from_file_location("_tool_catalog", tc)
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["_tool_catalog"] = mod
+        spec.loader.exec_module(mod)
+        out.update(t.key for t in mod.CATALOG)
+
+    # 合并 distro/mcp-tools.json 中的 AtomCode 20 个 MCP 服务工具清单（`<server>_<tool>` 格式）
+    mt = next((p for p in (
+        REPO / "distro" / "mcp-tools.json",
+        Path("/opt/hca/mcp-tools.json"),
+    ) if p.is_file()), None)
+    if mt is not None:
+        data = json.loads(mt.read_text(encoding="utf-8"))
+        for srv, tools in (data.get("servers") or {}).items():
+            for t in tools:
+                out.add(f"{srv}_{t}")
+    return out
 
 
 KNOWN_TOOLS = _known_tools()

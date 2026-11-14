@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://schema.zeabur.app/template.json
 #
-# HunterCode 社区版 (AtomCode Unified v3.0.0) · Zeabur 一键部署模板
+# HunterCode 社区版 (AtomCode Unified v3.5.0) · Zeabur 一键部署模板
 # ════════════════════════════════════════════════════════════════════════
 # 部署完成后打开绑定的域名，按首启向导（五步）配置大模型即可对话。
 # 初始化口令 HUNTER_SETUP_TOKEN 由模板随机生成，在 api 服务的「变量」里查看。
@@ -36,7 +36,7 @@ spec:
       cpu: 2
       ram: 6
   readme: |
-    ## HunterCode 社区版 (AtomCode v3.0.0)
+    ## HunterCode 社区版 (AtomCode v3.5.0)
 
     自部署的 AI 投研助手：A 股 / 港股 / 美股行情、魔法筛选器、深度分析、
     投资组合与自选股跟踪，基于 **AtomCode 5.1.0 Fork 提速底座**，全部跑在你自己的实例上。
@@ -146,7 +146,7 @@ spec:
       template: PREBUILT_V2
       spec:
         source:
-          image: ghcr.io/agentpit-io/hunter-community-llm-shim:3.0.0
+          image: ghcr.io/agentpit-io/hunter-community-llm-shim:3.5.0
         ports:
           - id: http
             port: 3999
@@ -185,7 +185,7 @@ spec:
         - llm-shim
       spec:
         source:
-          image: ghcr.io/agentpit-io/hunter-community-api:3.0.0
+          image: ghcr.io/agentpit-io/hunter-community-api:3.5.0
         ports:
           - id: http
             port: 8000
@@ -261,7 +261,7 @@ spec:
         - llm-shim
       spec:
         source:
-          image: ghcr.io/agentpit-io/hunter-community-daemon:3.0.0
+          image: ghcr.io/agentpit-io/hunter-community-daemon:3.5.0
         ports:
           - id: http
             port: 13456
@@ -367,7 +367,7 @@ spec:
         - daemon
       spec:
         source:
-          image: ghcr.io/agentpit-io/hunter-community-web:3.0.0
+          image: ghcr.io/agentpit-io/hunter-community-web:3.5.0
         ports:
           - id: web
             port: 3000
@@ -404,7 +404,7 @@ spec:
         - daemon
       spec:
         source:
-          image: ghcr.io/agentpit-io/hunter-community-paper:3.0.0
+          image: ghcr.io/agentpit-io/hunter-community-paper:3.5.0
         ports:
           - id: http
             port: 8000
@@ -525,7 +525,7 @@ spec:
         - temporal
       spec:
         source:
-          image: ghcr.io/agentpit-io/hunter-community-fin-worker:3.0.0
+          image: ghcr.io/agentpit-io/hunter-community-fin-worker:3.5.0
         ports:
           - id: http
             port: 8300

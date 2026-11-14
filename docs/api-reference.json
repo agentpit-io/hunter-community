@@ -63,6 +63,51 @@
         "title": "AdoptIn",
         "type": "object"
       },
+      "AfterCloseWorkflowRequest": {
+        "properties": {
+          "ai_draft_report": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "可选 AI 初稿，用于正则数字回读校验",
+            "title": "Ai Draft Report"
+          },
+          "market": {
+            "default": "CN_A",
+            "description": "市场代码",
+            "title": "Market",
+            "type": "string"
+          },
+          "trade_date": {
+            "default": "2026-11-13",
+            "description": "交易日期 YYYY-MM-DD",
+            "title": "Trade Date",
+            "type": "string"
+          },
+          "watchlist_symbols": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "自选股代码列表",
+            "title": "Watchlist Symbols"
+          }
+        },
+        "title": "AfterCloseWorkflowRequest",
+        "type": "object"
+      },
       "AlertPatch": {
         "properties": {
           "enabled": {
@@ -182,6 +227,65 @@
           }
         },
         "title": "AutoApplyIn",
+        "type": "object"
+      },
+      "BacktestAuditRequest": {
+        "properties": {
+          "adjustment_type": {
+            "default": "前复权",
+            "description": "复权方式",
+            "title": "Adjustment Type",
+            "type": "string"
+          },
+          "commission_bps": {
+            "default": 3.0,
+            "minimum": 0.0,
+            "title": "Commission Bps",
+            "type": "number"
+          },
+          "filter_halted_stocks": {
+            "default": true,
+            "description": "是否过滤停牌标的",
+            "title": "Filter Halted Stocks",
+            "type": "boolean"
+          },
+          "filter_limit_up_down": {
+            "default": true,
+            "description": "是否过滤一字涨跌停不可成交",
+            "title": "Filter Limit Up Down",
+            "type": "boolean"
+          },
+          "include_delisted_stocks": {
+            "default": true,
+            "description": "是否包含退市股与历史成分股防幸存者偏差",
+            "title": "Include Delisted Stocks",
+            "type": "boolean"
+          },
+          "slippage_bps": {
+            "default": 10.0,
+            "minimum": 0.0,
+            "title": "Slippage Bps",
+            "type": "number"
+          },
+          "stamp_duty_bps": {
+            "default": 5.0,
+            "minimum": 0.0,
+            "title": "Stamp Duty Bps",
+            "type": "number"
+          },
+          "strategy_name": {
+            "default": "低市盈率+高股息月度轮动策略",
+            "title": "Strategy Name",
+            "type": "string"
+          },
+          "use_pit_fundamentals": {
+            "default": true,
+            "description": "是否按披露日 published_at 使用 Point-in-Time 财报",
+            "title": "Use Pit Fundamentals",
+            "type": "boolean"
+          }
+        },
+        "title": "BacktestAuditRequest",
         "type": "object"
       },
       "BacktestIn": {
@@ -710,6 +814,91 @@
           }
         },
         "title": "CompleteIn",
+        "type": "object"
+      },
+      "ComplianceAuditEventRequest": {
+        "properties": {
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "latency_ms": {
+            "default": 1.0,
+            "title": "Latency Ms",
+            "type": "number"
+          },
+          "license_scope": {
+            "default": "authorized_user_readonly",
+            "title": "License Scope",
+            "type": "string"
+          },
+          "market": {
+            "default": "CN_A",
+            "title": "Market",
+            "type": "string"
+          },
+          "mcp_server": {
+            "default": "hookd",
+            "title": "Mcp Server",
+            "type": "string"
+          },
+          "provider_id": {
+            "default": "galaxy_broker",
+            "title": "Provider Id",
+            "type": "string"
+          },
+          "response_bytes": {
+            "default": 0,
+            "title": "Response Bytes",
+            "type": "integer"
+          },
+          "session_id": {
+            "default": "",
+            "title": "Session Id",
+            "type": "string"
+          },
+          "size_guarded": {
+            "default": false,
+            "title": "Size Guarded",
+            "type": "boolean"
+          },
+          "status_code": {
+            "default": "ok",
+            "title": "Status Code",
+            "type": "string"
+          },
+          "symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Symbol"
+          },
+          "tool_name": {
+            "title": "Tool Name",
+            "type": "string"
+          },
+          "user_id": {
+            "default": "anonymous",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool_name"
+        ],
+        "title": "ComplianceAuditEventRequest",
         "type": "object"
       },
       "CondenseIn": {
@@ -1336,6 +1525,85 @@
         "title": "EstimateIn",
         "type": "object"
       },
+      "EtfDcaCalculateRequest": {
+        "properties": {
+          "assumed_annual_return_pct": {
+            "default": 6.0,
+            "description": "目标反推假设年化收益率(%)",
+            "title": "Assumed Annual Return Pct",
+            "type": "number"
+          },
+          "dividend_reinvest": {
+            "default": true,
+            "description": "是否分红再投资",
+            "title": "Dividend Reinvest",
+            "type": "boolean"
+          },
+          "end_date": {
+            "default": "2026-11-13",
+            "description": "回测截止日期 YYYY-MM-DD",
+            "title": "End Date",
+            "type": "string"
+          },
+          "frequency": {
+            "default": "monthly",
+            "description": "定投频率：monthly / biweekly / weekly",
+            "title": "Frequency",
+            "type": "string"
+          },
+          "invest_day": {
+            "default": 15,
+            "description": "每月扣款日（1-28）或每周星期几（1-5）",
+            "maximum": 28.0,
+            "minimum": 1.0,
+            "title": "Invest Day",
+            "type": "integer"
+          },
+          "periodic_amount": {
+            "default": 2000.0,
+            "description": "每期定投金额（元）",
+            "exclusiveMinimum": 0.0,
+            "title": "Periodic Amount",
+            "type": "number"
+          },
+          "start_date": {
+            "default": "2023-11-01",
+            "description": "回测起始日期 YYYY-MM-DD",
+            "title": "Start Date",
+            "type": "string"
+          },
+          "subscription_fee_pct": {
+            "default": 0.1,
+            "description": "申购费率(%)",
+            "exclusiveMaximum": 5.0,
+            "minimum": 0.0,
+            "title": "Subscription Fee Pct",
+            "type": "number"
+          },
+          "symbol": {
+            "default": "510300.SH",
+            "description": "ETF代码，如 510300.SH / 510050.SH / 159915.SZ",
+            "title": "Symbol",
+            "type": "string"
+          },
+          "target_amount": {
+            "default": 100000.0,
+            "description": "未来目标金额（元）",
+            "exclusiveMinimum": 0.0,
+            "title": "Target Amount",
+            "type": "number"
+          },
+          "target_years": {
+            "default": 3.0,
+            "description": "目标投资年限（年）",
+            "exclusiveMinimum": 0.0,
+            "title": "Target Years",
+            "type": "number"
+          }
+        },
+        "title": "EtfDcaCalculateRequest",
+        "type": "object"
+      },
       "EventAnalysisBody": {
         "properties": {
           "event": {
@@ -1808,6 +2076,30 @@
         "title": "ExperimentIn",
         "type": "object"
       },
+      "FactorAnalyzeRequest": {
+        "properties": {
+          "factor_id": {
+            "default": "low_pe_high_div",
+            "description": "因子ID：low_pe_high_div / roe_quality_growth / low_vol_momentum",
+            "title": "Factor Id",
+            "type": "string"
+          },
+          "neutralize_industry": {
+            "default": true,
+            "description": "是否申万一级行业市值中性化",
+            "title": "Neutralize Industry",
+            "type": "boolean"
+          },
+          "universe": {
+            "default": "000300.SH",
+            "description": "股票池指数代码",
+            "title": "Universe",
+            "type": "string"
+          }
+        },
+        "title": "FactorAnalyzeRequest",
+        "type": "object"
+      },
       "FeedbackIn": {
         "properties": {
           "message_ts": {
@@ -2159,6 +2451,60 @@
         "title": "InstallIn",
         "type": "object"
       },
+      "IntradayAnomalyRequest": {
+        "properties": {
+          "cooldown_seconds": {
+            "default": 300,
+            "description": "同事件冷却窗口秒数",
+            "title": "Cooldown Seconds",
+            "type": "integer"
+          },
+          "event_type": {
+            "default": "price_volume_spike",
+            "description": "异动事件类型",
+            "title": "Event Type",
+            "type": "string"
+          },
+          "market": {
+            "default": "CN_A",
+            "description": "市场代码",
+            "title": "Market",
+            "type": "string"
+          },
+          "max_alerts_per_window": {
+            "default": 2,
+            "description": "冷却窗口内最大允许推送次数",
+            "title": "Max Alerts Per Window",
+            "type": "integer"
+          },
+          "original_thesis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "用户原投资论点",
+            "title": "Original Thesis"
+          },
+          "simulate_disconnect": {
+            "default": false,
+            "description": "是否模拟数据源断连（测试诚实停止）",
+            "title": "Simulate Disconnect",
+            "type": "boolean"
+          },
+          "symbol": {
+            "default": "600036.SH",
+            "description": "异动股票代码",
+            "title": "Symbol",
+            "type": "string"
+          }
+        },
+        "title": "IntradayAnomalyRequest",
+        "type": "object"
+      },
       "JobIn": {
         "properties": {
           "custom": {
@@ -2355,6 +2701,44 @@
           }
         },
         "title": "LogoutReq",
+        "type": "object"
+      },
+      "ManualImportRequest": {
+        "properties": {
+          "csv_content": {
+            "description": "CSV/TSV 交割单或持仓文本内容",
+            "title": "Csv Content",
+            "type": "string"
+          },
+          "filename": {
+            "default": "galaxy_settlement_20261113.csv",
+            "description": "上传文件名",
+            "title": "Filename",
+            "type": "string"
+          },
+          "import_type": {
+            "default": "settlement_csv",
+            "description": "导入类型：settlement_csv / positions_csv / excel_xlsx",
+            "title": "Import Type",
+            "type": "string"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "可选用户标识",
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "csv_content"
+        ],
+        "title": "ManualImportRequest",
         "type": "object"
       },
       "McpCreateIn": {
@@ -2677,6 +3061,88 @@
         "title": "NewsIn",
         "type": "object"
       },
+      "OAuthAuthorizeRequest": {
+        "properties": {
+          "access_token": {
+            "default": "gz_oauth_ro_20261113_9f2a8b7c6d5e",
+            "description": "券商 OAuth 2.0 短期只读访问凭证（服务端 AES-256-GCM 加密存储，绝不回显明文）",
+            "title": "Access Token",
+            "type": "string"
+          },
+          "account_id": {
+            "default": "GZ-88001928",
+            "description": "资金账号（服务端自动脱敏展示）",
+            "title": "Account Id",
+            "type": "string"
+          },
+          "broker_id": {
+            "default": "galaxy_broker",
+            "description": "合作券商标识，如 galaxy_broker / huaxi_broker / dongguan_broker",
+            "title": "Broker Id",
+            "type": "string"
+          },
+          "broker_name": {
+            "default": "中国银河证券官方只读通道",
+            "description": "合作券商通道名称",
+            "title": "Broker Name",
+            "type": "string"
+          },
+          "scopes": {
+            "description": "授权只读 Scope 列表",
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes",
+            "type": "array"
+          },
+          "ttl_hours": {
+            "default": 24,
+            "description": "短期凭证有效小时数",
+            "maximum": 720.0,
+            "minimum": 1.0,
+            "title": "Ttl Hours",
+            "type": "integer"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "可选用户标识（未登录本地单用户模式兜底）",
+            "title": "User Id"
+          }
+        },
+        "title": "OAuthAuthorizeRequest",
+        "type": "object"
+      },
+      "OAuthRevokeRequest": {
+        "properties": {
+          "reason": {
+            "default": "用户在设置页主动点击一键撤销只读授权",
+            "description": "撤销原因",
+            "title": "Reason",
+            "type": "string"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "可选用户标识",
+            "title": "User Id"
+          }
+        },
+        "title": "OAuthRevokeRequest",
+        "type": "object"
+      },
       "OCRIn": {
         "properties": {
           "image_base64": {
@@ -2817,6 +3283,51 @@
           "symbol"
         ],
         "title": "PoolItem",
+        "type": "object"
+      },
+      "PreMarketWorkflowRequest": {
+        "properties": {
+          "ai_draft_report": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "可选 AI 初稿，用于正则数字回读校验",
+            "title": "Ai Draft Report"
+          },
+          "market": {
+            "default": "CN_A",
+            "description": "市场代码：CN_A / HK / US",
+            "title": "Market",
+            "type": "string"
+          },
+          "trade_date": {
+            "default": "2026-11-13",
+            "description": "交易日期 YYYY-MM-DD",
+            "title": "Trade Date",
+            "type": "string"
+          },
+          "watchlist_symbols": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "自选股代码列表",
+            "title": "Watchlist Symbols"
+          }
+        },
+        "title": "PreMarketWorkflowRequest",
         "type": "object"
       },
       "PreferenceIn": {
@@ -3654,6 +4165,36 @@
         "title": "RolloutIn",
         "type": "object"
       },
+      "RoutingConfigUpdateRequest": {
+        "properties": {
+          "allow_fallback": {
+            "default": true,
+            "description": "主源超时或未覆盖时是否允许自动切换至备用公开源",
+            "title": "Allow Fallback",
+            "type": "boolean"
+          },
+          "merge_strategy": {
+            "default": "primary_then_fallback",
+            "description": "多源路由策略（严禁 average / mean 跨源取均值）",
+            "title": "Merge Strategy",
+            "type": "string"
+          },
+          "primary_provider_id": {
+            "default": "galaxy_broker",
+            "description": "主数据源标识",
+            "title": "Primary Provider Id",
+            "type": "string"
+          },
+          "simulate_primary_timeout": {
+            "default": false,
+            "description": "是否模拟主源 HTTP 504 超时（供主备降级演练）",
+            "title": "Simulate Primary Timeout",
+            "type": "boolean"
+          }
+        },
+        "title": "RoutingConfigUpdateRequest",
+        "type": "object"
+      },
       "SaasConfigOut": {
         "properties": {
           "data_key_masked": {
@@ -4066,6 +4607,18 @@
           "script"
         ],
         "title": "ScreenSaveIn",
+        "type": "object"
+      },
+      "ScreenerBuildRequest": {
+        "properties": {
+          "natural_query": {
+            "default": "筛选沪深300成分股中市盈率低于15倍、股息率大于3%、ROE大于10%且非ST正常交易的股票",
+            "description": "自然语言选股描述",
+            "title": "Natural Query",
+            "type": "string"
+          }
+        },
+        "title": "ScreenerBuildRequest",
         "type": "object"
       },
       "ScreenerIn": {
@@ -5043,6 +5596,48 @@
         "title": "TestReq",
         "type": "object"
       },
+      "ThesisCheckRequest": {
+        "properties": {
+          "custom_thesis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "自定义买入理由（可选）",
+            "title": "Custom Thesis"
+          },
+          "invalidation_rule": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "自定义失效反证条件（可选）",
+            "title": "Invalidation Rule"
+          },
+          "symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "股票代码（可选）",
+            "title": "Symbol"
+          }
+        },
+        "title": "ThesisCheckRequest",
+        "type": "object"
+      },
       "ThesisIn": {
         "properties": {
           "buy_date": {
@@ -5361,6 +5956,25 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "VerifyNumbersRequest": {
+        "properties": {
+          "report_text": {
+            "description": "待校验的 AI 报告正文",
+            "title": "Report Text",
+            "type": "string"
+          },
+          "truth_payload": {
+            "description": "底层工具或计算引擎返回的确定性真值 JSON",
+            "title": "Truth Payload"
+          }
+        },
+        "required": [
+          "report_text",
+          "truth_payload"
+        ],
+        "title": "VerifyNumbersRequest",
         "type": "object"
       },
       "app__routers__agent_chat__ChatIn": {
@@ -7767,6 +8381,674 @@
           }
         },
         "summary": "Get Stock Detail"
+      }
+    },
+    "/api/broker/account/accounts": {
+      "get": {
+        "operationId": "api_get_readonly_accounts_api_broker_account_accounts_get",
+        "parameters": [
+          {
+            "description": "请求的 user_id",
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "请求的 user_id",
+              "title": "User Id"
+            }
+          },
+          {
+            "description": "真实会话登录用户 ID（用于跨租户校验）",
+            "in": "query",
+            "name": "session_user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "真实会话登录用户 ID（用于跨租户校验）",
+              "title": "Session User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Get Readonly Accounts",
+        "tags": [
+          "broker_connector"
+        ]
+      }
+    },
+    "/api/broker/account/positions": {
+      "get": {
+        "operationId": "api_get_readonly_positions_api_broker_account_positions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "account_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Account Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "session_user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Session User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Get Readonly Positions",
+        "tags": [
+          "broker_connector"
+        ]
+      }
+    },
+    "/api/broker/account/summary": {
+      "get": {
+        "operationId": "api_get_readonly_account_summary_api_broker_account_summary_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "account_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Account Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "session_user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Session User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Get Readonly Account Summary",
+        "tags": [
+          "broker_connector"
+        ]
+      }
+    },
+    "/api/broker/account/trades": {
+      "get": {
+        "operationId": "api_get_readonly_trades_api_broker_account_trades_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "account_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Account Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start Date"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End Date"
+            }
+          },
+          {
+            "in": "query",
+            "name": "session_user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Session User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Get Readonly Trades",
+        "tags": [
+          "broker_connector"
+        ]
+      }
+    },
+    "/api/broker/audit-logs": {
+      "get": {
+        "operationId": "api_list_broker_audit_logs_api_broker_audit_logs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 30,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api List Broker Audit Logs Api Broker Audit Logs Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api List Broker Audit Logs",
+        "tags": [
+          "broker_connector"
+        ]
+      }
+    },
+    "/api/broker/manual-import": {
+      "post": {
+        "description": "未授权用户的 Excel/CSV 交割单与持仓手工导入解析接口。",
+        "operationId": "api_import_manual_settlement_api_broker_manual_import_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManualImportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Import Manual Settlement",
+        "tags": [
+          "broker_connector"
+        ]
+      }
+    },
+    "/api/broker/manual-import/latest": {
+      "get": {
+        "operationId": "api_get_latest_manual_import_api_broker_manual_import_latest_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Get Latest Manual Import Api Broker Manual Import Latest Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Get Latest Manual Import",
+        "tags": [
+          "broker_connector"
+        ]
+      }
+    },
+    "/api/broker/oauth/authorize": {
+      "post": {
+        "description": "开启用户单独 OAuth 券商账户只读授权（Token 服务端 AES-256-GCM 加密托管）。",
+        "operationId": "api_authorize_broker_readonly_api_broker_oauth_authorize_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OAuthAuthorizeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Authorize Broker Readonly",
+        "tags": [
+          "broker_connector"
+        ]
+      }
+    },
+    "/api/broker/oauth/revoke": {
+      "post": {
+        "description": "一键撤销券商只读授权：立即销毁加密凭证、清空对应账户缓存并记录 `broker_audit_log`。",
+        "operationId": "api_revoke_broker_readonly_api_broker_oauth_revoke_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OAuthRevokeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Revoke Broker Readonly Api Broker Oauth Revoke Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Revoke Broker Readonly",
+        "tags": [
+          "broker_connector"
+        ]
+      }
+    },
+    "/api/broker/routing/config": {
+      "post": {
+        "description": "切换主备数据源配置（严格拦截跨源取均值策略）。",
+        "operationId": "api_update_broker_routing_config_api_broker_routing_config_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoutingConfigUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Update Broker Routing Config",
+        "tags": [
+          "broker_connector"
+        ]
+      }
+    },
+    "/api/broker/status": {
+      "get": {
+        "description": "获取当前用户的券商数据源路由配置、OAuth 只读授权状态（AES-256-GCM 脱敏）与手工交割单导入状态。",
+        "operationId": "api_get_broker_connector_status_api_broker_status_get",
+        "parameters": [
+          {
+            "description": "可选查询用户ID",
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "可选查询用户ID",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Get Broker Connector Status Api Broker Status Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Get Broker Connector Status",
+        "tags": [
+          "broker_connector"
+        ]
       }
     },
     "/api/capability-groups": {
@@ -10494,6 +11776,131 @@
         "summary": "Save",
         "tags": [
           "hunter-unlock"
+        ]
+      }
+    },
+    "/api/internal/broker/audit-log": {
+      "post": {
+        "description": "供 `hookd` 的 `audit` 钩子将券商 MCP 调用与安全拦截事件同步写入 `broker_audit_log` 表。",
+        "operationId": "internal_write_broker_audit_log_api_internal_broker_audit_log_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ComplianceAuditEventRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Internal Write Broker Audit Log Api Internal Broker Audit Log Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Internal Write Broker Audit Log",
+        "tags": [
+          "internal_broker_connector"
+        ]
+      }
+    },
+    "/api/internal/broker/oauth-verify": {
+      "get": {
+        "description": "供 `hookd` 在 `PreToolUse` 阶段核验用户的 OAuth 只读授权与 Scope。",
+        "operationId": "internal_verify_broker_oauth_api_internal_broker_oauth_verify_get",
+        "parameters": [
+          {
+            "description": "待校验的用户 ID",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "待校验的用户 ID",
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "所需只读 Scope",
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "default": "positions.read",
+              "description": "所需只读 Scope",
+              "title": "Scope",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tool_name",
+            "required": false,
+            "schema": {
+              "default": "get_positions",
+              "title": "Tool Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "session_user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Session User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Internal Verify Broker Oauth",
+        "tags": [
+          "internal_broker_connector"
         ]
       }
     },
@@ -21890,6 +23297,899 @@
           }
         },
         "summary": "Update Thesis"
+      }
+    },
+    "/api/workflows/after-close": {
+      "post": {
+        "operationId": "api_run_after_close_workflow_api_workflows_after_close_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AfterCloseWorkflowRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Run After Close Workflow Api Workflows After Close Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Run After Close Workflow",
+        "tags": [
+          "daily_workflows"
+        ]
+      }
+    },
+    "/api/workflows/announcement/{announcement_id}": {
+      "get": {
+        "operationId": "api_get_announcement_pdf_pages_api_workflows_announcement__announcement_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "announcement_id",
+            "required": true,
+            "schema": {
+              "title": "Announcement Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "页码范围，如 1-3",
+            "in": "query",
+            "name": "page_range",
+            "required": false,
+            "schema": {
+              "default": "1-3",
+              "description": "页码范围，如 1-3",
+              "title": "Page Range",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Get Announcement Pdf Pages Api Workflows Announcement  Announcement Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Get Announcement Pdf Pages",
+        "tags": [
+          "daily_workflows"
+        ]
+      }
+    },
+    "/api/workflows/backtest/audit": {
+      "post": {
+        "operationId": "api_audit_backtest_api_workflows_backtest_audit_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BacktestAuditRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Audit Backtest Api Workflows Backtest Audit Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Audit Backtest",
+        "tags": [
+          "daily_workflows"
+        ]
+      }
+    },
+    "/api/workflows/catalog": {
+      "get": {
+        "description": "返回 M3 阶段全部 22 个金融 SKILL（8 P0 + 7 P1 + 7 升级）、3 条日常工作流与五大工作台目录。",
+        "operationId": "get_workflows_and_skills_catalog_api_workflows_catalog_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Workflows And Skills Catalog Api Workflows Catalog Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Workflows And Skills Catalog",
+        "tags": [
+          "daily_workflows"
+        ]
+      }
+    },
+    "/api/workflows/etf-dca/calculate": {
+      "post": {
+        "description": "ETF 定投计算器交互测算接口（正向测算 + 历史净值回测 + 目标反推 + 定投 vs 一次性买入对比）。",
+        "operationId": "api_calculate_etf_dca_api_workflows_etf_dca_calculate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EtfDcaCalculateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Calculate Etf Dca Api Workflows Etf Dca Calculate Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Calculate Etf Dca",
+        "tags": [
+          "daily_workflows"
+        ]
+      }
+    },
+    "/api/workflows/factor/analyze": {
+      "post": {
+        "operationId": "api_analyze_factor_api_workflows_factor_analyze_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FactorAnalyzeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Analyze Factor Api Workflows Factor Analyze Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Analyze Factor",
+        "tags": [
+          "daily_workflows"
+        ]
+      }
+    },
+    "/api/workflows/intraday-anomaly": {
+      "post": {
+        "operationId": "api_run_intraday_anomaly_api_workflows_intraday_anomaly_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntradayAnomalyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Run Intraday Anomaly Api Workflows Intraday Anomaly Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Run Intraday Anomaly",
+        "tags": [
+          "daily_workflows"
+        ]
+      }
+    },
+    "/api/workflows/pre-market": {
+      "post": {
+        "operationId": "api_run_pre_market_workflow_api_workflows_pre_market_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreMarketWorkflowRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Run Pre Market Workflow Api Workflows Pre Market Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Run Pre Market Workflow",
+        "tags": [
+          "daily_workflows"
+        ]
+      }
+    },
+    "/api/workflows/screener/build": {
+      "post": {
+        "operationId": "api_build_screener_api_workflows_screener_build_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScreenerBuildRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Build Screener Api Workflows Screener Build Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Build Screener",
+        "tags": [
+          "daily_workflows"
+        ]
+      }
+    },
+    "/api/workflows/thesis/check": {
+      "post": {
+        "operationId": "api_check_thesis_api_workflows_thesis_check_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ThesisCheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Check Thesis Api Workflows Thesis Check Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Check Thesis",
+        "tags": [
+          "daily_workflows"
+        ]
+      }
+    },
+    "/api/workflows/verify-numbers": {
+      "post": {
+        "operationId": "api_verify_report_numbers_api_workflows_verify_numbers_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyNumbersRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Verify Report Numbers Api Workflows Verify Numbers Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Verify Report Numbers",
+        "tags": [
+          "daily_workflows"
+        ]
+      }
+    },
+    "/api/workflows/workbench/market": {
+      "get": {
+        "description": "市场工作台聚合数据：包含 08:30 盘前观察卡与 15:30 盘后复盘卡片。",
+        "operationId": "api_get_market_workbench_api_workflows_workbench_market_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "market",
+            "required": false,
+            "schema": {
+              "default": "CN_A",
+              "title": "Market",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "trade_date",
+            "required": false,
+            "schema": {
+              "default": "2026-11-13",
+              "title": "Trade Date",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Get Market Workbench Api Workflows Workbench Market Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Get Market Workbench",
+        "tags": [
+          "daily_workflows"
+        ]
+      }
+    },
+    "/api/workflows/workbench/portfolio-review": {
+      "get": {
+        "description": "组合复盘工作台一站式数据：投资论点看板 + 交易与研究日志 + 多源新闻去重信号摘要。",
+        "operationId": "api_get_portfolio_review_workbench_api_workflows_workbench_portfolio_review_get",
+        "parameters": [
+          {
+            "description": "可选筛选股票代码",
+            "in": "query",
+            "name": "symbol",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "可选筛选股票代码",
+              "title": "Symbol"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Get Portfolio Review Workbench Api Workflows Workbench Portfolio Review Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Get Portfolio Review Workbench",
+        "tags": [
+          "daily_workflows"
+        ]
+      }
+    },
+    "/api/workflows/workbench/quant": {
+      "get": {
+        "description": "量化研究工作台一站式数据：ETF定投计算器 + 因子有效性IC/分层回测 + 回测质量审计 + 自然语言选股器。",
+        "operationId": "api_get_quant_workbench_api_workflows_workbench_quant_get",
+        "parameters": [
+          {
+            "description": "ETF代码",
+            "in": "query",
+            "name": "etf_symbol",
+            "required": false,
+            "schema": {
+              "default": "510300.SH",
+              "description": "ETF代码",
+              "title": "Etf Symbol",
+              "type": "string"
+            }
+          },
+          {
+            "description": "每期定投金额（元）",
+            "in": "query",
+            "name": "periodic_amount",
+            "required": false,
+            "schema": {
+              "default": 2000.0,
+              "description": "每期定投金额（元）",
+              "exclusiveMinimum": 0,
+              "title": "Periodic Amount",
+              "type": "number"
+            }
+          },
+          {
+            "description": "定投频率：monthly / biweekly / weekly",
+            "in": "query",
+            "name": "frequency",
+            "required": false,
+            "schema": {
+              "default": "monthly",
+              "description": "定投频率：monthly / biweekly / weekly",
+              "title": "Frequency",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "invest_day",
+            "required": false,
+            "schema": {
+              "default": 15,
+              "maximum": 28,
+              "minimum": 1,
+              "title": "Invest Day",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_date",
+            "required": false,
+            "schema": {
+              "default": "2023-11-01",
+              "title": "Start Date",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end_date",
+            "required": false,
+            "schema": {
+              "default": "2026-11-13",
+              "title": "End Date",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "subscription_fee_pct",
+            "required": false,
+            "schema": {
+              "default": 0.1,
+              "exclusiveMaximum": 5.0,
+              "minimum": 0.0,
+              "title": "Subscription Fee Pct",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "dividend_reinvest",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Dividend Reinvest",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "target_amount",
+            "required": false,
+            "schema": {
+              "default": 100000.0,
+              "exclusiveMinimum": 0,
+              "title": "Target Amount",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "target_years",
+            "required": false,
+            "schema": {
+              "default": 3.0,
+              "exclusiveMinimum": 0,
+              "title": "Target Years",
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "assumed_annual_return_pct",
+            "required": false,
+            "schema": {
+              "default": 6.0,
+              "title": "Assumed Annual Return Pct",
+              "type": "number"
+            }
+          },
+          {
+            "description": "因子ID",
+            "in": "query",
+            "name": "factor_id",
+            "required": false,
+            "schema": {
+              "default": "low_pe_high_div",
+              "description": "因子ID",
+              "title": "Factor Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Get Quant Workbench Api Workflows Workbench Quant Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Get Quant Workbench",
+        "tags": [
+          "daily_workflows"
+        ]
+      }
+    },
+    "/api/workflows/workbench/stock": {
+      "get": {
+        "operationId": "api_get_stock_research_workbench_api_workflows_workbench_stock_get",
+        "parameters": [
+          {
+            "description": "证券代码",
+            "in": "query",
+            "name": "symbol",
+            "required": false,
+            "schema": {
+              "default": "600036.SH",
+              "description": "证券代码",
+              "title": "Symbol",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "market",
+            "required": false,
+            "schema": {
+              "default": "CN_A",
+              "title": "Market",
+              "type": "string"
+            }
+          },
+          {
+            "description": "复权方式：前复权/后复权/不复权",
+            "in": "query",
+            "name": "adjustment",
+            "required": false,
+            "schema": {
+              "default": "前复权",
+              "description": "复权方式：前复权/后复权/不复权",
+              "title": "Adjustment",
+              "type": "string"
+            }
+          },
+          {
+            "description": "是否展示会计准则重述后口径及重述对照表",
+            "in": "query",
+            "name": "restated",
+            "required": false,
+            "schema": {
+              "default": true,
+              "description": "是否展示会计准则重述后口径及重述对照表",
+              "title": "Restated",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Get Stock Research Workbench Api Workflows Workbench Stock Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Get Stock Research Workbench",
+        "tags": [
+          "daily_workflows"
+        ]
+      }
+    },
+    "/api/workflows/workbench/watchlist": {
+      "get": {
+        "operationId": "api_get_watchlist_workbench_api_workflows_workbench_watchlist_get",
+        "parameters": [
+          {
+            "description": "逗号分隔的股票代码列表",
+            "in": "query",
+            "name": "symbols",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "逗号分隔的股票代码列表",
+              "title": "Symbols"
+            }
+          },
+          {
+            "in": "query",
+            "name": "market",
+            "required": false,
+            "schema": {
+              "default": "CN_A",
+              "title": "Market",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Api Get Watchlist Workbench Api Workflows Workbench Watchlist Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Get Watchlist Workbench",
+        "tags": [
+          "daily_workflows"
+        ]
       }
     }
   }

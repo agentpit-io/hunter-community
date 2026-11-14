@@ -7,7 +7,7 @@ spec:
   url: 'https://hunter-community.agentpit.io'
   gitRepo: 'https://github.com/agentpit-io/hunter-community'
   author: 'agentpit-io'
-  description: 'Self-hosted AI investment research assistant (AtomCode 5.1.0 Unified v3.0.0) for A-share / HK / US markets. Bring your own LLM key — data, conversations and keys all stay on your instance.'
+  description: 'Self-hosted AI investment research assistant (AtomCode 5.1.0 Unified v3.5.0) for A-share / HK / US markets. Bring your own LLM key — data, conversations and keys all stay on your instance.'
   readme: 'https://raw.githubusercontent.com/agentpit-io/hunter-community/main/deploy/sealos/README.md'
   icon: 'https://raw.githubusercontent.com/agentpit-io/hunter-community/main/deploy/sealos/logo.png'
   screenshots:
@@ -17,7 +17,7 @@ spec:
   i18n:
     zh:
       title: 'HunterCode'
-      description: '自部署的 AI 投研助手（AtomCode 5.1.0 统一版 v3.0.0）· A股/港股/美股 · 用你自己的大模型 key，数据、对话和密钥都留在你自己的实例上。'
+      description: '自部署的 AI 投研助手（AtomCode 5.1.0 统一版 v3.5.0）· A股/港股/美股 · 用你自己的大模型 key，数据、对话和密钥都留在你自己的实例上。'
       readme: 'https://raw.githubusercontent.com/agentpit-io/hunter-community/main/deploy/sealos/README_zh.md'
   categories:
     - ai
@@ -281,7 +281,7 @@ kind: Deployment
 metadata:
   name: ${{ defaults.app_name }}-llm-shim
   annotations:
-    originImageName: ghcr.io/agentpit-io/hunter-community-llm-shim:3.0.0
+    originImageName: ghcr.io/agentpit-io/hunter-community-llm-shim:3.5.0
     deploy.cloud.sealos.io/minReplicas: '1'
     deploy.cloud.sealos.io/maxReplicas: '1'
   labels:
@@ -301,7 +301,7 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: ${{ defaults.app_name }}-llm-shim
-          image: ghcr.io/agentpit-io/hunter-community-llm-shim:3.0.0
+          image: ghcr.io/agentpit-io/hunter-community-llm-shim:3.5.0
           env:
             - name: LLM_BASE_URL
               value: ''
@@ -357,7 +357,7 @@ kind: StatefulSet
 metadata:
   name: ${{ defaults.app_name }}-api
   annotations:
-    originImageName: ghcr.io/agentpit-io/hunter-community-api:3.0.0
+    originImageName: ghcr.io/agentpit-io/hunter-community-api:3.5.0
     deploy.cloud.sealos.io/minReplicas: '1'
     deploy.cloud.sealos.io/maxReplicas: '1'
   labels:
@@ -380,7 +380,7 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: ${{ defaults.app_name }}-api
-          image: ghcr.io/agentpit-io/hunter-community-api:3.0.0
+          image: ghcr.io/agentpit-io/hunter-community-api:3.5.0
           env:
             - name: PG_HOST
               valueFrom:
@@ -533,7 +533,7 @@ kind: StatefulSet
 metadata:
   name: ${{ defaults.app_name }}-daemon
   annotations:
-    originImageName: ghcr.io/agentpit-io/hunter-community-daemon:3.0.0
+    originImageName: ghcr.io/agentpit-io/hunter-community-daemon:3.5.0
     deploy.cloud.sealos.io/minReplicas: '1'
     deploy.cloud.sealos.io/maxReplicas: '1'
   labels:
@@ -559,7 +559,7 @@ spec:
         fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: ${{ defaults.app_name }}-daemon
-          image: ghcr.io/agentpit-io/hunter-community-daemon:3.0.0
+          image: ghcr.io/agentpit-io/hunter-community-daemon:3.5.0
           env:
             - name: HCA_DAEMON_PORT
               value: '13456'
@@ -685,7 +685,7 @@ kind: Deployment
 metadata:
   name: ${{ defaults.app_name }}
   annotations:
-    originImageName: ghcr.io/agentpit-io/hunter-community-web:3.0.0
+    originImageName: ghcr.io/agentpit-io/hunter-community-web:3.5.0
     deploy.cloud.sealos.io/minReplicas: '1'
     deploy.cloud.sealos.io/maxReplicas: '1'
   labels:
@@ -705,7 +705,7 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: ${{ defaults.app_name }}
-          image: ghcr.io/agentpit-io/hunter-community-web:3.0.0
+          image: ghcr.io/agentpit-io/hunter-community-web:3.5.0
           env:
             - name: NODE_ENV
               value: production
@@ -767,7 +767,7 @@ kind: Deployment
 metadata:
   name: ${{ defaults.app_name }}-paper
   annotations:
-    originImageName: ghcr.io/agentpit-io/hunter-community-paper:3.0.0
+    originImageName: ghcr.io/agentpit-io/hunter-community-paper:3.5.0
     deploy.cloud.sealos.io/minReplicas: '1'
     deploy.cloud.sealos.io/maxReplicas: '1'
   labels:
@@ -827,7 +827,7 @@ spec:
               value: ${{ defaults.fin_paper_password }}
       containers:
         - name: ${{ defaults.app_name }}-paper
-          image: ghcr.io/agentpit-io/hunter-community-paper:3.0.0
+          image: ghcr.io/agentpit-io/hunter-community-paper:3.5.0
           env:
             - name: PG_HOST
               valueFrom:
@@ -1047,7 +1047,7 @@ kind: Deployment
 metadata:
   name: ${{ defaults.app_name }}-fin-worker
   annotations:
-    originImageName: ghcr.io/agentpit-io/hunter-community-fin-worker:3.0.0
+    originImageName: ghcr.io/agentpit-io/hunter-community-fin-worker:3.5.0
     deploy.cloud.sealos.io/minReplicas: '1'
     deploy.cloud.sealos.io/maxReplicas: '1'
   labels:
@@ -1067,7 +1067,7 @@ spec:
       automountServiceAccountToken: false
       containers:
         - name: ${{ defaults.app_name }}-fin-worker
-          image: ghcr.io/agentpit-io/hunter-community-fin-worker:3.0.0
+          image: ghcr.io/agentpit-io/hunter-community-fin-worker:3.5.0
           env:
             - name: PAPER_BASE_URL
               value: http://${{ defaults.app_name }}-paper.${{ SEALOS_NAMESPACE }}.svc:8000

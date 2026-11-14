@@ -1,4 +1,4 @@
-# Hunter Community Edition (AtomCode Unified v3.0.0) · 1Panel 应用商店编排
+# Hunter Community Edition (AtomCode Unified v3.5.0) · 1Panel 应用商店编排
 #
 # 事实来源是仓库根目录的 docker-compose.yml(各个服务的镜像、环境变量、卷、
 # 依赖关系、健康检查全部以它为准)。这里只做「面板 / 公网场景」必须做的改动。
@@ -34,7 +34,7 @@ services:
   # ── 前端 · 本应用唯一对外暴露的服务 ──────────────────────────
   # 它是主服务,所以用裸 ${CONTAINER_NAME};面板的「访问」按钮指向这里。
   web:
-    image: ghcr.io/agentpit-io/hunter-community-web:3.0.0
+    image: ghcr.io/agentpit-io/hunter-community-web:3.5.0
     container_name: ${CONTAINER_NAME}
     restart: always
     depends_on:
@@ -64,7 +64,7 @@ services:
 
   # ── API · 不对外映射端口 ──────────────────────────────────────
   api:
-    image: ghcr.io/agentpit-io/hunter-community-api:3.0.0
+    image: ghcr.io/agentpit-io/hunter-community-api:3.5.0
     container_name: ${CONTAINER_NAME}-api
     restart: always
     depends_on:
@@ -108,7 +108,7 @@ services:
 
   # ── AtomCode Daemon 对话引擎 · 不对外映射端口 ──────────────────
   daemon:
-    image: ghcr.io/agentpit-io/hunter-community-daemon:3.0.0
+    image: ghcr.io/agentpit-io/hunter-community-daemon:3.5.0
     container_name: ${CONTAINER_NAME}-daemon
     restart: always
     depends_on:
@@ -161,7 +161,7 @@ services:
 
   # ── LLM schema 清洗与 ToolCallIndexer 层 · 不对外映射端口 ──────
   llm-shim:
-    image: ghcr.io/agentpit-io/hunter-community-llm-shim:3.0.0
+    image: ghcr.io/agentpit-io/hunter-community-llm-shim:3.5.0
     container_name: ${CONTAINER_NAME}-llm-shim
     restart: always
     environment:
@@ -243,7 +243,7 @@ services:
 
   # ── paper · 唯一账本服务(只追加) ──────────────────────────────
   paper:
-    image: ghcr.io/agentpit-io/hunter-community-paper:3.0.0
+    image: ghcr.io/agentpit-io/hunter-community-paper:3.5.0
     container_name: ${CONTAINER_NAME}-paper
     restart: always
     depends_on:
@@ -313,7 +313,7 @@ services:
 
   # ── fin-worker · 推理区 → 执行区的桥(不直连账本) ───────────────
   fin-worker:
-    image: ghcr.io/agentpit-io/hunter-community-fin-worker:3.0.0
+    image: ghcr.io/agentpit-io/hunter-community-fin-worker:3.5.0
     container_name: ${CONTAINER_NAME}-fin-worker
     restart: always
     depends_on:

@@ -1,5 +1,5 @@
 # ════════════════════════════════════════════════════════════════════════════
-# 个人本地开源部署 · **覆盖文件**（`03 §5` 路径 B · AtomCode Unified v3.0.0）
+# 个人本地开源部署 · **覆盖文件**（`03 §5` 路径 B · AtomCode Unified v3.5.0）
 #
 # 用法（**不改六服务默认启动体验** —— 不叠加这个文件时行为与以前完全一致）：
 #
@@ -11,8 +11,8 @@
 #
 # 这个文件做三件事（其余一律继承 `docker-compose.yml`）：
 #
-#   1. **钉死版本**：六个镜像一律 `3.0.0`（AtomCode 5.1.0 内核全面统一版，含全部 `0001`–`0056` 迁移）。
-#   2. **宿主机端口一律绑 `127.0.0.1`**：把 postgres / redis / api / web / daemon 五个全部收到回环上。
+#   1. **钉死版本**：六个镜像一律 `3.5.0`（AtomCode 5.1.0 内核全面统一版，含全部 `0001`–`0056` 迁移）。
+#   2. **宿主机端口一律绑 `127.0.0.1`**：把 postgres / redis / api / web / opencode 五个全部收到回环上。
 #   3. **把 fin 栈收进 `paper` profile**：默认文件里那四个服务挂在 `fin` 上；本文件把它们改挂 `paper`。
 # ════════════════════════════════════════════════════════════════════════════
 
@@ -28,26 +28,26 @@ services:
       - "127.0.0.1:${REDIS_HOST_PORT:-6579}:6379"
 
   api:
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-api:3.0.0
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-api:3.5.0
     ports: !override
       - "127.0.0.1:${API_HOST_PORT:-8230}:8000"
 
   web:
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-web:3.0.0
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-web:3.5.0
     ports: !override
       - "127.0.0.1:${WEB_HOST_PORT:-3230}:3000"
 
-  daemon:
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-daemon:3.0.0
+  opencode:
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-opencode:3.5.0
     ports: !override
       - "127.0.0.1:${OPENCODE_HOST_PORT:-4031}:13456"
 
   llm-shim:
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-llm-shim:3.0.0
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-llm-shim:3.5.0
 
   # ── fin 栈：改挂 `paper` profile ────────────────────────────────────────
   paper:
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-paper:3.0.0
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-paper:3.5.0
     profiles: ["paper"]
 
   temporal:
@@ -57,5 +57,5 @@ services:
     profiles: ["paper"]
 
   fin-worker:
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-fin-worker:3.0.0
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-fin-worker:3.5.0
     profiles: ["paper"]

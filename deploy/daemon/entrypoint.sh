@@ -81,10 +81,12 @@ atomcode daemon --port "$INTERNAL_PORT" --idle-timeout 0 --no-telemetry &
 DAEMON_PID=$!
 
 SOCAT_PID=""
+SOCAT_LEGACY_PID=""
 cleanup() {
   log "收到退出信号，关闭子进程"
   [ -n "$HOOKD_PID" ] && kill "$HOOKD_PID" 2>/dev/null || true
   [ -n "$SOCAT_PID" ] && kill "$SOCAT_PID" 2>/dev/null || true
+  [ -n "$SOCAT_LEGACY_PID" ] && kill "$SOCAT_LEGACY_PID" 2>/dev/null || true
   kill "$DAEMON_PID" 2>/dev/null || true
   wait "$DAEMON_PID" 2>/dev/null || true
 }
@@ -184,6 +186,14 @@ done
 log "socat 0.0.0.0:${PORT} → 127.0.0.1:${INTERNAL_PORT}"
 socat "TCP-LISTEN:${PORT},fork,reuseaddr" "TCP:127.0.0.1:${INTERNAL_PORT}" &
 SOCAT_PID=$!
+
+# 兼容存量 HunterLauncher 0.1.22 将宿主 3921 映射到容器 3901 端口的转发
+LEGACY_PORT="${HCA_LEGACY_OPENCODE_PORT:-3901}"
+if [ -n "$LEGACY_PORT" ] && [ "$LEGACY_PORT" != "$PORT" ] && [ "$LEGACY_PORT" != "$INTERNAL_PORT" ]; then
+  log "socat 0.0.0.0:${LEGACY_PORT} → 127.0.0.1:${INTERNAL_PORT} (兼容 0.1.22 端口映射)"
+  socat "TCP-LISTEN:${LEGACY_PORT},fork,reuseaddr" "TCP:127.0.0.1:${INTERNAL_PORT}" &
+  SOCAT_LEGACY_PID=$!
+fi
 
 log "就绪。健康检查 http://127.0.0.1:${PORT}/health"
 wait "$DAEMON_PID"

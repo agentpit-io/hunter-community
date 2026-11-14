@@ -1,4 +1,4 @@
-# Hunter Community Edition (AtomCode Unified v3.0.0) · 默认编排(**只用预构建镜像**)
+# Hunter Community Edition (AtomCode Unified v3.5.0) · 默认编排(**只用预构建镜像**)
 #
 # `git clone` 之后直接 `docker compose up -d` 就能起,不需要先改 .env、
 # 也不需要本地构建 —— 自家服务全部走 GHCR 上的预构建镜像。
@@ -45,7 +45,7 @@ services:
       retries: 10
 
   api:
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-api:${HUNTER_VERSION:-3.0.0}
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-api:${HUNTER_VERSION:-3.5.0}
     <<: *restart
     depends_on:
       postgres:
@@ -92,7 +92,7 @@ services:
       ASSISTANT_MODEL_COMPRESS: ${ASSISTANT_MODEL_COMPRESS:-}
       HTTP_PROXY: ${HTTP_PROXY_UPSTREAM:-}
       HTTPS_PROXY: ${HTTPS_PROXY_UPSTREAM:-}
-      NO_PROXY: ${NO_PROXY_UPSTREAM:-localhost,127.0.0.1,api,web,postgres,redis,daemon,llm-shim,paper,fin-worker,temporal}
+      NO_PROXY: ${NO_PROXY_UPSTREAM:-localhost,127.0.0.1,api,web,postgres,redis,daemon,opencode,llm-shim,paper,fin-worker,temporal}
       FORECAST_PROVIDER: ${FORECAST_PROVIDER:-}
       KRONOS_LOCAL_URL: ${KRONOS_LOCAL_URL:-}
       HUNTER_SAAS_KRONOS_URL: ${HUNTER_SAAS_KRONOS_URL:-}
@@ -121,7 +121,7 @@ services:
       - "${API_HOST_PORT:-8100}:8000"
 
   paper:
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-paper:${FIN_TAG:-3.0.0}
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-paper:${FIN_TAG:-3.5.0}
     <<: *restart
     profiles: ["fin"]
     depends_on:
@@ -179,7 +179,7 @@ services:
       retries: 5
 
   fin-worker:
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-fin-worker:${FIN_TAG:-3.0.0}
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-fin-worker:${FIN_TAG:-3.5.0}
     <<: *restart
     profiles: ["fin"]
     depends_on:
@@ -211,11 +211,11 @@ services:
       - "127.0.0.1:${FIN_WORKER_HOST_PORT:-8300}:8300"
 
   web:
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-web:${HUNTER_VERSION:-3.0.0}
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-web:${HUNTER_VERSION:-3.5.0}
     <<: *restart
     depends_on:
       - api
-      - daemon
+      - opencode
     environment:
       HOSTNAME: "${HUNTER_BIND_HOST:-0.0.0.0}"
       NODE_ENV: production
@@ -236,7 +236,7 @@ services:
       - hunter_secrets:/opt/hunter-secrets:ro
 
   llm-shim:
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-llm-shim:${HUNTER_VERSION:-3.0.0}
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-llm-shim:${HUNTER_VERSION:-3.5.0}
     <<: *restart
     environment:
       HUNTER_BIND_HOST: "${HUNTER_BIND_HOST:-0.0.0.0}"
@@ -246,11 +246,17 @@ services:
       LLM_TOOL_DENY: "${HCA_LLM_TOOL_DENY-atomgit_*,code_review,ast_grep,read_symbol,list_symbols,find_references,trace_callers,trace_callees,trace_chain,blast_radius,file_dependencies,lsp,list_sessions,schedule_wakeup,recall}"
       HTTP_PROXY: ${HTTP_PROXY_UPSTREAM:-}
       HTTPS_PROXY: ${HTTPS_PROXY_UPSTREAM:-}
-      NO_PROXY: ${NO_PROXY_UPSTREAM:-localhost,127.0.0.1,api,web,postgres,redis,daemon,llm-shim}
+      NO_PROXY: ${NO_PROXY_UPSTREAM:-localhost,127.0.0.1,api,web,postgres,redis,daemon,opencode,llm-shim}
 
-  daemon:
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-daemon:${HUNTER_VERSION:-3.0.0}
+  opencode:
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-opencode:${HUNTER_VERSION:-3.5.0}
+    hostname: daemon
     <<: *restart
+    networks:
+      default:
+        aliases:
+          - daemon
+          - opencode
     depends_on:
       api:
         condition: service_healthy
@@ -260,10 +266,12 @@ services:
       - "host.docker.internal:host-gateway"
     expose:
       - "13456"
+      - "3901"
     environment:
       HCA_DAEMON_PORT: "13456"
       HCA_DAEMON_INTERNAL_PORT: "13457"
       HCA_DAEMON_SERVICE_NAME: daemon
+      HCA_LEGACY_OPENCODE_PORT: "3901"
       HCA_WORKSPACE: /workspace
       ATOMCODE_HOME: /data/atomcode
       HCA_WORKSPACE_REFRESH: "1"
