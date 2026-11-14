@@ -159,28 +159,43 @@ log "POST /live/mcp/trust → $(curl -fsS -m 10 -X POST -H "$AUTH" "${BASE}/live
 # 等不齐**不算失败**：少一个 MCP 不该让 daemon 起不来，如实打日志就行。
 mcp_status() { curl -fsS -m 5 -H "$AUTH" "${BASE}/mcp/status" || echo '{}'; }
 
-for attempt in $(seq 1 "$MCP_RELOAD_ATTEMPTS"); do
-  log "POST /mcp/reload（第 ${attempt}/${MCP_RELOAD_ATTEMPTS} 次）→ $(curl -fsS -m 30 -X POST -H "$AUTH" "${BASE}/mcp/reload" | head -c 300)"
-  for i in $(seq 1 "$MCP_TIMEOUT"); do
-    STATUS=$(mcp_status)
+# POST /cd 与 POST /live/mcp/trust 本身已异步触发 MCP 子进程拉起。
+# 先等第一轮自然收敛，避免一上来无条件 POST /mcp/reload 把正在初始化的进程杀掉（触发 "MCP server closed stdout" 假报错）。
+STATUS="{}"
+for i in $(seq 1 "$MCP_TIMEOUT"); do
+  STATUS=$(mcp_status)
+  if printf '%s' "$STATUS" | grep -q '"connected"' || printf '%s' "$STATUS" | grep -q '"error"'; then
     printf '%s' "$STATUS" | grep -q '"connecting"' || break
-    sleep 1
-  done
-  if printf '%s' "$STATUS" | grep -q '"error"'; then
-    log "⚠ 有 MCP 没连上：$(printf '%s' "$STATUS" | head -c 600)"
-    # 写成 if 而不是 `[ ... ] && { ...; }`：后者在条件为假时整条 AND 列表返回非零，
-    # 在 set -e 下会把脚本直接带走（经典坑）。
-    if [ "$attempt" -lt "$MCP_RELOAD_ATTEMPTS" ]; then
-      log "等 ${MCP_RETRY_WAIT} 秒重挂"
-      sleep "$MCP_RETRY_WAIT"
-      continue
-    fi
-    log "⚠ 重试用尽，带着残缺的 MCP 继续起 —— 用 docker exec hca-daemon python3 /opt/hca/tools/dump_mcp_tools.py 看每个 server 的报错原文"
-  else
-    log "MCP 全部就绪：$(printf '%s' "$STATUS" | head -c 600)"
   fi
-  break
+  sleep 1
 done
+
+if printf '%s' "$STATUS" | grep -q '"connected"' && ! printf '%s' "$STATUS" | grep -q '"error"' && ! printf '%s' "$STATUS" | grep -q '"connecting"'; then
+  log "MCP 全部就绪：$(printf '%s' "$STATUS" | head -c 600)"
+else
+  for attempt in $(seq 1 "$MCP_RELOAD_ATTEMPTS"); do
+    log "POST /mcp/reload（第 ${attempt}/${MCP_RELOAD_ATTEMPTS} 次）→ $(curl -fsS -m 30 -X POST -H "$AUTH" "${BASE}/mcp/reload" | head -c 300)"
+    for i in $(seq 1 "$MCP_TIMEOUT"); do
+      STATUS=$(mcp_status)
+      printf '%s' "$STATUS" | grep -q '"connecting"' || break
+      sleep 1
+    done
+    if printf '%s' "$STATUS" | grep -q '"error"'; then
+      log "⚠ 有 MCP 没连上：$(printf '%s' "$STATUS" | head -c 600)"
+      # 写成 if 而不是 `[ ... ] && { ...; }`：后者在条件为假时整条 AND 列表返回非零，
+      # 在 set -e 下会把脚本直接带走（经典坑）。
+      if [ "$attempt" -lt "$MCP_RELOAD_ATTEMPTS" ]; then
+        log "等 ${MCP_RETRY_WAIT} 秒重挂"
+        sleep "$MCP_RETRY_WAIT"
+        continue
+      fi
+      log "⚠ 重试用尽，带着残缺的 MCP 继续起 —— 用 docker exec hca-daemon python3 /opt/hca/tools/dump_mcp_tools.py 看每个 server 的报错原文"
+    else
+      log "MCP 全部就绪：$(printf '%s' "$STATUS" | head -c 600)"
+    fi
+    break
+  done
+fi
 
 # ── 6. 暴露到容器网络 ────────────────────────────────────────────────────────
 log "socat 0.0.0.0:${PORT} → 127.0.0.1:${INTERNAL_PORT}"

@@ -176,6 +176,9 @@ class UpstreamGuardTests(unittest.TestCase):
     就是盯这条的。
     """
 
+    def setUp(self):
+        shim.clear_dns_cache()
+
     def ok(self, url, **kw):
         allowed, why = shim.check_upstream(url, **kw)
         self.assertTrue(allowed, f"{url} 应放行,却被拒:{why}")
@@ -264,6 +267,39 @@ class UpstreamGuardTests(unittest.TestCase):
                 (2, 1, 6, "", ("104.18.0.1", 443)),
                 (2, 1, 6, "", ("127.0.0.1", 443))]):
             self.no("https://mixed.example.com/v1", "回环")
+
+    def test_dns_transient_failure_retries_and_succeeds(self):
+        """DNS 首次解析偶发超时(抛 gaierror)、第 2 次成功时自动重试并通过校验。"""
+        with patch.object(shim, "DNS_RETRY_DELAY", 0.001), \
+                patch.object(shim.socket, "getaddrinfo", side_effect=[
+                    shim.socket.gaierror("Temporary failure in name resolution"),
+                    [(2, 1, 6, "", ("104.18.0.1", 443))],
+                ]) as mock_getaddr:
+            self.ok("https://hunter.agentpit.io/api/saas/llm/v1")
+            self.assertEqual(mock_getaddr.call_count, 2)
+
+    def test_dns_cache_hit_avoids_repeated_getaddrinfo(self):
+        """连续两次校验同一上游域名时命中 DNS 缓存,getaddrinfo 只调用 1 次。"""
+        with patch.object(shim.socket, "getaddrinfo",
+                          return_value=[(2, 1, 6, "", ("104.18.0.1", 443))]) as mock_getaddr:
+            self.ok("https://hunter.agentpit.io/api/saas/llm/v1")
+            self.ok("https://hunter.agentpit.io/api/saas/llm/v1")
+            self.assertEqual(mock_getaddr.call_count, 1)
+
+    def test_dns_stale_cache_fallback_when_all_retries_fail(self):
+        """DNS 缓存过期后若上游 DNS 瞬时故障(连续抛 gaierror),自动沿用上次合法公网 IP 缓存放行。"""
+        with patch.object(shim, "DNS_RETRY_DELAY", 0.001), \
+                patch.object(shim, "DNS_CACHE_TTL", 0.01):
+            with patch.object(shim.socket, "getaddrinfo",
+                              return_value=[(2, 1, 6, "", ("104.18.0.1", 443))]):
+                self.ok("https://hunter.agentpit.io/api/saas/llm/v1")
+            # 强制让缓存条目过期
+            for k, (_, infos) in list(shim._DNS_CACHE.items()):
+                shim._DNS_CACHE[k] = (0.0, infos)
+            with patch.object(shim.socket, "getaddrinfo",
+                              side_effect=shim.socket.gaierror("DNS timeout")) as mock_getaddr:
+                self.ok("https://hunter.agentpit.io/api/saas/llm/v1")
+                self.assertEqual(mock_getaddr.call_count, shim.DNS_RETRIES)
 
 
 # ─────────────────────────────────────────────────────────────────────

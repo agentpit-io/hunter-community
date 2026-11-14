@@ -35,6 +35,7 @@ import json
 import os
 import re
 import socket
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -128,6 +129,55 @@ UNCONFIGURED_MSG = (
 )
 
 
+# DNS 解析缓存与瞬时超时重试（应对 macOS Colima 休眠唤醒 / 代理切换瞬间 DNS 偶发 2s 超时）
+DNS_CACHE_TTL = float(os.environ.get("LLM_SHIM_DNS_TTL", "300"))
+DNS_RETRIES = int(os.environ.get("LLM_SHIM_DNS_RETRIES", "3"))
+DNS_RETRY_DELAY = float(os.environ.get("LLM_SHIM_DNS_RETRY_DELAY", "0.3"))
+_DNS_CACHE: dict[tuple[str, int], tuple[float, list]] = {}
+_DNS_LOCK = threading.Lock()
+
+
+def clear_dns_cache() -> None:
+    """清空 DNS 解析缓存（主要供单元测试隔离使用）。"""
+    with _DNS_LOCK:
+        _DNS_CACHE.clear()
+
+
+def _resolve_host(host: str, port: int) -> list:
+    """带缓存、重试与历史缓存兜底（stale cache fallback）的 DNS 解析。"""
+    key = (host, port)
+    now = time.monotonic()
+    with _DNS_LOCK:
+        cached = _DNS_CACHE.get(key)
+        if cached is not None and (now - cached[0]) < DNS_CACHE_TTL:
+            return cached[1]
+
+    last_err: Exception | None = None
+    attempts = max(1, DNS_RETRIES)
+    for attempt in range(1, attempts + 1):
+        try:
+            infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+            with _DNS_LOCK:
+                _DNS_CACHE[key] = (time.monotonic(), infos)
+            return infos
+        except socket.gaierror as e:
+            last_err = e
+            if attempt < attempts:
+                time.sleep(DNS_RETRY_DELAY)
+
+    with _DNS_LOCK:
+        stale = _DNS_CACHE.get(key)
+        if stale is not None:
+            print(
+                f"[shim] DNS 瞬时解析超时，沿用上次缓存的解析结果: {host}",
+                flush=True,
+            )
+            return stale[1]
+
+    assert last_err is not None
+    raise last_err
+
+
 def check_upstream(url: str, allow_private=None):
     """校验上游地址 → (是否放行, 中文原因)。
 
@@ -161,7 +211,7 @@ def check_upstream(url: str, allow_private=None):
         if not allow_private:
             return False, "上游地址指向本机回环(localhost),不允许"
     try:
-        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+        infos = _resolve_host(host, port)
     except socket.gaierror:
         # 解析不了就不放行。转发过去也是失败,而这里能给一句看得懂的话。
         return False, f"解析不了上游主机名 {host}"
