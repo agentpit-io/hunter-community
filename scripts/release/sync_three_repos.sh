@@ -187,6 +187,17 @@ if [ -f "${HCA_REPO}/docs/开发文档/HunterCode_证券公司接口与金融SKI
   cp -f "${HCA_REPO}/docs/开发文档/HunterCode_证券公司接口与金融SKILL_全链路验收总结报告.md" "${HUNTERCODE_REPO}/docs-hunter/broker-specs/"
 fi
 
+# 5.3.1 同步 llm-shim 与 daemon 入口脚本
+if [ -d "${HCA_REPO}/scripts/llm-shim" ]; then
+  mkdir -p "${HUNTERCODE_REPO}/scripts/llm-shim"
+  cp -rf "${HCA_REPO}/scripts/llm-shim/"*.py "${HUNTERCODE_REPO}/scripts/llm-shim/"
+  rm -rf "${HUNTERCODE_REPO}/scripts/llm-shim/__pycache__"
+fi
+if [ -f "${HCA_REPO}/deploy/daemon/entrypoint.sh" ]; then
+  mkdir -p "${HUNTERCODE_REPO}/deploy/daemon"
+  cp -f "${HCA_REPO}/deploy/daemon/entrypoint.sh" "${HUNTERCODE_REPO}/deploy/daemon/entrypoint.sh"
+fi
+
 # 5.4 更新 huntercode-repo 版本号文件
 echo "${VER_NUM}" > "${HUNTERCODE_REPO}/VERSION"
 
