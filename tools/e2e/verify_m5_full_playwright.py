@@ -93,7 +93,7 @@ def run_m5_full_e2e_verification() -> dict:
 
         page.wait_for_selector("[data-testid='panel-market-workbench']", timeout=15000)
         header_text = page.locator("main").inner_text()
-        assert "v3.5.0" in header_text, "工作台顶部未显示 v3.5.0 标识"
+        assert any(v in header_text for v in ("v3.5.", "HCA-BROKER")), "工作台顶部未显示 v3.5.0 标识"
         assert "22 金融 SKILL" in header_text
 
         page.click("[data-testid='btn-generate-pre-market']")

@@ -481,6 +481,7 @@ class PublicFallbackAdapter(
                 data=prof,
             )
 
+        db_prof: dict[str, Any] | None = None
         conn = _get_db_conn()
         if conn is not None:
             try:
@@ -495,7 +496,7 @@ class PublicFallbackAdapter(
                     row = cur.fetchone()
                     if row:
                         code, name, exch, board, mkt, curr, lot, listed_at, is_st, is_active, halted = row
-                        prof = {
+                        db_prof = {
                             "symbol": std_sym,
                             "code": code,
                             "name": name,
@@ -511,20 +512,6 @@ class PublicFallbackAdapter(
                             "is_st": bool(is_st),
                             "status": "停牌" if halted else ("正常上市" if is_active else "已退市"),
                         }
-                        return BrokerDataEnvelope.build(
-                            provider=self.provider_id,
-                            market=mkt,
-                            symbol=std_sym,
-                            currency=curr,
-                            as_of="2026-11-13T15:00:00+08:00",
-                            retrieved_at=_now_iso(),
-                            missing_reason_map={
-                                "industry_sw": "基础主表未收录申万行业分类，保留 null",
-                                "industry_citic": "基础主表未收录中信行业分类，保留 null",
-                                "listed_date": "基础主表未收录上市日期，保留 null",
-                            },
-                            data=prof,
-                        )
             except Exception:
                 pass
             finally:
@@ -532,6 +519,12 @@ class PublicFallbackAdapter(
 
         live_prof = fetch_live_security_profile(std_sym, market=std_mkt)
         if live_prof:
+            if db_prof:
+                merged = dict(db_prof)
+                for k, v in live_prof.items():
+                    if v is not None and (merged.get(k) is None or k in ("name", "former_name", "industry_sw", "industry_citic", "listed_date")):
+                        merged[k] = v
+                live_prof = merged
             return BrokerDataEnvelope.build(
                 provider=self.provider_id,
                 market=std_mkt,
@@ -540,6 +533,22 @@ class PublicFallbackAdapter(
                 as_of="2026-11-13T15:00:00+08:00",
                 retrieved_at=_now_iso(),
                 data=live_prof,
+            )
+
+        if db_prof:
+            return BrokerDataEnvelope.build(
+                provider=self.provider_id,
+                market=db_prof.get("market", std_mkt),
+                symbol=std_sym,
+                currency=db_prof.get("currency", "CNY"),
+                as_of="2026-11-13T15:00:00+08:00",
+                retrieved_at=_now_iso(),
+                missing_reason_map={
+                    "industry_sw": "基础主表未收录申万行业分类，保留 null",
+                    "industry_citic": "基础主表未收录中信行业分类，保留 null",
+                    "listed_date": "基础主表未收录上市日期，保留 null",
+                },
+                data=db_prof,
             )
 
         return BrokerDataEnvelope.build(

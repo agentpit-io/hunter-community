@@ -52,29 +52,45 @@ def test_public_fallback_adapter_yonyou_600588_real_data_not_cmb() -> None:
     syms = [r["symbol"] for r in search_env.data]
     assert "600588.SH" in syms
 
-    # 2. 证券档案：必须是“用友网络”，绝不是“招商银行”或 null
+    # 2. 证券档案：必须是“用友网络”，绝不是“招商银行”或 null，且主数据关键字段零缺失
     prof_env = adapter.get_security_profile("600588.SH")
     assert prof_env.ok is True
     assert prof_env.data["symbol"] == "600588.SH"
     assert "用友" in (prof_env.data.get("name") or "")
+    assert prof_env.data.get("industry_sw") is not None
+    assert prof_env.data.get("listed_date") == "2001-05-18"
+    assert prof_env.data.get("status") == "正常上市"
+    assert prof_env.meta.missing_fields == []
     assert "招商银行" not in json.dumps(prof_env.data, ensure_ascii=False)
 
     # 3. 财务报表与财务比率：真实三季报营收约 57.56 亿、归母净利亏损约 -12.47 亿、ROE 约 -18.58%
     stmt_env = adapter.get_financial_statements("600588.SH")
     assert stmt_env.ok is True
     assert len(stmt_env.data) >= 1
+    assert "revenue_pre_restatement" not in stmt_env.meta.missing_fields
+    assert "net_profit_parent_pre_restatement" not in stmt_env.meta.missing_fields
     latest_stmt = stmt_env.data[-1]
     assert latest_stmt["symbol"] == "600588.SH"
     # 绝不能是招商银行的 1389.20 亿营收或 425.80 亿利润
     assert latest_stmt["revenue"] != 138920000000.0
     assert latest_stmt["net_profit_parent"] != 42580000000.0
     assert latest_stmt["revenue"] is not None and 2_000_000_000 < latest_stmt["revenue"] < 20_000_000_000
+    assert latest_stmt.get("goodwill") is not None
+    assert latest_stmt.get("contract_liabilities") is not None and latest_stmt["contract_liabilities"] > 0
+    assert latest_stmt.get("interest_bearing_debt") is not None and latest_stmt["interest_bearing_debt"] > 0
 
     ratio_env = adapter.get_financial_ratios("600588.SH")
     assert ratio_env.ok is True
     assert len(ratio_env.data) >= 1
     latest_ratio = ratio_env.data[-1]
     assert latest_ratio["roe_weighted"] != 14.15
+    assert latest_ratio.get("dso_days") is not None
+    assert latest_ratio.get("dio_days") is not None
+    assert latest_ratio.get("dpo_days") is not None
+    assert latest_ratio.get("ccc_days") is not None
+    # 验证资产负债表总额口径与比率表 debt_to_asset_ratio 勾稽一致
+    calc_d2a = round(latest_stmt["total_liabilities"] / latest_stmt["total_assets"] * 100.0, 2)
+    assert abs(calc_d2a - latest_ratio["debt_to_asset_ratio"]) < 0.05
 
     # 4. 股东信息：第一大股东为北京用友科技有限公司
     sh_env = adapter.get_shareholders("600588.SH")
@@ -100,6 +116,29 @@ def test_three_new_deterministic_mcp_tools() -> None:
     assert env_sc["data"]["symbol"] == "600588.SH"
     assert env_sc["data"]["total_metrics"] == 90
     assert "scorecard" in env_sc["data"]
+    sc_metrics = env_sc["data"]["metrics"]
+    for must_have_code in (
+        "CURRENT_RATIO",
+        "QUICK_RATIO",
+        "CASH_RATIO",
+        "ROCE",
+        "NON_CURRENT_LIAB_RATIO",
+        "ALTMAN_Z_SCORE",
+        "OCF_TO_CURRENT_LIAB",
+        "REV_QOQ",
+        "NET_PROFIT_QOQ",
+        "REV_CAGR_3Y",
+        "REV_CAGR_5Y",
+        "EPS_YOY",
+        "CONSECUTIVE_DIVIDEND_YEARS",
+        "AR_TURNOVER_DAYS",
+        "INVENTORY_TURNOVER_DAYS",
+        "AP_TURNOVER_DAYS",
+        "CASH_CONVERSION_CYCLE",
+        "GOODWILL_TO_EQUITY",
+        "INTEREST_DEBT_RATIO",
+    ):
+        assert sc_metrics[must_have_code]["value"] is not None, f"{must_have_code} 不应为 None"
 
     # 2. broker_market.get_technical_indicators
     raw_ti = call_market("get_technical_indicators", {"symbol": "600588.SH", "adjustment": "前复权"})

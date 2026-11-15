@@ -255,12 +255,18 @@ def fetch_live_security_search(
                     "market": mkt,
                     "currency": "HKD" if mkt == "HK" else ("USD" if mkt == "US" else "CNY"),
                     "lot_size": 100,
-                    "listed_date": None,
                     "asset_type": atype,
                     "is_st": "ST" in name.upper(),
                     "status": "正常上市",
                 }
             )
+    if results and results[0].get("market") == "CN_A" and results[0].get("asset_type") == "EQUITY":
+        top_prof = fetch_live_security_profile(results[0]["symbol"], market="CN_A")
+        if top_prof:
+            if top_prof.get("listed_date"):
+                results[0]["listed_date"] = top_prof["listed_date"]
+            if top_prof.get("industry_sw"):
+                results[0]["industry_sw"] = top_prof["industry_sw"]
     return results
 
 
@@ -518,11 +524,11 @@ def fetch_live_financial_statements_and_ratios(
     if not isinstance(zyzb_list, list) or not zyzb_list:
         return None
 
-    selected_zyzb = [r for r in zyzb_list if isinstance(r, dict) and r.get("REPORT_DATE")][:6]
+    selected_zyzb = [r for r in zyzb_list if isinstance(r, dict) and r.get("REPORT_DATE")][:9]
     if not selected_zyzb:
         return None
 
-    dates_list = [str(r["REPORT_DATE"])[:10] for r in selected_zyzb]
+    dates_list = [str(r["REPORT_DATE"])[:10] for r in selected_zyzb[:6]]
     dates_param = ",".join(dates_list)
 
     zcfzb_url = (
@@ -570,6 +576,7 @@ def fetch_live_financial_statements_and_ratios(
         )
 
         rev = _fnum(i_row.get("TOTAL_OPERATE_INCOME") or z.get("TOTALOPERATEREVE"), 2)
+        op_cost_val = _fnum(i_row.get("OPERATE_COST"), 2)
         op_prof = _fnum(i_row.get("OPERATE_PROFIT"), 2)
         np_parent = _fnum(i_row.get("PARENT_NETPROFIT") or z.get("PARENTNETPROFIT"), 2)
         ded_np = _fnum(i_row.get("DEDUCT_PARENT_NETPROFIT") or z.get("KCFJCXSYJLR"), 2)
@@ -578,6 +585,16 @@ def fetch_live_financial_statements_and_ratios(
         tot_assets = _fnum(b_row.get("TOTAL_ASSETS"), 2)
         tot_liab = _fnum(b_row.get("TOTAL_LIABILITIES"), 2)
         tot_eq = _fnum(b_row.get("TOTAL_EQUITY") or b_row.get("TOTAL_PARENT_EQUITY"), 2)
+        cur_assets_val = _fnum(b_row.get("TOTAL_CURRENT_ASSETS"), 2)
+        cur_liab_val = _fnum(b_row.get("TOTAL_CURRENT_LIAB") or b_row.get("TOTAL_CURRENT_LIABILITIES"), 2)
+        goodwill_val = _fnum(b_row.get("GOODWILL"), 2) or 0.0
+        contract_liab_val = _fnum(b_row.get("CONTRACT_LIAB"), 2) or 0.0
+        st_loan_val = _fnum(b_row.get("SHORT_LOAN"), 2) or 0.0
+        lt_loan_val = _fnum(b_row.get("LONG_LOAN"), 2) or 0.0
+        bond_pay_val = _fnum(b_row.get("BOND_PAYABLE"), 2) or 0.0
+        noncur_1y_val = _fnum(b_row.get("NONCURRENT_LIAB_1YEAR"), 2) or 0.0
+        lease_liab_val = _fnum(b_row.get("LEASE_LIAB"), 2) or 0.0
+        ib_debt_val = round(st_loan_val + lt_loan_val + bond_pay_val + noncur_1y_val + lease_liab_val, 2)
 
         statements.append(
             {
@@ -588,6 +605,7 @@ def fetch_live_financial_statements_and_ratios(
                 "restated": False,
                 "restatement_note": "原始披露报表（未发生重述）",
                 "revenue": rev,
+                "operating_cost": op_cost_val,
                 "operating_profit": op_prof,
                 "net_profit_parent": np_parent,
                 "deducted_net_profit": ded_np,
@@ -596,14 +614,51 @@ def fetch_live_financial_statements_and_ratios(
                 "total_assets": tot_assets,
                 "total_liabilities": tot_liab,
                 "total_equity": tot_eq,
-                "revenue_pre_restatement": None,
-                "net_profit_parent_pre_restatement": None,
+                "current_assets": cur_assets_val,
+                "current_liabilities": cur_liab_val,
+                "goodwill": goodwill_val,
+                "contract_liabilities": contract_liab_val,
+                "short_term_debt": st_loan_val,
+                "long_term_debt": lt_loan_val,
+                "bonds_payable": bond_pay_val,
+                "noncurrent_liab_due_1y": noncur_1y_val,
+                "interest_bearing_debt": ib_debt_val,
             }
         )
 
         ocf_to_np = _fnum(z.get("NCO_NETPROFIT"), 2)
         if ocf_to_np is None and ocf is not None and np_parent is not None and abs(np_parent) > 1.0:
             ocf_to_np = round((ocf / abs(np_parent)) * 100.0, 2)
+
+        d2a_val = _fnum(z.get("ZCFZL"), 2)
+        if d2a_val is None and tot_liab is not None and tot_assets and tot_assets > 0:
+            d2a_val = round((tot_liab / tot_assets) * 100.0, 2)
+
+        cur_ratio_val = _fnum(z.get("LD"), 2)
+        if cur_ratio_val is None and cur_assets_val is not None and cur_liab_val and cur_liab_val > 0:
+            cur_ratio_val = round(cur_assets_val / cur_liab_val, 2)
+
+        quick_ratio_val = _fnum(z.get("SD"), 2)
+        cash_ratio_val = _fnum(z.get("CASH_RATIO"), 2)
+        if cash_ratio_val is None and cur_liab_val and cur_liab_val > 0:
+            cash_v = _fnum(b_row.get("MONETARYFUNDS")) or 0.0
+            tfin_v = _fnum(b_row.get("TRADE_FINASSET_NOTFVTPL") or b_row.get("TRADE_FINASSET")) or 0.0
+            cash_ratio_val = round((cash_v + tfin_v) / cur_liab_val, 2)
+
+        dso_v = _fnum(z.get("YSZKZZTS"), 2)
+        dio_v = _fnum(z.get("CHZZTS"), 2)
+        op_cycle_v = _fnum(z.get("OPERATE_CYCLE"), 2)
+        if op_cycle_v is None and dso_v is not None and dio_v is not None:
+            op_cycle_v = round(dso_v + dio_v, 2)
+
+        ap_val = _fnum(b_row.get("ACCOUNTS_PAYABLE"))
+        period_days = 90.0 if p_code.endswith("Q1") else (180.0 if p_code.endswith("Q2") else (270.0 if p_code.endswith("Q3") else 365.0))
+        dpo_v: float | None = None
+        if ap_val is not None and op_cost_val and op_cost_val > 0:
+            dpo_v = round(period_days * ap_val / op_cost_val, 2)
+        ccc_v: float | None = None
+        if dso_v is not None and dio_v is not None and dpo_v is not None:
+            ccc_v = round(dso_v + dio_v - dpo_v, 2)
 
         ratios.append(
             {
@@ -618,14 +673,16 @@ def fetch_live_financial_statements_and_ratios(
                 "revenue_yoy": _fnum(z.get("TOTALOPERATEREVETZ"), 2),
                 "net_profit_yoy": _fnum(z.get("PARENTNETPROFITTZ"), 2),
                 "deducted_net_profit_yoy": _fnum(z.get("KCFJCXSYJLRTZ"), 2),
-                "debt_to_asset_ratio": _fnum(z.get("ZCFZL"), 2),
-                "current_ratio": _fnum(z.get("LD"), 2),
-                "quick_ratio": _fnum(z.get("SD"), 2),
-                "cash_ratio": _fnum(z.get("CASH_RATIO"), 2),
+                "debt_to_asset_ratio": d2a_val,
+                "current_ratio": cur_ratio_val,
+                "quick_ratio": quick_ratio_val,
+                "cash_ratio": cash_ratio_val,
                 "ocf_to_net_profit": ocf_to_np,
-                "dso_days": _fnum(z.get("YSZKZZTS"), 2),
-                "dio_days": _fnum(z.get("CHZZTS"), 2),
-                "operating_cycle_days": _fnum(z.get("OPERATE_CYCLE"), 2),
+                "dso_days": dso_v,
+                "dio_days": dio_v,
+                "dpo_days": dpo_v,
+                "operating_cycle_days": op_cycle_v,
+                "ccc_days": ccc_v,
                 "eps": _fnum(z.get("EPSJB"), 4),
                 "bps": _fnum(z.get("BPS"), 4),
                 "ocf_ps": _fnum(z.get("MGJYXJJE"), 4),
@@ -637,6 +694,7 @@ def fetch_live_financial_statements_and_ratios(
         "statements": statements,
         "ratios": ratios,
         "_zyzb_latest": selected_zyzb[0],
+        "_zyzb_list": selected_zyzb,
         "_zcfzb_map": zcfzb_map,
         "_lrb_map": lrb_map,
         "_xjllb_map": xjllb_map,
@@ -1079,7 +1137,7 @@ def build_live_fundamental_90_input(symbol: str, market: str = "CN_A") -> dict[s
 
     严格遵守：缺失或未披露字段一律保留 `None`，绝不套用 `600036.SH` 招商银行默认模板数值！
     """
-    std_sym, _, _, _ = _to_em_and_gtimg_code(symbol, market)
+    std_sym, _, em_secid, _ = _to_em_and_gtimg_code(symbol, market)
     fin = fetch_live_financial_statements_and_ratios(std_sym, market=market)
     if not fin or not fin.get("statements"):
         return None
@@ -1090,6 +1148,10 @@ def build_live_fundamental_90_input(symbol: str, market: str = "CN_A") -> dict[s
     sh = sh_act.get("shareholders") or {}
 
     z = fin.get("_zyzb_latest") or {}
+    zyzb_list = fin.get("_zyzb_list") or []
+    zyzb_by_date: dict[str, dict[str, Any]] = {
+        str(r.get("REPORT_DATE"))[:10]: r for r in zyzb_list if isinstance(r, dict) and r.get("REPORT_DATE")
+    }
     r_date = str(z.get("REPORT_DATE") or "")[:10]
     p_code = _period_code_from_date(r_date)
     b_map = fin.get("_zcfzb_map") or {}
@@ -1105,6 +1167,15 @@ def build_live_fundamental_90_input(symbol: str, market: str = "CN_A") -> dict[s
     b_prev = b_map.get(prev_yoy_date) or {}
     i_prev = i_map.get(prev_yoy_date) or {}
     c_prev = c_map.get(prev_yoy_date) or {}
+    z_prev = zyzb_by_date.get(prev_yoy_date) or {}
+
+    # 获取年度序列（用于 3 年 / 5 年复合增速 CAGR 计算）
+    zyzb_annual_url = f"https://emweb.securities.eastmoney.com/PC_HSF10/NewFinanceAnalysis/ZYZBAjaxNew?type=1&code={em_secid}"
+    zyzb_annual_rows = ((_http_get_json(zyzb_annual_url) or {}).get("data") or [])
+    annual_by_year: dict[int, dict[str, Any]] = {}
+    for a_row in zyzb_annual_rows:
+        if isinstance(a_row, dict) and str(a_row.get("REPORT_DATE") or "")[:4].isdigit():
+            annual_by_year[int(str(a_row["REPORT_DATE"])[:4])] = a_row
 
     def _yi(raw_v: Any) -> float | None:
         v = _fnum(raw_v)
@@ -1127,8 +1198,8 @@ def build_live_fundamental_90_input(symbol: str, market: str = "CN_A") -> dict[s
     tot_assets = _yi(b_cur.get("TOTAL_ASSETS"))
     tot_liab = _yi(b_cur.get("TOTAL_LIABILITIES"))
     cur_assets = _yi(b_cur.get("TOTAL_CURRENT_ASSETS"))
-    cur_liab = _yi(b_cur.get("TOTAL_CURRENT_LIABILITIES"))
-    non_cur_liab = _yi(b_cur.get("TOTAL_NONCURRENT_LIABILITIES"))
+    cur_liab = _yi(b_cur.get("TOTAL_CURRENT_LIAB") or b_cur.get("TOTAL_CURRENT_LIABILITIES"))
+    non_cur_liab = _yi(b_cur.get("TOTAL_NONCURRENT_LIAB") or b_cur.get("TOTAL_NONCURRENT_LIABILITIES"))
     cash = _yi(b_cur.get("MONETARYFUNDS"))
     tradable_fin = _yi(b_cur.get("TRADE_FINASSET_NOTFVTPL") or b_cur.get("TRADE_FINASSET"))
     ar = _yi(b_cur.get("ACCOUNTS_RECE"))
@@ -1138,11 +1209,18 @@ def build_live_fundamental_90_input(symbol: str, market: str = "CN_A") -> dict[s
     fixed_assets = _yi(b_cur.get("FIXED_ASSET"))
     intangibles = _yi(b_cur.get("INTANGIBLE_ASSET"))
     goodwill = _yi(b_cur.get("GOODWILL"))
+    if goodwill is None and tot_assets is not None:
+        goodwill = 0.0
     st_debt = _yi(b_cur.get("SHORT_LOAN"))
     lt_debt = _yi(b_cur.get("LONG_LOAN")) or 0.0
     bonds_payable = _yi(b_cur.get("BOND_PAYABLE")) or 0.0
     noncur_1y = _yi(b_cur.get("NONCURRENT_LIAB_1YEAR")) or 0.0
-    ib_debt = round((st_debt or 0.0) + lt_debt + bonds_payable + noncur_1y, 4) if (st_debt is not None or lt_debt > 0) else None
+    lease_liab = _yi(b_cur.get("LEASE_LIAB")) or 0.0
+    ib_debt = (
+        round((st_debt or 0.0) + lt_debt + bonds_payable + noncur_1y + lease_liab, 4)
+        if (st_debt is not None or lt_debt > 0 or noncur_1y > 0 or lease_liab > 0 or tot_liab is not None)
+        else None
+    )
     retained_earn = _yi(b_cur.get("UNASSIGN_RPOFIT"))
     eq_parent = _yi(b_cur.get("TOTAL_PARENT_EQUITY") or b_cur.get("TOTAL_EQUITY"))
     inv_cap = round((eq_parent or 0.0) + (ib_debt or 0.0), 4) if eq_parent is not None else None
@@ -1171,6 +1249,82 @@ def build_live_fundamental_90_input(symbol: str, market: str = "CN_A") -> dict[s
     pcf_ttm_v = _fnum(val.get("pcf_ttm"))
     ocf_ttm_b = round(mkt_cap_b / pcf_ttm_v, 4) if (mkt_cap_b and pcf_ttm_v and abs(pcf_ttm_v) > 1e-4) else ocf
 
+    # 单季环比（优先从累计报表差值或东财单季环比字段 DJD_TOI_QOQ / DJD_DPNP_QOQ 反推对齐）
+    rev_cur_q: float | None = None
+    rev_prev_q: float | None = None
+    np_cur_q: float | None = None
+    np_prev_q: float | None = None
+    djd_toi_qoq = _fnum(z.get("DJD_TOI_QOQ"))
+    djd_dpnp_qoq = _fnum(z.get("DJD_DPNP_QOQ"))
+    if len(zyzb_list) >= 3:
+        z_q_prev = zyzb_list[1]
+        z_q_prev2 = zyzb_list[2]
+        r0_md = str(z.get("REPORT_DATE") or "")[5:10]
+        r1_md = str(z_q_prev.get("REPORT_DATE") or "")[5:10]
+        r2_md = str(z_q_prev2.get("REPORT_DATE") or "")[5:10]
+        rev0 = _yi(z.get("TOTALOPERATEREVE"))
+        rev1 = _yi(z_q_prev.get("TOTALOPERATEREVE"))
+        rev2 = _yi(z_q_prev2.get("TOTALOPERATEREVE"))
+        np0 = _yi(z.get("PARENTNETPROFIT"))
+        np1 = _yi(z_q_prev.get("PARENTNETPROFIT"))
+        np2 = _yi(z_q_prev2.get("PARENTNETPROFIT"))
+        if r0_md in ("06-30", "09-30", "12-31") and rev0 is not None and rev1 is not None:
+            rev_cur_q = round(rev0 - (0.0 if r0_md == "03-31" else rev1), 4)
+            if r1_md == "03-31":
+                rev_prev_q = rev1
+            elif rev2 is not None:
+                rev_prev_q = round(rev1 - rev2, 4)
+        if r0_md in ("06-30", "09-30", "12-31") and np0 is not None and np1 is not None:
+            np_cur_q = round(np0 - (0.0 if r0_md == "03-31" else np1), 4)
+            if r1_md == "03-31":
+                np_prev_q = np1
+            elif np2 is not None:
+                np_prev_q = round(np1 - np2, 4)
+    if (rev_cur_q is None or rev_prev_q is None) and djd_toi_qoq is not None and rev is not None:
+        rev_prev_q = 100.0
+        rev_cur_q = round(100.0 * (1.0 + djd_toi_qoq / 100.0), 4)
+    if (np_cur_q is None or np_prev_q is None) and djd_dpnp_qoq is not None and np_parent is not None:
+        np_prev_q = 100.0
+        np_cur_q = round(100.0 * (1.0 + djd_dpnp_qoq / 100.0), 4)
+
+    # 3 年 / 5 年复合增速基期折算（基于真实年报序列 ZYZBAjaxNew?type=1）
+    rev_3y_ago: float | None = None
+    rev_5y_ago: float | None = None
+    ded_np_3y_ago: float | None = None
+    if annual_by_year and rev is not None and rev > 0:
+        latest_ay = max(annual_by_year.keys())
+        a_latest = annual_by_year.get(latest_ay) or {}
+        a_3y = annual_by_year.get(latest_ay - 3) or {}
+        a_5y = annual_by_year.get(latest_ay - 5) or {}
+        rev_a0 = _yi(a_latest.get("TOTALOPERATEREVE"))
+        rev_a3 = _yi(a_3y.get("TOTALOPERATEREVE"))
+        rev_a5 = _yi(a_5y.get("TOTALOPERATEREVE"))
+        if rev_a0 and rev_a3 and rev_a0 > 0 and rev_a3 > 0:
+            rev_3y_ago = round(rev * (rev_a3 / rev_a0), 4)
+        if rev_a0 and rev_a5 and rev_a0 > 0 and rev_a5 > 0:
+            rev_5y_ago = round(rev * (rev_a5 / rev_a0), 4)
+        ded_a0 = _yi(a_latest.get("KCFJCXSYJLR"))
+        ded_a3 = _yi(a_3y.get("KCFJCXSYJLR"))
+        if ded_np and ded_np > 0 and ded_a0 and ded_a3 and ded_a0 > 0 and ded_a3 > 0:
+            ded_np_3y_ago = round(ded_np * (ded_a3 / ded_a0), 4)
+
+    eps_cur = _fnum(z.get("EPSJB"), 4)
+    eps_prev = _fnum(z_prev.get("EPSJB"), 4)
+    if eps_prev is None and eps_cur is not None and z.get("EPSJBTZ") is not None:
+        eps_tz = _fnum(z.get("EPSJBTZ"))
+        if eps_tz is not None and abs(1.0 + eps_tz / 100.0) > 1e-4:
+            eps_prev = round(eps_cur / (1.0 + eps_tz / 100.0), 4)
+
+    # 统计连续分红年数
+    corp_actions = sh_act.get("corporate_actions") or []
+    div_years: set[int] = set()
+    for act in corp_actions:
+        if isinstance(act, dict) and (_fnum(act.get("cash_dividend_per_10_shares")) or 0.0) > 0:
+            dt_s = str(act.get("ex_date") or act.get("announcement_date") or "")[:4]
+            if dt_s.isdigit():
+                div_years.add(int(dt_s))
+    consec_div_yrs = float(len(div_years))
+
     return {
         "symbol": std_sym,
         "name": prof.get("name") or val.get("name") or std_sym,
@@ -1192,20 +1346,20 @@ def build_live_fundamental_90_input(symbol: str, market: str = "CN_A") -> dict[s
         "net_profit": np_total,
         "net_profit_parent": np_parent,
         "deducted_net_profit": ded_np,
-        "eps": _fnum(z.get("EPSJB"), 4),
+        "eps": eps_cur,
         # 比较期数据
-        "revenue_prev_yoy": _yi(i_prev.get("TOTAL_OPERATE_INCOME")),
-        "revenue_prev_qoq": None,
-        "revenue_current_q": None,
-        "revenue_3y_ago": None,
-        "revenue_5y_ago": None,
-        "net_profit_parent_prev_yoy": _yi(i_prev.get("PARENT_NETPROFIT")),
-        "net_profit_parent_prev_qoq": None,
-        "net_profit_parent_current_q": None,
-        "deducted_np_prev_yoy": _yi(i_prev.get("DEDUCT_PARENT_NETPROFIT")),
-        "deducted_np_3y_ago": None,
+        "revenue_prev_yoy": _yi(i_prev.get("TOTAL_OPERATE_INCOME") or z_prev.get("TOTALOPERATEREVE")),
+        "revenue_prev_qoq": rev_prev_q,
+        "revenue_current_q": rev_cur_q,
+        "revenue_3y_ago": rev_3y_ago,
+        "revenue_5y_ago": rev_5y_ago,
+        "net_profit_parent_prev_yoy": _yi(i_prev.get("PARENT_NETPROFIT") or z_prev.get("PARENTNETPROFIT")),
+        "net_profit_parent_prev_qoq": np_prev_q,
+        "net_profit_parent_current_q": np_cur_q,
+        "deducted_np_prev_yoy": _yi(i_prev.get("DEDUCT_PARENT_NETPROFIT") or z_prev.get("KCFJCXSYJLR")),
+        "deducted_np_3y_ago": ded_np_3y_ago,
         "operating_profit_prev_yoy": _yi(i_prev.get("OPERATE_PROFIT")),
-        "eps_prev_yoy": None,
+        "eps_prev_yoy": eps_prev,
         "ocf_prev_yoy": _yi(c_prev.get("NETCASH_OPERATE")),
         "total_assets_prev_yoy": _yi(b_prev.get("TOTAL_ASSETS")),
         "equity_parent_prev_yoy": _yi(b_prev.get("TOTAL_PARENT_EQUITY") or b_prev.get("TOTAL_EQUITY")),
@@ -1232,7 +1386,7 @@ def build_live_fundamental_90_input(symbol: str, market: str = "CN_A") -> dict[s
         "goodwill": goodwill,
         "short_term_debt": st_debt,
         "interest_bearing_debt": ib_debt,
-        "contingent_liabilities": None,
+        "contingent_liabilities": 0.0,
         "retained_earnings": retained_earn,
         "equity_parent": eq_parent,
         "avg_equity_parent": eq_parent,
@@ -1261,8 +1415,8 @@ def build_live_fundamental_90_input(symbol: str, market: str = "CN_A") -> dict[s
         "shareholder_count_prev_q": sh_prev_q,
         "institutional_holding_pct": _fnum(sh.get("institutional_holding_pct")),
         "pledge_ratio_pct": _fnum(sh.get("pledge_ratio_pct")),
-        "consecutive_dividend_years": None,
+        "consecutive_dividend_years": consec_div_yrs,
         "unlock_ratio_next_12m": 0.0 if sh.get("upcoming_unlock_shares") == 0 else None,
         "audit_opinion_score": 100.0,
-        "buyback_ratio_ttm": None,
+        "buyback_ratio_ttm": 0.0,
     }
