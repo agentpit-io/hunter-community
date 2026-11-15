@@ -1,5 +1,12 @@
 """Generate the deployable help page from doc/产品说明书.md.
 
+Editorial Developer Platform style (De-AI-Templated WebUI):
+- Deep Forest Brand (--color-brand: #203C30, --color-brand-dark: #10B981)
+- Crisp 1px borders (#E2E8F0), warm neutral surfaces (#FBFBFA / #F8F9FA)
+- Terminal slate code blocks (#0F172A) with one-click copy + SVG checkmark feedback
+- Zero decorative emojis; structured English phase/step badges
+- Smart client-side environment detection (localhost vs agentpit.io -> hunter-community.agentpit.io)
+
 Requires Python-Markdown: pip install Markdown
 Run from the repository root: python3 scripts/generate-help.py
 """
@@ -41,7 +48,7 @@ def decorate_app_links(html: str) -> str:
         return (
             '<li class="direct-launch-item">'
             '<div class="direct-launch-card">'
-            '<span class="direct-launch-label">🎯 本节功能新窗口直达：</span>'
+            '<span class="direct-launch-label">QUICK LAUNCH / 本节功能直达</span>'
             f'<div class="direct-launch-actions">{inner}</div>'
             '</div>'
             '</li>'
@@ -76,18 +83,18 @@ def inject_env_choice_card(html: str) -> str:
     card_html = (
         '<div class="env-choice-section" id="env-choice-guide">'
         '<div class="env-choice-header">'
-        '<span class="env-choice-badge">🧭 环境入口选择说明卡片 · 双通道直达（100% 防 404）</span>'
+        '<span class="env-choice-badge">ENVIRONMENT ROUTING · 环境入口选择与双通道直达（100% 防 404）</span>'
         '<span class="env-choice-status" id="current-env-indicator">正在智能检测当前访问环境...</span>'
         '</div>'
         '<p class="env-choice-intro">'
         '本帮助中心同时服务于<strong>个人电脑本地私有部署实例</strong>与<strong>官方公网在线演示站</strong>。'
         '页面内置客户端智能环境感知引擎：当您在本地实例打开本页时，全页所有功能按钮自动跳往您的本地环境；'
-        '当您在 AgentPit 官网（<code>www.agentpit.io</code>）浏览本说明书时，点击任意功能入口将<strong>智能优先打开官方免安装在线演示站</strong>，并在右下角提供一键切换本地 <code>localhost:3100</code> 通道！'
+        '当您在 AgentPit 官网（<code>www.agentpit.io</code>）浏览本说明书时，点击任意功能入口将<strong>智能优先打开官方免安装在线演示站</strong>，并在右下角提供一键切换本地 <code>localhost:3100</code> 通道。'
         '</p>'
         '<div class="env-choice-grid">'
         '  <div class="env-card env-card-local">'
         '    <div class="env-card-head">'
-        '      <span class="env-card-icon">🖥️</span>'
+        '      <span class="env-card-code">LOCAL</span>'
         '      <div>'
         '        <h4>本地部署环境（个人私有数据不出盘）</h4>'
         '        <span class="env-tag env-tag-green">100% 本地隐私 · 零实盘风险</span>'
@@ -96,23 +103,23 @@ def inject_env_choice_card(html: str) -> str:
         '    <p class="env-card-desc">适合已在自己电脑（Mac / Windows / Linux）通过一键脚本或 Docker 启动 HunterCode 的股民。您的 API Key、自选股、持仓交割单与复盘记忆全部保存在本机硬盘。</p>'
         '    <div class="env-url-box"><code>http://localhost:3100/workbench</code></div>'
         '    <div class="env-card-actions">'
-        '      <a class="env-btn env-btn-local" href="http://localhost:3100/workbench" target="_blank" rel="noopener">🖥️ 一键打开本地投研工作台 ↗</a>'
-        '      <a class="env-btn env-btn-sub" href="http://localhost:3100/chat" target="_blank" rel="noopener">💬 本地 AI 对话 (:3100/chat) ↗</a>'
+        '      <a class="env-btn env-btn-local" href="http://localhost:3100/workbench" target="_blank" rel="noopener">打开本地投研工作台 ↗</a>'
+        '      <a class="env-btn env-btn-sub" href="http://localhost:3100/chat" target="_blank" rel="noopener">本地 AI 对话 (:3100/chat) ↗</a>'
         '    </div>'
         '  </div>'
         '  <div class="env-card env-card-demo">'
         '    <div class="env-card-head">'
-        '      <span class="env-card-icon">🚀</span>'
+        '      <span class="env-card-code">CLOUD DEMO</span>'
         '      <div>'
         '        <h4>官方免安装在线演示站（公网即点即用）</h4>'
-        '        <span class="env-tag env-tag-copper">免安装体验 · 实盘行情直连</span>'
+        '        <span class="env-tag env-tag-brand">免安装体验 · 实盘行情直连</span>'
         '      </div>'
         '    </div>'
         '    <p class="env-card-desc">适合正在浏览官网说明书、尚未在本地安装，或希望直接在浏览器体验 08:30 晨报、56+90 项个体检、ETF 定投计算与 AI 自动模拟盘的用户。</p>'
         '    <div class="env-url-box"><code>https://hunter-community.agentpit.io/workbench</code></div>'
         '    <div class="env-card-actions">'
-        '      <a class="env-btn env-btn-demo" href="https://hunter-community.agentpit.io/workbench" target="_blank" rel="noopener">🚀 一键打开在线演示站工作台 ↗</a>'
-        '      <a class="env-btn env-btn-sub" href="https://hunter-community.agentpit.io/chat" target="_blank" rel="noopener">💬 在线演示 AI 对话 ↗</a>'
+        '      <a class="env-btn env-btn-demo" href="https://hunter-community.agentpit.io/workbench" target="_blank" rel="noopener">打开在线演示站工作台 ↗</a>'
+        '      <a class="env-btn env-btn-sub" href="https://hunter-community.agentpit.io/chat" target="_blank" rel="noopener">在线演示 AI 对话 ↗</a>'
         '    </div>'
         '  </div>'
         '</div>'
@@ -170,9 +177,9 @@ def wrap_screenshot_images(html: str) -> str:
         return (
             f'<figure class="shot-card" onclick="openLightbox(\'{src_url}\', \'{alt_text}\')">'
             f'<div class="shot-bar">'
-            f'<span class="shot-dots"><i></i><i></i><i></i></span>'
+            f'<span class="shot-tag">FIGURE</span>'
             f'<span class="shot-title">{alt_text}</span>'
-            f'<span class="shot-zoom">🔍 点击图片放大全屏查看</span>'
+            f'<span class="shot-zoom">点击放大全屏查看 ↗</span>'
             f'</div>'
             f'<div class="shot-img-wrap">'
             f'<img src="{src_url}" alt="{alt_text}" loading="lazy" />'
@@ -184,7 +191,7 @@ def wrap_screenshot_images(html: str) -> str:
 
 
 def wrap_code_prompts(html: str) -> str:
-    """Wrap <pre><code...>...</code></pre> with a header bar containing a one-click copy button."""
+    """Wrap <pre><code...>...</code></pre> with a terminal header bar containing a one-click copy button."""
     pattern = re.compile(r'<pre><code(?:\s+class="[^"]*")?>(.*?)</code></pre>', re.DOTALL)
 
     def replacer(match: re.Match) -> str:
@@ -192,10 +199,10 @@ def wrap_code_prompts(html: str) -> str:
         return (
             '<div class="prompt-box">'
             '<div class="prompt-bar">'
-            '<span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 <a class="app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="color:#ffbe7b;text-decoration:underline;">/chat ↗</a>）</span>'
+            '<span class="prompt-tag">PROMPT / 对话框提问口令（可直接粘贴到 <a class="app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="color:#10B981;text-decoration:underline;">/chat ↗</a>）</span>'
             '<div style="display:flex;gap:8px;align-items:center;">'
-            '<button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button>'
-            '<a class="copy-btn app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="text-decoration:none;">🚀 打开 /chat 提问 ↗</a>'
+            '<button type="button" class="copy-btn" onclick="copyPrompt(this)">复制提问口令</button>'
+            '<a class="copy-btn copy-btn-link app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="text-decoration:none;">打开 /chat 提问 ↗</a>'
             '</div>'
             '</div>'
             f'<pre><code>{code_inner}</code></pre>'
@@ -272,16 +279,21 @@ def main() -> None:
   <style>
     :root {{
       color-scheme: light;
-      --ink: #1e1915;
-      --muted: #6e6257;
-      --line: #dfd3c0;
-      --paper: #fffdfa;
-      --bg: #f6f1e8;
-      --copper: #b56527;
-      --copper-dark: #8c4814;
-      --copper-soft: #f8efe4;
-      --green: #16794b;
-      --green-bg: #e7f6ee;
+      --color-brand: #203C30;
+      --color-brand-hover: #172B22;
+      --color-brand-dark: #10B981;
+      --color-brand-soft: #ECFDF5;
+      --color-brand-border: #A7F3D0;
+      --ink: #0F172A;
+      --ink-secondary: #334155;
+      --muted: #64748B;
+      --line: #E2E8F0;
+      --border-strong: #CBD5E1;
+      --paper: #FFFFFF;
+      --bg: #FBFBFA;
+      --surface-muted: #F8F9FA;
+      --code-bg: #0F172A;
+      --code-header: #1E293B;
     }}
     * {{ box-sizing: border-box; }}
     html {{ scroll-behavior: smooth; }}
@@ -289,10 +301,11 @@ def main() -> None:
       margin: 0;
       color: var(--ink);
       background: var(--bg);
-      font: 15.5px/1.8 -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      font: 15px/1.75 -apple-system, BlinkMacSystemFont, "Inter", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      -webkit-font-smoothing: antialiased;
     }}
-    a {{ color: var(--copper-dark); text-decoration: none; }}
-    a:hover {{ text-decoration: underline; }}
+    a {{ color: var(--color-brand); text-decoration: none; }}
+    a:hover {{ color: var(--color-brand-dark); text-decoration: underline; }}
 
     /* Top Sticky Navigation */
     .top {{
@@ -303,9 +316,9 @@ def main() -> None:
       gap: 20px;
       align-items: center;
       padding: 12px max(24px, calc((100vw - 1440px) / 2));
-      background: rgba(255, 253, 250, 0.95);
+      background: rgba(251, 251, 250, 0.96);
       border-bottom: 1px solid var(--line);
-      backdrop-filter: blur(14px);
+      backdrop-filter: blur(8px);
     }}
     .brand {{
       display: flex;
@@ -313,57 +326,62 @@ def main() -> None:
       gap: 10px;
       margin-right: auto;
       color: var(--ink);
-      font-weight: 800;
-      font-size: 16px;
+      font-weight: 700;
+      font-size: 15.5px;
+      letter-spacing: -0.01em;
       white-space: nowrap;
       text-decoration: none !important;
     }}
-    .brand img {{ width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--line); }}
+    .brand img {{ width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--line); }}
     .brand-badge {{
-      font-size: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11.5px;
       font-weight: 600;
       padding: 2px 8px;
-      border-radius: 999px;
-      background: var(--copper-soft);
-      color: var(--copper-dark);
-      border: 1px solid #e6cdb2;
+      border-radius: 4px;
+      background: var(--surface-muted);
+      color: var(--color-brand);
+      border: 1px solid var(--line);
     }}
-    .top nav {{ display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }}
+    .top nav {{ display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }}
     .top nav a {{
-      padding: 6px 13px;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: 600;
-      color: #4b3f35;
-      transition: all 0.15s ease;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 13.5px;
+      font-weight: 500;
+      color: var(--ink-secondary);
+      border: 1px solid transparent;
+      transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
     }}
     .top nav a:hover {{
-      background: var(--copper-soft);
-      color: var(--copper-dark);
+      background: var(--surface-muted);
+      border-color: var(--line);
+      color: var(--ink);
       text-decoration: none;
     }}
     .top nav a.nav-primary {{
-      background: var(--copper);
-      color: #fff;
+      background: var(--color-brand);
+      border-color: var(--color-brand);
+      color: #FFFFFF;
+      font-weight: 600;
     }}
     .top nav a.nav-primary:hover {{
-      background: var(--copper-dark);
-      color: #fff;
+      background: var(--color-brand-hover);
+      color: #FFFFFF;
     }}
 
-    /* Hero Banner + 6-Step Visual Flow Grid */
+    /* Editorial Hero Header + 6-Step Workflow Matrix */
     .hero-banner {{
       max-width: 1440px;
-      margin: 26px auto 0;
+      margin: 24px auto 0;
       padding: 0 24px;
     }}
     .hero-card {{
-      background: linear-gradient(135deg, #241d18 0%, #3a2b20 55%, #593a20 100%);
-      color: #fdf8f2;
-      border-radius: 20px;
-      padding: 32px 36px 30px;
-      box-shadow: 0 14px 38px rgba(36, 25, 16, 0.14);
-      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: var(--paper);
+      color: var(--ink);
+      border-radius: 8px;
+      padding: 28px 32px;
+      border: 1px solid var(--line);
     }}
     .hero-top {{
       display: flex;
@@ -371,59 +389,70 @@ def main() -> None:
       justify-content: space-between;
       align-items: flex-start;
       gap: 20px;
-      margin-bottom: 24px;
+      padding-bottom: 22px;
+      margin-bottom: 22px;
+      border-bottom: 1px solid var(--line);
     }}
     .hero-title-group h1 {{
-      margin: 8px 0 10px;
-      font-size: clamp(24px, 2.6vw, 34px);
+      margin: 10px 0 10px;
+      font-size: clamp(22px, 2.4vw, 30px);
+      font-weight: 700;
       line-height: 1.3;
-      color: #fff;
+      color: var(--ink);
       letter-spacing: -0.02em;
     }}
     .hero-eyebrow {{
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      padding: 4px 12px;
-      border-radius: 999px;
-      background: rgba(245, 166, 91, 0.18);
-      border: 1px solid rgba(245, 166, 91, 0.4);
-      color: #f9c997;
-      font-size: 13px;
+      padding: 3px 10px;
+      border-radius: 4px;
+      background: var(--color-brand-soft);
+      border: 1px solid var(--color-brand-border);
+      color: var(--color-brand);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11.5px;
       font-weight: 600;
+      letter-spacing: 0.03em;
     }}
     .hero-sub {{
       margin: 0;
-      max-width: 78ch;
-      color: #dfd3c3;
-      font-size: 14.5px;
+      max-width: 82ch;
+      color: var(--ink-secondary);
+      font-size: 14px;
       line-height: 1.7;
     }}
     .hero-pills {{
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(140px, 1fr));
+      gap: 8px;
     }}
     .hero-pill {{
-      padding: 7px 14px;
-      border-radius: 10px;
-      background: rgba(255, 255, 255, 0.08);
-      border: 1px solid rgba(255, 255, 255, 0.14);
-      font-size: 13px;
-      color: #f7ede2;
+      padding: 8px 12px;
+      border-radius: 6px;
+      background: var(--surface-muted);
+      border: 1px solid var(--line);
+      font-size: 12.5px;
+      color: var(--muted);
       white-space: nowrap;
     }}
-    .hero-pill strong {{ color: #ffbe7b; }}
+    .hero-pill strong {{
+      display: block;
+      font-size: 14px;
+      color: var(--color-brand);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }}
 
     .flow-section-title {{
       display: flex;
       align-items: center;
       justify-content: space-between;
       margin: 0 0 12px;
-      font-size: 14px;
-      font-weight: 700;
-      color: #f6cca2;
-      letter-spacing: 0.02em;
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
     }}
     .flow-grid {{
       display: grid;
@@ -434,50 +463,50 @@ def main() -> None:
       display: flex;
       flex-direction: column;
       justify-content: space-between;
-      padding: 14px 15px;
-      border-radius: 14px;
-      background: rgba(255, 253, 250, 0.09);
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      color: #fff;
+      padding: 14px;
+      border-radius: 6px;
+      background: var(--surface-muted);
+      border: 1px solid var(--line);
+      color: var(--ink);
       text-decoration: none !important;
-      transition: transform 0.16s ease, background 0.16s ease, border-color 0.16s ease;
+      transition: border-color 0.15s ease, background-color 0.15s ease;
     }}
     .flow-step:hover {{
-      transform: translateY(-3px);
-      background: rgba(255, 253, 250, 0.16);
-      border-color: #f3a963;
+      background: var(--paper);
+      border-color: var(--color-brand);
     }}
     .flow-step-head {{
       display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 6px;
-      margin-bottom: 6px;
+      flex-direction: column;
+      gap: 4px;
+      margin-bottom: 8px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--line);
     }}
     .flow-badge {{
-      font-size: 11.5px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
       font-weight: 700;
-      padding: 2px 8px;
-      border-radius: 6px;
-      background: #d97930;
-      color: #fff;
+      color: var(--color-brand);
+      letter-spacing: 0.03em;
     }}
     .flow-time {{
       font-size: 11.5px;
-      color: #e6cbb1;
+      color: var(--muted);
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     }}
     .flow-step h3 {{
-      margin: 4px 0 6px;
-      font-size: 15px;
-      color: #fff;
+      margin: 2px 0 6px;
+      font-size: 14.5px;
+      font-weight: 600;
+      color: var(--ink);
       line-height: 1.35;
     }}
     .flow-step p {{
-      margin: 0 0 10px;
+      margin: 0 0 12px;
       font-size: 12.5px;
-      line-height: 1.5;
-      color: #dfd2c4;
+      line-height: 1.55;
+      color: var(--muted);
     }}
     .flow-actions {{
       display: flex;
@@ -488,11 +517,11 @@ def main() -> None:
     .flow-go {{
       font-size: 12px;
       font-weight: 600;
-      color: #ffbe7b;
+      color: var(--ink-secondary);
       text-decoration: none !important;
     }}
     .flow-go:hover {{
-      color: #fff;
+      color: var(--color-brand);
       text-decoration: underline !important;
     }}
     .flow-launch {{
@@ -500,28 +529,26 @@ def main() -> None:
       align-items: center;
       justify-content: center;
       padding: 5px 9px;
-      border-radius: 8px;
-      background: rgba(217, 121, 48, 0.32);
-      border: 1px solid rgba(255, 190, 123, 0.5);
-      color: #fff !important;
+      border-radius: 5px;
+      background: var(--color-brand);
+      border: 1px solid var(--color-brand);
+      color: #FFFFFF !important;
       font-size: 11.8px;
-      font-weight: 700;
+      font-weight: 600;
       text-decoration: none !important;
-      transition: all 0.15s ease;
+      transition: background-color 0.12s ease;
     }}
     .flow-launch:hover {{
-      background: #d97930;
-      border-color: #ffd7b0;
+      background: var(--color-brand-hover);
     }}
 
     /* Environment Entry Choice Card (Chapter 1) */
     .env-choice-section {{
       margin: 18px 0 28px;
       padding: 20px 22px;
-      border-radius: 16px;
-      background: linear-gradient(135deg, #fdf8f0 0%, #f7ecde 100%);
-      border: 2px solid #dfbe98;
-      box-shadow: 0 8px 24px rgba(140, 72, 20, 0.08);
+      border-radius: 8px;
+      background: var(--surface-muted);
+      border: 1px solid var(--border-strong);
     }}
     .env-choice-header {{
       display: flex;
@@ -535,26 +562,27 @@ def main() -> None:
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      padding: 4px 12px;
-      border-radius: 999px;
-      background: var(--copper-dark);
-      color: #fff;
-      font-size: 13px;
-      font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 4px;
+      background: var(--color-brand);
+      color: #FFFFFF;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      font-weight: 600;
     }}
     .env-choice-status {{
-      font-size: 12.5px;
-      font-weight: 700;
-      padding: 4px 12px;
-      border-radius: 999px;
-      background: #fff;
-      color: var(--copper-dark);
-      border: 1px solid #dec2a2;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 4px;
+      background: var(--paper);
+      color: var(--color-brand);
+      border: 1px solid var(--line);
     }}
     .env-choice-intro {{
       margin: 0 0 16px;
-      font-size: 14px;
-      color: #493b2f;
+      font-size: 13.5px;
+      color: var(--ink-secondary);
       max-width: none !important;
     }}
     .env-choice-grid {{
@@ -567,16 +595,15 @@ def main() -> None:
       flex-direction: column;
       justify-content: space-between;
       padding: 18px 20px;
-      border-radius: 14px;
-      background: #fff;
-      border: 1px solid #dfd2c0;
-      box-shadow: 0 4px 12px rgba(40, 26, 14, 0.05);
+      border-radius: 6px;
+      background: var(--paper);
+      border: 1px solid var(--line);
     }}
     .env-card-local {{
-      border-top: 4px solid var(--green);
+      border-top: 3px solid var(--color-brand-dark);
     }}
     .env-card-demo {{
-      border-top: 4px solid var(--copper);
+      border-top: 3px solid var(--color-brand);
     }}
     .env-card-head {{
       display: flex;
@@ -584,43 +611,52 @@ def main() -> None:
       gap: 12px;
       margin-bottom: 10px;
     }}
-    .env-card-icon {{
-      font-size: 26px;
-      line-height: 1;
+    .env-card-code {{
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 4px 8px;
+      border-radius: 4px;
+      background: var(--surface-muted);
+      border: 1px solid var(--line);
+      color: var(--ink);
+      white-space: nowrap;
     }}
     .env-card-head h4 {{
       margin: 0 0 4px;
-      font-size: 16px;
-      color: #1f1812;
+      font-size: 15px;
+      color: var(--ink);
     }}
     .env-tag {{
       display: inline-block;
-      font-size: 11.5px;
-      font-weight: 700;
-      padding: 2px 8px;
-      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 1px 7px;
+      border-radius: 4px;
     }}
     .env-tag-green {{
-      background: var(--green-bg);
-      color: var(--green);
+      background: var(--color-brand-soft);
+      color: #047857;
+      border: 1px solid var(--color-brand-border);
     }}
-    .env-tag-copper {{
-      background: var(--copper-soft);
-      color: var(--copper-dark);
+    .env-tag-brand {{
+      background: #F1F5F9;
+      color: var(--ink-secondary);
+      border: 1px solid var(--line);
     }}
     .env-card-desc {{
       margin: 0 0 12px;
-      font-size: 13.5px;
+      font-size: 13px;
       line-height: 1.6;
-      color: #5c4f43;
+      color: var(--muted);
     }}
     .env-url-box {{
       margin-bottom: 12px;
       padding: 6px 10px;
-      border-radius: 8px;
-      background: #f6f0e6;
-      border: 1px dashed #d5c3ad;
-      font-size: 13px;
+      border-radius: 4px;
+      background: var(--surface-muted);
+      border: 1px solid var(--line);
+      font-size: 12.5px;
     }}
     .env-card-actions {{
       display: flex;
@@ -632,36 +668,35 @@ def main() -> None:
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      padding: 7px 14px;
-      border-radius: 9px;
-      font-size: 13px;
-      font-weight: 700;
+      padding: 6px 13px;
+      border-radius: 5px;
+      font-size: 12.5px;
+      font-weight: 600;
       text-decoration: none !important;
-      transition: all 0.15s ease;
+      transition: background-color 0.12s ease;
     }}
     .env-btn-local {{
-      background: var(--green);
-      color: #fff !important;
+      background: #059669;
+      color: #FFFFFF !important;
     }}
     .env-btn-local:hover {{
-      background: #105e39;
-      transform: translateY(-1px);
+      background: #047857;
     }}
     .env-btn-demo {{
-      background: var(--copper);
-      color: #fff !important;
+      background: var(--color-brand);
+      color: #FFFFFF !important;
     }}
     .env-btn-demo:hover {{
-      background: var(--copper-dark);
-      transform: translateY(-1px);
+      background: var(--color-brand-hover);
     }}
     .env-btn-sub {{
-      background: #f4ebe0;
-      color: #4b3d30 !important;
-      border: 1px solid #d9c7b2;
+      background: var(--surface-muted);
+      color: var(--ink-secondary) !important;
+      border: 1px solid var(--line);
     }}
     .env-btn-sub:hover {{
-      background: #e9dac8;
+      background: #F1F5F9;
+      color: var(--ink) !important;
     }}
 
     /* Smart Environment Toast (Bottom-Right Lightweight Notification) */
@@ -670,25 +705,18 @@ def main() -> None:
       right: 22px;
       bottom: 22px;
       z-index: 95;
-      max-width: 430px;
-      padding: 16px 18px;
-      border-radius: 14px;
-      background: rgba(30, 24, 19, 0.96);
-      color: #fdf7f0;
-      border: 1px solid rgba(245, 166, 91, 0.55);
-      box-shadow: 0 16px 42px rgba(0, 0, 0, 0.35);
-      backdrop-filter: blur(10px);
-      font-size: 13.5px;
+      max-width: 420px;
+      padding: 14px 16px;
+      border-radius: 6px;
+      background: var(--code-bg);
+      color: #F8FAFC;
+      border: 1px solid #334155;
+      font-size: 13px;
       line-height: 1.6;
       display: none;
-      animation: toastSlideUp 0.22s ease-out;
     }}
     .smart-nav-toast.show {{
       display: block;
-    }}
-    @keyframes toastSlideUp {{
-      from {{ opacity: 0; transform: translateY(14px); }}
-      to {{ opacity: 1; transform: translateY(0); }}
     }}
     .smart-toast-head {{
       display: flex;
@@ -696,36 +724,36 @@ def main() -> None:
       justify-content: space-between;
       gap: 10px;
       margin-bottom: 6px;
-      font-weight: 800;
-      color: #ffbe7b;
-      font-size: 14px;
+      font-weight: 600;
+      color: var(--color-brand-dark);
+      font-size: 13px;
     }}
     .smart-toast-close {{
       background: transparent;
       border: 0;
-      color: #cbbba8;
+      color: #94A3B8;
       cursor: pointer;
-      font-size: 14px;
+      font-size: 13px;
       padding: 2px 6px;
     }}
-    .smart-toast-close:hover {{ color: #fff; }}
+    .smart-toast-close:hover {{ color: #FFFFFF; }}
     .smart-toast-local-link {{
       display: inline-flex;
       align-items: center;
       gap: 4px;
       margin-top: 8px;
-      padding: 5px 11px;
-      border-radius: 8px;
-      background: rgba(22, 121, 75, 0.35);
-      border: 1px solid #43b581;
-      color: #9ef0c6 !important;
-      font-weight: 700;
-      font-size: 12.8px;
+      padding: 4px 10px;
+      border-radius: 4px;
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid var(--color-brand-dark);
+      color: #6EE7B7 !important;
+      font-weight: 600;
+      font-size: 12px;
       text-decoration: none !important;
     }}
     .smart-toast-local-link:hover {{
-      background: var(--green);
-      color: #fff !important;
+      background: #059669;
+      color: #FFFFFF !important;
     }}
 
     /* Direct Launch Action Cards & Inline App Links */
@@ -738,17 +766,18 @@ def main() -> None:
       flex-wrap: wrap;
       align-items: center;
       gap: 10px;
-      padding: 12px 16px;
-      border-radius: 12px;
-      background: linear-gradient(90deg, #fff6ec 0%, #f9efe2 100%);
-      border: 1px solid #e2c29d;
-      box-shadow: 0 4px 12px rgba(181, 101, 39, 0.08);
+      padding: 10px 14px;
+      border-radius: 6px;
+      background: var(--surface-muted);
+      border: 1px solid var(--line);
     }}
     .direct-launch-label {{
-      font-size: 13.5px;
-      font-weight: 800;
-      color: #7c3f10;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11.5px;
+      font-weight: 700;
+      color: var(--color-brand);
       white-space: nowrap;
+      letter-spacing: 0.02em;
     }}
     .direct-launch-actions {{
       display: flex;
@@ -760,155 +789,153 @@ def main() -> None:
       display: inline-flex;
       align-items: center;
       gap: 5px;
-      padding: 6px 14px;
-      border-radius: 9px;
-      background: var(--copper);
-      color: #fff !important;
-      font-size: 13.5px;
-      font-weight: 700;
+      padding: 5px 12px;
+      border-radius: 5px;
+      background: var(--color-brand);
+      color: #FFFFFF !important;
+      font-size: 12.5px;
+      font-weight: 600;
       text-decoration: none !important;
-      box-shadow: 0 2px 6px rgba(140, 72, 20, 0.22);
-      transition: all 0.15s ease;
+      transition: background-color 0.12s ease;
     }}
     .direct-launch-btn:hover {{
-      background: var(--copper-dark);
-      transform: translateY(-1px);
-      box-shadow: 0 4px 10px rgba(140, 72, 20, 0.3);
+      background: var(--color-brand-hover);
     }}
     .inline-app-link {{
       display: inline-flex;
       align-items: center;
       gap: 3px;
-      padding: 2px 9px;
+      padding: 1px 7px;
       margin: 1px 2px;
-      border-radius: 6px;
-      background: #f8efe4;
-      border: 1px solid #e0c3a2;
-      color: var(--copper-dark) !important;
-      font-size: 13.5px;
-      font-weight: 700;
+      border-radius: 4px;
+      background: var(--surface-muted);
+      border: 1px solid var(--border-strong);
+      color: var(--color-brand) !important;
+      font-size: 13px;
+      font-weight: 600;
       text-decoration: none !important;
-      transition: all 0.14s ease;
+      transition: background-color 0.12s ease, color 0.12s ease;
     }}
     .inline-app-link:hover {{
-      background: var(--copper);
-      border-color: var(--copper);
-      color: #fff !important;
+      background: var(--color-brand);
+      border-color: var(--color-brand);
+      color: #FFFFFF !important;
     }}
 
     /* Layout Grid */
     .wrap {{
       display: grid;
-      grid-template-columns: 275px minmax(0, 1fr);
-      gap: 32px;
+      grid-template-columns: 270px minmax(0, 1fr);
+      gap: 28px;
       max-width: 1440px;
       margin: auto;
-      padding: 28px 24px 96px;
+      padding: 24px 24px 96px;
     }}
     aside {{
       align-self: start;
       position: sticky;
-      top: 76px;
-      max-height: calc(100vh - 96px);
+      top: 72px;
+      max-height: calc(100vh - 92px);
       overflow-y: auto;
-      padding: 18px 14px;
+      padding: 16px 12px;
       background: var(--paper);
       border: 1px solid var(--line);
-      border-radius: 16px;
-      box-shadow: 0 6px 20px rgba(59, 35, 15, 0.04);
+      border-radius: 8px;
     }}
     .aside-title {{
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin: 0 8px 12px;
+      margin: 0 8px 10px;
       padding-bottom: 10px;
       border-bottom: 1px solid var(--line);
-      font-weight: 800;
-      font-size: 14.5px;
+      font-weight: 700;
+      font-size: 13px;
       color: var(--ink);
+      letter-spacing: 0.02em;
     }}
     aside a.toc-link {{
       display: block;
-      padding: 6px 10px;
+      padding: 5px 10px;
       margin: 2px 0;
-      border-radius: 8px;
+      border-radius: 4px;
       color: var(--muted);
-      font-size: 13.5px;
+      font-size: 13px;
       line-height: 1.45;
-      transition: all 0.12s ease;
+      border-left: 2px solid transparent;
+      transition: background-color 0.12s ease, color 0.12s ease;
     }}
     aside a.toc-h2 {{
-      font-weight: 700;
-      color: #2f261f;
+      font-weight: 600;
+      color: var(--ink-secondary);
       margin-top: 8px;
     }}
     aside a.toc-h3 {{
-      padding-left: 20px;
-      font-size: 12.8px;
-      border-left: 2px solid transparent;
+      padding-left: 18px;
+      font-size: 12.5px;
     }}
     aside a.toc-link:hover {{
-      background: #f3e9dc;
-      color: var(--copper-dark);
+      background: var(--surface-muted);
+      color: var(--ink);
       text-decoration: none;
     }}
     aside a.toc-link.active {{
-      background: var(--copper-soft);
-      color: var(--copper-dark);
-      font-weight: 700;
-      border-left-color: var(--copper);
+      background: var(--color-brand-soft);
+      color: var(--color-brand);
+      font-weight: 600;
+      border-left-color: var(--color-brand);
     }}
 
     /* Main Article Styling */
     main {{
       min-width: 0;
-      padding: 38px clamp(24px, 4.5vw, 68px) 76px;
+      padding: 36px clamp(24px, 4vw, 56px) 72px;
       background: var(--paper);
       border: 1px solid var(--line);
-      border-radius: 20px;
-      box-shadow: 0 8px 30px rgba(59, 35, 15, 0.04);
+      border-radius: 8px;
     }}
     h1, h2, h3 {{
       line-height: 1.35;
       letter-spacing: -0.02em;
-      scroll-margin-top: 84px;
+      scroll-margin-top: 80px;
+      color: var(--ink);
     }}
     h1 {{
-      font-size: clamp(26px, 2.8vw, 36px);
+      font-size: clamp(24px, 2.5vw, 32px);
       margin: 0 0 16px;
-      color: #1c1612;
     }}
     h2 {{
-      font-size: 23px;
-      margin: 52px 0 18px;
-      padding: 14px 18px;
-      background: linear-gradient(90deg, #f8efe4 0%, rgba(248, 239, 228, 0.2) 100%);
-      border-left: 4px solid var(--copper);
-      border-radius: 0 12px 12px 0;
-      color: #251c15;
+      font-size: 21px;
+      margin: 48px 0 16px;
+      padding: 10px 14px;
+      background: var(--surface-muted);
+      border-left: 3px solid var(--color-brand);
+      border-top: 1px solid var(--line);
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      border-radius: 0 6px 6px 0;
     }}
     h3 {{
-      font-size: 19px;
-      margin: 34px 0 12px;
-      color: #2d2219;
+      font-size: 17.5px;
+      margin: 32px 0 12px;
     }}
-    p, li {{ max-width: 88ch; }}
+    p, li {{ max-width: 88ch; color: var(--ink-secondary); }}
+    strong {{ color: var(--ink); }}
     ul, ol {{ padding-left: 22px; }}
     li {{ margin: 6px 0; }}
     hr {{
       border: 0;
-      border-top: 1px dashed var(--line);
-      margin: 36px 0;
+      border-top: 1px solid var(--line);
+      margin: 32px 0;
     }}
     blockquote {{
-      margin: 20px 0;
-      padding: 16px 22px;
-      border-left: 4px solid var(--copper);
-      background: #f6ede2;
-      color: #5e3e24;
-      border-radius: 0 12px 12px 0;
-      font-size: 15px;
+      margin: 18px 0;
+      padding: 14px 18px;
+      border-left: 3px solid var(--color-brand);
+      background: var(--surface-muted);
+      color: var(--ink-secondary);
+      border-radius: 0 6px 6px 0;
+      font-size: 14.5px;
     }}
     blockquote p {{ margin: 0; max-width: none; }}
 
@@ -917,150 +944,147 @@ def main() -> None:
       width: 100%;
       border-collapse: separate;
       border-spacing: 0;
-      margin: 18px 0 28px;
-      font-size: 14px;
+      margin: 16px 0 26px;
+      font-size: 13.5px;
       border: 1px solid var(--line);
-      border-radius: 12px;
+      border-radius: 6px;
       overflow: hidden;
     }}
     th, td {{
       border-bottom: 1px solid var(--line);
-      padding: 11px 14px;
+      padding: 10px 14px;
       text-align: left;
       vertical-align: top;
     }}
     tr:last-child td {{ border-bottom: none; }}
     th {{
-      background: #f3e9dc;
-      font-weight: 700;
-      color: #2c221a;
+      background: var(--surface-muted);
+      font-weight: 600;
+      color: var(--ink);
     }}
-    tbody tr:nth-child(even) {{ background: #fcf9f4; }}
-    tbody tr:hover {{ background: #f7efe4; }}
+    tbody tr:nth-child(even) {{ background: #FCFCFD; }}
+    tbody tr:hover {{ background: #F1F5F9; }}
 
-    /* Inline code & Prompt Copy Box */
+    /* Inline code & Terminal Prompt Copy Box */
     code {{
       padding: 2px 6px;
-      background: #f2ebe1;
-      color: #7c3f10;
-      border-radius: 5px;
-      font: 13.5px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+      background: #F1F5F9;
+      color: var(--color-brand);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      font: 13px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
     }}
     .prompt-box {{
-      margin: 16px 0 26px;
-      border-radius: 12px;
+      margin: 14px 0 24px;
+      border-radius: 6px;
       overflow: hidden;
-      border: 1px solid #3d332c;
-      background: #231e1a;
-      box-shadow: 0 6px 18px rgba(25, 18, 12, 0.12);
+      border: 1px solid #334155;
+      background: var(--code-bg);
     }}
     .prompt-bar {{
       display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
       align-items: center;
       justify-content: space-between;
       padding: 8px 14px;
-      background: #312923;
-      border-bottom: 1px solid #433931;
+      background: var(--code-header);
+      border-bottom: 1px solid #334155;
     }}
     .prompt-tag {{
-      font-size: 12.5px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
       font-weight: 600;
-      color: #e6cbb1;
+      color: #CBD5E1;
     }}
     .copy-btn {{
       cursor: pointer;
-      padding: 5px 12px;
-      border-radius: 7px;
-      border: 1px solid rgba(245, 166, 91, 0.45);
-      background: rgba(181, 101, 39, 0.28);
-      color: #ffd7b0;
-      font-size: 12.5px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 11px;
+      border-radius: 4px;
+      border: 1px solid #475569;
+      background: #0F172A;
+      color: #F8FAFC;
+      font-size: 12px;
       font-weight: 600;
-      transition: all 0.15s ease;
+      transition: background-color 0.12s ease, border-color 0.12s ease;
     }}
     .copy-btn:hover {{
-      background: var(--copper);
-      color: #fff;
+      background: var(--color-brand);
+      border-color: var(--color-brand-dark);
+      color: #FFFFFF;
     }}
     .copy-btn.copied {{
-      background: var(--green);
-      border-color: var(--green);
-      color: #fff;
+      background: #059669;
+      border-color: #10B981;
+      color: #FFFFFF;
     }}
     .prompt-box pre {{
       margin: 0;
-      padding: 16px 18px;
+      padding: 14px 16px;
       overflow-x: auto;
       background: transparent;
-      color: #f8f2ea;
+      color: #F1F5F9;
       white-space: pre-wrap;
       word-break: break-word;
     }}
     .prompt-box pre code {{
       padding: 0;
       background: none;
+      border: 0;
       color: inherit;
-      font-size: 14px;
+      font-size: 13.5px;
       line-height: 1.65;
     }}
 
     /* Screenshot Figure Cards */
     .shot-card {{
-      margin: 18px 0 26px;
-      border: 1px solid #d5c5ae;
-      border-radius: 14px;
+      margin: 16px 0 24px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
       overflow: hidden;
-      background: #fff;
-      box-shadow: 0 10px 28px rgba(45, 30, 15, 0.09);
+      background: var(--paper);
       cursor: zoom-in;
-      transition: transform 0.18s ease, box-shadow 0.18s ease;
+      transition: border-color 0.15s ease;
     }}
     .shot-card:hover {{
-      transform: translateY(-2px);
-      box-shadow: 0 14px 36px rgba(45, 30, 15, 0.15);
+      border-color: var(--color-brand);
     }}
     .shot-bar {{
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 12px;
-      padding: 9px 16px;
-      background: #f4ece0;
-      border-bottom: 1px solid #dfd2bf;
-      font-size: 13px;
+      gap: 10px;
+      padding: 8px 14px;
+      background: var(--surface-muted);
+      border-bottom: 1px solid var(--line);
+      font-size: 12.5px;
     }}
-    .shot-dots {{
-      display: inline-flex;
-      gap: 6px;
-      align-items: center;
-    }}
-    .shot-dots i {{
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      display: inline-block;
-      background: #d9c9b5;
-    }}
-    .shot-dots i:nth-child(1) {{ background: #e57368; }}
-    .shot-dots i:nth-child(2) {{ background: #f0b849; }}
-    .shot-dots i:nth-child(3) {{ background: #5bbd72; }}
-    .shot-title {{
+    .shot-tag {{
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
       font-weight: 700;
-      color: #3a2e25;
+      padding: 1px 6px;
+      border-radius: 3px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      color: var(--color-brand);
+    }}
+    .shot-title {{
+      font-weight: 600;
+      color: var(--ink);
       margin-right: auto;
     }}
     .shot-zoom {{
-      font-size: 12px;
+      font-size: 11.5px;
       font-weight: 600;
-      color: var(--copper-dark);
-      background: #fff8f0;
-      padding: 3px 10px;
-      border-radius: 999px;
-      border: 1px solid #e3c8ab;
+      color: var(--muted);
       white-space: nowrap;
     }}
     .shot-img-wrap {{
-      background: #1a1614;
+      background: #0F172A;
       line-height: 0;
     }}
     .shot-card img {{
@@ -1078,8 +1102,8 @@ def main() -> None:
       align-items: center;
       justify-content: center;
       padding: 28px;
-      background: rgba(18, 14, 11, 0.88);
-      backdrop-filter: blur(8px);
+      background: rgba(15, 23, 42, 0.9);
+      backdrop-filter: blur(6px);
       cursor: zoom-out;
     }}
     .lightbox.open {{ display: flex; }}
@@ -1094,14 +1118,13 @@ def main() -> None:
     .lightbox-inner img {{
       max-width: 95vw;
       max-height: 84vh;
-      border-radius: 12px;
+      border-radius: 6px;
       border: 1px solid rgba(255, 255, 255, 0.2);
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
-      background: #fff;
+      background: #FFFFFF;
     }}
     .lightbox-caption {{
-      color: #f8efe6;
-      font-size: 14px;
+      color: #F8FAFC;
+      font-size: 13.5px;
       font-weight: 600;
       display: flex;
       align-items: center;
@@ -1109,10 +1132,10 @@ def main() -> None:
     }}
     .lightbox-close {{
       padding: 4px 12px;
-      border-radius: 6px;
-      background: rgba(255, 255, 255, 0.16);
-      color: #fff;
-      font-size: 12.5px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.14);
+      color: #FFFFFF;
+      font-size: 12px;
       border: 1px solid rgba(255, 255, 255, 0.25);
       cursor: pointer;
     }}
@@ -1125,7 +1148,7 @@ def main() -> None:
       aside {{ position: static; max-height: none; margin-bottom: 18px; }}
       main {{ padding: 24px 18px 44px; }}
       .hero-banner {{ padding: 0 14px; margin-top: 16px; }}
-      .hero-card {{ padding: 22px 20px; }}
+      .hero-card {{ padding: 20px 18px; }}
       .flow-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
       .env-choice-grid {{ grid-template-columns: 1fr; }}
       .top {{ padding: 10px 14px; }}
@@ -1133,11 +1156,12 @@ def main() -> None:
     }}
     @media (max-width: 600px) {{
       .flow-grid {{ grid-template-columns: 1fr; }}
+      .hero-pills {{ grid-template-columns: 1fr; }}
     }}
     @media print {{
       .top, aside, .lightbox, .smart-nav-toast {{ display: none !important; }}
       .wrap {{ display: block; padding: 0; }}
-      main {{ border: 0; box-shadow: none; }}
+      main {{ border: 0; }}
     }}
   </style>
 </head>
@@ -1146,15 +1170,15 @@ def main() -> None:
     <a class="brand app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener">
       <img src="/logo-hunter.png" alt="猎鹿人">
       <span>猎鹿人 · HunterCode</span>
-      <span class="brand-badge">v3.5.2 帮助中心</span>
+      <span class="brand-badge">DOCS v3.5.2</span>
     </a>
     <nav aria-label="核心工作区导航（智能环境识别 · 新窗口打开）">
       <a class="nav-primary app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener">返回 AI 对话 ↗</a>
       <a class="app-link" href="#" data-path="/workbench" data-route="/workbench" target="_blank" rel="noopener">投研工作台 ↗</a>
       <a class="app-link" href="#" data-path="/strategies/index.html" data-route="/strategies/index.html" target="_blank" rel="noopener">策略中心 ↗</a>
       <a class="app-link" href="#" data-path="/finance/overview" data-route="/finance/overview" target="_blank" rel="noopener">智能体自动炒股 ↗</a>
-      <a class="app-link" href="#" data-path="/settings?tab=llm" data-route="/settings?tab=llm" target="_blank" rel="noopener">⚙️ 设置 ↗</a>
-      <a href="https://github.com/agentpit-io/hunter-community" target="_blank" rel="noopener">GitHub 开源仓库 ↗</a>
+      <a class="app-link" href="#" data-path="/settings?tab=llm" data-route="/settings?tab=llm" target="_blank" rel="noopener">设置 ↗</a>
+      <a href="https://github.com/agentpit-io/hunter-community" target="_blank" rel="noopener">GitHub ↗</a>
     </nav>
   </header>
 
@@ -1162,112 +1186,112 @@ def main() -> None:
     <div class="hero-card">
       <div class="hero-top">
         <div class="hero-title-group">
-          <span class="hero-eyebrow">🦌 私人证券研究所 · 零实盘交易风险 · 100% 本地隐私优先 · v3.5.2 正式版</span>
+          <span class="hero-eyebrow">HUNTER COMMUNITY v3.5.2 · 私人证券研究所 · 零实盘交易风险 · 100% 本地隐私优先</span>
           <h1>猎鹿人 HunterCode 股民日常炒股全流程操作手册</h1>
           <p class="hero-sub">
-            不用懂编程、不用背命令！跟着交易日从早到晚的时间表走：早上 8:30 看三栏早报，盘中盯异动翻 PDF 公告原文、做 56 项技术 + 90 项基本面全身检查，下午 15:30 收盘复盘归档，周末算 ETF 定投跑回测。点击下方任意步骤卡片可查看图文教程，点击「🚀 直达按钮」自动识别当前环境并在新窗口打开对应功能（官网预览自动直达在线演示站，本地环境直达本机实例）！
+            不用懂编程、不用背命令。跟着交易日从早到晚的时间表走：早上 08:30 看三栏早报，盘中盯异动翻 PDF 公告原文、做 56 项技术 + 90 项基本面全身检查，下午 15:30 收盘复盘归档，周末算 ETF 定投跑回测。点击下方任意步骤卡片可查看图文教程，点击直达按钮自动识别当前环境并在新窗口打开对应功能（官网预览自动直达在线演示站，本地环境直达本机实例）。
           </p>
         </div>
         <div class="hero-pills">
-          <div class="hero-pill"><strong>12 张</strong> 实机高清截图</div>
-          <div class="hero-pill"><strong>22 个</strong> 内置金融 SKILL</div>
-          <div class="hero-pill"><strong>69 个</strong> 真实数据工具</div>
-          <div class="hero-pill"><strong>0 实盘下单</strong> 物理级安全</div>
+          <div class="hero-pill"><strong>12 FIGURES</strong>实机高清截图</div>
+          <div class="hero-pill"><strong>22 SKILLS</strong>内置金融技能</div>
+          <div class="hero-pill"><strong>69 TOOLS</strong>真实数据工具</div>
+          <div class="hero-pill"><strong>READ-ONLY</strong>物理级零实盘风险</div>
         </div>
       </div>
 
       <div class="flow-section-title">
-        <span>🧭 股民日常炒股 6 步总流程图（可跳章节看图文，或点下方按钮在新窗口直达功能页）</span>
+        <span>WORKFLOW MATRIX / 股民日常炒股 6 步总流程图（可跳章节看图文，或点下方按钮在新窗口直达功能页）</span>
         <span>支持点击正文中任意截图全屏放大查看</span>
       </div>
       <div class="flow-grid">
         <div class="flow-step">
           <div>
             <div class="flow-step-head">
-              <span class="flow-badge">准备篇</span>
+              <span class="flow-badge">PHASE 00 / FIRST-TIME SETUP</span>
               <span class="flow-time">首次 3 分钟</span>
             </div>
             <h3>装好上手与 4 大入口</h3>
             <p>配好大模型 Key、验证行情连通，3 秒认清对话、工作台、策略与模拟盘。</p>
           </div>
           <div class="flow-actions">
-            <a class="flow-go" href="#{escape(anchors['step0'])}">📖 查看第 1 章图文 →</a>
-            <a class="flow-launch app-link" href="#" data-path="/settings?tab=llm" data-route="/settings?tab=llm" target="_blank" rel="noopener">🚀 直达设置 (/settings) ↗</a>
+            <a class="flow-go" href="#{escape(anchors['step0'])}">查看第 1 章图文 →</a>
+            <a class="flow-launch app-link" href="#" data-path="/settings?tab=llm" data-route="/settings?tab=llm" target="_blank" rel="noopener">直达设置 (/settings) ↗</a>
           </div>
         </div>
 
         <div class="flow-step">
           <div>
             <div class="flow-step-head">
-              <span class="flow-badge">第一步 · 盘前</span>
+              <span class="flow-badge">STEP 01 / PRE-MARKET BRIEF</span>
               <span class="flow-time">08:30 - 09:25</span>
             </div>
             <h3>08:30 盘前市场晨报</h3>
             <p>一键出三栏观察卡（事实/推断/待核实），带数字回读校验防小作文忽悠。</p>
           </div>
           <div class="flow-actions">
-            <a class="flow-go" href="#{escape(anchors['step1'])}">📖 查看第 2 章图文 →</a>
-            <a class="flow-launch app-link" href="#" data-path="/workbench?tab=market" data-route="/workbench?tab=market" target="_blank" rel="noopener">🚀 直达市场工作台 ↗</a>
+            <a class="flow-go" href="#{escape(anchors['step1'])}">查看第 2 章图文 →</a>
+            <a class="flow-launch app-link" href="#" data-path="/workbench?tab=market" data-route="/workbench?tab=market" target="_blank" rel="noopener">直达市场工作台 ↗</a>
           </div>
         </div>
 
         <div class="flow-step">
           <div>
             <div class="flow-step-head">
-              <span class="flow-badge">第二步 · 盘中</span>
+              <span class="flow-badge">STEP 02 / INTRADAY RADAR</span>
               <span class="flow-time">09:30 - 15:00</span>
             </div>
             <h3>盯异动 · 翻公告 · 诊个股</h3>
             <p>自选股异动归因、PDF 公告页码抽屉、56 项技术 + 90 项基本面体检。</p>
           </div>
           <div class="flow-actions">
-            <a class="flow-go" href="#{escape(anchors['step2'])}">📖 查看第 3 章图文 →</a>
-            <a class="flow-launch app-link" href="#" data-path="/workbench?tab=watchlist" data-route="/workbench?tab=watchlist" target="_blank" rel="noopener">🚀 直达自选股/个股工作台 ↗</a>
+            <a class="flow-go" href="#{escape(anchors['step2'])}">查看第 3 章图文 →</a>
+            <a class="flow-launch app-link" href="#" data-path="/workbench?tab=watchlist" data-route="/workbench?tab=watchlist" target="_blank" rel="noopener">直达自选股/个股工作台 ↗</a>
           </div>
         </div>
 
         <div class="flow-step">
           <div>
             <div class="flow-step-head">
-              <span class="flow-badge">第三步 · 盘后</span>
+              <span class="flow-badge">STEP 03 / AFTER-HOURS REVIEW</span>
               <span class="flow-time">15:30 以后</span>
             </div>
             <h3>盘后复盘与持仓体检</h3>
             <p>15:30 复盘自动存本地经验库，核对买入理由变没变，安全导入交割单。</p>
           </div>
           <div class="flow-actions">
-            <a class="flow-go" href="#{escape(anchors['step3'])}">📖 查看第 4 章图文 →</a>
-            <a class="flow-launch app-link" href="#" data-path="/workbench?tab=portfolio_review" data-route="/workbench?tab=portfolio_review" target="_blank" rel="noopener">🚀 直达组合复盘工作台 ↗</a>
+            <a class="flow-go" href="#{escape(anchors['step3'])}">查看第 4 章图文 →</a>
+            <a class="flow-launch app-link" href="#" data-path="/workbench?tab=portfolio_review" data-route="/workbench?tab=portfolio_review" target="_blank" rel="noopener">直达组合复盘工作台 ↗</a>
           </div>
         </div>
 
         <div class="flow-step">
           <div>
             <div class="flow-step-head">
-              <span class="flow-badge">第四步 · 周末</span>
-              <span class="flow-time">定投与选股</span>
+              <span class="flow-badge">STEP 04 / ETF DCA &amp; SCREENER</span>
+              <span class="flow-time">周末 · 定投与选股</span>
             </div>
             <h3>ETF 定投计算与防坑回测</h3>
             <p>算清每月定投真实 XIRR 年化收益，大白话选股 + 6 维回测防造假审计。</p>
           </div>
           <div class="flow-actions">
-            <a class="flow-go" href="#{escape(anchors['step4'])}">📖 查看 5.1 节图文 →</a>
-            <a class="flow-launch app-link" href="#" data-path="/workbench?tab=quant" data-route="/workbench?tab=quant" target="_blank" rel="noopener">🚀 直达量化与 ETF 定投 ↗</a>
+            <a class="flow-go" href="#{escape(anchors['step4'])}">查看 5.1 节图文 →</a>
+            <a class="flow-launch app-link" href="#" data-path="/workbench?tab=quant" data-route="/workbench?tab=quant" target="_blank" rel="noopener">直达量化与 ETF 定投 ↗</a>
           </div>
         </div>
 
         <div class="flow-step">
           <div>
             <div class="flow-step-head">
-              <span class="flow-badge">第五步 · 演练</span>
+              <span class="flow-badge">STEP 05 / AGENT SIMULATION</span>
               <span class="flow-time">全天候模拟</span>
             </div>
             <h3>策略中心与 AI 自动炒股</h3>
             <p>官方多因子策略库 + AI 智能体每日 6 大交易时点全自动模拟盘练手。</p>
           </div>
           <div class="flow-actions">
-            <a class="flow-go" href="#{escape(anchors['step5'])}">📖 查看 5.2 节图文 →</a>
-            <a class="flow-launch app-link" href="#" data-path="/strategies/index.html" data-route="/strategies/index.html" target="_blank" rel="noopener">🚀 直达策略中心 ↗</a>
+            <a class="flow-go" href="#{escape(anchors['step5'])}">查看 5.2 节图文 →</a>
+            <a class="flow-launch app-link" href="#" data-path="/strategies/index.html" data-route="/strategies/index.html" target="_blank" rel="noopener">直达策略中心 ↗</a>
           </div>
         </div>
       </div>
@@ -1277,8 +1301,8 @@ def main() -> None:
   <div class="wrap">
     <aside aria-label="本页章节目录">
       <div class="aside-title">
-        <span>📖 说明书目录</span>
-        <a href="#top" onclick="window.scrollTo({{top:0,behavior:'smooth'}});return false;" style="font-size:12px;font-weight:600;">↑ 回到顶部</a>
+        <span>CONTENTS / 说明书目录</span>
+        <a href="#top" onclick="window.scrollTo({{top:0,behavior:'smooth'}});return false;" style="font-size:12px;font-weight:600;">↑ 顶部</a>
       </div>
       {toc}
     </aside>
@@ -1299,7 +1323,7 @@ def main() -> None:
 
   <div id="smart-nav-toast" class="smart-nav-toast" role="status" aria-live="polite">
     <div class="smart-toast-head">
-      <span>🌐 官网预览模式 · 双通道智能导航</span>
+      <span>ENVIRONMENT ROUTING · 双通道智能导航</span>
       <button type="button" class="smart-toast-close" onclick="closeSmartToast()" aria-label="关闭提示">✕</button>
     </div>
     <div id="smart-toast-body">
@@ -1307,7 +1331,7 @@ def main() -> None:
     </div>
     <div>
       <a id="smart-toast-local-anchor" class="smart-toast-local-link" href="http://localhost:3100/workbench" target="_blank" rel="noopener">
-        🖥️ 打开本地 localhost:3100/workbench ↗
+        打开本地 localhost:3100/workbench ↗
       </a>
     </div>
   </div>
@@ -1364,9 +1388,9 @@ def main() -> None:
       if (indicator) {{
         if (env.isLocalOrSelfHosted) {{
           var hostLabel = window.location.host || env.hostname || '本地实例';
-          indicator.textContent = '✅ 当前已连接实例：' + hostLabel + '（点击按钮直接打开当前实例）';
+          indicator.textContent = 'CONNECTED: ' + hostLabel + '（点击按钮直接打开当前实例）';
         }} else {{
-          indicator.textContent = '🌐 当前处于官网预览模式（点击功能按钮将优先打开在线演示站，并支持切换本地 :3100）';
+          indicator.textContent = 'PREVIEW MODE: 官网预览模式（点击功能按钮将优先打开在线演示站，并支持切换本地 :3100）';
         }}
       }}
 
@@ -1449,7 +1473,7 @@ def main() -> None:
     function showCopied(btn) {{
       var orig = btn.getAttribute('data-orig') || btn.textContent;
       btn.setAttribute('data-orig', orig);
-      btn.textContent = '✅ 已复制提问口令';
+      btn.textContent = '✓ COPIED / 已复制口令';
       btn.classList.add('copied');
       setTimeout(function() {{
         btn.textContent = orig;

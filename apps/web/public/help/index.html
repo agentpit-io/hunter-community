@@ -10,16 +10,21 @@
   <style>
     :root {
       color-scheme: light;
-      --ink: #1e1915;
-      --muted: #6e6257;
-      --line: #dfd3c0;
-      --paper: #fffdfa;
-      --bg: #f6f1e8;
-      --copper: #b56527;
-      --copper-dark: #8c4814;
-      --copper-soft: #f8efe4;
-      --green: #16794b;
-      --green-bg: #e7f6ee;
+      --color-brand: #203C30;
+      --color-brand-hover: #172B22;
+      --color-brand-dark: #10B981;
+      --color-brand-soft: #ECFDF5;
+      --color-brand-border: #A7F3D0;
+      --ink: #0F172A;
+      --ink-secondary: #334155;
+      --muted: #64748B;
+      --line: #E2E8F0;
+      --border-strong: #CBD5E1;
+      --paper: #FFFFFF;
+      --bg: #FBFBFA;
+      --surface-muted: #F8F9FA;
+      --code-bg: #0F172A;
+      --code-header: #1E293B;
     }
     * { box-sizing: border-box; }
     html { scroll-behavior: smooth; }
@@ -27,10 +32,11 @@
       margin: 0;
       color: var(--ink);
       background: var(--bg);
-      font: 15.5px/1.8 -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      font: 15px/1.75 -apple-system, BlinkMacSystemFont, "Inter", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      -webkit-font-smoothing: antialiased;
     }
-    a { color: var(--copper-dark); text-decoration: none; }
-    a:hover { text-decoration: underline; }
+    a { color: var(--color-brand); text-decoration: none; }
+    a:hover { color: var(--color-brand-dark); text-decoration: underline; }
 
     /* Top Sticky Navigation */
     .top {
@@ -41,9 +47,9 @@
       gap: 20px;
       align-items: center;
       padding: 12px max(24px, calc((100vw - 1440px) / 2));
-      background: rgba(255, 253, 250, 0.95);
+      background: rgba(251, 251, 250, 0.96);
       border-bottom: 1px solid var(--line);
-      backdrop-filter: blur(14px);
+      backdrop-filter: blur(8px);
     }
     .brand {
       display: flex;
@@ -51,57 +57,62 @@
       gap: 10px;
       margin-right: auto;
       color: var(--ink);
-      font-weight: 800;
-      font-size: 16px;
+      font-weight: 700;
+      font-size: 15.5px;
+      letter-spacing: -0.01em;
       white-space: nowrap;
       text-decoration: none !important;
     }
-    .brand img { width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--line); }
+    .brand img { width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--line); }
     .brand-badge {
-      font-size: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11.5px;
       font-weight: 600;
       padding: 2px 8px;
-      border-radius: 999px;
-      background: var(--copper-soft);
-      color: var(--copper-dark);
-      border: 1px solid #e6cdb2;
+      border-radius: 4px;
+      background: var(--surface-muted);
+      color: var(--color-brand);
+      border: 1px solid var(--line);
     }
-    .top nav { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .top nav { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
     .top nav a {
-      padding: 6px 13px;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: 600;
-      color: #4b3f35;
-      transition: all 0.15s ease;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 13.5px;
+      font-weight: 500;
+      color: var(--ink-secondary);
+      border: 1px solid transparent;
+      transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
     }
     .top nav a:hover {
-      background: var(--copper-soft);
-      color: var(--copper-dark);
+      background: var(--surface-muted);
+      border-color: var(--line);
+      color: var(--ink);
       text-decoration: none;
     }
     .top nav a.nav-primary {
-      background: var(--copper);
-      color: #fff;
+      background: var(--color-brand);
+      border-color: var(--color-brand);
+      color: #FFFFFF;
+      font-weight: 600;
     }
     .top nav a.nav-primary:hover {
-      background: var(--copper-dark);
-      color: #fff;
+      background: var(--color-brand-hover);
+      color: #FFFFFF;
     }
 
-    /* Hero Banner + 6-Step Visual Flow Grid */
+    /* Editorial Hero Header + 6-Step Workflow Matrix */
     .hero-banner {
       max-width: 1440px;
-      margin: 26px auto 0;
+      margin: 24px auto 0;
       padding: 0 24px;
     }
     .hero-card {
-      background: linear-gradient(135deg, #241d18 0%, #3a2b20 55%, #593a20 100%);
-      color: #fdf8f2;
-      border-radius: 20px;
-      padding: 32px 36px 30px;
-      box-shadow: 0 14px 38px rgba(36, 25, 16, 0.14);
-      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: var(--paper);
+      color: var(--ink);
+      border-radius: 8px;
+      padding: 28px 32px;
+      border: 1px solid var(--line);
     }
     .hero-top {
       display: flex;
@@ -109,59 +120,70 @@
       justify-content: space-between;
       align-items: flex-start;
       gap: 20px;
-      margin-bottom: 24px;
+      padding-bottom: 22px;
+      margin-bottom: 22px;
+      border-bottom: 1px solid var(--line);
     }
     .hero-title-group h1 {
-      margin: 8px 0 10px;
-      font-size: clamp(24px, 2.6vw, 34px);
+      margin: 10px 0 10px;
+      font-size: clamp(22px, 2.4vw, 30px);
+      font-weight: 700;
       line-height: 1.3;
-      color: #fff;
+      color: var(--ink);
       letter-spacing: -0.02em;
     }
     .hero-eyebrow {
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      padding: 4px 12px;
-      border-radius: 999px;
-      background: rgba(245, 166, 91, 0.18);
-      border: 1px solid rgba(245, 166, 91, 0.4);
-      color: #f9c997;
-      font-size: 13px;
+      padding: 3px 10px;
+      border-radius: 4px;
+      background: var(--color-brand-soft);
+      border: 1px solid var(--color-brand-border);
+      color: var(--color-brand);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11.5px;
       font-weight: 600;
+      letter-spacing: 0.03em;
     }
     .hero-sub {
       margin: 0;
-      max-width: 78ch;
-      color: #dfd3c3;
-      font-size: 14.5px;
+      max-width: 82ch;
+      color: var(--ink-secondary);
+      font-size: 14px;
       line-height: 1.7;
     }
     .hero-pills {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(140px, 1fr));
+      gap: 8px;
     }
     .hero-pill {
-      padding: 7px 14px;
-      border-radius: 10px;
-      background: rgba(255, 255, 255, 0.08);
-      border: 1px solid rgba(255, 255, 255, 0.14);
-      font-size: 13px;
-      color: #f7ede2;
+      padding: 8px 12px;
+      border-radius: 6px;
+      background: var(--surface-muted);
+      border: 1px solid var(--line);
+      font-size: 12.5px;
+      color: var(--muted);
       white-space: nowrap;
     }
-    .hero-pill strong { color: #ffbe7b; }
+    .hero-pill strong {
+      display: block;
+      font-size: 14px;
+      color: var(--color-brand);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
 
     .flow-section-title {
       display: flex;
       align-items: center;
       justify-content: space-between;
       margin: 0 0 12px;
-      font-size: 14px;
-      font-weight: 700;
-      color: #f6cca2;
-      letter-spacing: 0.02em;
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
     }
     .flow-grid {
       display: grid;
@@ -172,50 +194,50 @@
       display: flex;
       flex-direction: column;
       justify-content: space-between;
-      padding: 14px 15px;
-      border-radius: 14px;
-      background: rgba(255, 253, 250, 0.09);
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      color: #fff;
+      padding: 14px;
+      border-radius: 6px;
+      background: var(--surface-muted);
+      border: 1px solid var(--line);
+      color: var(--ink);
       text-decoration: none !important;
-      transition: transform 0.16s ease, background 0.16s ease, border-color 0.16s ease;
+      transition: border-color 0.15s ease, background-color 0.15s ease;
     }
     .flow-step:hover {
-      transform: translateY(-3px);
-      background: rgba(255, 253, 250, 0.16);
-      border-color: #f3a963;
+      background: var(--paper);
+      border-color: var(--color-brand);
     }
     .flow-step-head {
       display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 6px;
-      margin-bottom: 6px;
+      flex-direction: column;
+      gap: 4px;
+      margin-bottom: 8px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--line);
     }
     .flow-badge {
-      font-size: 11.5px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
       font-weight: 700;
-      padding: 2px 8px;
-      border-radius: 6px;
-      background: #d97930;
-      color: #fff;
+      color: var(--color-brand);
+      letter-spacing: 0.03em;
     }
     .flow-time {
       font-size: 11.5px;
-      color: #e6cbb1;
+      color: var(--muted);
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     }
     .flow-step h3 {
-      margin: 4px 0 6px;
-      font-size: 15px;
-      color: #fff;
+      margin: 2px 0 6px;
+      font-size: 14.5px;
+      font-weight: 600;
+      color: var(--ink);
       line-height: 1.35;
     }
     .flow-step p {
-      margin: 0 0 10px;
+      margin: 0 0 12px;
       font-size: 12.5px;
-      line-height: 1.5;
-      color: #dfd2c4;
+      line-height: 1.55;
+      color: var(--muted);
     }
     .flow-actions {
       display: flex;
@@ -226,11 +248,11 @@
     .flow-go {
       font-size: 12px;
       font-weight: 600;
-      color: #ffbe7b;
+      color: var(--ink-secondary);
       text-decoration: none !important;
     }
     .flow-go:hover {
-      color: #fff;
+      color: var(--color-brand);
       text-decoration: underline !important;
     }
     .flow-launch {
@@ -238,28 +260,26 @@
       align-items: center;
       justify-content: center;
       padding: 5px 9px;
-      border-radius: 8px;
-      background: rgba(217, 121, 48, 0.32);
-      border: 1px solid rgba(255, 190, 123, 0.5);
-      color: #fff !important;
+      border-radius: 5px;
+      background: var(--color-brand);
+      border: 1px solid var(--color-brand);
+      color: #FFFFFF !important;
       font-size: 11.8px;
-      font-weight: 700;
+      font-weight: 600;
       text-decoration: none !important;
-      transition: all 0.15s ease;
+      transition: background-color 0.12s ease;
     }
     .flow-launch:hover {
-      background: #d97930;
-      border-color: #ffd7b0;
+      background: var(--color-brand-hover);
     }
 
     /* Environment Entry Choice Card (Chapter 1) */
     .env-choice-section {
       margin: 18px 0 28px;
       padding: 20px 22px;
-      border-radius: 16px;
-      background: linear-gradient(135deg, #fdf8f0 0%, #f7ecde 100%);
-      border: 2px solid #dfbe98;
-      box-shadow: 0 8px 24px rgba(140, 72, 20, 0.08);
+      border-radius: 8px;
+      background: var(--surface-muted);
+      border: 1px solid var(--border-strong);
     }
     .env-choice-header {
       display: flex;
@@ -273,26 +293,27 @@
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      padding: 4px 12px;
-      border-radius: 999px;
-      background: var(--copper-dark);
-      color: #fff;
-      font-size: 13px;
-      font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 4px;
+      background: var(--color-brand);
+      color: #FFFFFF;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      font-weight: 600;
     }
     .env-choice-status {
-      font-size: 12.5px;
-      font-weight: 700;
-      padding: 4px 12px;
-      border-radius: 999px;
-      background: #fff;
-      color: var(--copper-dark);
-      border: 1px solid #dec2a2;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 4px;
+      background: var(--paper);
+      color: var(--color-brand);
+      border: 1px solid var(--line);
     }
     .env-choice-intro {
       margin: 0 0 16px;
-      font-size: 14px;
-      color: #493b2f;
+      font-size: 13.5px;
+      color: var(--ink-secondary);
       max-width: none !important;
     }
     .env-choice-grid {
@@ -305,16 +326,15 @@
       flex-direction: column;
       justify-content: space-between;
       padding: 18px 20px;
-      border-radius: 14px;
-      background: #fff;
-      border: 1px solid #dfd2c0;
-      box-shadow: 0 4px 12px rgba(40, 26, 14, 0.05);
+      border-radius: 6px;
+      background: var(--paper);
+      border: 1px solid var(--line);
     }
     .env-card-local {
-      border-top: 4px solid var(--green);
+      border-top: 3px solid var(--color-brand-dark);
     }
     .env-card-demo {
-      border-top: 4px solid var(--copper);
+      border-top: 3px solid var(--color-brand);
     }
     .env-card-head {
       display: flex;
@@ -322,43 +342,52 @@
       gap: 12px;
       margin-bottom: 10px;
     }
-    .env-card-icon {
-      font-size: 26px;
-      line-height: 1;
+    .env-card-code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 4px 8px;
+      border-radius: 4px;
+      background: var(--surface-muted);
+      border: 1px solid var(--line);
+      color: var(--ink);
+      white-space: nowrap;
     }
     .env-card-head h4 {
       margin: 0 0 4px;
-      font-size: 16px;
-      color: #1f1812;
+      font-size: 15px;
+      color: var(--ink);
     }
     .env-tag {
       display: inline-block;
-      font-size: 11.5px;
-      font-weight: 700;
-      padding: 2px 8px;
-      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 1px 7px;
+      border-radius: 4px;
     }
     .env-tag-green {
-      background: var(--green-bg);
-      color: var(--green);
+      background: var(--color-brand-soft);
+      color: #047857;
+      border: 1px solid var(--color-brand-border);
     }
-    .env-tag-copper {
-      background: var(--copper-soft);
-      color: var(--copper-dark);
+    .env-tag-brand {
+      background: #F1F5F9;
+      color: var(--ink-secondary);
+      border: 1px solid var(--line);
     }
     .env-card-desc {
       margin: 0 0 12px;
-      font-size: 13.5px;
+      font-size: 13px;
       line-height: 1.6;
-      color: #5c4f43;
+      color: var(--muted);
     }
     .env-url-box {
       margin-bottom: 12px;
       padding: 6px 10px;
-      border-radius: 8px;
-      background: #f6f0e6;
-      border: 1px dashed #d5c3ad;
-      font-size: 13px;
+      border-radius: 4px;
+      background: var(--surface-muted);
+      border: 1px solid var(--line);
+      font-size: 12.5px;
     }
     .env-card-actions {
       display: flex;
@@ -370,36 +399,35 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      padding: 7px 14px;
-      border-radius: 9px;
-      font-size: 13px;
-      font-weight: 700;
+      padding: 6px 13px;
+      border-radius: 5px;
+      font-size: 12.5px;
+      font-weight: 600;
       text-decoration: none !important;
-      transition: all 0.15s ease;
+      transition: background-color 0.12s ease;
     }
     .env-btn-local {
-      background: var(--green);
-      color: #fff !important;
+      background: #059669;
+      color: #FFFFFF !important;
     }
     .env-btn-local:hover {
-      background: #105e39;
-      transform: translateY(-1px);
+      background: #047857;
     }
     .env-btn-demo {
-      background: var(--copper);
-      color: #fff !important;
+      background: var(--color-brand);
+      color: #FFFFFF !important;
     }
     .env-btn-demo:hover {
-      background: var(--copper-dark);
-      transform: translateY(-1px);
+      background: var(--color-brand-hover);
     }
     .env-btn-sub {
-      background: #f4ebe0;
-      color: #4b3d30 !important;
-      border: 1px solid #d9c7b2;
+      background: var(--surface-muted);
+      color: var(--ink-secondary) !important;
+      border: 1px solid var(--line);
     }
     .env-btn-sub:hover {
-      background: #e9dac8;
+      background: #F1F5F9;
+      color: var(--ink) !important;
     }
 
     /* Smart Environment Toast (Bottom-Right Lightweight Notification) */
@@ -408,25 +436,18 @@
       right: 22px;
       bottom: 22px;
       z-index: 95;
-      max-width: 430px;
-      padding: 16px 18px;
-      border-radius: 14px;
-      background: rgba(30, 24, 19, 0.96);
-      color: #fdf7f0;
-      border: 1px solid rgba(245, 166, 91, 0.55);
-      box-shadow: 0 16px 42px rgba(0, 0, 0, 0.35);
-      backdrop-filter: blur(10px);
-      font-size: 13.5px;
+      max-width: 420px;
+      padding: 14px 16px;
+      border-radius: 6px;
+      background: var(--code-bg);
+      color: #F8FAFC;
+      border: 1px solid #334155;
+      font-size: 13px;
       line-height: 1.6;
       display: none;
-      animation: toastSlideUp 0.22s ease-out;
     }
     .smart-nav-toast.show {
       display: block;
-    }
-    @keyframes toastSlideUp {
-      from { opacity: 0; transform: translateY(14px); }
-      to { opacity: 1; transform: translateY(0); }
     }
     .smart-toast-head {
       display: flex;
@@ -434,36 +455,36 @@
       justify-content: space-between;
       gap: 10px;
       margin-bottom: 6px;
-      font-weight: 800;
-      color: #ffbe7b;
-      font-size: 14px;
+      font-weight: 600;
+      color: var(--color-brand-dark);
+      font-size: 13px;
     }
     .smart-toast-close {
       background: transparent;
       border: 0;
-      color: #cbbba8;
+      color: #94A3B8;
       cursor: pointer;
-      font-size: 14px;
+      font-size: 13px;
       padding: 2px 6px;
     }
-    .smart-toast-close:hover { color: #fff; }
+    .smart-toast-close:hover { color: #FFFFFF; }
     .smart-toast-local-link {
       display: inline-flex;
       align-items: center;
       gap: 4px;
       margin-top: 8px;
-      padding: 5px 11px;
-      border-radius: 8px;
-      background: rgba(22, 121, 75, 0.35);
-      border: 1px solid #43b581;
-      color: #9ef0c6 !important;
-      font-weight: 700;
-      font-size: 12.8px;
+      padding: 4px 10px;
+      border-radius: 4px;
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid var(--color-brand-dark);
+      color: #6EE7B7 !important;
+      font-weight: 600;
+      font-size: 12px;
       text-decoration: none !important;
     }
     .smart-toast-local-link:hover {
-      background: var(--green);
-      color: #fff !important;
+      background: #059669;
+      color: #FFFFFF !important;
     }
 
     /* Direct Launch Action Cards & Inline App Links */
@@ -476,17 +497,18 @@
       flex-wrap: wrap;
       align-items: center;
       gap: 10px;
-      padding: 12px 16px;
-      border-radius: 12px;
-      background: linear-gradient(90deg, #fff6ec 0%, #f9efe2 100%);
-      border: 1px solid #e2c29d;
-      box-shadow: 0 4px 12px rgba(181, 101, 39, 0.08);
+      padding: 10px 14px;
+      border-radius: 6px;
+      background: var(--surface-muted);
+      border: 1px solid var(--line);
     }
     .direct-launch-label {
-      font-size: 13.5px;
-      font-weight: 800;
-      color: #7c3f10;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11.5px;
+      font-weight: 700;
+      color: var(--color-brand);
       white-space: nowrap;
+      letter-spacing: 0.02em;
     }
     .direct-launch-actions {
       display: flex;
@@ -498,155 +520,153 @@
       display: inline-flex;
       align-items: center;
       gap: 5px;
-      padding: 6px 14px;
-      border-radius: 9px;
-      background: var(--copper);
-      color: #fff !important;
-      font-size: 13.5px;
-      font-weight: 700;
+      padding: 5px 12px;
+      border-radius: 5px;
+      background: var(--color-brand);
+      color: #FFFFFF !important;
+      font-size: 12.5px;
+      font-weight: 600;
       text-decoration: none !important;
-      box-shadow: 0 2px 6px rgba(140, 72, 20, 0.22);
-      transition: all 0.15s ease;
+      transition: background-color 0.12s ease;
     }
     .direct-launch-btn:hover {
-      background: var(--copper-dark);
-      transform: translateY(-1px);
-      box-shadow: 0 4px 10px rgba(140, 72, 20, 0.3);
+      background: var(--color-brand-hover);
     }
     .inline-app-link {
       display: inline-flex;
       align-items: center;
       gap: 3px;
-      padding: 2px 9px;
+      padding: 1px 7px;
       margin: 1px 2px;
-      border-radius: 6px;
-      background: #f8efe4;
-      border: 1px solid #e0c3a2;
-      color: var(--copper-dark) !important;
-      font-size: 13.5px;
-      font-weight: 700;
+      border-radius: 4px;
+      background: var(--surface-muted);
+      border: 1px solid var(--border-strong);
+      color: var(--color-brand) !important;
+      font-size: 13px;
+      font-weight: 600;
       text-decoration: none !important;
-      transition: all 0.14s ease;
+      transition: background-color 0.12s ease, color 0.12s ease;
     }
     .inline-app-link:hover {
-      background: var(--copper);
-      border-color: var(--copper);
-      color: #fff !important;
+      background: var(--color-brand);
+      border-color: var(--color-brand);
+      color: #FFFFFF !important;
     }
 
     /* Layout Grid */
     .wrap {
       display: grid;
-      grid-template-columns: 275px minmax(0, 1fr);
-      gap: 32px;
+      grid-template-columns: 270px minmax(0, 1fr);
+      gap: 28px;
       max-width: 1440px;
       margin: auto;
-      padding: 28px 24px 96px;
+      padding: 24px 24px 96px;
     }
     aside {
       align-self: start;
       position: sticky;
-      top: 76px;
-      max-height: calc(100vh - 96px);
+      top: 72px;
+      max-height: calc(100vh - 92px);
       overflow-y: auto;
-      padding: 18px 14px;
+      padding: 16px 12px;
       background: var(--paper);
       border: 1px solid var(--line);
-      border-radius: 16px;
-      box-shadow: 0 6px 20px rgba(59, 35, 15, 0.04);
+      border-radius: 8px;
     }
     .aside-title {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin: 0 8px 12px;
+      margin: 0 8px 10px;
       padding-bottom: 10px;
       border-bottom: 1px solid var(--line);
-      font-weight: 800;
-      font-size: 14.5px;
+      font-weight: 700;
+      font-size: 13px;
       color: var(--ink);
+      letter-spacing: 0.02em;
     }
     aside a.toc-link {
       display: block;
-      padding: 6px 10px;
+      padding: 5px 10px;
       margin: 2px 0;
-      border-radius: 8px;
+      border-radius: 4px;
       color: var(--muted);
-      font-size: 13.5px;
+      font-size: 13px;
       line-height: 1.45;
-      transition: all 0.12s ease;
+      border-left: 2px solid transparent;
+      transition: background-color 0.12s ease, color 0.12s ease;
     }
     aside a.toc-h2 {
-      font-weight: 700;
-      color: #2f261f;
+      font-weight: 600;
+      color: var(--ink-secondary);
       margin-top: 8px;
     }
     aside a.toc-h3 {
-      padding-left: 20px;
-      font-size: 12.8px;
-      border-left: 2px solid transparent;
+      padding-left: 18px;
+      font-size: 12.5px;
     }
     aside a.toc-link:hover {
-      background: #f3e9dc;
-      color: var(--copper-dark);
+      background: var(--surface-muted);
+      color: var(--ink);
       text-decoration: none;
     }
     aside a.toc-link.active {
-      background: var(--copper-soft);
-      color: var(--copper-dark);
-      font-weight: 700;
-      border-left-color: var(--copper);
+      background: var(--color-brand-soft);
+      color: var(--color-brand);
+      font-weight: 600;
+      border-left-color: var(--color-brand);
     }
 
     /* Main Article Styling */
     main {
       min-width: 0;
-      padding: 38px clamp(24px, 4.5vw, 68px) 76px;
+      padding: 36px clamp(24px, 4vw, 56px) 72px;
       background: var(--paper);
       border: 1px solid var(--line);
-      border-radius: 20px;
-      box-shadow: 0 8px 30px rgba(59, 35, 15, 0.04);
+      border-radius: 8px;
     }
     h1, h2, h3 {
       line-height: 1.35;
       letter-spacing: -0.02em;
-      scroll-margin-top: 84px;
+      scroll-margin-top: 80px;
+      color: var(--ink);
     }
     h1 {
-      font-size: clamp(26px, 2.8vw, 36px);
+      font-size: clamp(24px, 2.5vw, 32px);
       margin: 0 0 16px;
-      color: #1c1612;
     }
     h2 {
-      font-size: 23px;
-      margin: 52px 0 18px;
-      padding: 14px 18px;
-      background: linear-gradient(90deg, #f8efe4 0%, rgba(248, 239, 228, 0.2) 100%);
-      border-left: 4px solid var(--copper);
-      border-radius: 0 12px 12px 0;
-      color: #251c15;
+      font-size: 21px;
+      margin: 48px 0 16px;
+      padding: 10px 14px;
+      background: var(--surface-muted);
+      border-left: 3px solid var(--color-brand);
+      border-top: 1px solid var(--line);
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      border-radius: 0 6px 6px 0;
     }
     h3 {
-      font-size: 19px;
-      margin: 34px 0 12px;
-      color: #2d2219;
+      font-size: 17.5px;
+      margin: 32px 0 12px;
     }
-    p, li { max-width: 88ch; }
+    p, li { max-width: 88ch; color: var(--ink-secondary); }
+    strong { color: var(--ink); }
     ul, ol { padding-left: 22px; }
     li { margin: 6px 0; }
     hr {
       border: 0;
-      border-top: 1px dashed var(--line);
-      margin: 36px 0;
+      border-top: 1px solid var(--line);
+      margin: 32px 0;
     }
     blockquote {
-      margin: 20px 0;
-      padding: 16px 22px;
-      border-left: 4px solid var(--copper);
-      background: #f6ede2;
-      color: #5e3e24;
-      border-radius: 0 12px 12px 0;
-      font-size: 15px;
+      margin: 18px 0;
+      padding: 14px 18px;
+      border-left: 3px solid var(--color-brand);
+      background: var(--surface-muted);
+      color: var(--ink-secondary);
+      border-radius: 0 6px 6px 0;
+      font-size: 14.5px;
     }
     blockquote p { margin: 0; max-width: none; }
 
@@ -655,150 +675,147 @@
       width: 100%;
       border-collapse: separate;
       border-spacing: 0;
-      margin: 18px 0 28px;
-      font-size: 14px;
+      margin: 16px 0 26px;
+      font-size: 13.5px;
       border: 1px solid var(--line);
-      border-radius: 12px;
+      border-radius: 6px;
       overflow: hidden;
     }
     th, td {
       border-bottom: 1px solid var(--line);
-      padding: 11px 14px;
+      padding: 10px 14px;
       text-align: left;
       vertical-align: top;
     }
     tr:last-child td { border-bottom: none; }
     th {
-      background: #f3e9dc;
-      font-weight: 700;
-      color: #2c221a;
+      background: var(--surface-muted);
+      font-weight: 600;
+      color: var(--ink);
     }
-    tbody tr:nth-child(even) { background: #fcf9f4; }
-    tbody tr:hover { background: #f7efe4; }
+    tbody tr:nth-child(even) { background: #FCFCFD; }
+    tbody tr:hover { background: #F1F5F9; }
 
-    /* Inline code & Prompt Copy Box */
+    /* Inline code & Terminal Prompt Copy Box */
     code {
       padding: 2px 6px;
-      background: #f2ebe1;
-      color: #7c3f10;
-      border-radius: 5px;
-      font: 13.5px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+      background: #F1F5F9;
+      color: var(--color-brand);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      font: 13px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
     }
     .prompt-box {
-      margin: 16px 0 26px;
-      border-radius: 12px;
+      margin: 14px 0 24px;
+      border-radius: 6px;
       overflow: hidden;
-      border: 1px solid #3d332c;
-      background: #231e1a;
-      box-shadow: 0 6px 18px rgba(25, 18, 12, 0.12);
+      border: 1px solid #334155;
+      background: var(--code-bg);
     }
     .prompt-bar {
       display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
       align-items: center;
       justify-content: space-between;
       padding: 8px 14px;
-      background: #312923;
-      border-bottom: 1px solid #433931;
+      background: var(--code-header);
+      border-bottom: 1px solid #334155;
     }
     .prompt-tag {
-      font-size: 12.5px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
       font-weight: 600;
-      color: #e6cbb1;
+      color: #CBD5E1;
     }
     .copy-btn {
       cursor: pointer;
-      padding: 5px 12px;
-      border-radius: 7px;
-      border: 1px solid rgba(245, 166, 91, 0.45);
-      background: rgba(181, 101, 39, 0.28);
-      color: #ffd7b0;
-      font-size: 12.5px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 11px;
+      border-radius: 4px;
+      border: 1px solid #475569;
+      background: #0F172A;
+      color: #F8FAFC;
+      font-size: 12px;
       font-weight: 600;
-      transition: all 0.15s ease;
+      transition: background-color 0.12s ease, border-color 0.12s ease;
     }
     .copy-btn:hover {
-      background: var(--copper);
-      color: #fff;
+      background: var(--color-brand);
+      border-color: var(--color-brand-dark);
+      color: #FFFFFF;
     }
     .copy-btn.copied {
-      background: var(--green);
-      border-color: var(--green);
-      color: #fff;
+      background: #059669;
+      border-color: #10B981;
+      color: #FFFFFF;
     }
     .prompt-box pre {
       margin: 0;
-      padding: 16px 18px;
+      padding: 14px 16px;
       overflow-x: auto;
       background: transparent;
-      color: #f8f2ea;
+      color: #F1F5F9;
       white-space: pre-wrap;
       word-break: break-word;
     }
     .prompt-box pre code {
       padding: 0;
       background: none;
+      border: 0;
       color: inherit;
-      font-size: 14px;
+      font-size: 13.5px;
       line-height: 1.65;
     }
 
     /* Screenshot Figure Cards */
     .shot-card {
-      margin: 18px 0 26px;
-      border: 1px solid #d5c5ae;
-      border-radius: 14px;
+      margin: 16px 0 24px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
       overflow: hidden;
-      background: #fff;
-      box-shadow: 0 10px 28px rgba(45, 30, 15, 0.09);
+      background: var(--paper);
       cursor: zoom-in;
-      transition: transform 0.18s ease, box-shadow 0.18s ease;
+      transition: border-color 0.15s ease;
     }
     .shot-card:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 14px 36px rgba(45, 30, 15, 0.15);
+      border-color: var(--color-brand);
     }
     .shot-bar {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 12px;
-      padding: 9px 16px;
-      background: #f4ece0;
-      border-bottom: 1px solid #dfd2bf;
-      font-size: 13px;
+      gap: 10px;
+      padding: 8px 14px;
+      background: var(--surface-muted);
+      border-bottom: 1px solid var(--line);
+      font-size: 12.5px;
     }
-    .shot-dots {
-      display: inline-flex;
-      gap: 6px;
-      align-items: center;
-    }
-    .shot-dots i {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      display: inline-block;
-      background: #d9c9b5;
-    }
-    .shot-dots i:nth-child(1) { background: #e57368; }
-    .shot-dots i:nth-child(2) { background: #f0b849; }
-    .shot-dots i:nth-child(3) { background: #5bbd72; }
-    .shot-title {
+    .shot-tag {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 11px;
       font-weight: 700;
-      color: #3a2e25;
+      padding: 1px 6px;
+      border-radius: 3px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      color: var(--color-brand);
+    }
+    .shot-title {
+      font-weight: 600;
+      color: var(--ink);
       margin-right: auto;
     }
     .shot-zoom {
-      font-size: 12px;
+      font-size: 11.5px;
       font-weight: 600;
-      color: var(--copper-dark);
-      background: #fff8f0;
-      padding: 3px 10px;
-      border-radius: 999px;
-      border: 1px solid #e3c8ab;
+      color: var(--muted);
       white-space: nowrap;
     }
     .shot-img-wrap {
-      background: #1a1614;
+      background: #0F172A;
       line-height: 0;
     }
     .shot-card img {
@@ -816,8 +833,8 @@
       align-items: center;
       justify-content: center;
       padding: 28px;
-      background: rgba(18, 14, 11, 0.88);
-      backdrop-filter: blur(8px);
+      background: rgba(15, 23, 42, 0.9);
+      backdrop-filter: blur(6px);
       cursor: zoom-out;
     }
     .lightbox.open { display: flex; }
@@ -832,14 +849,13 @@
     .lightbox-inner img {
       max-width: 95vw;
       max-height: 84vh;
-      border-radius: 12px;
+      border-radius: 6px;
       border: 1px solid rgba(255, 255, 255, 0.2);
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
-      background: #fff;
+      background: #FFFFFF;
     }
     .lightbox-caption {
-      color: #f8efe6;
-      font-size: 14px;
+      color: #F8FAFC;
+      font-size: 13.5px;
       font-weight: 600;
       display: flex;
       align-items: center;
@@ -847,10 +863,10 @@
     }
     .lightbox-close {
       padding: 4px 12px;
-      border-radius: 6px;
-      background: rgba(255, 255, 255, 0.16);
-      color: #fff;
-      font-size: 12.5px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.14);
+      color: #FFFFFF;
+      font-size: 12px;
       border: 1px solid rgba(255, 255, 255, 0.25);
       cursor: pointer;
     }
@@ -863,7 +879,7 @@
       aside { position: static; max-height: none; margin-bottom: 18px; }
       main { padding: 24px 18px 44px; }
       .hero-banner { padding: 0 14px; margin-top: 16px; }
-      .hero-card { padding: 22px 20px; }
+      .hero-card { padding: 20px 18px; }
       .flow-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .env-choice-grid { grid-template-columns: 1fr; }
       .top { padding: 10px 14px; }
@@ -871,11 +887,12 @@
     }
     @media (max-width: 600px) {
       .flow-grid { grid-template-columns: 1fr; }
+      .hero-pills { grid-template-columns: 1fr; }
     }
     @media print {
       .top, aside, .lightbox, .smart-nav-toast { display: none !important; }
       .wrap { display: block; padding: 0; }
-      main { border: 0; box-shadow: none; }
+      main { border: 0; }
     }
   </style>
 </head>
@@ -884,15 +901,15 @@
     <a class="brand app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener">
       <img src="/logo-hunter.png" alt="猎鹿人">
       <span>猎鹿人 · HunterCode</span>
-      <span class="brand-badge">v3.5.2 帮助中心</span>
+      <span class="brand-badge">DOCS v3.5.2</span>
     </a>
     <nav aria-label="核心工作区导航（智能环境识别 · 新窗口打开）">
       <a class="nav-primary app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener">返回 AI 对话 ↗</a>
       <a class="app-link" href="#" data-path="/workbench" data-route="/workbench" target="_blank" rel="noopener">投研工作台 ↗</a>
       <a class="app-link" href="#" data-path="/strategies/index.html" data-route="/strategies/index.html" target="_blank" rel="noopener">策略中心 ↗</a>
       <a class="app-link" href="#" data-path="/finance/overview" data-route="/finance/overview" target="_blank" rel="noopener">智能体自动炒股 ↗</a>
-      <a class="app-link" href="#" data-path="/settings?tab=llm" data-route="/settings?tab=llm" target="_blank" rel="noopener">⚙️ 设置 ↗</a>
-      <a href="https://github.com/agentpit-io/hunter-community" target="_blank" rel="noopener">GitHub 开源仓库 ↗</a>
+      <a class="app-link" href="#" data-path="/settings?tab=llm" data-route="/settings?tab=llm" target="_blank" rel="noopener">设置 ↗</a>
+      <a href="https://github.com/agentpit-io/hunter-community" target="_blank" rel="noopener">GitHub ↗</a>
     </nav>
   </header>
 
@@ -900,112 +917,112 @@
     <div class="hero-card">
       <div class="hero-top">
         <div class="hero-title-group">
-          <span class="hero-eyebrow">🦌 私人证券研究所 · 零实盘交易风险 · 100% 本地隐私优先 · v3.5.2 正式版</span>
+          <span class="hero-eyebrow">HUNTER COMMUNITY v3.5.2 · 私人证券研究所 · 零实盘交易风险 · 100% 本地隐私优先</span>
           <h1>猎鹿人 HunterCode 股民日常炒股全流程操作手册</h1>
           <p class="hero-sub">
-            不用懂编程、不用背命令！跟着交易日从早到晚的时间表走：早上 8:30 看三栏早报，盘中盯异动翻 PDF 公告原文、做 56 项技术 + 90 项基本面全身检查，下午 15:30 收盘复盘归档，周末算 ETF 定投跑回测。点击下方任意步骤卡片可查看图文教程，点击「🚀 直达按钮」自动识别当前环境并在新窗口打开对应功能（官网预览自动直达在线演示站，本地环境直达本机实例）！
+            不用懂编程、不用背命令。跟着交易日从早到晚的时间表走：早上 08:30 看三栏早报，盘中盯异动翻 PDF 公告原文、做 56 项技术 + 90 项基本面全身检查，下午 15:30 收盘复盘归档，周末算 ETF 定投跑回测。点击下方任意步骤卡片可查看图文教程，点击直达按钮自动识别当前环境并在新窗口打开对应功能（官网预览自动直达在线演示站，本地环境直达本机实例）。
           </p>
         </div>
         <div class="hero-pills">
-          <div class="hero-pill"><strong>12 张</strong> 实机高清截图</div>
-          <div class="hero-pill"><strong>22 个</strong> 内置金融 SKILL</div>
-          <div class="hero-pill"><strong>69 个</strong> 真实数据工具</div>
-          <div class="hero-pill"><strong>0 实盘下单</strong> 物理级安全</div>
+          <div class="hero-pill"><strong>12 FIGURES</strong>实机高清截图</div>
+          <div class="hero-pill"><strong>22 SKILLS</strong>内置金融技能</div>
+          <div class="hero-pill"><strong>69 TOOLS</strong>真实数据工具</div>
+          <div class="hero-pill"><strong>READ-ONLY</strong>物理级零实盘风险</div>
         </div>
       </div>
 
       <div class="flow-section-title">
-        <span>🧭 股民日常炒股 6 步总流程图（可跳章节看图文，或点下方按钮在新窗口直达功能页）</span>
+        <span>WORKFLOW MATRIX / 股民日常炒股 6 步总流程图（可跳章节看图文，或点下方按钮在新窗口直达功能页）</span>
         <span>支持点击正文中任意截图全屏放大查看</span>
       </div>
       <div class="flow-grid">
         <div class="flow-step">
           <div>
             <div class="flow-step-head">
-              <span class="flow-badge">准备篇</span>
+              <span class="flow-badge">PHASE 00 / FIRST-TIME SETUP</span>
               <span class="flow-time">首次 3 分钟</span>
             </div>
             <h3>装好上手与 4 大入口</h3>
             <p>配好大模型 Key、验证行情连通，3 秒认清对话、工作台、策略与模拟盘。</p>
           </div>
           <div class="flow-actions">
-            <a class="flow-go" href="#1-3">📖 查看第 1 章图文 →</a>
-            <a class="flow-launch app-link" href="#" data-path="/settings?tab=llm" data-route="/settings?tab=llm" target="_blank" rel="noopener">🚀 直达设置 (/settings) ↗</a>
+            <a class="flow-go" href="#1-3">查看第 1 章图文 →</a>
+            <a class="flow-launch app-link" href="#" data-path="/settings?tab=llm" data-route="/settings?tab=llm" target="_blank" rel="noopener">直达设置 (/settings) ↗</a>
           </div>
         </div>
 
         <div class="flow-step">
           <div>
             <div class="flow-step-head">
-              <span class="flow-badge">第一步 · 盘前</span>
+              <span class="flow-badge">STEP 01 / PRE-MARKET BRIEF</span>
               <span class="flow-time">08:30 - 09:25</span>
             </div>
             <h3>08:30 盘前市场晨报</h3>
             <p>一键出三栏观察卡（事实/推断/待核实），带数字回读校验防小作文忽悠。</p>
           </div>
           <div class="flow-actions">
-            <a class="flow-go" href="#2-0830-0925-3">📖 查看第 2 章图文 →</a>
-            <a class="flow-launch app-link" href="#" data-path="/workbench?tab=market" data-route="/workbench?tab=market" target="_blank" rel="noopener">🚀 直达市场工作台 ↗</a>
+            <a class="flow-go" href="#2-0830-0925-3">查看第 2 章图文 →</a>
+            <a class="flow-launch app-link" href="#" data-path="/workbench?tab=market" data-route="/workbench?tab=market" target="_blank" rel="noopener">直达市场工作台 ↗</a>
           </div>
         </div>
 
         <div class="flow-step">
           <div>
             <div class="flow-step-head">
-              <span class="flow-badge">第二步 · 盘中</span>
+              <span class="flow-badge">STEP 02 / INTRADAY RADAR</span>
               <span class="flow-time">09:30 - 15:00</span>
             </div>
             <h3>盯异动 · 翻公告 · 诊个股</h3>
             <p>自选股异动归因、PDF 公告页码抽屉、56 项技术 + 90 项基本面体检。</p>
           </div>
           <div class="flow-actions">
-            <a class="flow-go" href="#3-0930-1500-pdf-56-90">📖 查看第 3 章图文 →</a>
-            <a class="flow-launch app-link" href="#" data-path="/workbench?tab=watchlist" data-route="/workbench?tab=watchlist" target="_blank" rel="noopener">🚀 直达自选股/个股工作台 ↗</a>
+            <a class="flow-go" href="#3-0930-1500-pdf-56-90">查看第 3 章图文 →</a>
+            <a class="flow-launch app-link" href="#" data-path="/workbench?tab=watchlist" data-route="/workbench?tab=watchlist" target="_blank" rel="noopener">直达自选股/个股工作台 ↗</a>
           </div>
         </div>
 
         <div class="flow-step">
           <div>
             <div class="flow-step-head">
-              <span class="flow-badge">第三步 · 盘后</span>
+              <span class="flow-badge">STEP 03 / AFTER-HOURS REVIEW</span>
               <span class="flow-time">15:30 以后</span>
             </div>
             <h3>盘后复盘与持仓体检</h3>
             <p>15:30 复盘自动存本地经验库，核对买入理由变没变，安全导入交割单。</p>
           </div>
           <div class="flow-actions">
-            <a class="flow-go" href="#4-1530">📖 查看第 4 章图文 →</a>
-            <a class="flow-launch app-link" href="#" data-path="/workbench?tab=portfolio_review" data-route="/workbench?tab=portfolio_review" target="_blank" rel="noopener">🚀 直达组合复盘工作台 ↗</a>
+            <a class="flow-go" href="#4-1530">查看第 4 章图文 →</a>
+            <a class="flow-launch app-link" href="#" data-path="/workbench?tab=portfolio_review" data-route="/workbench?tab=portfolio_review" target="_blank" rel="noopener">直达组合复盘工作台 ↗</a>
           </div>
         </div>
 
         <div class="flow-step">
           <div>
             <div class="flow-step-head">
-              <span class="flow-badge">第四步 · 周末</span>
-              <span class="flow-time">定投与选股</span>
+              <span class="flow-badge">STEP 04 / ETF DCA &amp; SCREENER</span>
+              <span class="flow-time">周末 · 定投与选股</span>
             </div>
             <h3>ETF 定投计算与防坑回测</h3>
             <p>算清每月定投真实 XIRR 年化收益，大白话选股 + 6 维回测防造假审计。</p>
           </div>
           <div class="flow-actions">
-            <a class="flow-go" href="#51-etf">📖 查看 5.1 节图文 →</a>
-            <a class="flow-launch app-link" href="#" data-path="/workbench?tab=quant" data-route="/workbench?tab=quant" target="_blank" rel="noopener">🚀 直达量化与 ETF 定投 ↗</a>
+            <a class="flow-go" href="#51-etf">查看 5.1 节图文 →</a>
+            <a class="flow-launch app-link" href="#" data-path="/workbench?tab=quant" data-route="/workbench?tab=quant" target="_blank" rel="noopener">直达量化与 ETF 定投 ↗</a>
           </div>
         </div>
 
         <div class="flow-step">
           <div>
             <div class="flow-step-head">
-              <span class="flow-badge">第五步 · 演练</span>
+              <span class="flow-badge">STEP 05 / AGENT SIMULATION</span>
               <span class="flow-time">全天候模拟</span>
             </div>
             <h3>策略中心与 AI 自动炒股</h3>
             <p>官方多因子策略库 + AI 智能体每日 6 大交易时点全自动模拟盘练手。</p>
           </div>
           <div class="flow-actions">
-            <a class="flow-go" href="#52-ai">📖 查看 5.2 节图文 →</a>
-            <a class="flow-launch app-link" href="#" data-path="/strategies/index.html" data-route="/strategies/index.html" target="_blank" rel="noopener">🚀 直达策略中心 ↗</a>
+            <a class="flow-go" href="#52-ai">查看 5.2 节图文 →</a>
+            <a class="flow-launch app-link" href="#" data-path="/strategies/index.html" data-route="/strategies/index.html" target="_blank" rel="noopener">直达策略中心 ↗</a>
           </div>
         </div>
       </div>
@@ -1015,8 +1032,8 @@
   <div class="wrap">
     <aside aria-label="本页章节目录">
       <div class="aside-title">
-        <span>📖 说明书目录</span>
-        <a href="#top" onclick="window.scrollTo({top:0,behavior:'smooth'});return false;" style="font-size:12px;font-weight:600;">↑ 回到顶部</a>
+        <span>CONTENTS / 说明书目录</span>
+        <a href="#top" onclick="window.scrollTo({top:0,behavior:'smooth'});return false;" style="font-size:12px;font-weight:600;">↑ 顶部</a>
       </div>
       <a class="toc-link toc-h2" data-target="6" href="#6">股民一天炒股 6 步总流程图（跟着时间走，炒股有章法）</a>
 <a class="toc-link toc-h2" data-target="1-3" href="#1-3">第 1 章：产品简介与 3 分钟首次上手（装好后第一步干什么？）</a>
@@ -1062,64 +1079,64 @@
 </thead>
 <tbody>
 <tr>
-<td style="text-align: left;"><strong>准备篇 · 首次 3 分钟上手</strong></td>
+<td style="text-align: left;"><strong>PHASE 00 · 首次 3 分钟上手</strong></td>
 <td style="text-align: left;">刚装好软件时</td>
 <td style="text-align: left;">装好打开 → 选大模型/填 Key → 认识 4 大主入口</td>
-<td style="text-align: left;"><a class="inline-app-link app-link" href="#" data-path="/settings?tab=llm" data-route="/settings?tab=llm" target="_blank" rel="noopener">⚙️ 设置大模型 (/settings?tab=llm) ↗</a> · <a class="inline-app-link app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener">💬 AI 对话 (/chat) ↗</a></td>
+<td style="text-align: left;"><a class="inline-app-link app-link" href="#" data-path="/settings?tab=llm" data-route="/settings?tab=llm" target="_blank" rel="noopener">设置大模型 (/settings?tab=llm) ↗</a> · <a class="inline-app-link app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener">AI 对话 (/chat) ↗</a></td>
 </tr>
 <tr>
-<td style="text-align: left;"><strong>第一步 · 盘前准备</strong></td>
+<td style="text-align: left;"><strong>STEP 01 · 盘前准备</strong></td>
 <td style="text-align: left;">交易日 <strong>08:30 - 09:25</strong></td>
 <td style="text-align: left;">一键出今日市场晨报 → 看隔夜大事与板块风向 → 定今日观察清单</td>
-<td style="text-align: left;"><a class="inline-app-link app-link" href="#" data-path="/workbench?tab=market" data-route="/workbench?tab=market" target="_blank" rel="noopener">🚀 投研工作台 · 市场晨报 (/workbench?tab=market) ↗</a></td>
+<td style="text-align: left;"><a class="inline-app-link app-link" href="#" data-path="/workbench?tab=market" data-route="/workbench?tab=market" target="_blank" rel="noopener">投研工作台 · 市场晨报 (/workbench?tab=market) ↗</a></td>
 </tr>
 <tr>
-<td style="text-align: left;"><strong>第二步 · 盘中盯盘与诊股</strong></td>
+<td style="text-align: left;"><strong>STEP 02 · 盘中盯盘与诊股</strong></td>
 <td style="text-align: left;">交易日 <strong>09:30 - 15:00</strong></td>
 <td style="text-align: left;">盯自选股突发异动 → 翻 PDF 公告原文防踩雷 → 查 56 项技术与 90 项基本面体检 → 对话框随时问小鹿</td>
-<td style="text-align: left;"><a class="inline-app-link app-link" href="#" data-path="/workbench?tab=watchlist" data-route="/workbench?tab=watchlist" target="_blank" rel="noopener">👀 自选股工作台 (/workbench?tab=watchlist) ↗</a> · <a class="inline-app-link app-link" href="#" data-path="/workbench?tab=stock" data-route="/workbench?tab=stock" target="_blank" rel="noopener">🔬 个股研究 (/workbench?tab=stock) ↗</a> · <a class="inline-app-link app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener">💬 AI 对话 (/chat) ↗</a></td>
+<td style="text-align: left;"><a class="inline-app-link app-link" href="#" data-path="/workbench?tab=watchlist" data-route="/workbench?tab=watchlist" target="_blank" rel="noopener">自选股工作台 (/workbench?tab=watchlist) ↗</a> · <a class="inline-app-link app-link" href="#" data-path="/workbench?tab=stock" data-route="/workbench?tab=stock" target="_blank" rel="noopener">个股研究 (/workbench?tab=stock) ↗</a> · <a class="inline-app-link app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener">AI 对话 (/chat) ↗</a></td>
 </tr>
 <tr>
-<td style="text-align: left;"><strong>第三步 · 盘后复盘与记账</strong></td>
+<td style="text-align: left;"><strong>STEP 03 · 盘后复盘与记账</strong></td>
 <td style="text-align: left;">交易日 <strong>15:30 以后</strong></td>
 <td style="text-align: left;">一键跑 15:30 盘后复盘（自动存经验库）→ 核对持仓买入理由变没变 → 安全导入持仓与交割单</td>
-<td style="text-align: left;"><a class="inline-app-link app-link" href="#" data-path="/workbench?tab=portfolio_review" data-route="/workbench?tab=portfolio_review" target="_blank" rel="noopener">📝 组合复盘 (/workbench?tab=portfolio_review) ↗</a> · <a class="inline-app-link app-link" href="#" data-path="/settings?tab=broker" data-route="/settings?tab=broker" target="_blank" rel="noopener">🔒 只读持仓导入 (/settings?tab=broker) ↗</a></td>
+<td style="text-align: left;"><a class="inline-app-link app-link" href="#" data-path="/workbench?tab=portfolio_review" data-route="/workbench?tab=portfolio_review" target="_blank" rel="noopener">组合复盘 (/workbench?tab=portfolio_review) ↗</a> · <a class="inline-app-link app-link" href="#" data-path="/settings?tab=broker" data-route="/settings?tab=broker" target="_blank" rel="noopener">只读持仓导入 (/settings?tab=broker) ↗</a></td>
 </tr>
 <tr>
-<td style="text-align: left;"><strong>第四步 · 周末定投与选股研究</strong></td>
+<td style="text-align: left;"><strong>STEP 04 · 周末定投与选股研究</strong></td>
 <td style="text-align: left;">周末 / 闲暇进阶</td>
 <td style="text-align: left;">用 ETF 定投计算器算每月投多少 → 用大白话选股器筛好票 → 回测 6 维防坑体检</td>
-<td style="text-align: left;"><a class="inline-app-link app-link" href="#" data-path="/workbench?tab=quant" data-route="/workbench?tab=quant" target="_blank" rel="noopener">📐 量化与 ETF 定投 (/workbench?tab=quant) ↗</a></td>
+<td style="text-align: left;"><a class="inline-app-link app-link" href="#" data-path="/workbench?tab=quant" data-route="/workbench?tab=quant" target="_blank" rel="noopener">量化与 ETF 定投 (/workbench?tab=quant) ↗</a></td>
 </tr>
 <tr>
-<td style="text-align: left;"><strong>第五步 · AI 智能体模拟炒股训练</strong></td>
+<td style="text-align: left;"><strong>STEP 05 · AI 智能体模拟炒股训练</strong></td>
 <td style="text-align: left;">全天候演练</td>
 <td style="text-align: left;">策略中心 + 模拟盘 6 大交易时点自动盯盘演练 → 零真金白银风险练手</td>
-<td style="text-align: left;"><a class="inline-app-link app-link" href="#" data-path="/strategies/index.html" data-route="/strategies/index.html" target="_blank" rel="noopener">📊 策略中心 (/strategies/index.html) ↗</a> · <a class="inline-app-link app-link" href="#" data-path="/finance/overview" data-route="/finance/overview" target="_blank" rel="noopener">🤖 模拟自动炒股 (/finance/overview) ↗</a></td>
+<td style="text-align: left;"><a class="inline-app-link app-link" href="#" data-path="/strategies/index.html" data-route="/strategies/index.html" target="_blank" rel="noopener">策略中心 (/strategies/index.html) ↗</a> · <a class="inline-app-link app-link" href="#" data-path="/finance/overview" data-route="/finance/overview" target="_blank" rel="noopener">模拟自动炒股 (/finance/overview) ↗</a></td>
 </tr>
 </tbody>
 </table>
 <hr />
 <h2 id="1-3">第 1 章：产品简介与 3 分钟首次上手（装好后第一步干什么？）</h2>
-<div class="env-choice-section" id="env-choice-guide"><div class="env-choice-header"><span class="env-choice-badge">🧭 环境入口选择说明卡片 · 双通道直达（100% 防 404）</span><span class="env-choice-status" id="current-env-indicator">正在智能检测当前访问环境...</span></div><p class="env-choice-intro">本帮助中心同时服务于<strong>个人电脑本地私有部署实例</strong>与<strong>官方公网在线演示站</strong>。页面内置客户端智能环境感知引擎：当您在本地实例打开本页时，全页所有功能按钮自动跳往您的本地环境；当您在 AgentPit 官网（<code>www.agentpit.io</code>）浏览本说明书时，点击任意功能入口将<strong>智能优先打开官方免安装在线演示站</strong>，并在右下角提供一键切换本地 <code>localhost:3100</code> 通道！</p><div class="env-choice-grid">  <div class="env-card env-card-local">    <div class="env-card-head">      <span class="env-card-icon">🖥️</span>      <div>        <h4>本地部署环境（个人私有数据不出盘）</h4>        <span class="env-tag env-tag-green">100% 本地隐私 · 零实盘风险</span>      </div>    </div>    <p class="env-card-desc">适合已在自己电脑（Mac / Windows / Linux）通过一键脚本或 Docker 启动 HunterCode 的股民。您的 API Key、自选股、持仓交割单与复盘记忆全部保存在本机硬盘。</p>    <div class="env-url-box"><code>http://localhost:3100/workbench</code></div>    <div class="env-card-actions">      <a class="env-btn env-btn-local" href="http://localhost:3100/workbench" target="_blank" rel="noopener">🖥️ 一键打开本地投研工作台 ↗</a>      <a class="env-btn env-btn-sub" href="http://localhost:3100/chat" target="_blank" rel="noopener">💬 本地 AI 对话 (:3100/chat) ↗</a>    </div>  </div>  <div class="env-card env-card-demo">    <div class="env-card-head">      <span class="env-card-icon">🚀</span>      <div>        <h4>官方免安装在线演示站（公网即点即用）</h4>        <span class="env-tag env-tag-copper">免安装体验 · 实盘行情直连</span>      </div>    </div>    <p class="env-card-desc">适合正在浏览官网说明书、尚未在本地安装，或希望直接在浏览器体验 08:30 晨报、56+90 项个体检、ETF 定投计算与 AI 自动模拟盘的用户。</p>    <div class="env-url-box"><code>https://hunter-community.agentpit.io/workbench</code></div>    <div class="env-card-actions">      <a class="env-btn env-btn-demo" href="https://hunter-community.agentpit.io/workbench" target="_blank" rel="noopener">🚀 一键打开在线演示站工作台 ↗</a>      <a class="env-btn env-btn-sub" href="https://hunter-community.agentpit.io/chat" target="_blank" rel="noopener">💬 在线演示 AI 对话 ↗</a>    </div>  </div></div></div>
+<div class="env-choice-section" id="env-choice-guide"><div class="env-choice-header"><span class="env-choice-badge">ENVIRONMENT ROUTING · 环境入口选择与双通道直达（100% 防 404）</span><span class="env-choice-status" id="current-env-indicator">正在智能检测当前访问环境...</span></div><p class="env-choice-intro">本帮助中心同时服务于<strong>个人电脑本地私有部署实例</strong>与<strong>官方公网在线演示站</strong>。页面内置客户端智能环境感知引擎：当您在本地实例打开本页时，全页所有功能按钮自动跳往您的本地环境；当您在 AgentPit 官网（<code>www.agentpit.io</code>）浏览本说明书时，点击任意功能入口将<strong>智能优先打开官方免安装在线演示站</strong>，并在右下角提供一键切换本地 <code>localhost:3100</code> 通道。</p><div class="env-choice-grid">  <div class="env-card env-card-local">    <div class="env-card-head">      <span class="env-card-code">LOCAL</span>      <div>        <h4>本地部署环境（个人私有数据不出盘）</h4>        <span class="env-tag env-tag-green">100% 本地隐私 · 零实盘风险</span>      </div>    </div>    <p class="env-card-desc">适合已在自己电脑（Mac / Windows / Linux）通过一键脚本或 Docker 启动 HunterCode 的股民。您的 API Key、自选股、持仓交割单与复盘记忆全部保存在本机硬盘。</p>    <div class="env-url-box"><code>http://localhost:3100/workbench</code></div>    <div class="env-card-actions">      <a class="env-btn env-btn-local" href="http://localhost:3100/workbench" target="_blank" rel="noopener">打开本地投研工作台 ↗</a>      <a class="env-btn env-btn-sub" href="http://localhost:3100/chat" target="_blank" rel="noopener">本地 AI 对话 (:3100/chat) ↗</a>    </div>  </div>  <div class="env-card env-card-demo">    <div class="env-card-head">      <span class="env-card-code">CLOUD DEMO</span>      <div>        <h4>官方免安装在线演示站（公网即点即用）</h4>        <span class="env-tag env-tag-brand">免安装体验 · 实盘行情直连</span>      </div>    </div>    <p class="env-card-desc">适合正在浏览官网说明书、尚未在本地安装，或希望直接在浏览器体验 08:30 晨报、56+90 项个体检、ETF 定投计算与 AI 自动模拟盘的用户。</p>    <div class="env-url-box"><code>https://hunter-community.agentpit.io/workbench</code></div>    <div class="env-card-actions">      <a class="env-btn env-btn-demo" href="https://hunter-community.agentpit.io/workbench" target="_blank" rel="noopener">打开在线演示站工作台 ↗</a>      <a class="env-btn env-btn-sub" href="https://hunter-community.agentpit.io/chat" target="_blank" rel="noopener">在线演示 AI 对话 ↗</a>    </div>  </div></div></div>
 <h3 id="11">1.1 首次打开设置向导与大模型配置</h3>
 <ul>
 <li><strong>① 解决你炒股的什么痛点？</strong>
     很多股民装好 AI 软件后一头雾水：不知道去哪填大模型 Key、不知道行情通不通、怕配置太复杂。猎鹿人把所有开关集中在同一个设置面板里，填好 API Key 点一下测试就能用，A 股/港股/美股公开行情开箱即通。</li>
 <li><strong>② 去哪点、怎么操作（按钮级指引）</strong><ul>
-<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">🎯 本节功能新窗口直达：</span><div class="direct-launch-actions"><a class="direct-launch-btn app-link" href="#" data-path="/settings?tab=llm" data-route="/settings?tab=llm" target="_blank" rel="noopener">🚀 点击直达：大模型与偏好设置 (/settings?tab=llm) ↗</a> <a class="direct-launch-btn app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener">💬 点击直达：AI 对话主工作区 (/chat) ↗</a></div></div></li>
+<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">QUICK LAUNCH / 本节功能直达</span><div class="direct-launch-actions"><a class="direct-launch-btn app-link" href="#" data-path="/settings?tab=llm" data-route="/settings?tab=llm" target="_blank" rel="noopener">点击直达：大模型与偏好设置 (/settings?tab=llm) ↗</a> <a class="direct-launch-btn app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener">点击直达：AI 对话主工作区 (/chat) ↗</a></div></div></li>
 <li><strong>第 1 步</strong>：在浏览器打开猎鹿人首页，点击左下角头像或直接点击上方按钮打开 <a class="inline-app-link app-link" href="#" data-path="/settings?tab=llm" data-route="/settings?tab=llm" target="_blank" rel="noopener">设置 → 大模型与偏好 (/settings?tab=llm) ↗</a>；</li>
 <li><strong>第 2 步</strong>：选择你顺手的大模型服务商（支持 DeepSeek、通义千问、OpenAI、Claude 或本地 Ollama），粘贴你的 API Key 并点击 <strong>「保存并测试连接」</strong>；</li>
 <li><strong>第 3 步</strong>：确认右上角状态灯变绿，即可点击顶部 <a class="inline-app-link app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener">返回 AI 对话 (/chat) ↗</a> 开始看盘问股。</li>
 </ul>
 </li>
 <li><strong>③ 真实界面高清截图与看点说明</strong>
-    <figure class="shot-card" onclick="openLightbox('/help/images/01-setup-wizard.png', '1.1 首次打开设置向导与大模型配置')"><div class="shot-bar"><span class="shot-dots"><i></i><i></i><i></i></span><span class="shot-title">1.1 首次打开设置向导与大模型配置</span><span class="shot-zoom">🔍 点击图片放大全屏查看</span></div><div class="shot-img-wrap"><img src="/help/images/01-setup-wizard.png" alt="1.1 首次打开设置向导与大模型配置" loading="lazy" /></div></figure><ul>
+    <figure class="shot-card" onclick="openLightbox('/help/images/01-setup-wizard.png', '1.1 首次打开设置向导与大模型配置')"><div class="shot-bar"><span class="shot-tag">FIGURE</span><span class="shot-title">1.1 首次打开设置向导与大模型配置</span><span class="shot-zoom">点击放大全屏查看 ↗</span></div><div class="shot-img-wrap"><img src="/help/images/01-setup-wizard.png" alt="1.1 首次打开设置向导与大模型配置" loading="lazy" /></div></figure><ul>
 <li><strong>图中看点 1</strong>：左侧切换栏清晰列出「大模型配置」「行情与数据源」「合作券商只读授权」等核心模块，不用改任何代码文件；</li>
 <li><strong>图中看点 2</strong>：支持一键切换主力推理模型与快速问答模型，所有密钥加密保存在你自己的机器上，绝不外传。</li>
 </ul>
 </li>
-<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 <a class="app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="color:#ffbe7b;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button><a class="copy-btn app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="text-decoration:none;">🚀 打开 /chat 提问 ↗</a></div></div><pre><code>请帮我检查当前行情数据源与知识库工具是否已经就绪，并报一下上证指数、恒生指数和贵州茅台（600519.SH）的最新实盘行情，确认时间与数据源。</code></pre></div>
+<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">PROMPT / 对话框提问口令（可直接粘贴到 <a class="app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="color:#10B981;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">复制提问口令</button><a class="copy-btn copy-btn-link app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="text-decoration:none;">打开 /chat 提问 ↗</a></div></div><pre><code>请帮我检查当前行情数据源与知识库工具是否已经就绪，并报一下上证指数、恒生指数和贵州茅台（600519.SH）的最新实盘行情，确认时间与数据源。</code></pre></div>
 </li>
 </ul>
 <hr />
@@ -1128,19 +1145,19 @@
 <li><strong>① 解决你炒股的什么痛点？</strong>
     传统炒股软件菜单密密麻麻几百个，找个功能像走迷宫。猎鹿人把日常炒股浓缩成 <strong>4 大黄金入口</strong>，不管是平时随便问两句、盘中盯异动看公告，还是周末算定投跑回测，3 秒钟就能切过去。</li>
 <li><strong>② 去哪点、怎么操作（按钮级指引）</strong><ul>
-<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">🎯 本节功能新窗口直达：</span><div class="direct-launch-actions"><a class="direct-launch-btn app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener">💬 AI 对话 (/chat) ↗</a> <a class="direct-launch-btn app-link" href="#" data-path="/workbench" data-route="/workbench" target="_blank" rel="noopener">🚀 投研工作台 (/workbench) ↗</a> <a class="direct-launch-btn app-link" href="#" data-path="/strategies/index.html" data-route="/strategies/index.html" target="_blank" rel="noopener">📊 策略中心 (/strategies/index.html) ↗</a> <a class="direct-launch-btn app-link" href="#" data-path="/finance/overview" data-route="/finance/overview" target="_blank" rel="noopener">🤖 模拟自动炒股 (/finance/overview) ↗</a></div></div></li>
+<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">QUICK LAUNCH / 本节功能直达</span><div class="direct-launch-actions"><a class="direct-launch-btn app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener">AI 对话 (/chat) ↗</a> <a class="direct-launch-btn app-link" href="#" data-path="/workbench" data-route="/workbench" target="_blank" rel="noopener">投研工作台 (/workbench) ↗</a> <a class="direct-launch-btn app-link" href="#" data-path="/strategies/index.html" data-route="/strategies/index.html" target="_blank" rel="noopener">策略中心 (/strategies/index.html) ↗</a> <a class="direct-launch-btn app-link" href="#" data-path="/finance/overview" data-route="/finance/overview" target="_blank" rel="noopener">模拟自动炒股 (/finance/overview) ↗</a></div></div></li>
 <li><strong>第 1 步</strong>：打开主界面 <a class="inline-app-link app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener">AI 对话主工作区 (/chat) ↗</a>，中间是对话框，左侧栏可以随时切自选股、持仓和历史对话；</li>
 <li><strong>第 2 步</strong>：点击顶部导航栏或侧边栏的 <a class="inline-app-link app-link" href="#" data-path="/workbench" data-route="/workbench" target="_blank" rel="noopener">投研工作台 (/workbench) ↗</a>，进入集成了早报、自选股异动、公告 PDF 抽屉、个股 56+90 项体检、组合复盘与 ETF 定投的一站式看板；</li>
 <li><strong>第 3 步</strong>：点击顶部 <a class="inline-app-link app-link" href="#" data-path="/strategies/index.html" data-route="/strategies/index.html" target="_blank" rel="noopener">策略中心 (/strategies/index.html) ↗</a> 或侧边栏 <a class="inline-app-link app-link" href="#" data-path="/finance/overview" data-route="/finance/overview" target="_blank" rel="noopener">模拟炒股 / 智能体交易 (/finance/overview) ↗</a>，查看量化选股回测与 AI 模拟盘自动演练。</li>
 </ul>
 </li>
 <li><strong>③ 真实界面高清截图与看点说明</strong>
-    <figure class="shot-card" onclick="openLightbox('/help/images/02-chat-workspace.png', '1.2 认识主界面与 4 大核心入口')"><div class="shot-bar"><span class="shot-dots"><i></i><i></i><i></i></span><span class="shot-title">1.2 认识主界面与 4 大核心入口</span><span class="shot-zoom">🔍 点击图片放大全屏查看</span></div><div class="shot-img-wrap"><img src="/help/images/02-chat-workspace.png" alt="1.2 认识主界面与 4 大核心入口" loading="lazy" /></div></figure><ul>
+    <figure class="shot-card" onclick="openLightbox('/help/images/02-chat-workspace.png', '1.2 认识主界面与 4 大核心入口')"><div class="shot-bar"><span class="shot-tag">FIGURE</span><span class="shot-title">1.2 认识主界面与 4 大核心入口</span><span class="shot-zoom">点击放大全屏查看 ↗</span></div><div class="shot-img-wrap"><img src="/help/images/02-chat-workspace.png" alt="1.2 认识主界面与 4 大核心入口" loading="lazy" /></div></figure><ul>
 <li><strong>图中看点 1</strong>：左侧导航栏把「AI 对话」「投研工作台」「能力库（22 个金融技能）」「策略中心」排得明明白白；</li>
 <li><strong>图中看点 2</strong>：主工作区预设了股民最常问的快捷卡片（查个股、看早报、防踩雷、诊持仓），新手点一下卡片就能直接发问。</li>
 </ul>
 </li>
-<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 <a class="app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="color:#ffbe7b;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button><a class="copy-btn app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="text-decoration:none;">🚀 打开 /chat 提问 ↗</a></div></div><pre><code>我是刚用猎鹿人的普通股民，手头主要做 A 股蓝筹和宽基 ETF。请用大白话告诉我：早上开盘前、盘中看盘、收盘后复盘，我分别该怎么配合使用你？</code></pre></div>
+<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">PROMPT / 对话框提问口令（可直接粘贴到 <a class="app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="color:#10B981;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">复制提问口令</button><a class="copy-btn copy-btn-link app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="text-decoration:none;">打开 /chat 提问 ↗</a></div></div><pre><code>我是刚用猎鹿人的普通股民，手头主要做 A 股蓝筹和宽基 ETF。请用大白话告诉我：早上开盘前、盘中看盘、收盘后复盘，我分别该怎么配合使用你？</code></pre></div>
 </li>
 </ul>
 <hr />
@@ -1150,19 +1167,19 @@
 <li><strong>① 解决你炒股的什么痛点？</strong>
     每天早上起来到处刷微信群、看财经公众号，消息真假难辨，还经常被没出处的“小作文”忽悠去集合竞价追高。猎鹿人的盘前观察卡严格把 <strong>【已核实事实】</strong>、<strong>【逻辑推断】</strong>、<strong>【待核实问题】</strong> 拆成三栏，而且每条数字都经过系统底层「数字回读校验」，杜绝 AI 瞎编价格和涨跌幅。</li>
 <li><strong>② 去哪点、怎么操作（按钮级指引）</strong><ul>
-<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">🎯 本节功能新窗口直达：</span><div class="direct-launch-actions"><a class="direct-launch-btn app-link" href="#" data-path="/workbench?tab=market" data-route="/workbench?tab=market" target="_blank" rel="noopener">🚀 点击直达：投研工作台 市场工作台 (/workbench?tab=market) ↗</a> <a class="direct-launch-btn app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener">💬 去对话框问早报 (/chat) ↗</a></div></div></li>
+<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">QUICK LAUNCH / 本节功能直达</span><div class="direct-launch-actions"><a class="direct-launch-btn app-link" href="#" data-path="/workbench?tab=market" data-route="/workbench?tab=market" target="_blank" rel="noopener">点击直达：投研工作台 市场工作台 (/workbench?tab=market) ↗</a> <a class="direct-launch-btn app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener">去对话框问早报 (/chat) ↗</a></div></div></li>
 <li><strong>第 1 步</strong>：点击上方直达按钮或顶部导航进入 <a class="inline-app-link app-link" href="#" data-path="/workbench" data-route="/workbench" target="_blank" rel="noopener">投研工作台 (/workbench) ↗</a>，默认打开的就是第一个标签页 <strong>「市场工作台」</strong>；</li>
 <li><strong>第 2 步</strong>：点击右上角醒目的 <strong>「生成今日市场晨报（08:30 盘前观察卡）」</strong> 按钮；</li>
 <li><strong>第 3 步</strong>：先看右上角绿色的 <strong>「数字回读校验通过」</strong> 标志，再从左到右浏览【已核实事实】（隔夜外盘、A 股指数、真实新闻出处）、【逻辑推断】（对今日板块风向的推演）和【待核实问题】（今天开盘后重点盯哪几个信号）。</li>
 </ul>
 </li>
 <li><strong>③ 真实界面高清截图与看点说明</strong>
-    <figure class="shot-card" onclick="openLightbox('/help/images/04-morning-market-brief.png', '2.1 08:30 盘前市场晨报观察卡')"><div class="shot-bar"><span class="shot-dots"><i></i><i></i><i></i></span><span class="shot-title">2.1 08:30 盘前市场晨报观察卡</span><span class="shot-zoom">🔍 点击图片放大全屏查看</span></div><div class="shot-img-wrap"><img src="/help/images/04-morning-market-brief.png" alt="2.1 08:30 盘前市场晨报观察卡" loading="lazy" /></div></figure><ul>
-<li><strong>图中看点 1</strong>：顶部清楚显示 <code>08:30 盘前晨报已就绪</code> 与 <code>数字回读校验通过（Numeric Readback Verified）</code> 绿色盾牌，所有指数点位与涨跌幅均来自真实行情接口；</li>
+    <figure class="shot-card" onclick="openLightbox('/help/images/04-morning-market-brief.png', '2.1 08:30 盘前市场晨报观察卡')"><div class="shot-bar"><span class="shot-tag">FIGURE</span><span class="shot-title">2.1 08:30 盘前市场晨报观察卡</span><span class="shot-zoom">点击放大全屏查看 ↗</span></div><div class="shot-img-wrap"><img src="/help/images/04-morning-market-brief.png" alt="2.1 08:30 盘前市场晨报观察卡" loading="lazy" /></div></figure><ul>
+<li><strong>图中看点 1</strong>：顶部清楚显示 <code>08:30 盘前晨报已就绪</code> 与 <code>数字回读校验通过（Numeric Readback Verified）</code> 绿色标识，所有指数点位与涨跌幅均来自真实行情接口；</li>
 <li><strong>图中看点 2</strong>：下方「三栏证据结构」把事实（带明确时间戳与数据源）、推断（绝不伪装成事实）和今天开盘要盯的悬念彻底分开，帮你养成专业研究员的盘前习惯。</li>
 </ul>
 </li>
-<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 <a class="app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="color:#ffbe7b;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button><a class="copy-btn app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="text-decoration:none;">🚀 打开 /chat 提问 ↗</a></div></div><pre><code>请帮我生成一份今日 08:30 盘前观察卡：汇总隔夜全球重要行情、A 股与港股最新风向，以及我自选股过去 24 小时的重要公告。请严格按【已核实事实】【逻辑推断】【今日开盘待核实问题】三栏输出，所有数字必须标注来源与时间。</code></pre></div>
+<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">PROMPT / 对话框提问口令（可直接粘贴到 <a class="app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="color:#10B981;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">复制提问口令</button><a class="copy-btn copy-btn-link app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="text-decoration:none;">打开 /chat 提问 ↗</a></div></div><pre><code>请帮我生成一份今日 08:30 盘前观察卡：汇总隔夜全球重要行情、A 股与港股最新风向，以及我自选股过去 24 小时的重要公告。请严格按【已核实事实】【逻辑推断】【今日开盘待核实问题】三栏输出，所有数字必须标注来源与时间。</code></pre></div>
 </li>
 </ul>
 <hr />
@@ -1172,19 +1189,19 @@
 <li><strong>① 解决你炒股的什么痛点？</strong>
     盘中自选股突然拉升或跳水，你到处问人“发生什么事了？”往往半小时后才看到消息；更坑的是，很多粗制滥造的软件遇到停牌或退市整理股票（比如 <code>600898.SH</code>）会把缺失价格当成 <code>0.00</code> 甚至算出“-100% 暴跌”吓死人。猎鹿人不仅能一键调动行情、公告、快讯解释盘中异动，而且对停牌/缺数股票诚实显示 <code>—</code> 并注明原因，绝不拿假 0 糊弄你。</li>
 <li><strong>② 去哪点、怎么操作（按钮级指引）</strong><ul>
-<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">🎯 本节功能新窗口直达：</span><div class="direct-launch-actions"><a class="direct-launch-btn app-link" href="#" data-path="/workbench?tab=watchlist" data-route="/workbench?tab=watchlist" target="_blank" rel="noopener">🚀 点击直达：投研工作台 自选股工作台 (/workbench?tab=watchlist) ↗</a> <a class="direct-launch-btn app-link" href="#" data-path="/workbench" data-route="/workbench" target="_blank" rel="noopener">🚀 投研工作台首页 (/workbench) ↗</a></div></div></li>
+<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">QUICK LAUNCH / 本节功能直达</span><div class="direct-launch-actions"><a class="direct-launch-btn app-link" href="#" data-path="/workbench?tab=watchlist" data-route="/workbench?tab=watchlist" target="_blank" rel="noopener">点击直达：投研工作台 自选股工作台 (/workbench?tab=watchlist) ↗</a> <a class="direct-launch-btn app-link" href="#" data-path="/workbench" data-route="/workbench" target="_blank" rel="noopener">投研工作台首页 (/workbench) ↗</a></div></div></li>
 <li><strong>第 1 步</strong>：点击上方直达按钮进入 <a class="inline-app-link app-link" href="#" data-path="/workbench?tab=watchlist" data-route="/workbench?tab=watchlist" target="_blank" rel="noopener">投研工作台 · 自选股工作台 (/workbench?tab=watchlist) ↗</a>；</li>
 <li><strong>第 2 步</strong>：查看自选股实时行情列表——注意看正常交易票（如贵州茅台 <code>600519.SH</code>、腾讯控股 <code>00700.HK</code>）的实时涨跌与估值，以及异常/停牌测试票（<code>600898.SH</code>）诚实展示的 <code>—</code> 与状态说明；</li>
 <li><strong>第 3 步</strong>：当某只自选股盘中出现放量急涨或跳水时，点击 <strong>「盘中异动归因解释」</strong> 按钮，系统会立刻结合最新公告、板块联动和资金流给出多维度原因排查。</li>
 </ul>
 </li>
 <li><strong>③ 真实界面高清截图与看点说明</strong>
-    <figure class="shot-card" onclick="openLightbox('/help/images/05-intraday-watchlist-anomaly.png', '3.1 自选股盯盘与盘中突发异动解释')"><div class="shot-bar"><span class="shot-dots"><i></i><i></i><i></i></span><span class="shot-title">3.1 自选股盯盘与盘中突发异动解释</span><span class="shot-zoom">🔍 点击图片放大全屏查看</span></div><div class="shot-img-wrap"><img src="/help/images/05-intraday-watchlist-anomaly.png" alt="3.1 自选股盯盘与盘中突发异动解释" loading="lazy" /></div></figure><ul>
+    <figure class="shot-card" onclick="openLightbox('/help/images/05-intraday-watchlist-anomaly.png', '3.1 自选股盯盘与盘中突发异动解释')"><div class="shot-bar"><span class="shot-tag">FIGURE</span><span class="shot-title">3.1 自选股盯盘与盘中突发异动解释</span><span class="shot-zoom">点击放大全屏查看 ↗</span></div><div class="shot-img-wrap"><img src="/help/images/05-intraday-watchlist-anomaly.png" alt="3.1 自选股盯盘与盘中突发异动解释" loading="lazy" /></div></figure><ul>
 <li><strong>图中看点 1</strong>：自选股表格中，<code>600898.SH</code> 因停牌/无有效实时报价，最新价与涨跌幅严格显示为 <code>—</code> 并标注停牌缺数提示，绝不乱填 <code>0</code>；</li>
 <li><strong>图中看点 2</strong>：下方的「盘中异动解释卡」自动串联盘口量价变化、同板块表现与最近公告，并提醒你哪些是已证实公告、哪些还需要等盘后龙虎榜确认。</li>
 </ul>
 </li>
-<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 <a class="app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="color:#ffbe7b;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button><a class="copy-btn app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="text-decoration:none;">🚀 打开 /chat 提问 ↗</a></div></div><pre><code>我的自选股贵州茅台（600519.SH）和招商银行（600036.SH）今天盘中走势有什么异动？请结合实时行情、同板块表现和最新公告帮我排查原因，区分已核实事实与市场传闻。</code></pre></div>
+<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">PROMPT / 对话框提问口令（可直接粘贴到 <a class="app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="color:#10B981;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">复制提问口令</button><a class="copy-btn copy-btn-link app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="text-decoration:none;">打开 /chat 提问 ↗</a></div></div><pre><code>我的自选股贵州茅台（600519.SH）和招商银行（600036.SH）今天盘中走势有什么异动？请结合实时行情、同板块表现和最新公告帮我排查原因，区分已核实事实与市场传闻。</code></pre></div>
 </li>
 </ul>
 <hr />
@@ -1193,19 +1210,19 @@
 <li><strong>① 解决你炒股的什么痛点？</strong>
     上市公司发一份年报或重大合同公告动辄一两百页，自己翻眼花缭乱；只看别人写的两句话摘要，又怕漏掉“解除合同条款”或“大股东减持附加条件”。猎鹿人帮你提炼公告要点的同时，每一条都带着 <code>[来源：公告标题 · 第X页]</code> 标签，点一下就在右侧弹出 PDF 原文抽屉，直接对着页码核实原话！</li>
 <li><strong>② 去哪点、怎么操作（按钮级指引）</strong><ul>
-<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">🎯 本节功能新窗口直达：</span><div class="direct-launch-actions"><a class="direct-launch-btn app-link" href="#" data-path="/workbench?tab=watchlist" data-route="/workbench?tab=watchlist" target="_blank" rel="noopener">📄 点击直达：自选股公告与 PDF 原文抽屉 (/workbench?tab=watchlist) ↗</a></div></div></li>
+<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">QUICK LAUNCH / 本节功能直达</span><div class="direct-launch-actions"><a class="direct-launch-btn app-link" href="#" data-path="/workbench?tab=watchlist" data-route="/workbench?tab=watchlist" target="_blank" rel="noopener">点击直达：自选股公告与 PDF 原文抽屉 (/workbench?tab=watchlist) ↗</a></div></div></li>
 <li><strong>第 1 步</strong>：在 <a class="inline-app-link app-link" href="#" data-path="/workbench?tab=watchlist" data-route="/workbench?tab=watchlist" target="_blank" rel="noopener">投研工作台 · 自选股工作台 (/workbench?tab=watchlist) ↗</a> 下方的「最新公告与原文溯源」列表中，找到你想看的公司公告；</li>
 <li><strong>第 2 步</strong>：点击公告右侧的 <strong>「查看 PDF 原文页码溯源」</strong> 按钮；</li>
 <li><strong>第 3 步</strong>：画面右侧立刻滑出 <strong>「公告 PDF 原文溯源抽屉」</strong>，直接高亮展示该结论对应的第几页、第几段原文条款，核对完点右上角关闭即可继续看盘。</li>
 </ul>
 </li>
 <li><strong>③ 真实界面高清截图与看点说明</strong>
-    <figure class="shot-card" onclick="openLightbox('/help/images/06-announcement-pdf-drawer.png', '3.2 右侧 PDF 原文页码抽屉一键核对')"><div class="shot-bar"><span class="shot-dots"><i></i><i></i><i></i></span><span class="shot-title">3.2 右侧 PDF 原文页码抽屉一键核对</span><span class="shot-zoom">🔍 点击图片放大全屏查看</span></div><div class="shot-img-wrap"><img src="/help/images/06-announcement-pdf-drawer.png" alt="3.2 右侧 PDF 原文页码抽屉一键核对" loading="lazy" /></div></figure><ul>
+    <figure class="shot-card" onclick="openLightbox('/help/images/06-announcement-pdf-drawer.png', '3.2 右侧 PDF 原文页码抽屉一键核对')"><div class="shot-bar"><span class="shot-tag">FIGURE</span><span class="shot-title">3.2 右侧 PDF 原文页码抽屉一键核对</span><span class="shot-zoom">点击放大全屏查看 ↗</span></div><div class="shot-img-wrap"><img src="/help/images/06-announcement-pdf-drawer.png" alt="3.2 右侧 PDF 原文页码抽屉一键核对" loading="lazy" /></div></figure><ul>
 <li><strong>图中看点 1</strong>：右侧抽屉顶部清晰标注 <code>[来源：600519.SH 贵州茅台定期报告/重大事项公告 · 第1页]</code> 以及披露日期与文档编号；</li>
 <li><strong>图中看点 2</strong>：抽屉内不仅给出原文关键段落摘录，还把“对股民意味着什么（支持/削弱原买入逻辑）”用大白话列在下方，不用跳出页面到处找 PDF 下载。</li>
 </ul>
 </li>
-<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 <a class="app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="color:#ffbe7b;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button><a class="copy-btn app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="text-decoration:none;">🚀 打开 /chat 提问 ↗</a></div></div><pre><code>请帮我检索贵州茅台（600519.SH）最近的重点公告，提炼对股东最关键的 3 条核心内容，每条必须标注原公告名称与具体页码，并告诉我有没有需要警惕的隐藏条款。</code></pre></div>
+<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">PROMPT / 对话框提问口令（可直接粘贴到 <a class="app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="color:#10B981;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">复制提问口令</button><a class="copy-btn copy-btn-link app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="text-decoration:none;">打开 /chat 提问 ↗</a></div></div><pre><code>请帮我检索贵州茅台（600519.SH）最近的重点公告，提炼对股东最关键的 3 条核心内容，每条必须标注原公告名称与具体页码，并告诉我有没有需要警惕的隐藏条款。</code></pre></div>
 </li>
 </ul>
 <hr />
@@ -1214,20 +1231,20 @@
 <li><strong>① 解决你炒股的什么痛点？</strong>
     想买一只股票前，既想看技术面是不是买点（均线、MACD、RSI、布林带、主力资金怎么走），又怕公司基本面有雷（挣不挣钱、欠债多不多、现金流真不真、估值贵不贵）。自己拿计算器算完得花一下午，猎鹿人用底层确定性数学引擎 1 秒钟给你算齐 <strong>7 大类 56 项技术指标</strong> 和 <strong>6 大维度 90 项基本面体检评分卡</strong>，连“短线超买但中线趋势向上”这种多空信号打架都会主动提醒你！</li>
 <li><strong>② 去哪点、怎么操作（按钮级指引）</strong><ul>
-<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">🎯 本节功能新窗口直达：</span><div class="direct-launch-actions"><a class="direct-launch-btn app-link" href="#" data-path="/workbench?tab=stock" data-route="/workbench?tab=stock" target="_blank" rel="noopener">🔬 点击直达：投研工作台 个股研究工作台 (/workbench?tab=stock) ↗</a> <a class="direct-launch-btn app-link" href="#" data-path="/workbench" data-route="/workbench" target="_blank" rel="noopener">🚀 投研工作台 (/workbench) ↗</a></div></div></li>
+<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">QUICK LAUNCH / 本节功能直达</span><div class="direct-launch-actions"><a class="direct-launch-btn app-link" href="#" data-path="/workbench?tab=stock" data-route="/workbench?tab=stock" target="_blank" rel="noopener">点击直达：投研工作台 个股研究工作台 (/workbench?tab=stock) ↗</a> <a class="direct-launch-btn app-link" href="#" data-path="/workbench" data-route="/workbench" target="_blank" rel="noopener">投研工作台 (/workbench) ↗</a></div></div></li>
 <li><strong>第 1 步</strong>：点击上方直达按钮进入 <a class="inline-app-link app-link" href="#" data-path="/workbench?tab=stock" data-route="/workbench?tab=stock" target="_blank" rel="noopener">投研工作台 · 个股研究工作台 (/workbench?tab=stock) ↗</a>；</li>
 <li><strong>第 2 步</strong>：在顶部输入框输入股票代码（例如 <code>600036.SH</code> 招商银行或 <code>600519.SH</code> 贵州茅台），并按需切换复权口径（<strong>前复权 <code>qfq</code></strong> 看短线连贯图形、<strong>后复权 <code>hfq</code></strong> 看长线真实含分红累计涨幅、<strong>不复权 <code>none</code></strong> 看除权缺口）；</li>
 <li><strong>第 3 步</strong>：先看左半边 <strong>「56 项技术面全景体检」</strong>（7 大分类得分 + <strong>多空冲突提醒框</strong>），再看右半边 <strong>「90 项基本面 6 维评分卡」</strong>（盈利能力、成长性、偿债安全、现金流质量、估值水位、公司治理与分红）。</li>
 </ul>
 </li>
 <li><strong>③ 真实界面高清截图与看点说明</strong>
-    <figure class="shot-card" onclick="openLightbox('/help/images/07-stock-56tech-90fund.png', '3.3 个股 56 项技术指标 + 90 项基本面评分卡')"><div class="shot-bar"><span class="shot-dots"><i></i><i></i><i></i></span><span class="shot-title">3.3 个股 56 项技术指标 + 90 项基本面评分卡</span><span class="shot-zoom">🔍 点击图片放大全屏查看</span></div><div class="shot-img-wrap"><img src="/help/images/07-stock-56tech-90fund.png" alt="3.3 个股 56 项技术指标 + 90 项基本面评分卡" loading="lazy" /></div></figure><ul>
+    <figure class="shot-card" onclick="openLightbox('/help/images/07-stock-56tech-90fund.png', '3.3 个股 56 项技术指标 + 90 项基本面评分卡')"><div class="shot-bar"><span class="shot-tag">FIGURE</span><span class="shot-title">3.3 个股 56 项技术指标 + 90 项基本面评分卡</span><span class="shot-zoom">点击放大全屏查看 ↗</span></div><div class="shot-img-wrap"><img src="/help/images/07-stock-56tech-90fund.png" alt="3.3 个股 56 项技术指标 + 90 项基本面评分卡" loading="lazy" /></div></figure><ul>
 <li><strong>图中看点 1</strong>：顶部带有前复权/后复权/不复权一键切换开关，并明确提示不同复权口径对均线与历史高点判断的影响；</li>
 <li><strong>图中看点 2</strong>：左侧「56 项技术指标」不仅汇总趋势、动量、波动、量能 7 大类信号，还专门设有醒目的 <strong>「信号冲突提示（Conflict Notes）」</strong>，防止你只看单一指标冲动追高；</li>
 <li><strong>图中看点 3</strong>：右侧「90 项基本面体检」把枯燥的财报科目翻译成百分制得分与行业排位，哪一项强、哪一项弱一目了然。</li>
 </ul>
 </li>
-<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 <a class="app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="color:#ffbe7b;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button><a class="copy-btn app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="text-decoration:none;">🚀 打开 /chat 提问 ↗</a></div></div><pre><code>请对招商银行（600036.SH）或贵州茅台（600519.SH）做一次全套个体检：调用 56 项技术指标工具（前复权口径）和 90 项基本面评分卡工具，用大白话告诉我它现在技术面有哪几个多空冲突信号、基本面哪块最强哪块有短板？</code></pre></div>
+<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">PROMPT / 对话框提问口令（可直接粘贴到 <a class="app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="color:#10B981;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">复制提问口令</button><a class="copy-btn copy-btn-link app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="text-decoration:none;">打开 /chat 提问 ↗</a></div></div><pre><code>请对招商银行（600036.SH）或贵州茅台（600519.SH）做一次全套个体检：调用 56 项技术指标工具（前复权口径）和 90 项基本面评分卡工具，用大白话告诉我它现在技术面有哪几个多空冲突信号、基本面哪块最强哪块有短板？</code></pre></div>
 </li>
 </ul>
 <hr />
@@ -1236,19 +1253,19 @@
 <li><strong>① 解决你炒股的什么痛点？</strong>
     看板上的数字看完了，你还想找几个“老法师”帮你把把关：比如让价值派、成长派、激进派、风控官 6 个不同风格的专家吵一架（多空辩论），或者排查一下某只暴涨妖股是不是“杀猪盘/庄股出货”，又或者拆解今天的龙虎榜游资席位。猎鹿人内置了 <strong>22 个专业金融技能（SKILL）</strong>，点一下就能按机构级标准流程帮你深挖。</li>
 <li><strong>② 去哪点、怎么操作（按钮级指引）</strong><ul>
-<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">🎯 本节功能新窗口直达：</span><div class="direct-launch-actions"><a class="direct-launch-btn app-link" href="#" data-path="/library" data-route="/library" target="_blank" rel="noopener">🧩 点击直达：能力库 / 22 个金融 SKILL (/library) ↗</a> <a class="direct-launch-btn app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener">💬 点击直达：AI 对话框 (/chat) ↗</a></div></div></li>
+<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">QUICK LAUNCH / 本节功能直达</span><div class="direct-launch-actions"><a class="direct-launch-btn app-link" href="#" data-path="/library" data-route="/library" target="_blank" rel="noopener">点击直达：能力库 / 22 个金融 SKILL (/library) ↗</a> <a class="direct-launch-btn app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener">点击直达：AI 对话框 (/chat) ↗</a></div></div></li>
 <li><strong>第 1 步</strong>：点击左侧导航栏的 <a class="inline-app-link app-link" href="#" data-path="/library" data-route="/library" target="_blank" rel="noopener">能力库 / SKILL (/library) ↗</a> 查看全部 22 个内置金融技能与 20 个数据工具通道；</li>
 <li><strong>第 2 步</strong>：挑中你想要的技能（如 <code>deep_analysis</code> 深度个股研报、<code>investor_panel</code> 6 位投资大师圆桌辩论、<code>trap_detector</code> 财务造假与杀猪盘排雷、<code>lhb_analyzer</code> 龙虎榜席位拆解）；</li>
 <li><strong>第 3 步</strong>：打开 <a class="inline-app-link app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener">AI 对话框 (/chat) ↗</a>，直接用大白话点名调用该技能，AI 就会严格按照该技能的步骤先查真实数据、再交叉验证、最后给你结构化结论。</li>
 </ul>
 </li>
 <li><strong>③ 真实界面高清截图与看点说明</strong>
-    <figure class="shot-card" onclick="openLightbox('/help/images/03-chat-deep-analysis.png', '3.4 22 个内置金融技能与能力库')"><div class="shot-bar"><span class="shot-dots"><i></i><i></i><i></i></span><span class="shot-title">3.4 22 个内置金融技能与能力库</span><span class="shot-zoom">🔍 点击图片放大全屏查看</span></div><div class="shot-img-wrap"><img src="/help/images/03-chat-deep-analysis.png" alt="3.4 22 个内置金融技能与能力库" loading="lazy" /></div></figure><ul>
+    <figure class="shot-card" onclick="openLightbox('/help/images/03-chat-deep-analysis.png', '3.4 22 个内置金融技能与能力库')"><div class="shot-bar"><span class="shot-tag">FIGURE</span><span class="shot-title">3.4 22 个内置金融技能与能力库</span><span class="shot-zoom">点击放大全屏查看 ↗</span></div><div class="shot-img-wrap"><img src="/help/images/03-chat-deep-analysis.png" alt="3.4 22 个内置金融技能与能力库" loading="lazy" /></div></figure><ul>
 <li><strong>图中看点 1</strong>：能力库页面把所有内置 SKILL 按「深度研究」「排雷风控」「盘面博弈」「量化与组合」分类排布，每个卡片都用一句话写清它能帮你干什么；</li>
 <li><strong>图中看点 2</strong>：所有技能都直接挂载本地 69 个真实金融 MCP 工具，做到“有数必查、无数必认、绝不瞎编”。</li>
 </ul>
 </li>
-<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 <a class="app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="color:#ffbe7b;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button><a class="copy-btn app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="text-decoration:none;">🚀 打开 /chat 提问 ↗</a></div></div><pre><code>请调用【6 位投资大师圆桌辩论（investor_panel）】和【排雷检测（trap_detector）】技能，帮我全面剖析用友网络（600588.SH）当前的多空分歧点、财务现金流质量以及我最该盯紧的 3 个风险信号。</code></pre></div>
+<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">PROMPT / 对话框提问口令（可直接粘贴到 <a class="app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="color:#10B981;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">复制提问口令</button><a class="copy-btn copy-btn-link app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="text-decoration:none;">打开 /chat 提问 ↗</a></div></div><pre><code>请调用【6 位投资大师圆桌辩论（investor_panel）】和【排雷检测（trap_detector）】技能，帮我全面剖析用友网络（600588.SH）当前的多空分歧点、财务现金流质量以及我最该盯紧的 3 个风险信号。</code></pre></div>
 </li>
 </ul>
 <hr />
@@ -1258,19 +1275,19 @@
 <li><strong>① 解决你炒股的什么痛点？</strong>
     很多散户炒股三年还是老样子，原因就是收盘关电脑就走，从不复盘，今天踩过的坑下个月接着踩。猎鹿人在下午 3 点半收盘后，一键帮你把今天的大盘表现、自选股涨跌原因、盘前预判对错整理成复盘卡片，并自动存进你电脑本地的 <strong>专属经验库（<code>fin_memory</code>）</strong>，以后再买同类股票时系统会自动翻旧账提醒你！</li>
 <li><strong>② 去哪点、怎么操作（按钮级指引）</strong><ul>
-<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">🎯 本节功能新窗口直达：</span><div class="direct-launch-actions"><a class="direct-launch-btn app-link" href="#" data-path="/workbench?tab=market&amp;view=after_close" data-route="/workbench?tab=market&amp;view=after_close" target="_blank" rel="noopener">🌇 点击直达：投研工作台 15:30 盘后复盘 (/workbench?tab=market&amp;view=after_close) ↗</a> <a class="direct-launch-btn app-link" href="#" data-path="/workbench" data-route="/workbench" target="_blank" rel="noopener">🚀 投研工作台 (/workbench) ↗</a></div></div></li>
+<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">QUICK LAUNCH / 本节功能直达</span><div class="direct-launch-actions"><a class="direct-launch-btn app-link" href="#" data-path="/workbench?tab=market&amp;view=after_close" data-route="/workbench?tab=market&amp;view=after_close" target="_blank" rel="noopener">点击直达：投研工作台 15:30 盘后复盘 (/workbench?tab=market&amp;view=after_close) ↗</a> <a class="direct-launch-btn app-link" href="#" data-path="/workbench" data-route="/workbench" target="_blank" rel="noopener">投研工作台 (/workbench) ↗</a></div></div></li>
 <li><strong>第 1 步</strong>：下午 15:00 收盘后，点击上方直达按钮打开 <a class="inline-app-link app-link" href="#" data-path="/workbench?tab=market&amp;view=after_close" data-route="/workbench?tab=market&amp;view=after_close" target="_blank" rel="noopener">投研工作台 → 市场工作台 (/workbench?tab=market&amp;view=after_close) ↗</a>；</li>
 <li><strong>第 2 步</strong>：点击 <strong>「执行今日盘后复盘（15:30 收盘总结）」</strong> 按钮；</li>
 <li><strong>第 3 步</strong>：查看生成的收盘总结卡片，确认右上角显示 <strong>「已归档至 fin_memory 本地经验库」</strong>，把今天的得失变成你自己的投研资产。</li>
 </ul>
 </li>
 <li><strong>③ 真实界面高清截图与看点说明</strong>
-    <figure class="shot-card" onclick="openLightbox('/help/images/08-after-close-review.png', '4.1 15:30 盘后复盘与本地经验库归档')"><div class="shot-bar"><span class="shot-dots"><i></i><i></i><i></i></span><span class="shot-title">4.1 15:30 盘后复盘与本地经验库归档</span><span class="shot-zoom">🔍 点击图片放大全屏查看</span></div><div class="shot-img-wrap"><img src="/help/images/08-after-close-review.png" alt="4.1 15:30 盘后复盘与本地经验库归档" loading="lazy" /></div></figure><ul>
+    <figure class="shot-card" onclick="openLightbox('/help/images/08-after-close-review.png', '4.1 15:30 盘后复盘与本地经验库归档')"><div class="shot-bar"><span class="shot-tag">FIGURE</span><span class="shot-title">4.1 15:30 盘后复盘与本地经验库归档</span><span class="shot-zoom">点击放大全屏查看 ↗</span></div><div class="shot-img-wrap"><img src="/help/images/08-after-close-review.png" alt="4.1 15:30 盘后复盘与本地经验库归档" loading="lazy" /></div></figure><ul>
 <li><strong>图中看点 1</strong>：盘后复盘卡片自动对比今日早盘观察清单与全天实际走势，客观复核哪些预判应验、哪些超预期；</li>
 <li><strong>图中看点 2</strong>：带有 <code>fin_memory</code> 本地记忆归档标识与唯一记录号，下次你在对话框问相关股票时，AI 能直接调出你当时的复盘笔记。</li>
 </ul>
 </li>
-<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 <a class="app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="color:#ffbe7b;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button><a class="copy-btn app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="text-decoration:none;">🚀 打开 /chat 提问 ↗</a></div></div><pre><code>现在已经收盘了，请帮我做一次今日 15:30 盘后复盘：总结今天 A 股与港股的核心主线、我自选股的全天表现，对比今天早上盘前观察卡有哪些预期差，并把复盘结论存入我的本地投研记忆库。</code></pre></div>
+<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">PROMPT / 对话框提问口令（可直接粘贴到 <a class="app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="color:#10B981;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">复制提问口令</button><a class="copy-btn copy-btn-link app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="text-decoration:none;">打开 /chat 提问 ↗</a></div></div><pre><code>现在已经收盘了，请帮我做一次今日 15:30 盘后复盘：总结今天 A 股与港股的核心主线、我自选股的全天表现，对比今天早上盘前观察卡有哪些预期差，并把复盘结论存入我的本地投研记忆库。</code></pre></div>
 </li>
 </ul>
 <hr />
@@ -1279,19 +1296,19 @@
 <li><strong>① 解决你炒股的什么痛点？</strong>
     股民最容易犯的错就是“凭感觉买、凭信仰套死”——明明当初是因为“业绩高增长”才买的，结果半年报业绩暴雷了，却安慰自己“我是做长线价值投资的”死扛不走。猎鹿人的 <strong>「组合复盘工作台」</strong> 专门帮你把每只持仓股的 <strong>「当初买入理由（投资论点）」</strong> 和 <strong>「什么情况下必须认错离场（失效条件）」</strong> 钉在看板上，每天自动拿最新公告和去重新闻帮你比对！</li>
 <li><strong>② 去哪点、怎么操作（按钮级指引）</strong><ul>
-<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">🎯 本节功能新窗口直达：</span><div class="direct-launch-actions"><a class="direct-launch-btn app-link" href="#" data-path="/workbench?tab=portfolio_review" data-route="/workbench?tab=portfolio_review" target="_blank" rel="noopener">📝 点击直达：投研工作台 组合复盘工作台 (/workbench?tab=portfolio_review) ↗</a></div></div></li>
+<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">QUICK LAUNCH / 本节功能直达</span><div class="direct-launch-actions"><a class="direct-launch-btn app-link" href="#" data-path="/workbench?tab=portfolio_review" data-route="/workbench?tab=portfolio_review" target="_blank" rel="noopener">点击直达：投研工作台 组合复盘工作台 (/workbench?tab=portfolio_review) ↗</a></div></div></li>
 <li><strong>第 1 步</strong>：点击上方直达按钮进入 <a class="inline-app-link app-link" href="#" data-path="/workbench?tab=portfolio_review" data-route="/workbench?tab=portfolio_review" target="_blank" rel="noopener">投研工作台 · 组合复盘工作台 (/workbench?tab=portfolio_review) ↗</a>；</li>
 <li><strong>第 2 步</strong>：在 <strong>「持仓投资论点（Thesis）状态看板」</strong> 中，逐只检查你的持仓股：看最新财报和公告是 <strong>【支持原逻辑】</strong>、<strong>【削弱原逻辑】</strong> 还是已经触发了 <strong>【失效红线】</strong>；</li>
 <li><strong>第 3 步</strong>：在右侧 <strong>「结构化交易日志」</strong> 记录你每次加减仓的心态与依据，并在下方查看自动合并了重复转发的 <strong>「去重聚合新闻流」</strong>（同一个消息被 10 家媒体转发只显示 1 条，清清爽爽）。</li>
 </ul>
 </li>
 <li><strong>③ 真实界面高清截图与看点说明</strong>
-    <figure class="shot-card" onclick="openLightbox('/help/images/09-portfolio-thesis-journal.png', '4.2 组合复盘：投资论点看板与交易日志')"><div class="shot-bar"><span class="shot-dots"><i></i><i></i><i></i></span><span class="shot-title">4.2 组合复盘：投资论点看板与交易日志</span><span class="shot-zoom">🔍 点击图片放大全屏查看</span></div><div class="shot-img-wrap"><img src="/help/images/09-portfolio-thesis-journal.png" alt="4.2 组合复盘：投资论点看板与交易日志" loading="lazy" /></div></figure><ul>
+    <figure class="shot-card" onclick="openLightbox('/help/images/09-portfolio-thesis-journal.png', '4.2 组合复盘：投资论点看板与交易日志')"><div class="shot-bar"><span class="shot-tag">FIGURE</span><span class="shot-title">4.2 组合复盘：投资论点看板与交易日志</span><span class="shot-zoom">点击放大全屏查看 ↗</span></div><div class="shot-img-wrap"><img src="/help/images/09-portfolio-thesis-journal.png" alt="4.2 组合复盘：投资论点看板与交易日志" loading="lazy" /></div></figure><ul>
 <li><strong>图中看点 1</strong>：每只持仓股都清晰列出「核心买入假设」「当前证据状态（支持/观察/警示）」与「明确失效条件」，帮你克服人性弱点；</li>
 <li><strong>图中看点 2</strong>：底部的去重新闻流（Deduplicated News Feed）自动把同源重复快讯折叠合并，标注首发来源与重复次数，再也不怕被刷屏消息干扰。</li>
 </ul>
 </li>
-<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 <a class="app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="color:#ffbe7b;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button><a class="copy-btn app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="text-decoration:none;">🚀 打开 /chat 提问 ↗</a></div></div><pre><code>请帮我巡检我当前的持仓组合：结合最近一周的财报、公告和行业新闻，逐只判断我当初买入贵州茅台（600519.SH）和招商银行（600036.SH）的投资逻辑是得到了强化还是被削弱？有没有触发失效条件？</code></pre></div>
+<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">PROMPT / 对话框提问口令（可直接粘贴到 <a class="app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="color:#10B981;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">复制提问口令</button><a class="copy-btn copy-btn-link app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="text-decoration:none;">打开 /chat 提问 ↗</a></div></div><pre><code>请帮我巡检我当前的持仓组合：结合最近一周的财报、公告和行业新闻，逐只判断我当初买入贵州茅台（600519.SH）和招商银行（600036.SH）的投资逻辑是得到了强化还是被削弱？有没有触发失效条件？</code></pre></div>
 </li>
 </ul>
 <hr />
@@ -1300,19 +1317,19 @@
 <li><strong>① 解决你炒股的什么痛点？</strong>
     想让 AI 帮你诊断手头的真实持仓，但一个个手敲股票代码和成本价太累；要是让软件连券商账号，又怕泄漏交易密码或者 AI 抽风乱买乱卖把本金亏光。猎鹿人采用 <strong>「物理级零交易接口」</strong> 设计：只提供 <strong>只读持仓同步（Read-Only OAuth）</strong> 和 <strong>本地 Excel/CSV 交割单导入</strong> 两种安全方式，代码里根本没有实盘下单函数，而且随时可以一键撤销授权！</li>
 <li><strong>② 去哪点、怎么操作（按钮级指引）</strong><ul>
-<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">🎯 本节功能新窗口直达：</span><div class="direct-launch-actions"><a class="direct-launch-btn app-link" href="#" data-path="/settings?tab=broker" data-route="/settings?tab=broker" target="_blank" rel="noopener">🔒 点击直达：设置 合作券商只读授权与持仓导入 (/settings?tab=broker) ↗</a></div></div></li>
+<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">QUICK LAUNCH / 本节功能直达</span><div class="direct-launch-actions"><a class="direct-launch-btn app-link" href="#" data-path="/settings?tab=broker" data-route="/settings?tab=broker" target="_blank" rel="noopener">点击直达：设置 合作券商只读授权与持仓导入 (/settings?tab=broker) ↗</a></div></div></li>
 <li><strong>第 1 步</strong>：点击上方直达按钮进入 <a class="inline-app-link app-link" href="#" data-path="/settings?tab=broker" data-route="/settings?tab=broker" target="_blank" rel="noopener">设置 → 合作券商只读授权与持仓导入 (/settings?tab=broker) ↗</a>；</li>
 <li><strong>第 2 步</strong>：方式 A（只读连接器）：选择模拟/合作只读通道，点击 <strong>「开启只读持仓授权」</strong>，系统仅拉取股票代码、持仓数量与成本价（绝不索要交易密码，随时可点「撤销授权」断开）；</li>
 <li><strong>第 3 步</strong>：方式 B（最推荐散户使用）：从你手机或电脑炒股软件导出 CSV/Excel 交割单或持仓表，点击 <strong>「上传交割单 / 持仓 CSV」</strong>，系统在本地秒级解析持仓结构、行业集中度与历史盈亏。</li>
 </ul>
 </li>
 <li><strong>③ 真实界面高清截图与看点说明</strong>
-    <figure class="shot-card" onclick="openLightbox('/help/images/10-broker-readonly-auth.png', '4.3 只读持仓授权与 CSV 交割单安全导入')"><div class="shot-bar"><span class="shot-dots"><i></i><i></i><i></i></span><span class="shot-title">4.3 只读持仓授权与 CSV 交割单安全导入</span><span class="shot-zoom">🔍 点击图片放大全屏查看</span></div><div class="shot-img-wrap"><img src="/help/images/10-broker-readonly-auth.png" alt="4.3 只读持仓授权与 CSV 交割单安全导入" loading="lazy" /></div></figure><ul>
+    <figure class="shot-card" onclick="openLightbox('/help/images/10-broker-readonly-auth.png', '4.3 只读持仓授权与 CSV 交割单安全导入')"><div class="shot-bar"><span class="shot-tag">FIGURE</span><span class="shot-title">4.3 只读持仓授权与 CSV 交割单安全导入</span><span class="shot-zoom">点击放大全屏查看 ↗</span></div><div class="shot-img-wrap"><img src="/help/images/10-broker-readonly-auth.png" alt="4.3 只读持仓授权与 CSV 交割单安全导入" loading="lazy" /></div></figure><ul>
 <li><strong>图中看点 1</strong>：顶部醒目展示 <strong>「物理级只读安全承诺：0 实盘下单接口 · 0 资金划转权限 · 本地加密存储」</strong>；</li>
 <li><strong>图中看点 2</strong>：下方同时展示只读同步过来的持仓明细（含仓位占比、浮动盈亏）以及 CSV 交割单导入后的体检摘要卡片。</li>
 </ul>
 </li>
-<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 <a class="app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="color:#ffbe7b;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button><a class="copy-btn app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="text-decoration:none;">🚀 打开 /chat 提问 ↗</a></div></div><pre><code>我已经导入了最新持仓，请帮我做一次持仓组合风险体检：看看我的仓位是不是太集中在某一个行业？如果大盘回调 10% 或消费/银行板块波动，我的组合最大回撤大概是多少？</code></pre></div>
+<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">PROMPT / 对话框提问口令（可直接粘贴到 <a class="app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="color:#10B981;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">复制提问口令</button><a class="copy-btn copy-btn-link app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="text-decoration:none;">打开 /chat 提问 ↗</a></div></div><pre><code>我已经导入了最新持仓，请帮我做一次持仓组合风险体检：看看我的仓位是不是太集中在某一个行业？如果大盘回调 10% 或消费/银行板块波动，我的组合最大回撤大概是多少？</code></pre></div>
 </li>
 </ul>
 <hr />
@@ -1322,19 +1339,19 @@
 <li><strong>① 解决你炒股的什么痛点？</strong>
     很多上班族没空天天盯盘，想每月发工资定投沪深 300、纳指或红利 ETF，但算不清“每月投 3000 块、坚持 5 年能攒多少钱？真实年化收益（XIRR）到底是多少？跟一次性买入比哪个划算？”；另外看到网上吹嘘“年化 80% 的神级选股公式”，不知道是不是用了未来数据造假。猎鹿人的 <strong>「量化研究与 ETF 定投工作台」</strong> 把这两件事做成傻瓜式工具，1 秒出结果！</li>
 <li><strong>② 去哪点、怎么操作（按钮级指引）</strong><ul>
-<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">🎯 本节功能新窗口直达：</span><div class="direct-launch-actions"><a class="direct-launch-btn app-link" href="#" data-path="/workbench?tab=quant" data-route="/workbench?tab=quant" target="_blank" rel="noopener">📐 点击直达：投研工作台 量化研究与 ETF 定投 (/workbench?tab=quant) ↗</a> <a class="direct-launch-btn app-link" href="#" data-path="/workbench" data-route="/workbench" target="_blank" rel="noopener">🚀 投研工作台 (/workbench) ↗</a></div></div></li>
+<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">QUICK LAUNCH / 本节功能直达</span><div class="direct-launch-actions"><a class="direct-launch-btn app-link" href="#" data-path="/workbench?tab=quant" data-route="/workbench?tab=quant" target="_blank" rel="noopener">点击直达：投研工作台 量化研究与 ETF 定投 (/workbench?tab=quant) ↗</a> <a class="direct-launch-btn app-link" href="#" data-path="/workbench" data-route="/workbench" target="_blank" rel="noopener">投研工作台 (/workbench) ↗</a></div></div></li>
 <li><strong>第 1 步</strong>：点击上方直达按钮进入 <a class="inline-app-link app-link" href="#" data-path="/workbench?tab=quant" data-route="/workbench?tab=quant" target="_blank" rel="noopener">投研工作台 · 量化研究与 ETF 定投工作台 (/workbench?tab=quant) ↗</a>；</li>
 <li><strong>第 2 步</strong>：在左侧 <strong>「ETF 定投（DCA）全生命周期计算器」</strong> 中，设定定投标的（如 <code>510300.SH</code> 沪深300ETF）、每月定投金额或目标攒钱金额，一键查看 <strong>真实内部收益率（XIRR）</strong>、微笑曲线摊薄成本过程，以及 <strong>「定投 vs 一次性买入（Lump-Sum）」</strong> 的抗回撤对比；</li>
 <li><strong>第 3 步</strong>：在右侧查看 <strong>「量化因子 5 分位分层检验」</strong> 与 <strong>「回测 6 维防坑审计清单」</strong>（自动检查有没有偷看未来数据、有没有把退市烂票剔除掉算虚高收益、有没有扣除印花税和滑点成本）。</li>
 </ul>
 </li>
 <li><strong>③ 真实界面高清截图与看点说明</strong>
-    <figure class="shot-card" onclick="openLightbox('/help/images/11-quant-etf-dca-strategies.png', '5.1 ETF 定投计算器与量化选股防坑审计')"><div class="shot-bar"><span class="shot-dots"><i></i><i></i><i></i></span><span class="shot-title">5.1 ETF 定投计算器与量化选股防坑审计</span><span class="shot-zoom">🔍 点击图片放大全屏查看</span></div><div class="shot-img-wrap"><img src="/help/images/11-quant-etf-dca-strategies.png" alt="5.1 ETF 定投计算器与量化选股防坑审计" loading="lazy" /></div></figure><ul>
+    <figure class="shot-card" onclick="openLightbox('/help/images/11-quant-etf-dca-strategies.png', '5.1 ETF 定投计算器与量化选股防坑审计')"><div class="shot-bar"><span class="shot-tag">FIGURE</span><span class="shot-title">5.1 ETF 定投计算器与量化选股防坑审计</span><span class="shot-zoom">点击放大全屏查看 ↗</span></div><div class="shot-img-wrap"><img src="/help/images/11-quant-etf-dca-strategies.png" alt="5.1 ETF 定投计算器与量化选股防坑审计" loading="lazy" /></div></figure><ul>
 <li><strong>图中看点 1</strong>：ETF 定投面板清晰列出总投入本金、期末市值、XIRR 真实年化回报率、最大回撤，还能按“5 年后想攒够 50 万”反推现在每月该投多少钱；</li>
 <li><strong>图中看点 2</strong>：右侧的「6 维防坑审计（Bias Audit）」给策略逐项打勾验身（前视偏差、幸存者偏差、交易成本、涨跌停不可成交约束等），帮你戳破假回测神话。</li>
 </ul>
 </li>
-<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 <a class="app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="color:#ffbe7b;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button><a class="copy-btn app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="text-decoration:none;">🚀 打开 /chat 提问 ↗</a></div></div><pre><code>我打算每月发工资定投 3000 元沪深300ETF（510300.SH）搭配红利ETF（510880.SH），请调用 ETF 定投计算器工具帮我测算历史定投的真实年化收益率（XIRR）、最大回撤，并对比一次性买入哪种更适合普通上班族？</code></pre></div>
+<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">PROMPT / 对话框提问口令（可直接粘贴到 <a class="app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="color:#10B981;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">复制提问口令</button><a class="copy-btn copy-btn-link app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="text-decoration:none;">打开 /chat 提问 ↗</a></div></div><pre><code>我打算每月发工资定投 3000 元沪深300ETF（510300.SH）搭配红利ETF（510880.SH），请调用 ETF 定投计算器工具帮我测算历史定投的真实年化收益率（XIRR）、最大回撤，并对比一次性买入哪种更适合普通上班族？</code></pre></div>
 </li>
 </ul>
 <hr />
@@ -1343,19 +1360,19 @@
 <li><strong>① 解决你炒股的什么痛点？</strong>
     想试试多因子量化选股策略，或者想看 AI 智能体如果自己在盘前、早盘、盘中、尾盘全天候盯盘买卖会做成什么样，但绝不想拿自己的血汗钱去冒险。猎鹿人自带完整的 <strong>「策略中心」</strong>（<code>/strategies/index.html</code>）与 <strong>「AI 智能体模拟炒股训练场」</strong>（<code>/finance/overview</code>），用 100% 虚拟资金在真实历史与实盘行情上全自动演练，赚了帮你找灵感，亏了不伤你一分钱！</li>
 <li><strong>② 去哪点、怎么操作（按钮级指引）</strong><ul>
-<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">🎯 本节功能新窗口直达：</span><div class="direct-launch-actions"><a class="direct-launch-btn app-link" href="#" data-path="/strategies/index.html" data-route="/strategies/index.html" target="_blank" rel="noopener">📊 点击直达：策略中心 (/strategies/index.html) ↗</a> <a class="direct-launch-btn app-link" href="#" data-path="/finance/overview" data-route="/finance/overview" target="_blank" rel="noopener">🤖 点击直达：AI 智能体模拟自动炒股 (/finance/overview) ↗</a></div></div></li>
+<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">QUICK LAUNCH / 本节功能直达</span><div class="direct-launch-actions"><a class="direct-launch-btn app-link" href="#" data-path="/strategies/index.html" data-route="/strategies/index.html" target="_blank" rel="noopener">点击直达：策略中心 (/strategies/index.html) ↗</a> <a class="direct-launch-btn app-link" href="#" data-path="/finance/overview" data-route="/finance/overview" target="_blank" rel="noopener">点击直达：AI 智能体模拟自动炒股 (/finance/overview) ↗</a></div></div></li>
 <li><strong>第 1 步</strong>：点击上方直达按钮进入 <a class="inline-app-link app-link" href="#" data-path="/strategies/index.html" data-route="/strategies/index.html" target="_blank" rel="noopener">策略中心 (/strategies/index.html) ↗</a>，浏览官方内置策略库、因子广场（估值/质量/动量/资金流因子）与可视化回测工作台；</li>
 <li><strong>第 2 步</strong>：挑选任意策略查看它的净值曲线、超额收益、最大回撤与每期换手率；</li>
 <li><strong>第 3 步</strong>：若想看 AI 全天候自动模拟操盘，点击访问 <a class="inline-app-link app-link" href="#" data-path="/finance/overview" data-route="/finance/overview" target="_blank" rel="noopener">智能体模拟自动炒股 (/finance/overview) ↗</a>，观察智能体在每日 <strong>6 大固定交易时点（08:35 盘前、09:35 早盘、11:35 午盘、14:30 尾盘、15:10 收盘、20:00 晚间复盘）</strong> 自动生成的虚拟持仓调仓记录与理由。</li>
 </ul>
 </li>
 <li><strong>③ 真实界面高清截图与看点说明</strong>
-    <figure class="shot-card" onclick="openLightbox('/help/images/12-strategy-and-auto-trade.png', '5.2 策略中心与 AI 智能体模拟自动炒股')"><div class="shot-bar"><span class="shot-dots"><i></i><i></i><i></i></span><span class="shot-title">5.2 策略中心与 AI 智能体模拟自动炒股</span><span class="shot-zoom">🔍 点击图片放大全屏查看</span></div><div class="shot-img-wrap"><img src="/help/images/12-strategy-and-auto-trade.png" alt="5.2 策略中心与 AI 智能体模拟自动炒股" loading="lazy" /></div></figure><ul>
+    <figure class="shot-card" onclick="openLightbox('/help/images/12-strategy-and-auto-trade.png', '5.2 策略中心与 AI 智能体模拟自动炒股')"><div class="shot-bar"><span class="shot-tag">FIGURE</span><span class="shot-title">5.2 策略中心与 AI 智能体模拟自动炒股</span><span class="shot-zoom">点击放大全屏查看 ↗</span></div><div class="shot-img-wrap"><img src="/help/images/12-strategy-and-auto-trade.png" alt="5.2 策略中心与 AI 智能体模拟自动炒股" loading="lazy" /></div></figure><ul>
 <li><strong>图中看点 1</strong>：策略中心把复杂的量化回测包装成直观的策略卡片，年化收益、夏普比率、最大回撤、持仓标的池一眼看懂；</li>
 <li><strong>图中看点 2</strong>：支持从「官方策略 → 因子广场 → 策略对比 → 模拟盘演练」全链路打通，普通股民不用写一行 Python 代码就能用上量化研究所的武器。</li>
 </ul>
 </li>
-<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 <a class="app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="color:#ffbe7b;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button><a class="copy-btn app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="text-decoration:none;">🚀 打开 /chat 提问 ↗</a></div></div><pre><code>请帮我用大白话选股器筛选 A 股里“ROE 连续三年大于 15%、市盈率处于历史中低位、且经营现金流健康的蓝筹股”，并调用量化回测防坑工具看看这种低估值高股息策略在过去三年的表现和最大回撤。</code></pre></div>
+<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">PROMPT / 对话框提问口令（可直接粘贴到 <a class="app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="color:#10B981;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">复制提问口令</button><a class="copy-btn copy-btn-link app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="text-decoration:none;">打开 /chat 提问 ↗</a></div></div><pre><code>请帮我用大白话选股器筛选 A 股里“ROE 连续三年大于 15%、市盈率处于历史中低位、且经营现金流健康的蓝筹股”，并调用量化回测防坑工具看看这种低估值高股息策略在过去三年的表现和最大回撤。</code></pre></div>
 </li>
 </ul>
 <hr />
@@ -1590,7 +1607,7 @@
 
   <div id="smart-nav-toast" class="smart-nav-toast" role="status" aria-live="polite">
     <div class="smart-toast-head">
-      <span>🌐 官网预览模式 · 双通道智能导航</span>
+      <span>ENVIRONMENT ROUTING · 双通道智能导航</span>
       <button type="button" class="smart-toast-close" onclick="closeSmartToast()" aria-label="关闭提示">✕</button>
     </div>
     <div id="smart-toast-body">
@@ -1598,7 +1615,7 @@
     </div>
     <div>
       <a id="smart-toast-local-anchor" class="smart-toast-local-link" href="http://localhost:3100/workbench" target="_blank" rel="noopener">
-        🖥️ 打开本地 localhost:3100/workbench ↗
+        打开本地 localhost:3100/workbench ↗
       </a>
     </div>
   </div>
@@ -1655,9 +1672,9 @@
       if (indicator) {
         if (env.isLocalOrSelfHosted) {
           var hostLabel = window.location.host || env.hostname || '本地实例';
-          indicator.textContent = '✅ 当前已连接实例：' + hostLabel + '（点击按钮直接打开当前实例）';
+          indicator.textContent = 'CONNECTED: ' + hostLabel + '（点击按钮直接打开当前实例）';
         } else {
-          indicator.textContent = '🌐 当前处于官网预览模式（点击功能按钮将优先打开在线演示站，并支持切换本地 :3100）';
+          indicator.textContent = 'PREVIEW MODE: 官网预览模式（点击功能按钮将优先打开在线演示站，并支持切换本地 :3100）';
         }
       }
 
@@ -1740,7 +1757,7 @@
     function showCopied(btn) {
       var orig = btn.getAttribute('data-orig') || btn.textContent;
       btn.setAttribute('data-orig', orig);
-      btn.textContent = '✅ 已复制提问口令';
+      btn.textContent = '✓ COPIED / 已复制口令';
       btn.classList.add('copied');
       setTimeout(function() {
         btn.textContent = orig;
