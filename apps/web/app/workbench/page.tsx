@@ -585,7 +585,7 @@ export default function BrokerDailyWorkbenchPage() {
          disabled={loading}
          className="px-4 py-2 rounded-lg text-sm font-semibold bg-[#203C30] text-white hover:bg-[#182E24] disabled:opacity-50"
         >
-         ☀️ 生成今日市场晨报（08:30 盘前观察卡）
+          生成今日市场晨报（08:30 盘前观察卡）
         </button>
         <button
          data-testid="btn-generate-after-close"
@@ -610,7 +610,7 @@ export default function BrokerDailyWorkbenchPage() {
          </span>
          {activeMarketCard.number_verification?.ok && (
           <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-semibold">
-           ✅ 数字回读校验通过 ({activeMarketCard.number_verification.matched_count} 项真值)
+            数字回读校验通过 ({activeMarketCard.number_verification.matched_count} 项真值)
           </span>
          )}
         </div>
@@ -673,7 +673,7 @@ export default function BrokerDailyWorkbenchPage() {
         </div>
 
         <div className="bg-white rounded-xl border border-slate-200 p-4">
-         <h3 className="text-sm font-bold text-slate-900 mb-2">🧊 领跌行业板块</h3>
+         <h3 className="text-sm font-bold text-slate-900 mb-2"> 领跌行业板块</h3>
          <div className="space-y-1.5">
           {(preCard.market_overview.lagging_sectors || []).map((s: any) => (
            <div key={s.sector} className="flex items-center justify-between text-xs">
@@ -693,7 +693,7 @@ export default function BrokerDailyWorkbenchPage() {
          <h2 className="text-lg font-bold text-slate-900">
           {activeWorkflowView === 'pre_market'
            ? 'EVIDENCE MATRIX 《今日盘前观察卡》 · 三栏证据拆解'
-           : '📝 《15:30 盘后复盘与经验沉淀报告》 · 三栏证据拆解'}
+           : ' 《15:30 盘后复盘与经验沉淀报告》 · 三栏证据拆解'}
          </h2>
          {activeWorkflowView === 'after_close' && afterCard?.fin_memory_receipt && (
           <span className="px-3 py-1 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-800">
@@ -713,7 +713,7 @@ export default function BrokerDailyWorkbenchPage() {
          </div>
 
          <div className="p-4 rounded-xl bg-slate-50/60 border border-slate-200">
-          <h3 className="text-sm font-bold text-amber-900 mb-2">【逻辑推断】（传导链与多空推演）</h3>
+          <h3 className="text-sm font-bold text-[#203C30] dark:text-emerald-400 mb-2">【逻辑推断】（传导链与多空推演）</h3>
           <ul className="text-xs text-slate-700 space-y-2 list-disc pl-4">
            {(activeMarketCard.three_column_evidence.logical_inferences || []).map((f: string, i: number) => (
             <li key={i}>{f}</li>
@@ -734,7 +734,7 @@ export default function BrokerDailyWorkbenchPage() {
         {/* 盘后复盘：早盘预期 vs 收盘现实核对表 */}
         {activeWorkflowView === 'after_close' && afterCard?.review_comparison && (
          <div className="mt-5 pt-4 border-t border-slate-200">
-          <h3 className="text-sm font-bold text-slate-900 mb-3">🔍 早盘观察条件 vs 15:00 收盘结果对照表</h3>
+          <h3 className="text-sm font-bold text-slate-900 mb-3"> 早盘观察条件 vs 15:00 收盘结果对照表</h3>
           <div className="overflow-x-auto">
            <table className="w-full text-xs text-left border-collapse">
             <thead>
@@ -802,7 +802,7 @@ export default function BrokerDailyWorkbenchPage() {
          onClick={() => triggerIntradayAnomaly('600036.SH', true)}
          className="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-200 text-slate-800 hover:bg-slate-300"
         >
-         🔌 演练数据源断连诚实告警
+          演练数据源断连诚实告警
         </button>
        </div>
       </div>
@@ -975,9 +975,9 @@ export default function BrokerDailyWorkbenchPage() {
 
          {/* 风险预警列表 */}
          {(watchlistData.portfolio_risk.alerts || []).length > 0 && (
-          <div className="mb-4 p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs text-amber-900 space-y-1">
+          <div className="mb-4 p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs text-[#203C30] dark:text-emerald-400 space-y-1">
            {watchlistData.portfolio_risk.alerts.map((al: string, i: number) => (
-            <div key={i}>⚠️ {al}</div>
+            <div key={i}>[ALERT] {al}</div>
            ))}
           </div>
          )}
@@ -1071,7 +1071,7 @@ export default function BrokerDailyWorkbenchPage() {
          </ul>
         </div>
         <div className="bg-white rounded-xl border border-slate-200 p-4">
-         <h3 className="text-xs font-bold text-amber-900 mb-2">【逻辑推断】（指标冲突与现金流质量）</h3>
+         <h3 className="text-xs font-bold text-[#203C30] dark:text-emerald-400 mb-2">【逻辑推断】（指标冲突与现金流质量）</h3>
          <ul className="text-xs text-slate-700 space-y-1.5 list-disc pl-4">
           {stockData.three_column_evidence.logical_inferences.map((f: string, i: number) => (
            <li key={i}>{f}</li>
@@ -1095,7 +1095,7 @@ export default function BrokerDailyWorkbenchPage() {
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
          <div>
           <h2 className="text-base font-bold text-slate-900">
-           📈 7 大类 56 项技术指标确定性看板（`technical_dashboard` · 已计算 {tech56.computed_indicators}/{tech56.total_indicators} 项）
+            7 大类 56 项技术指标确定性看板（`technical_dashboard` · 已计算 {tech56.computed_indicators}/{tech56.total_indicators} 项）
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
            纯 Python 确定性引擎计算（误差 &lt; 1e-6） · 严禁大模型心算指标 · 复权口径：{tech56.adjustment}
@@ -1121,8 +1121,8 @@ export default function BrokerDailyWorkbenchPage() {
 
         {/* 多指标信号冲突告警 */}
         {(tech56.signal_conflicts || []).length > 0 && (
-         <div className="mb-4 p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs text-amber-900">
-          <strong>⚠️ 多指标客观冲突提示：</strong>
+         <div className="mb-4 p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs text-[#203C30] dark:text-emerald-400">
+          <strong>[SIGNAL CONFLICT] 多指标客观冲突提示：</strong>
           {tech56.signal_conflicts.map((c: any, i: number) => (
            <span key={i} className="ml-2">{c.summary || c.type}</span>
           ))}
@@ -1202,7 +1202,7 @@ export default function BrokerDailyWorkbenchPage() {
             <div className="text-xs font-semibold text-slate-700">{dimName}</div>
             <div className="flex items-baseline justify-between mt-1">
              <span className="text-xl font-bold text-slate-900">{fmtVal(dimInfo.score, '', 1)}</span>
-             <span className="text-xs font-bold px-1.5 py-0.5 rounded bg-slate-100 text-amber-900">
+             <span className="text-xs font-bold px-1.5 py-0.5 rounded bg-slate-100 text-[#203C30] dark:text-emerald-400">
               {dimInfo.grade}
              </span>
             </div>
@@ -1285,7 +1285,7 @@ export default function BrokerDailyWorkbenchPage() {
           </span>
          </div>
          <h2 className="text-lg font-bold text-slate-900 mt-1">
-          💰 ETF 定投计算器（正向历史净值回测 · 目标金额反推 · 定投 vs 一次性买入对比）
+           ETF 定投计算器（正向历史净值回测 · 目标金额反推 · 定投 vs 一次性买入对比）
          </h2>
         </div>
         {quantData?.etf_dca?.etf_quote && (
@@ -1495,7 +1495,7 @@ export default function BrokerDailyWorkbenchPage() {
             P1 · factor_research
            </span>
            <h3 className="text-base font-bold text-slate-900 mt-1">
-            📈 因子有效性检验（IC / Rank IC / 5层分层单调性 / 拥挤度）
+             因子有效性检验（IC / Rank IC / 5层分层单调性 / 拥挤度）
            </h3>
           </div>
           <select
@@ -1599,7 +1599,7 @@ export default function BrokerDailyWorkbenchPage() {
            onClick={() => runBacktestAudit(true, true, true, true)}
            className="px-2.5 py-1 rounded bg-emerald-700 text-white font-semibold hover:bg-emerald-800"
           >
-           ✅ 标准合规回测（PIT财报+历史成分股+扣费）
+            标准合规回测（PIT财报+历史成分股+扣费）
           </button>
           <button
            data-testid="btn-audit-simulate-pit-fail"
@@ -1649,7 +1649,7 @@ export default function BrokerDailyWorkbenchPage() {
            P1 · stock_screener_builder
           </span>
           <h3 className="text-base font-bold text-slate-900 mt-1">
-           🔍 自然语言结构化选股器（含字段可用性诚实校验）
+            自然语言结构化选股器（含字段可用性诚实校验）
           </h3>
          </div>
          <div className="flex items-center gap-2">
@@ -1686,7 +1686,7 @@ export default function BrokerDailyWorkbenchPage() {
         <div className="flex flex-wrap gap-2 mb-3">
          {(quantData.stock_screener.structured_filters || []).map((f: any, idx: number) => (
           <span key={idx} className="px-2.5 py-1 rounded-md text-xs bg-emerald-50 border border-emerald-200 text-emerald-950 font-mono">
-           ✅ {f.label} {f.operator} {String(f.value)} ({f.unit})
+            {f.label} {f.operator} {String(f.value)} ({f.unit})
           </span>
          ))}
          {(quantData.stock_screener.unsupported_fields || []).map((u: any, idx: number) => (
@@ -1892,7 +1892,7 @@ export default function BrokerDailyWorkbenchPage() {
             P1 · news_signal_digest
            </span>
            <h3 className="text-base font-bold text-slate-900 mt-1">
-            📰 多源新闻水位线去重与跨源事件聚类摘要
+             多源新闻水位线去重与跨源事件聚类摘要
            </h3>
           </div>
           <div className="text-xs text-slate-600 font-mono">
