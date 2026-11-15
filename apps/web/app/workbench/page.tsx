@@ -778,7 +778,7 @@ export default function BrokerDailyWorkbenchPage() {
          value={newSymbolInput}
          onChange={(e) => setNewSymbolInput(e.target.value)}
          placeholder="输入股票代码，如 000001.SZ"
-         className="px-3 py-1.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:border-amber-600"
+         className="px-3 py-1.5 rounded-lg border border-slate-300 text-sm focus:outline-none focus:border-[#203C30]"
         />
         <button
          data-testid="btn-add-watchlist-symbol"
@@ -793,7 +793,7 @@ export default function BrokerDailyWorkbenchPage() {
         <button
          data-testid="btn-trigger-intraday-anomaly"
          onClick={() => triggerIntradayAnomaly('600036.SH', false)}
-         className="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-indigo-700 text-white hover:bg-indigo-800"
+         className="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-[#203C30] text-white hover:bg-[#182E24]"
         >
          INTRADAY RADAR 盘中异动解释流 (600036.SH)
         </button>
@@ -815,8 +815,8 @@ export default function BrokerDailyWorkbenchPage() {
          !intradayResult.ok
           ? 'bg-red-50 border-red-300 text-red-900'
           : intradayResult.throttled
-          ? 'bg-slate-50 border-slate-300 text-amber-900'
-          : 'bg-indigo-50/70 border-indigo-200 text-slate-900'
+          ? 'bg-slate-50 border-slate-300 text-slate-900'
+          : 'bg-slate-50 border-slate-200 text-slate-900'
         }`}
        >
         {!intradayResult.ok ? (
@@ -920,7 +920,7 @@ export default function BrokerDailyWorkbenchPage() {
          {(watchlistData?.announcements || []).map((ann: AnnouncementItem, idx: number) => (
           <div
            key={`${ann.announcement_id}-${idx}`}
-           className="p-3.5 rounded-xl border border-slate-200 hover:border-amber-600 transition-all bg-slate-50/50"
+           className="p-3.5 rounded-xl border border-slate-200 hover:border-[#203C30] transition-all bg-slate-50/50"
           >
            <div className="flex items-center justify-between text-xs text-slate-500 mb-1">
             <span className="font-semibold text-[#172B22] dark:text-emerald-300">
@@ -1277,7 +1277,7 @@ export default function BrokerDailyWorkbenchPage() {
        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div>
          <div className="flex items-center gap-2">
-          <span className="px-2 py-0.5 rounded text-xs font-semibold bg-slate-100 text-amber-900">
+          <span className="px-2 py-0.5 rounded text-xs font-semibold bg-slate-100 text-[#203C30] dark:text-emerald-400">
            P1 核心工具 · etf_dca_planner + broker_funds
           </span>
           <span className="text-xs text-slate-500">
@@ -1399,8 +1399,8 @@ export default function BrokerDailyWorkbenchPage() {
           </div>
          </div>
          <div className="p-3 rounded-xl bg-slate-50/70 border border-slate-200">
-          <div className="text-xs text-amber-900">期末总市值 (含累计收益)</div>
-          <div className="text-lg font-bold font-mono text-amber-950 mt-1">
+          <div className="text-xs text-[#203C30] dark:text-emerald-400">期末总市值 (含累计收益)</div>
+          <div className="text-lg font-bold font-mono text-slate-900 mt-1">
            {fmtVal(quantData.etf_dca.backtest.summary.final_market_value, ' 元')}
           </div>
           <div className="text-xs text-emerald-700 font-semibold">
@@ -1434,7 +1434,7 @@ export default function BrokerDailyWorkbenchPage() {
           </p>
           <div className="grid grid-cols-2 gap-2 text-xs">
            <div className="bg-white p-2.5 rounded border border-slate-200">
-            <div className="font-semibold text-amber-900">定期定额投资 (DCA)</div>
+            <div className="font-semibold text-[#203C30] dark:text-emerald-400">定期定额投资 (DCA)</div>
             <div>期末市值：<strong className="font-mono">{fmtVal(quantData.etf_dca.backtest.summary.final_market_value, ' 元')}</strong></div>
             <div>年化 XIRR：<strong className="font-mono">{fmtVal(quantData.etf_dca.backtest.summary.irr_annualized_pct, '%')}</strong></div>
             <div>最大回撤：<strong className="font-mono">-{fmtVal(quantData.etf_dca.backtest.summary.max_drawdown_pct, '%')}</strong></div>
@@ -1467,7 +1467,7 @@ export default function BrokerDailyWorkbenchPage() {
             {(quantData.etf_dca.target_reverse_plan.scenario_matrix || []).map((sc: any, idx: number) => (
              <tr key={idx}>
               <td className="p-2 border border-slate-200 font-mono font-semibold">{fmtVal(sc.assumed_annual_return_pct, '%')}</td>
-              <td className="p-2 border border-slate-200 font-mono font-bold text-amber-900">{fmtVal(sc.required_periodic_amount, ' 元')}</td>
+              <td className="p-2 border border-slate-200 font-mono font-bold text-[#203C30] dark:text-emerald-400">{fmtVal(sc.required_periodic_amount, ' 元')}</td>
               <td className="p-2 border border-slate-200 font-mono">{fmtVal(sc.total_principal_needed, ' 元')}</td>
               <td className="p-2 border border-slate-200 font-mono text-emerald-700">+{fmtVal(sc.estimated_compound_gain, ' 元')}</td>
              </tr>
@@ -1479,7 +1479,7 @@ export default function BrokerDailyWorkbenchPage() {
        </div>
 
        {/* 强制历史假设免责声明 */}
-       <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs text-amber-950 font-medium" data-testid="dca-mandatory-disclaimer">
+       <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-800 font-medium" data-testid="dca-mandatory-disclaimer">
         {quantData?.etf_dca?.disclaimer}
        </div>
       </div>
@@ -1597,16 +1597,16 @@ export default function BrokerDailyWorkbenchPage() {
           <button
            data-testid="btn-audit-standard-pass"
            onClick={() => runBacktestAudit(true, true, true, true)}
-           className="px-2.5 py-1 rounded bg-emerald-700 text-white font-semibold hover:bg-emerald-800"
+           className="px-2.5 py-1 rounded bg-[#203C30] text-white font-semibold hover:bg-[#182E24]"
           >
-            标准合规回测（PIT财报+历史成分股+扣费）
+           [PASS] 标准合规回测（PIT财报+历史成分股+扣费）
           </button>
           <button
            data-testid="btn-audit-simulate-pit-fail"
            onClick={() => runBacktestAudit(false, false, false, true)}
            className="px-2.5 py-1 rounded bg-rose-700 text-white font-semibold hover:bg-rose-800"
           >
-           ⚠️ 模拟未来函数与幸存者偏差（触发拦截）
+           [INTERCEPT] 模拟未来函数与幸存者偏差（触发拦截）
           </button>
          </div>
 
@@ -1645,7 +1645,7 @@ export default function BrokerDailyWorkbenchPage() {
        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm" data-testid="stock-screener-card">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
          <div>
-          <span className="px-2 py-0.5 rounded text-xs font-semibold bg-slate-100 text-amber-900">
+          <span className="px-2 py-0.5 rounded text-xs font-semibold bg-slate-100 text-[#203C30] dark:text-emerald-400">
            P1 · stock_screener_builder
           </span>
           <h3 className="text-base font-bold text-slate-900 mt-1">
@@ -1691,7 +1691,7 @@ export default function BrokerDailyWorkbenchPage() {
          ))}
          {(quantData.stock_screener.unsupported_fields || []).map((u: any, idx: number) => (
           <span key={idx} className="px-2.5 py-1 rounded-md text-xs bg-rose-50 border border-rose-300 text-rose-900 font-semibold" data-testid="screener-unsupported-badge">
-           ⚠️ {u.requested_term}：{u.reason}
+           [UNSUPPORTED] {u.requested_term}：{u.reason}
           </span>
          ))}
         </div>
@@ -1737,7 +1737,7 @@ export default function BrokerDailyWorkbenchPage() {
        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm" data-testid="investment-thesis-board">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
          <div>
-          <span className="px-2 py-0.5 rounded text-xs font-semibold bg-slate-100 text-amber-900">
+          <span className="px-2 py-0.5 rounded text-xs font-semibold bg-slate-100 text-[#203C30] dark:text-emerald-400">
            P1 · investment_thesis_tracker
           </span>
           <h2 className="text-lg font-bold text-slate-900 mt-1">
@@ -1748,7 +1748,7 @@ export default function BrokerDailyWorkbenchPage() {
           <span className="px-2.5 py-1 rounded bg-emerald-100 text-emerald-900 font-semibold">
            稳健成立：{portfolioReviewData.thesis_tracker.intact_count}
           </span>
-          <span className="px-2.5 py-1 rounded bg-slate-100 text-amber-900 font-semibold">
+          <span className="px-2.5 py-1 rounded bg-slate-100 text-[#203C30] dark:text-emerald-400 font-semibold">
            核心观察：{portfolioReviewData.thesis_tracker.watch_count}
           </span>
           <span className="px-2.5 py-1 rounded bg-rose-100 text-rose-900 font-semibold">
@@ -1809,7 +1809,7 @@ export default function BrokerDailyWorkbenchPage() {
                 ? 'bg-rose-200 text-rose-950'
                 : isIntact
                 ? 'bg-emerald-100 text-emerald-900'
-                : 'bg-slate-100 text-amber-900'
+                : 'bg-slate-100 text-[#203C30] dark:text-emerald-400'
               }`}
              >
               {th.status_label}
@@ -1830,7 +1830,7 @@ export default function BrokerDailyWorkbenchPage() {
              <div className="mt-2 pt-2 border-t border-slate-200 text-xs">
               <div className="font-semibold text-slate-800">
                最新公告核查：{th.latest_announcement_check.latest_announcement_title}{' '}
-               <span className="font-mono text-amber-900">{th.latest_announcement_check.citation}</span>
+               <span className="font-mono text-[#203C30] dark:text-emerald-400">{th.latest_announcement_check.citation}</span>
               </div>
               <div className="text-slate-700 mt-1">
                {th.latest_announcement_check.verification_conclusion}
@@ -1862,7 +1862,7 @@ export default function BrokerDailyWorkbenchPage() {
           </span>
          </div>
 
-         <div className="text-xs text-amber-900 bg-slate-50 p-2 rounded border border-slate-200 mb-3">
+         <div className="text-xs text-slate-800 bg-slate-50 p-2 rounded border border-slate-200 mb-3">
           {portfolioReviewData.trading_journal.paper_mode_notice}
          </div>
 
@@ -1917,7 +1917,7 @@ export default function BrokerDailyWorkbenchPage() {
            <div key={ev.news_id} className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs space-y-1">
             <div className="flex items-center justify-between">
              <span className="font-bold text-slate-900">{ev.title}</span>
-             <span className="px-2 py-0.5 rounded bg-slate-100 text-amber-900 font-mono">
+             <span className="px-2 py-0.5 rounded bg-slate-100 text-[#203C30] dark:text-emerald-400 font-mono">
               指纹 #{ev.event_fingerprint?.slice(0, 6)} · 合并 {ev.duplicate_count} 源
              </span>
             </div>
@@ -1947,7 +1947,7 @@ export default function BrokerDailyWorkbenchPage() {
      <div className="w-full max-w-2xl bg-white h-full shadow-2xl flex flex-col overflow-hidden">
       <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
        <div>
-        <span className="text-xs font-semibold px-2 py-0.5 rounded bg-slate-100 text-amber-900">
+        <span className="text-xs font-semibold px-2 py-0.5 rounded bg-slate-100 text-[#203C30] dark:text-emerald-400">
          公告 PDF 原文页码溯源 · 共 {selectedAnn.page_count || (selectedAnn.pages || []).length} 页
         </span>
         <h3 className="text-base font-bold text-slate-900 mt-1">{selectedAnn.title}</h3>
@@ -1957,7 +1957,7 @@ export default function BrokerDailyWorkbenchPage() {
         onClick={() => setDrawerOpen(false)}
         className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-200 text-slate-800 hover:bg-slate-300"
        >
-        ✕ 关闭抽屉
+        关闭抽屉
        </button>
       </div>
 
@@ -1988,11 +1988,11 @@ export default function BrokerDailyWorkbenchPage() {
        {selectedAnn.pages && selectedAnn.pages[selectedPageIdx] ? (
         <div className="p-4 rounded-xl border-2 border-[#203C30] bg-slate-50/30">
          <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-bold text-amber-900">
+          <span className="text-xs font-bold text-[#203C30] dark:text-emerald-400">
             当前高亮页码：第 {selectedAnn.pages[selectedPageIdx].page_no ?? selectedAnn.pages[selectedPageIdx].page_number ?? selectedPageIdx + 1} 页
            {selectedAnn.pages[selectedPageIdx].page_title ? ` · ${selectedAnn.pages[selectedPageIdx].page_title}` : ''}
           </span>
-          <span className="text-xs font-mono bg-slate-100 text-amber-900 px-2 py-0.5 rounded" data-testid="drawer-page-citation">
+          <span className="text-xs font-mono bg-slate-100 text-[#203C30] dark:text-emerald-400 px-2 py-0.5 rounded" data-testid="drawer-page-citation">
            {selectedAnn.pages[selectedPageIdx].citation_tag ||
             `[来源：${selectedAnn.title} · 第${selectedAnn.pages[selectedPageIdx].page_no ?? selectedPageIdx + 1}页]`}
           </span>
