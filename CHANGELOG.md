@@ -3,6 +3,22 @@
 All notable changes to HunterCode · Community Edition follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.1] - 2026-11-15
+
+> **正式版 · 全市场真实公开数据源直连、3 个确定性计算引擎 MCP 工具暴露（总计 69 个 MCP 工具）与出口语言守卫精准修复。**
+>
+> **核心升级与修复亮点（`v3.5.0` → `v3.5.1`）**：
+> 1. **真实公开数据源全市场直连（`live_public_fetcher.py` & `public_adapter.py`）**：
+>    - `PublicFallbackAdapter` 全量 15 个证券/行情/财务/估值/股东/分红/公告/研报/一致预期/行业对标接口接入全市场真实公开数据源（东方财富 / 腾讯财经 / 新浪财经 / 巨潮资讯），彻底解决非内置股票（如 `600588.SH` 用友网络）回退到静态演示快照的问题。
+> 2. **新增暴露 3 个确定性计算引擎 MCP 工具（20 个 MCP 服务 · 共 69 个工具）**：
+>    - `broker_fundamental` 新增第 6 个工具 `get_fundamental_scorecard`：一键输出 6 大维度 90 项基本面体检评分卡与行业分位；
+>    - `broker_market` 新增第 7 个工具 `get_technical_indicators`：一键输出 7 大类 56 项技术指标与多空信号冲突诊断；
+>    - `broker_funds` 新增第 6 个工具 `calculate_etf_dca`：一站式输出正向历史定投回测（XIRR、最大回撤）、目标金额反推与定投 vs 一次性买入同区间对比；
+>    - 同步更新 `fundamental_scorecard`、`technical_dashboard`、`etf_dca_planner` 三大金融 SKILL 与 `Dockerfile.daemon` 镜像内计算引擎目录打包。
+> 3. **出口语言守卫与前端富卡片渲染加固（`text_sanitizer.py` & `ChatWorkspace.tsx`）**：
+>    - 修复 `text_sanitizer.py` 将含 `as_of`、`provider`、`PE(TTM)`、`PB(MRQ)`、`EV/EBITDA` 等金融专业缩写与时间戳标签的中文估值段落误判剔除的问题；
+>    - 加固前端 `ChatWorkspace.tsx` 富卡片异常返回结构的防御性渲染与跨容器共享密钥读取权限。
+
 ## [3.5.0] - 2026-11-14
 
 > **里程碑正式版 · HunterCode × 证券公司接口与金融 SKILL 体系工程（M0–M5 全链路收官版）。**

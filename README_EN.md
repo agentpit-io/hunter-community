@@ -8,7 +8,7 @@
 
 <img src="./docs/assets/logo.png" alt="HunterCode" width="160" height="160" />
 
-# HunterCode · AtomCode Unified (`v3.5.0`)
+# HunterCode · AtomCode Unified (`v3.5.1`)
 
 ### Community & AtomCode Edition
 
@@ -17,7 +17,7 @@
 HunterCode is an open-source, local alternative to Tencent WorkBuddy Finance Edition · built for hedge-fund researchers, brokerage integrations, and serious individual investors<br>
 <sub>Tencent and WorkBuddy are trademarks of Tencent. HunterCode is not affiliated with, partnered with, or endorsed by Tencent.</sub>
 
-[![Version](https://img.shields.io/badge/version-v3.5.0-blue)](https://github.com/agentpit-io/hunter-community/releases)
+[![Version](https://img.shields.io/badge/version-v3.5.1-blue)](https://github.com/agentpit-io/hunter-community/releases)
 [![Kernel](https://img.shields.io/badge/AtomCode-v5.1.0_Fork-0A7E8C)](./pins.lock)
 [![License](https://img.shields.io/badge/license-Apache_2.0-green)](./LICENSE)
 [![CI](https://github.com/agentpit-io/hunter-community/actions/workflows/ci.yml/badge.svg)](https://github.com/agentpit-io/hunter-community/actions/workflows/ci.yml)
@@ -28,7 +28,7 @@ HunterCode is an open-source, local alternative to Tencent WorkBuddy Finance Edi
 
 [**🚀 Live demo**](https://hunter-community.agentpit.io) &nbsp;·&nbsp; [**⚡ Deploy in 5 min**](#-deploy-in-5-minutes) &nbsp;·&nbsp; [**📖 Docs**](./docs/部署与运维.md) &nbsp;·&nbsp; [**💬 Discussions**](https://github.com/agentpit-io/hunter-community/discussions)
 
-🚀 **2026-11-14 Milestone Release `v3.5.0`: Full Brokerage Interface Layer (20 MCP Servers · 66 Tools) + Deterministic 56 Technical / 90 Fundamental / ETF DCA Engines + 22 Finance SKILLs + 3 Daily Workflows & 5 Research Workbenches + CSDN Developer Notebooks!**  
+🚀 **2026-11-14 Milestone Release `v3.5.1`: Full Brokerage Interface Layer (20 MCP Servers · 69 Tools) + Deterministic 56 Technical / 90 Fundamental / ETF DCA Engines + 22 Finance SKILLs + 3 Daily Workflows & 5 Research Workbenches + CSDN Developer Notebooks!**  
 Starting with `v3.0.0`, `hunter-community` and `huntercode-atomcode` (GitHub & GitCode) share the **exact same source tree and Commit SHA** (the legacy OpenCode v2.2 branch is archived at `legacy/opencode-v2.2`).
 
 </div>
@@ -37,9 +37,9 @@ Starting with `v3.0.0`, `hunter-community` and `huntercode-atomcode` (GitHub & G
 
 ---
 
-## 🎉 What's New in `v3.5.0` (20 MCP Servers + 22 Finance SKILLs)
+## 🎉 What's New in `v3.5.1` (20 MCP Servers + 22 Finance SKILLs)
 
-1. **20 MCP Servers (12 Core + 8 Brokerage Read-Only MCPs · 66 Tools Total)**:
+1. **20 MCP Servers (12 Core + 8 Brokerage Read-Only MCPs · 69 Tools Total)**:
    - **12 Core MCPs**: `hcapack`, `akshare`, `kronos`, `truesource`, `uzi`, `watchlist`, `portfolio`, `screener`, `hunter_cap`, `hunter_user`, `runtime_control`, `fin_memory`.
    - **4 P0 Brokerage MCPs (`v3.1.0`)**: `broker_security`, `broker_market`, `broker_disclosure`, `broker_fundamental` (with strict `BrokerDataEnvelope` timestamp separation `as_of` / `published_at` / `retrieved_at` and `null` missing-value discipline).
    - **3 P1 Brokerage MCPs (`v3.3.0`)**: `broker_funds` (ETF quotes/IOPV, fund NAV, ETF holdings, fees, convertible bonds), `broker_research` (licensed research summaries, consensus estimates, sector crowding), `broker_education` (investor education, product guides, risk disclosures).
