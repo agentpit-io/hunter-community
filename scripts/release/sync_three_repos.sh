@@ -207,6 +207,20 @@ if [ -f "${HCA_REPO}/deploy/daemon/hca-init.py" ]; then
   cp -f "${HCA_REPO}/deploy/daemon/hca-init.py" "${HUNTERCODE_REPO}/deploy/daemon/hca-init.py"
 fi
 
+# 5.3.2 同步产品说明书、帮助中心生成脚本与静态产物
+if [ -f "${HCA_REPO}/doc/产品说明书.md" ]; then
+  mkdir -p "${HUNTERCODE_REPO}/docs-hunter"
+  cp -f "${HCA_REPO}/doc/产品说明书.md" "${HUNTERCODE_REPO}/docs-hunter/产品说明书.md"
+fi
+if [ -f "${HCA_REPO}/scripts/generate-help.py" ]; then
+  mkdir -p "${HUNTERCODE_REPO}/scripts"
+  cp -f "${HCA_REPO}/scripts/generate-help.py" "${HUNTERCODE_REPO}/scripts/generate-help.py"
+fi
+if [ -d "${HCA_REPO}/apps/web/public/help" ]; then
+  mkdir -p "${HUNTERCODE_REPO}/docs-hunter/help"
+  cp -rf "${HCA_REPO}/apps/web/public/help/"* "${HUNTERCODE_REPO}/docs-hunter/help/"
+fi
+
 # 5.4 更新 huntercode-repo 版本号文件
 echo "${VER_NUM}" > "${HUNTERCODE_REPO}/VERSION"
 
