@@ -28,13 +28,13 @@ def github_links(text: str) -> str:
 
 
 def decorate_app_links(html: str) -> str:
-    """Turn relative app links (/workbench, /chat, /settings, /strategies, /finance, /library) into target="_blank" direct-launch buttons/cards."""
+    """Turn relative app links (/workbench, /chat, /settings, /strategies, /finance, /library) into smart environment-aware app-link buttons/cards."""
     # 1. Convert "直达功能入口：..." list items into prominent launch bars
     def launch_bar_repl(match: re.Match) -> str:
         inner = match.group(1)
         inner = re.sub(
             r'<a\s+href="(/[^"]+)"[^>]*>(.*?)</a>',
-            r'<a class="direct-launch-btn" href="\1" target="_blank" rel="noopener">\2 ↗</a>',
+            r'<a class="direct-launch-btn app-link" href="#" data-path="\1" data-route="\1" target="_blank" rel="noopener">\2 ↗</a>',
             inner,
         )
         inner = inner.replace(" · ", " ")
@@ -54,14 +54,14 @@ def decorate_app_links(html: str) -> str:
         flags=re.DOTALL,
     )
 
-    # 2. Ensure all remaining internal app route links open in a new tab with button badge styling
+    # 2. Ensure all remaining internal app route links open in a new tab with smart environment routing
     def inline_app_link_repl(match: re.Match) -> str:
         href = match.group(1)
         label = match.group(2)
         if href.startswith("/help"):
             return match.group(0)
         suffix = "" if "↗" in label else " ↗"
-        return f'<a class="inline-app-link" href="{href}" target="_blank" rel="noopener">{label}{suffix}</a>'
+        return f'<a class="inline-app-link app-link" href="#" data-path="{href}" data-route="{href}" target="_blank" rel="noopener">{label}{suffix}</a>'
 
     html = re.sub(
         r'<a\s+href="(/(?:workbench|chat|settings|strategies|finance|library)[^"]*)"\s*>(.*?)</a>',
@@ -69,6 +69,61 @@ def decorate_app_links(html: str) -> str:
         html,
     )
     return html
+
+
+def inject_env_choice_card(html: str) -> str:
+    """Insert the dual-column Environment Entry Choice Card right below the Chapter 1 H2 heading."""
+    card_html = (
+        '<div class="env-choice-section" id="env-choice-guide">'
+        '<div class="env-choice-header">'
+        '<span class="env-choice-badge">🧭 环境入口选择说明卡片 · 双通道直达（100% 防 404）</span>'
+        '<span class="env-choice-status" id="current-env-indicator">正在智能检测当前访问环境...</span>'
+        '</div>'
+        '<p class="env-choice-intro">'
+        '本帮助中心同时服务于<strong>个人电脑本地私有部署实例</strong>与<strong>官方公网在线演示站</strong>。'
+        '页面内置客户端智能环境感知引擎：当您在本地实例打开本页时，全页所有功能按钮自动跳往您的本地环境；'
+        '当您在 AgentPit 官网（<code>www.agentpit.io</code>）浏览本说明书时，点击任意功能入口将<strong>智能优先打开官方免安装在线演示站</strong>，并在右下角提供一键切换本地 <code>localhost:3100</code> 通道！'
+        '</p>'
+        '<div class="env-choice-grid">'
+        '  <div class="env-card env-card-local">'
+        '    <div class="env-card-head">'
+        '      <span class="env-card-icon">🖥️</span>'
+        '      <div>'
+        '        <h4>本地部署环境（个人私有数据不出盘）</h4>'
+        '        <span class="env-tag env-tag-green">100% 本地隐私 · 零实盘风险</span>'
+        '      </div>'
+        '    </div>'
+        '    <p class="env-card-desc">适合已在自己电脑（Mac / Windows / Linux）通过一键脚本或 Docker 启动 HunterCode 的股民。您的 API Key、自选股、持仓交割单与复盘记忆全部保存在本机硬盘。</p>'
+        '    <div class="env-url-box"><code>http://localhost:3100/workbench</code></div>'
+        '    <div class="env-card-actions">'
+        '      <a class="env-btn env-btn-local" href="http://localhost:3100/workbench" target="_blank" rel="noopener">🖥️ 一键打开本地投研工作台 ↗</a>'
+        '      <a class="env-btn env-btn-sub" href="http://localhost:3100/chat" target="_blank" rel="noopener">💬 本地 AI 对话 (:3100/chat) ↗</a>'
+        '    </div>'
+        '  </div>'
+        '  <div class="env-card env-card-demo">'
+        '    <div class="env-card-head">'
+        '      <span class="env-card-icon">🚀</span>'
+        '      <div>'
+        '        <h4>官方免安装在线演示站（公网即点即用）</h4>'
+        '        <span class="env-tag env-tag-copper">免安装体验 · 实盘行情直连</span>'
+        '      </div>'
+        '    </div>'
+        '    <p class="env-card-desc">适合正在浏览官网说明书、尚未在本地安装，或希望直接在浏览器体验 08:30 晨报、56+90 项个体检、ETF 定投计算与 AI 自动模拟盘的用户。</p>'
+        '    <div class="env-url-box"><code>https://hunter-community.agentpit.io/workbench</code></div>'
+        '    <div class="env-card-actions">'
+        '      <a class="env-btn env-btn-demo" href="https://hunter-community.agentpit.io/workbench" target="_blank" rel="noopener">🚀 一键打开在线演示站工作台 ↗</a>'
+        '      <a class="env-btn env-btn-sub" href="https://hunter-community.agentpit.io/chat" target="_blank" rel="noopener">💬 在线演示 AI 对话 ↗</a>'
+        '    </div>'
+        '  </div>'
+        '</div>'
+        '</div>'
+    )
+    return re.sub(
+        r'(<h2 id="[^"]*">第 1 章[^<]*</h2>)',
+        r'\1\n' + card_html,
+        html,
+        count=1,
+    )
 
 
 def normalize_markdown_lists(md_text: str) -> str:
@@ -137,10 +192,10 @@ def wrap_code_prompts(html: str) -> str:
         return (
             '<div class="prompt-box">'
             '<div class="prompt-bar">'
-            '<span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 <a href="/chat" target="_blank" rel="noopener" style="color:#ffbe7b;text-decoration:underline;">/chat ↗</a>）</span>'
+            '<span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 <a class="app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="color:#ffbe7b;text-decoration:underline;">/chat ↗</a>）</span>'
             '<div style="display:flex;gap:8px;align-items:center;">'
             '<button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button>'
-            '<a class="copy-btn" href="/chat" target="_blank" rel="noopener" style="text-decoration:none;">🚀 打开 /chat 提问 ↗</a>'
+            '<a class="copy-btn app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener" style="text-decoration:none;">🚀 打开 /chat 提问 ↗</a>'
             '</div>'
             '</div>'
             f'<pre><code>{code_inner}</code></pre>'
@@ -203,7 +258,7 @@ def main() -> None:
     raw_html = github_links(md.convert(source))
     toc = extract_toc_items(raw_html)
     anchors = find_step_anchors(raw_html)
-    content = decorate_app_links(wrap_code_prompts(wrap_screenshot_images(raw_html)))
+    content = inject_env_choice_card(decorate_app_links(wrap_code_prompts(wrap_screenshot_images(raw_html))))
 
     page = f'''<!doctype html>
 <html lang="zh-CN">
@@ -457,6 +512,220 @@ def main() -> None:
     .flow-launch:hover {{
       background: #d97930;
       border-color: #ffd7b0;
+    }}
+
+    /* Environment Entry Choice Card (Chapter 1) */
+    .env-choice-section {{
+      margin: 18px 0 28px;
+      padding: 20px 22px;
+      border-radius: 16px;
+      background: linear-gradient(135deg, #fdf8f0 0%, #f7ecde 100%);
+      border: 2px solid #dfbe98;
+      box-shadow: 0 8px 24px rgba(140, 72, 20, 0.08);
+    }}
+    .env-choice-header {{
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }}
+    .env-choice-badge {{
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      border-radius: 999px;
+      background: var(--copper-dark);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 700;
+    }}
+    .env-choice-status {{
+      font-size: 12.5px;
+      font-weight: 700;
+      padding: 4px 12px;
+      border-radius: 999px;
+      background: #fff;
+      color: var(--copper-dark);
+      border: 1px solid #dec2a2;
+    }}
+    .env-choice-intro {{
+      margin: 0 0 16px;
+      font-size: 14px;
+      color: #493b2f;
+      max-width: none !important;
+    }}
+    .env-choice-grid {{
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }}
+    .env-card {{
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 18px 20px;
+      border-radius: 14px;
+      background: #fff;
+      border: 1px solid #dfd2c0;
+      box-shadow: 0 4px 12px rgba(40, 26, 14, 0.05);
+    }}
+    .env-card-local {{
+      border-top: 4px solid var(--green);
+    }}
+    .env-card-demo {{
+      border-top: 4px solid var(--copper);
+    }}
+    .env-card-head {{
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      margin-bottom: 10px;
+    }}
+    .env-card-icon {{
+      font-size: 26px;
+      line-height: 1;
+    }}
+    .env-card-head h4 {{
+      margin: 0 0 4px;
+      font-size: 16px;
+      color: #1f1812;
+    }}
+    .env-tag {{
+      display: inline-block;
+      font-size: 11.5px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 6px;
+    }}
+    .env-tag-green {{
+      background: var(--green-bg);
+      color: var(--green);
+    }}
+    .env-tag-copper {{
+      background: var(--copper-soft);
+      color: var(--copper-dark);
+    }}
+    .env-card-desc {{
+      margin: 0 0 12px;
+      font-size: 13.5px;
+      line-height: 1.6;
+      color: #5c4f43;
+    }}
+    .env-url-box {{
+      margin-bottom: 12px;
+      padding: 6px 10px;
+      border-radius: 8px;
+      background: #f6f0e6;
+      border: 1px dashed #d5c3ad;
+      font-size: 13px;
+    }}
+    .env-card-actions {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: auto;
+    }}
+    .env-btn {{
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 7px 14px;
+      border-radius: 9px;
+      font-size: 13px;
+      font-weight: 700;
+      text-decoration: none !important;
+      transition: all 0.15s ease;
+    }}
+    .env-btn-local {{
+      background: var(--green);
+      color: #fff !important;
+    }}
+    .env-btn-local:hover {{
+      background: #105e39;
+      transform: translateY(-1px);
+    }}
+    .env-btn-demo {{
+      background: var(--copper);
+      color: #fff !important;
+    }}
+    .env-btn-demo:hover {{
+      background: var(--copper-dark);
+      transform: translateY(-1px);
+    }}
+    .env-btn-sub {{
+      background: #f4ebe0;
+      color: #4b3d30 !important;
+      border: 1px solid #d9c7b2;
+    }}
+    .env-btn-sub:hover {{
+      background: #e9dac8;
+    }}
+
+    /* Smart Environment Toast (Bottom-Right Lightweight Notification) */
+    .smart-nav-toast {{
+      position: fixed;
+      right: 22px;
+      bottom: 22px;
+      z-index: 95;
+      max-width: 430px;
+      padding: 16px 18px;
+      border-radius: 14px;
+      background: rgba(30, 24, 19, 0.96);
+      color: #fdf7f0;
+      border: 1px solid rgba(245, 166, 91, 0.55);
+      box-shadow: 0 16px 42px rgba(0, 0, 0, 0.35);
+      backdrop-filter: blur(10px);
+      font-size: 13.5px;
+      line-height: 1.6;
+      display: none;
+      animation: toastSlideUp 0.22s ease-out;
+    }}
+    .smart-nav-toast.show {{
+      display: block;
+    }}
+    @keyframes toastSlideUp {{
+      from {{ opacity: 0; transform: translateY(14px); }}
+      to {{ opacity: 1; transform: translateY(0); }}
+    }}
+    .smart-toast-head {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 6px;
+      font-weight: 800;
+      color: #ffbe7b;
+      font-size: 14px;
+    }}
+    .smart-toast-close {{
+      background: transparent;
+      border: 0;
+      color: #cbbba8;
+      cursor: pointer;
+      font-size: 14px;
+      padding: 2px 6px;
+    }}
+    .smart-toast-close:hover {{ color: #fff; }}
+    .smart-toast-local-link {{
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      margin-top: 8px;
+      padding: 5px 11px;
+      border-radius: 8px;
+      background: rgba(22, 121, 75, 0.35);
+      border: 1px solid #43b581;
+      color: #9ef0c6 !important;
+      font-weight: 700;
+      font-size: 12.8px;
+      text-decoration: none !important;
+    }}
+    .smart-toast-local-link:hover {{
+      background: var(--green);
+      color: #fff !important;
     }}
 
     /* Direct Launch Action Cards & Inline App Links */
@@ -858,6 +1127,7 @@ def main() -> None:
       .hero-banner {{ padding: 0 14px; margin-top: 16px; }}
       .hero-card {{ padding: 22px 20px; }}
       .flow-grid {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+      .env-choice-grid {{ grid-template-columns: 1fr; }}
       .top {{ padding: 10px 14px; }}
       table {{ display: block; overflow-x: auto; }}
     }}
@@ -865,7 +1135,7 @@ def main() -> None:
       .flow-grid {{ grid-template-columns: 1fr; }}
     }}
     @media print {{
-      .top, aside, .lightbox {{ display: none !important; }}
+      .top, aside, .lightbox, .smart-nav-toast {{ display: none !important; }}
       .wrap {{ display: block; padding: 0; }}
       main {{ border: 0; box-shadow: none; }}
     }}
@@ -873,17 +1143,17 @@ def main() -> None:
 </head>
 <body>
   <header class="top">
-    <a class="brand" href="/chat" target="_blank" rel="noopener">
+    <a class="brand app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener">
       <img src="/logo-hunter.png" alt="猎鹿人">
       <span>猎鹿人 · HunterCode</span>
       <span class="brand-badge">v3.5.2 帮助中心</span>
     </a>
-    <nav aria-label="核心工作区导航（新窗口打开）">
-      <a class="nav-primary" href="/chat" target="_blank" rel="noopener">💬 AI 对话 (/chat) ↗</a>
-      <a href="/workbench" target="_blank" rel="noopener">🚀 投研工作台 (/workbench) ↗</a>
-      <a href="/strategies/index.html" target="_blank" rel="noopener">📊 策略中心 ↗</a>
-      <a href="/finance/overview" target="_blank" rel="noopener">🤖 智能体自动炒股 ↗</a>
-      <a href="/settings?tab=llm" target="_blank" rel="noopener">⚙️ 设置 ↗</a>
+    <nav aria-label="核心工作区导航（智能环境识别 · 新窗口打开）">
+      <a class="nav-primary app-link" href="#" data-path="/chat" data-route="/chat" target="_blank" rel="noopener">返回 AI 对话 ↗</a>
+      <a class="app-link" href="#" data-path="/workbench" data-route="/workbench" target="_blank" rel="noopener">投研工作台 ↗</a>
+      <a class="app-link" href="#" data-path="/strategies/index.html" data-route="/strategies/index.html" target="_blank" rel="noopener">策略中心 ↗</a>
+      <a class="app-link" href="#" data-path="/finance/overview" data-route="/finance/overview" target="_blank" rel="noopener">智能体自动炒股 ↗</a>
+      <a class="app-link" href="#" data-path="/settings?tab=llm" data-route="/settings?tab=llm" target="_blank" rel="noopener">⚙️ 设置 ↗</a>
       <a href="https://github.com/agentpit-io/hunter-community" target="_blank" rel="noopener">GitHub 开源仓库 ↗</a>
     </nav>
   </header>
@@ -895,7 +1165,7 @@ def main() -> None:
           <span class="hero-eyebrow">🦌 私人证券研究所 · 零实盘交易风险 · 100% 本地隐私优先 · v3.5.2 正式版</span>
           <h1>猎鹿人 HunterCode 股民日常炒股全流程操作手册</h1>
           <p class="hero-sub">
-            不用懂编程、不用背命令！跟着交易日从早到晚的时间表走：早上 8:30 看三栏早报，盘中盯异动翻 PDF 公告原文、做 56 项技术 + 90 项基本面全身检查，下午 15:30 收盘复盘归档，周末算 ETF 定投跑回测。点击下方任意步骤卡片可查看图文教程，点击「🚀 直达按钮」直接在新窗口打开你当前实例的对应功能边看边练！
+            不用懂编程、不用背命令！跟着交易日从早到晚的时间表走：早上 8:30 看三栏早报，盘中盯异动翻 PDF 公告原文、做 56 项技术 + 90 项基本面全身检查，下午 15:30 收盘复盘归档，周末算 ETF 定投跑回测。点击下方任意步骤卡片可查看图文教程，点击「🚀 直达按钮」自动识别当前环境并在新窗口打开对应功能（官网预览自动直达在线演示站，本地环境直达本机实例）！
           </p>
         </div>
         <div class="hero-pills">
@@ -922,7 +1192,7 @@ def main() -> None:
           </div>
           <div class="flow-actions">
             <a class="flow-go" href="#{escape(anchors['step0'])}">📖 查看第 1 章图文 →</a>
-            <a class="flow-launch" href="/settings?tab=llm" target="_blank" rel="noopener">🚀 直达设置 (/settings) ↗</a>
+            <a class="flow-launch app-link" href="#" data-path="/settings?tab=llm" data-route="/settings?tab=llm" target="_blank" rel="noopener">🚀 直达设置 (/settings) ↗</a>
           </div>
         </div>
 
@@ -937,7 +1207,7 @@ def main() -> None:
           </div>
           <div class="flow-actions">
             <a class="flow-go" href="#{escape(anchors['step1'])}">📖 查看第 2 章图文 →</a>
-            <a class="flow-launch" href="/workbench?tab=market" target="_blank" rel="noopener">🚀 直达市场工作台 ↗</a>
+            <a class="flow-launch app-link" href="#" data-path="/workbench?tab=market" data-route="/workbench?tab=market" target="_blank" rel="noopener">🚀 直达市场工作台 ↗</a>
           </div>
         </div>
 
@@ -952,7 +1222,7 @@ def main() -> None:
           </div>
           <div class="flow-actions">
             <a class="flow-go" href="#{escape(anchors['step2'])}">📖 查看第 3 章图文 →</a>
-            <a class="flow-launch" href="/workbench?tab=watchlist" target="_blank" rel="noopener">🚀 直达自选股/个股工作台 ↗</a>
+            <a class="flow-launch app-link" href="#" data-path="/workbench?tab=watchlist" data-route="/workbench?tab=watchlist" target="_blank" rel="noopener">🚀 直达自选股/个股工作台 ↗</a>
           </div>
         </div>
 
@@ -967,7 +1237,7 @@ def main() -> None:
           </div>
           <div class="flow-actions">
             <a class="flow-go" href="#{escape(anchors['step3'])}">📖 查看第 4 章图文 →</a>
-            <a class="flow-launch" href="/workbench?tab=portfolio_review" target="_blank" rel="noopener">🚀 直达组合复盘工作台 ↗</a>
+            <a class="flow-launch app-link" href="#" data-path="/workbench?tab=portfolio_review" data-route="/workbench?tab=portfolio_review" target="_blank" rel="noopener">🚀 直达组合复盘工作台 ↗</a>
           </div>
         </div>
 
@@ -982,7 +1252,7 @@ def main() -> None:
           </div>
           <div class="flow-actions">
             <a class="flow-go" href="#{escape(anchors['step4'])}">📖 查看 5.1 节图文 →</a>
-            <a class="flow-launch" href="/workbench?tab=quant" target="_blank" rel="noopener">🚀 直达量化与 ETF 定投 ↗</a>
+            <a class="flow-launch app-link" href="#" data-path="/workbench?tab=quant" data-route="/workbench?tab=quant" target="_blank" rel="noopener">🚀 直达量化与 ETF 定投 ↗</a>
           </div>
         </div>
 
@@ -997,7 +1267,7 @@ def main() -> None:
           </div>
           <div class="flow-actions">
             <a class="flow-go" href="#{escape(anchors['step5'])}">📖 查看 5.2 节图文 →</a>
-            <a class="flow-launch" href="/strategies/index.html" target="_blank" rel="noopener">🚀 直达策略中心 ↗</a>
+            <a class="flow-launch app-link" href="#" data-path="/strategies/index.html" data-route="/strategies/index.html" target="_blank" rel="noopener">🚀 直达策略中心 ↗</a>
           </div>
         </div>
       </div>
@@ -1027,7 +1297,104 @@ def main() -> None:
     </div>
   </div>
 
+  <div id="smart-nav-toast" class="smart-nav-toast" role="status" aria-live="polite">
+    <div class="smart-toast-head">
+      <span>🌐 官网预览模式 · 双通道智能导航</span>
+      <button type="button" class="smart-toast-close" onclick="closeSmartToast()" aria-label="关闭提示">✕</button>
+    </div>
+    <div id="smart-toast-body">
+      当前处于官网预览模式，已为您打开在线演示站。如果您已在本地启动 Hunter，亦可点击：
+    </div>
+    <div>
+      <a id="smart-toast-local-anchor" class="smart-toast-local-link" href="http://localhost:3100/workbench" target="_blank" rel="noopener">
+        🖥️ 打开本地 localhost:3100/workbench ↗
+      </a>
+    </div>
+  </div>
+
   <script>
+    var DEMO_ORIGIN = 'https://hunter-community.agentpit.io';
+    var LOCAL_ORIGIN = 'http://localhost:3100';
+    var smartToastTimer = null;
+
+    function detectAppEnvironment() {{
+      var hostname = (window.location.hostname || '').toLowerCase();
+      var port = window.location.port || '';
+      var hasCustomPort = port !== '' && port !== '80' && port !== '443';
+      var isLocalOrSelfHosted = (
+        hostname === 'localhost' ||
+        hostname === '127.0.0.1' ||
+        hasCustomPort ||
+        hostname.indexOf('hunter-community.agentpit.io') !== -1
+      );
+      var isOfficialMarketingSite = (
+        hostname === 'agentpit.io' ||
+        hostname === 'www.agentpit.io'
+      );
+      return {{
+        hostname: hostname,
+        port: port,
+        isLocalOrSelfHosted: isLocalOrSelfHosted,
+        isOfficialMarketingSite: isOfficialMarketingSite || !isLocalOrSelfHosted
+      }};
+    }}
+
+    function showSmartToast(routePath) {{
+      var toast = document.getElementById('smart-nav-toast');
+      var localAnchor = document.getElementById('smart-toast-local-anchor');
+      if (!toast || !localAnchor) return;
+      var normalized = routePath && routePath.charAt(0) === '/' ? routePath : '/' + (routePath || 'workbench');
+      localAnchor.href = LOCAL_ORIGIN + normalized;
+      localAnchor.textContent = '[打开本地 localhost:3100' + normalized + ']';
+      toast.classList.add('show');
+      if (smartToastTimer) clearTimeout(smartToastTimer);
+      smartToastTimer = setTimeout(function() {{
+        toast.classList.remove('show');
+      }}, 9000);
+    }}
+
+    function closeSmartToast() {{
+      var toast = document.getElementById('smart-nav-toast');
+      if (toast) toast.classList.remove('show');
+    }}
+
+    function initSmartAppLinks() {{
+      var env = detectAppEnvironment();
+      var indicator = document.getElementById('current-env-indicator');
+      if (indicator) {{
+        if (env.isLocalOrSelfHosted) {{
+          var hostLabel = window.location.host || env.hostname || '本地实例';
+          indicator.textContent = '✅ 当前已连接实例：' + hostLabel + '（点击按钮直接打开当前实例）';
+        }} else {{
+          indicator.textContent = '🌐 当前处于官网预览模式（点击功能按钮将优先打开在线演示站，并支持切换本地 :3100）';
+        }}
+      }}
+
+      var appLinks = Array.prototype.slice.call(document.querySelectorAll('a.app-link[data-path]'));
+      appLinks.forEach(function(link) {{
+        var routePath = link.getAttribute('data-path') || link.getAttribute('data-route') || '/workbench';
+        if (routePath.charAt(0) !== '/') {{
+          routePath = '/' + routePath;
+        }}
+        if (env.isLocalOrSelfHosted) {{
+          link.setAttribute('href', routePath);
+        }} else {{
+          link.setAttribute('href', DEMO_ORIGIN + routePath);
+        }}
+        link.addEventListener('click', function(e) {{
+          var currentEnv = detectAppEnvironment();
+          if (!currentEnv.isLocalOrSelfHosted) {{
+            e.preventDefault();
+            var targetUrl = DEMO_ORIGIN + routePath;
+            window.open(targetUrl, '_blank', 'noopener');
+            showSmartToast(routePath);
+          }}
+        }});
+      }});
+    }}
+
+    initSmartAppLinks();
+
     function openLightbox(src, title) {{
       var box = document.getElementById('lightbox');
       var img = document.getElementById('lightbox-img');
@@ -1044,7 +1411,10 @@ def main() -> None:
     }}
 
     document.addEventListener('keydown', function(e) {{
-      if (e.key === 'Escape') closeLightbox();
+      if (e.key === 'Escape') {{
+        closeLightbox();
+        closeSmartToast();
+      }}
     }});
 
     function copyPrompt(btn) {{
