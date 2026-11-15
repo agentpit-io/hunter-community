@@ -27,6 +27,50 @@ def github_links(text: str) -> str:
     )
 
 
+def decorate_app_links(html: str) -> str:
+    """Turn relative app links (/workbench, /chat, /settings, /strategies, /finance, /library) into target="_blank" direct-launch buttons/cards."""
+    # 1. Convert "直达功能入口：..." list items into prominent launch bars
+    def launch_bar_repl(match: re.Match) -> str:
+        inner = match.group(1)
+        inner = re.sub(
+            r'<a\s+href="(/[^"]+)"[^>]*>(.*?)</a>',
+            r'<a class="direct-launch-btn" href="\1" target="_blank" rel="noopener">\2 ↗</a>',
+            inner,
+        )
+        inner = inner.replace(" · ", " ")
+        return (
+            '<li class="direct-launch-item">'
+            '<div class="direct-launch-card">'
+            '<span class="direct-launch-label">🎯 本节功能新窗口直达：</span>'
+            f'<div class="direct-launch-actions">{inner}</div>'
+            '</div>'
+            '</li>'
+        )
+
+    html = re.sub(
+        r'<li><strong>直达功能入口</strong>：\s*(.*?)</li>',
+        launch_bar_repl,
+        html,
+        flags=re.DOTALL,
+    )
+
+    # 2. Ensure all remaining internal app route links open in a new tab with button badge styling
+    def inline_app_link_repl(match: re.Match) -> str:
+        href = match.group(1)
+        label = match.group(2)
+        if href.startswith("/help"):
+            return match.group(0)
+        suffix = "" if "↗" in label else " ↗"
+        return f'<a class="inline-app-link" href="{href}" target="_blank" rel="noopener">{label}{suffix}</a>'
+
+    html = re.sub(
+        r'<a\s+href="(/(?:workbench|chat|settings|strategies|finance|library)[^"]*)"\s*>(.*?)</a>',
+        inline_app_link_repl,
+        html,
+    )
+    return html
+
+
 def normalize_markdown_lists(md_text: str) -> str:
     """Normalize 2-space indented fenced code blocks and sublists inside bullet items for Python-Markdown."""
     lines = md_text.splitlines()
@@ -93,8 +137,11 @@ def wrap_code_prompts(html: str) -> str:
         return (
             '<div class="prompt-box">'
             '<div class="prompt-bar">'
-            '<span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 /chat）</span>'
+            '<span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 <a href="/chat" target="_blank" rel="noopener" style="color:#ffbe7b;text-decoration:underline;">/chat ↗</a>）</span>'
+            '<div style="display:flex;gap:8px;align-items:center;">'
             '<button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button>'
+            '<a class="copy-btn" href="/chat" target="_blank" rel="noopener" style="text-decoration:none;">🚀 打开 /chat 提问 ↗</a>'
+            '</div>'
             '</div>'
             f'<pre><code>{code_inner}</code></pre>'
             '</div>'
@@ -156,7 +203,7 @@ def main() -> None:
     raw_html = github_links(md.convert(source))
     toc = extract_toc_items(raw_html)
     anchors = find_step_anchors(raw_html)
-    content = wrap_code_prompts(wrap_screenshot_images(raw_html))
+    content = decorate_app_links(wrap_code_prompts(wrap_screenshot_images(raw_html)))
 
     page = f'''<!doctype html>
 <html lang="zh-CN">
@@ -164,7 +211,7 @@ def main() -> None:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="猎鹿人 HunterCode (v3.5.2) 产品操作说明 · 股民日常炒股全流程图文指南">
-  <title>帮助中心 · 猎鹿人 HunterCode 股民日常炒股图文指南</title>
+  <title>帮助中心 (v3.5.2) · 猎鹿人 HunterCode 股民日常炒股图文指南</title>
   <link rel="icon" href="/icon.png" type="image/png" />
   <link rel="apple-touch-icon" href="/icon.png" />
   <style>
@@ -377,11 +424,107 @@ def main() -> None:
       line-height: 1.5;
       color: #dfd2c4;
     }}
+    .flow-actions {{
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: auto;
+    }}
     .flow-go {{
       font-size: 12px;
       font-weight: 600;
       color: #ffbe7b;
-      margin-top: auto;
+      text-decoration: none !important;
+    }}
+    .flow-go:hover {{
+      color: #fff;
+      text-decoration: underline !important;
+    }}
+    .flow-launch {{
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 5px 9px;
+      border-radius: 8px;
+      background: rgba(217, 121, 48, 0.32);
+      border: 1px solid rgba(255, 190, 123, 0.5);
+      color: #fff !important;
+      font-size: 11.8px;
+      font-weight: 700;
+      text-decoration: none !important;
+      transition: all 0.15s ease;
+    }}
+    .flow-launch:hover {{
+      background: #d97930;
+      border-color: #ffd7b0;
+    }}
+
+    /* Direct Launch Action Cards & Inline App Links */
+    .direct-launch-item {{
+      list-style: none;
+      margin: 10px 0 14px -18px;
+    }}
+    .direct-launch-card {{
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 16px;
+      border-radius: 12px;
+      background: linear-gradient(90deg, #fff6ec 0%, #f9efe2 100%);
+      border: 1px solid #e2c29d;
+      box-shadow: 0 4px 12px rgba(181, 101, 39, 0.08);
+    }}
+    .direct-launch-label {{
+      font-size: 13.5px;
+      font-weight: 800;
+      color: #7c3f10;
+      white-space: nowrap;
+    }}
+    .direct-launch-actions {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }}
+    .direct-launch-btn {{
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 6px 14px;
+      border-radius: 9px;
+      background: var(--copper);
+      color: #fff !important;
+      font-size: 13.5px;
+      font-weight: 700;
+      text-decoration: none !important;
+      box-shadow: 0 2px 6px rgba(140, 72, 20, 0.22);
+      transition: all 0.15s ease;
+    }}
+    .direct-launch-btn:hover {{
+      background: var(--copper-dark);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 10px rgba(140, 72, 20, 0.3);
+    }}
+    .inline-app-link {{
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      padding: 2px 9px;
+      margin: 1px 2px;
+      border-radius: 6px;
+      background: #f8efe4;
+      border: 1px solid #e0c3a2;
+      color: var(--copper-dark) !important;
+      font-size: 13.5px;
+      font-weight: 700;
+      text-decoration: none !important;
+      transition: all 0.14s ease;
+    }}
+    .inline-app-link:hover {{
+      background: var(--copper);
+      border-color: var(--copper);
+      color: #fff !important;
     }}
 
     /* Layout Grid */
@@ -730,17 +873,18 @@ def main() -> None:
 </head>
 <body>
   <header class="top">
-    <a class="brand" href="/chat">
+    <a class="brand" href="/chat" target="_blank" rel="noopener">
       <img src="/logo-hunter.png" alt="猎鹿人">
       <span>猎鹿人 · HunterCode</span>
       <span class="brand-badge">v3.5.2 帮助中心</span>
     </a>
-    <nav aria-label="核心工作区导航">
-      <a class="nav-primary" href="/chat" target="_blank" rel="noopener" title="在新窗口打开 AI 对话工作区">返回 AI 对话 ↗</a>
-      <a href="/workbench" target="_blank" rel="noopener" title="在新窗口打开投研工作台">投研工作台 ↗</a>
-      <a href="/strategies/index.html" target="_blank" rel="noopener" title="在新窗口打开策略中心">策略中心 ↗</a>
-      <a href="/finance/overview" target="_blank" rel="noopener" title="在新窗口打开模拟炒股总览">智能体自动炒股 ↗</a>
-      <a href="https://github.com/agentpit-io/hunter-community" target="_blank" rel="noopener">GitHub 开源仓库</a>
+    <nav aria-label="核心工作区导航（新窗口打开）">
+      <a class="nav-primary" href="/chat" target="_blank" rel="noopener">💬 AI 对话 (/chat) ↗</a>
+      <a href="/workbench" target="_blank" rel="noopener">🚀 投研工作台 (/workbench) ↗</a>
+      <a href="/strategies/index.html" target="_blank" rel="noopener">📊 策略中心 ↗</a>
+      <a href="/finance/overview" target="_blank" rel="noopener">🤖 智能体自动炒股 ↗</a>
+      <a href="/settings?tab=llm" target="_blank" rel="noopener">⚙️ 设置 ↗</a>
+      <a href="https://github.com/agentpit-io/hunter-community" target="_blank" rel="noopener">GitHub 开源仓库 ↗</a>
     </nav>
   </header>
 
@@ -748,10 +892,10 @@ def main() -> None:
     <div class="hero-card">
       <div class="hero-top">
         <div class="hero-title-group">
-          <span class="hero-eyebrow">🦌 私人证券研究所 · 零实盘交易风险 · 100% 本地隐私优先</span>
+          <span class="hero-eyebrow">🦌 私人证券研究所 · 零实盘交易风险 · 100% 本地隐私优先 · v3.5.2 正式版</span>
           <h1>猎鹿人 HunterCode 股民日常炒股全流程操作手册</h1>
           <p class="hero-sub">
-            不用懂编程、不用背命令！跟着交易日从早到晚的时间表走：早上 8:30 看三栏早报，盘中盯异动翻 PDF 公告原文、做 56 项技术 + 90 项基本面全身检查，下午 15:30 收盘复盘归档，周末算 ETF 定投跑回测。点击下方任意步骤卡片，直达图文实机教程与一键提问口令。
+            不用懂编程、不用背命令！跟着交易日从早到晚的时间表走：早上 8:30 看三栏早报，盘中盯异动翻 PDF 公告原文、做 56 项技术 + 90 项基本面全身检查，下午 15:30 收盘复盘归档，周末算 ETF 定投跑回测。点击下方任意步骤卡片可查看图文教程，点击「🚀 直达按钮」直接在新窗口打开你当前实例的对应功能边看边练！
           </p>
         </div>
         <div class="hero-pills">
@@ -763,11 +907,11 @@ def main() -> None:
       </div>
 
       <div class="flow-section-title">
-        <span>🧭 股民日常炒股 6 步总流程图（点击任意卡片平滑跳转到对应图文教程）</span>
+        <span>🧭 股民日常炒股 6 步总流程图（可跳章节看图文，或点下方按钮在新窗口直达功能页）</span>
         <span>支持点击正文中任意截图全屏放大查看</span>
       </div>
       <div class="flow-grid">
-        <a class="flow-step" href="#{escape(anchors['step0'])}">
+        <div class="flow-step">
           <div>
             <div class="flow-step-head">
               <span class="flow-badge">准备篇</span>
@@ -776,10 +920,13 @@ def main() -> None:
             <h3>装好上手与 4 大入口</h3>
             <p>配好大模型 Key、验证行情连通，3 秒认清对话、工作台、策略与模拟盘。</p>
           </div>
-          <span class="flow-go">查看第 1 章图文 →</span>
-        </a>
+          <div class="flow-actions">
+            <a class="flow-go" href="#{escape(anchors['step0'])}">📖 查看第 1 章图文 →</a>
+            <a class="flow-launch" href="/settings?tab=llm" target="_blank" rel="noopener">🚀 直达设置 (/settings) ↗</a>
+          </div>
+        </div>
 
-        <a class="flow-step" href="#{escape(anchors['step1'])}">
+        <div class="flow-step">
           <div>
             <div class="flow-step-head">
               <span class="flow-badge">第一步 · 盘前</span>
@@ -788,10 +935,13 @@ def main() -> None:
             <h3>08:30 盘前市场晨报</h3>
             <p>一键出三栏观察卡（事实/推断/待核实），带数字回读校验防小作文忽悠。</p>
           </div>
-          <span class="flow-go">查看第 2 章图文 →</span>
-        </a>
+          <div class="flow-actions">
+            <a class="flow-go" href="#{escape(anchors['step1'])}">📖 查看第 2 章图文 →</a>
+            <a class="flow-launch" href="/workbench?tab=market" target="_blank" rel="noopener">🚀 直达市场工作台 ↗</a>
+          </div>
+        </div>
 
-        <a class="flow-step" href="#{escape(anchors['step2'])}">
+        <div class="flow-step">
           <div>
             <div class="flow-step-head">
               <span class="flow-badge">第二步 · 盘中</span>
@@ -800,10 +950,13 @@ def main() -> None:
             <h3>盯异动 · 翻公告 · 诊个股</h3>
             <p>自选股异动归因、PDF 公告页码抽屉、56 项技术 + 90 项基本面体检。</p>
           </div>
-          <span class="flow-go">查看第 3 章图文 →</span>
-        </a>
+          <div class="flow-actions">
+            <a class="flow-go" href="#{escape(anchors['step2'])}">📖 查看第 3 章图文 →</a>
+            <a class="flow-launch" href="/workbench?tab=watchlist" target="_blank" rel="noopener">🚀 直达自选股/个股工作台 ↗</a>
+          </div>
+        </div>
 
-        <a class="flow-step" href="#{escape(anchors['step3'])}">
+        <div class="flow-step">
           <div>
             <div class="flow-step-head">
               <span class="flow-badge">第三步 · 盘后</span>
@@ -812,10 +965,13 @@ def main() -> None:
             <h3>盘后复盘与持仓体检</h3>
             <p>15:30 复盘自动存本地经验库，核对买入理由变没变，安全导入交割单。</p>
           </div>
-          <span class="flow-go">查看第 4 章图文 →</span>
-        </a>
+          <div class="flow-actions">
+            <a class="flow-go" href="#{escape(anchors['step3'])}">📖 查看第 4 章图文 →</a>
+            <a class="flow-launch" href="/workbench?tab=portfolio_review" target="_blank" rel="noopener">🚀 直达组合复盘工作台 ↗</a>
+          </div>
+        </div>
 
-        <a class="flow-step" href="#{escape(anchors['step4'])}">
+        <div class="flow-step">
           <div>
             <div class="flow-step-head">
               <span class="flow-badge">第四步 · 周末</span>
@@ -824,10 +980,13 @@ def main() -> None:
             <h3>ETF 定投计算与防坑回测</h3>
             <p>算清每月定投真实 XIRR 年化收益，大白话选股 + 6 维回测防造假审计。</p>
           </div>
-          <span class="flow-go">查看 5.1 节图文 →</span>
-        </a>
+          <div class="flow-actions">
+            <a class="flow-go" href="#{escape(anchors['step4'])}">📖 查看 5.1 节图文 →</a>
+            <a class="flow-launch" href="/workbench?tab=quant" target="_blank" rel="noopener">🚀 直达量化与 ETF 定投 ↗</a>
+          </div>
+        </div>
 
-        <a class="flow-step" href="#{escape(anchors['step5'])}">
+        <div class="flow-step">
           <div>
             <div class="flow-step-head">
               <span class="flow-badge">第五步 · 演练</span>
@@ -836,8 +995,11 @@ def main() -> None:
             <h3>策略中心与 AI 自动炒股</h3>
             <p>官方多因子策略库 + AI 智能体每日 6 大交易时点全自动模拟盘练手。</p>
           </div>
-          <span class="flow-go">查看 5.2 节图文 →</span>
-        </a>
+          <div class="flow-actions">
+            <a class="flow-go" href="#{escape(anchors['step5'])}">📖 查看 5.2 节图文 →</a>
+            <a class="flow-launch" href="/strategies/index.html" target="_blank" rel="noopener">🚀 直达策略中心 ↗</a>
+          </div>
+        </div>
       </div>
     </div>
   </section>

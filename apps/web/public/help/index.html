@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="猎鹿人 HunterCode (v3.5.2) 产品操作说明 · 股民日常炒股全流程图文指南">
-  <title>帮助中心 · 猎鹿人 HunterCode 股民日常炒股图文指南</title>
+  <title>帮助中心 (v3.5.2) · 猎鹿人 HunterCode 股民日常炒股图文指南</title>
   <link rel="icon" href="/icon.png" type="image/png" />
   <link rel="apple-touch-icon" href="/icon.png" />
   <style>
@@ -217,11 +217,107 @@
       line-height: 1.5;
       color: #dfd2c4;
     }
+    .flow-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: auto;
+    }
     .flow-go {
       font-size: 12px;
       font-weight: 600;
       color: #ffbe7b;
-      margin-top: auto;
+      text-decoration: none !important;
+    }
+    .flow-go:hover {
+      color: #fff;
+      text-decoration: underline !important;
+    }
+    .flow-launch {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 5px 9px;
+      border-radius: 8px;
+      background: rgba(217, 121, 48, 0.32);
+      border: 1px solid rgba(255, 190, 123, 0.5);
+      color: #fff !important;
+      font-size: 11.8px;
+      font-weight: 700;
+      text-decoration: none !important;
+      transition: all 0.15s ease;
+    }
+    .flow-launch:hover {
+      background: #d97930;
+      border-color: #ffd7b0;
+    }
+
+    /* Direct Launch Action Cards & Inline App Links */
+    .direct-launch-item {
+      list-style: none;
+      margin: 10px 0 14px -18px;
+    }
+    .direct-launch-card {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 16px;
+      border-radius: 12px;
+      background: linear-gradient(90deg, #fff6ec 0%, #f9efe2 100%);
+      border: 1px solid #e2c29d;
+      box-shadow: 0 4px 12px rgba(181, 101, 39, 0.08);
+    }
+    .direct-launch-label {
+      font-size: 13.5px;
+      font-weight: 800;
+      color: #7c3f10;
+      white-space: nowrap;
+    }
+    .direct-launch-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .direct-launch-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 6px 14px;
+      border-radius: 9px;
+      background: var(--copper);
+      color: #fff !important;
+      font-size: 13.5px;
+      font-weight: 700;
+      text-decoration: none !important;
+      box-shadow: 0 2px 6px rgba(140, 72, 20, 0.22);
+      transition: all 0.15s ease;
+    }
+    .direct-launch-btn:hover {
+      background: var(--copper-dark);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 10px rgba(140, 72, 20, 0.3);
+    }
+    .inline-app-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      padding: 2px 9px;
+      margin: 1px 2px;
+      border-radius: 6px;
+      background: #f8efe4;
+      border: 1px solid #e0c3a2;
+      color: var(--copper-dark) !important;
+      font-size: 13.5px;
+      font-weight: 700;
+      text-decoration: none !important;
+      transition: all 0.14s ease;
+    }
+    .inline-app-link:hover {
+      background: var(--copper);
+      border-color: var(--copper);
+      color: #fff !important;
     }
 
     /* Layout Grid */
@@ -570,17 +666,18 @@
 </head>
 <body>
   <header class="top">
-    <a class="brand" href="/chat">
+    <a class="brand" href="/chat" target="_blank" rel="noopener">
       <img src="/logo-hunter.png" alt="猎鹿人">
       <span>猎鹿人 · HunterCode</span>
       <span class="brand-badge">v3.5.2 帮助中心</span>
     </a>
-    <nav aria-label="核心工作区导航">
-      <a class="nav-primary" href="/chat" target="_blank" rel="noopener" title="在新窗口打开 AI 对话工作区">返回 AI 对话 ↗</a>
-      <a href="/workbench" target="_blank" rel="noopener" title="在新窗口打开投研工作台">投研工作台 ↗</a>
-      <a href="/strategies/index.html" target="_blank" rel="noopener" title="在新窗口打开策略中心">策略中心 ↗</a>
-      <a href="/finance/overview" target="_blank" rel="noopener" title="在新窗口打开模拟炒股总览">智能体自动炒股 ↗</a>
-      <a href="https://github.com/agentpit-io/hunter-community" target="_blank" rel="noopener">GitHub 开源仓库</a>
+    <nav aria-label="核心工作区导航（新窗口打开）">
+      <a class="nav-primary" href="/chat" target="_blank" rel="noopener">💬 AI 对话 (/chat) ↗</a>
+      <a href="/workbench" target="_blank" rel="noopener">🚀 投研工作台 (/workbench) ↗</a>
+      <a href="/strategies/index.html" target="_blank" rel="noopener">📊 策略中心 ↗</a>
+      <a href="/finance/overview" target="_blank" rel="noopener">🤖 智能体自动炒股 ↗</a>
+      <a href="/settings?tab=llm" target="_blank" rel="noopener">⚙️ 设置 ↗</a>
+      <a href="https://github.com/agentpit-io/hunter-community" target="_blank" rel="noopener">GitHub 开源仓库 ↗</a>
     </nav>
   </header>
 
@@ -588,10 +685,10 @@
     <div class="hero-card">
       <div class="hero-top">
         <div class="hero-title-group">
-          <span class="hero-eyebrow">🦌 私人证券研究所 · 零实盘交易风险 · 100% 本地隐私优先</span>
+          <span class="hero-eyebrow">🦌 私人证券研究所 · 零实盘交易风险 · 100% 本地隐私优先 · v3.5.2 正式版</span>
           <h1>猎鹿人 HunterCode 股民日常炒股全流程操作手册</h1>
           <p class="hero-sub">
-            不用懂编程、不用背命令！跟着交易日从早到晚的时间表走：早上 8:30 看三栏早报，盘中盯异动翻 PDF 公告原文、做 56 项技术 + 90 项基本面全身检查，下午 15:30 收盘复盘归档，周末算 ETF 定投跑回测。点击下方任意步骤卡片，直达图文实机教程与一键提问口令。
+            不用懂编程、不用背命令！跟着交易日从早到晚的时间表走：早上 8:30 看三栏早报，盘中盯异动翻 PDF 公告原文、做 56 项技术 + 90 项基本面全身检查，下午 15:30 收盘复盘归档，周末算 ETF 定投跑回测。点击下方任意步骤卡片可查看图文教程，点击「🚀 直达按钮」直接在新窗口打开你当前实例的对应功能边看边练！
           </p>
         </div>
         <div class="hero-pills">
@@ -603,11 +700,11 @@
       </div>
 
       <div class="flow-section-title">
-        <span>🧭 股民日常炒股 6 步总流程图（点击任意卡片平滑跳转到对应图文教程）</span>
+        <span>🧭 股民日常炒股 6 步总流程图（可跳章节看图文，或点下方按钮在新窗口直达功能页）</span>
         <span>支持点击正文中任意截图全屏放大查看</span>
       </div>
       <div class="flow-grid">
-        <a class="flow-step" href="#1-3">
+        <div class="flow-step">
           <div>
             <div class="flow-step-head">
               <span class="flow-badge">准备篇</span>
@@ -616,10 +713,13 @@
             <h3>装好上手与 4 大入口</h3>
             <p>配好大模型 Key、验证行情连通，3 秒认清对话、工作台、策略与模拟盘。</p>
           </div>
-          <span class="flow-go">查看第 1 章图文 →</span>
-        </a>
+          <div class="flow-actions">
+            <a class="flow-go" href="#1-3">📖 查看第 1 章图文 →</a>
+            <a class="flow-launch" href="/settings?tab=llm" target="_blank" rel="noopener">🚀 直达设置 (/settings) ↗</a>
+          </div>
+        </div>
 
-        <a class="flow-step" href="#2-0830-0925-3">
+        <div class="flow-step">
           <div>
             <div class="flow-step-head">
               <span class="flow-badge">第一步 · 盘前</span>
@@ -628,10 +728,13 @@
             <h3>08:30 盘前市场晨报</h3>
             <p>一键出三栏观察卡（事实/推断/待核实），带数字回读校验防小作文忽悠。</p>
           </div>
-          <span class="flow-go">查看第 2 章图文 →</span>
-        </a>
+          <div class="flow-actions">
+            <a class="flow-go" href="#2-0830-0925-3">📖 查看第 2 章图文 →</a>
+            <a class="flow-launch" href="/workbench?tab=market" target="_blank" rel="noopener">🚀 直达市场工作台 ↗</a>
+          </div>
+        </div>
 
-        <a class="flow-step" href="#3-0930-1500-pdf-56-90">
+        <div class="flow-step">
           <div>
             <div class="flow-step-head">
               <span class="flow-badge">第二步 · 盘中</span>
@@ -640,10 +743,13 @@
             <h3>盯异动 · 翻公告 · 诊个股</h3>
             <p>自选股异动归因、PDF 公告页码抽屉、56 项技术 + 90 项基本面体检。</p>
           </div>
-          <span class="flow-go">查看第 3 章图文 →</span>
-        </a>
+          <div class="flow-actions">
+            <a class="flow-go" href="#3-0930-1500-pdf-56-90">📖 查看第 3 章图文 →</a>
+            <a class="flow-launch" href="/workbench?tab=watchlist" target="_blank" rel="noopener">🚀 直达自选股/个股工作台 ↗</a>
+          </div>
+        </div>
 
-        <a class="flow-step" href="#4-1530">
+        <div class="flow-step">
           <div>
             <div class="flow-step-head">
               <span class="flow-badge">第三步 · 盘后</span>
@@ -652,10 +758,13 @@
             <h3>盘后复盘与持仓体检</h3>
             <p>15:30 复盘自动存本地经验库，核对买入理由变没变，安全导入交割单。</p>
           </div>
-          <span class="flow-go">查看第 4 章图文 →</span>
-        </a>
+          <div class="flow-actions">
+            <a class="flow-go" href="#4-1530">📖 查看第 4 章图文 →</a>
+            <a class="flow-launch" href="/workbench?tab=portfolio_review" target="_blank" rel="noopener">🚀 直达组合复盘工作台 ↗</a>
+          </div>
+        </div>
 
-        <a class="flow-step" href="#51-etf">
+        <div class="flow-step">
           <div>
             <div class="flow-step-head">
               <span class="flow-badge">第四步 · 周末</span>
@@ -664,10 +773,13 @@
             <h3>ETF 定投计算与防坑回测</h3>
             <p>算清每月定投真实 XIRR 年化收益，大白话选股 + 6 维回测防造假审计。</p>
           </div>
-          <span class="flow-go">查看 5.1 节图文 →</span>
-        </a>
+          <div class="flow-actions">
+            <a class="flow-go" href="#51-etf">📖 查看 5.1 节图文 →</a>
+            <a class="flow-launch" href="/workbench?tab=quant" target="_blank" rel="noopener">🚀 直达量化与 ETF 定投 ↗</a>
+          </div>
+        </div>
 
-        <a class="flow-step" href="#52-ai">
+        <div class="flow-step">
           <div>
             <div class="flow-step-head">
               <span class="flow-badge">第五步 · 演练</span>
@@ -676,8 +788,11 @@
             <h3>策略中心与 AI 自动炒股</h3>
             <p>官方多因子策略库 + AI 智能体每日 6 大交易时点全自动模拟盘练手。</p>
           </div>
-          <span class="flow-go">查看 5.2 节图文 →</span>
-        </a>
+          <div class="flow-actions">
+            <a class="flow-go" href="#52-ai">📖 查看 5.2 节图文 →</a>
+            <a class="flow-launch" href="/strategies/index.html" target="_blank" rel="noopener">🚀 直达策略中心 ↗</a>
+          </div>
+        </div>
       </div>
     </div>
   </section>
@@ -727,7 +842,7 @@
 <th style="text-align: left;">阶段</th>
 <th style="text-align: left;">时间 / 场景</th>
 <th style="text-align: left;">你在这一步干什么？</th>
-<th style="text-align: left;">核心入口</th>
+<th style="text-align: left;">核心入口（点击直接在新窗口打开对应功能）</th>
 </tr>
 </thead>
 <tbody>
@@ -735,37 +850,37 @@
 <td style="text-align: left;"><strong>准备篇 · 首次 3 分钟上手</strong></td>
 <td style="text-align: left;">刚装好软件时</td>
 <td style="text-align: left;">装好打开 → 选大模型/填 Key → 认识 4 大主入口</td>
-<td style="text-align: left;"><code>/settings?tab=llm</code> · <code>/chat</code></td>
+<td style="text-align: left;"><a class="inline-app-link" href="/settings?tab=llm" target="_blank" rel="noopener">⚙️ 设置大模型 (/settings?tab=llm) ↗</a> · <a class="inline-app-link" href="/chat" target="_blank" rel="noopener">💬 AI 对话 (/chat) ↗</a></td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>第一步 · 盘前准备</strong></td>
 <td style="text-align: left;">交易日 <strong>08:30 - 09:25</strong></td>
 <td style="text-align: left;">一键出今日市场晨报 → 看隔夜大事与板块风向 → 定今日观察清单</td>
-<td style="text-align: left;"><code>/workbench</code>（市场工作台）</td>
+<td style="text-align: left;"><a class="inline-app-link" href="/workbench?tab=market" target="_blank" rel="noopener">🚀 投研工作台 · 市场晨报 (/workbench?tab=market) ↗</a></td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>第二步 · 盘中盯盘与诊股</strong></td>
 <td style="text-align: left;">交易日 <strong>09:30 - 15:00</strong></td>
 <td style="text-align: left;">盯自选股突发异动 → 翻 PDF 公告原文防踩雷 → 查 56 项技术与 90 项基本面体检 → 对话框随时问小鹿</td>
-<td style="text-align: left;"><code>/workbench</code>（自选股 / 个股工作台）· <code>/chat</code></td>
+<td style="text-align: left;"><a class="inline-app-link" href="/workbench?tab=watchlist" target="_blank" rel="noopener">👀 自选股工作台 (/workbench?tab=watchlist) ↗</a> · <a class="inline-app-link" href="/workbench?tab=stock" target="_blank" rel="noopener">🔬 个股研究 (/workbench?tab=stock) ↗</a> · <a class="inline-app-link" href="/chat" target="_blank" rel="noopener">💬 AI 对话 (/chat) ↗</a></td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>第三步 · 盘后复盘与记账</strong></td>
 <td style="text-align: left;">交易日 <strong>15:30 以后</strong></td>
 <td style="text-align: left;">一键跑 15:30 盘后复盘（自动存经验库）→ 核对持仓买入理由变没变 → 安全导入持仓与交割单</td>
-<td style="text-align: left;"><code>/workbench</code>（组合复盘）· <code>/settings?tab=broker</code></td>
+<td style="text-align: left;"><a class="inline-app-link" href="/workbench?tab=portfolio_review" target="_blank" rel="noopener">📝 组合复盘 (/workbench?tab=portfolio_review) ↗</a> · <a class="inline-app-link" href="/settings?tab=broker" target="_blank" rel="noopener">🔒 只读持仓导入 (/settings?tab=broker) ↗</a></td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>第四步 · 周末定投与选股研究</strong></td>
 <td style="text-align: left;">周末 / 闲暇进阶</td>
 <td style="text-align: left;">用 ETF 定投计算器算每月投多少 → 用大白话选股器筛好票 → 回测 6 维防坑体检</td>
-<td style="text-align: left;"><code>/workbench</code>（量化与 ETF 定投）</td>
+<td style="text-align: left;"><a class="inline-app-link" href="/workbench?tab=quant" target="_blank" rel="noopener">📐 量化与 ETF 定投 (/workbench?tab=quant) ↗</a></td>
 </tr>
 <tr>
 <td style="text-align: left;"><strong>第五步 · AI 智能体模拟炒股训练</strong></td>
 <td style="text-align: left;">全天候演练</td>
 <td style="text-align: left;">策略中心 + 模拟盘 6 大交易时点自动盯盘演练 → 零真金白银风险练手</td>
-<td style="text-align: left;"><code>/strategies/index.html</code> · <code>/finance/overview</code></td>
+<td style="text-align: left;"><a class="inline-app-link" href="/strategies/index.html" target="_blank" rel="noopener">📊 策略中心 (/strategies/index.html) ↗</a> · <a class="inline-app-link" href="/finance/overview" target="_blank" rel="noopener">🤖 模拟自动炒股 (/finance/overview) ↗</a></td>
 </tr>
 </tbody>
 </table>
@@ -776,9 +891,10 @@
 <li><strong>① 解决你炒股的什么痛点？</strong>
     很多股民装好 AI 软件后一头雾水：不知道去哪填大模型 Key、不知道行情通不通、怕配置太复杂。猎鹿人把所有开关集中在同一个设置面板里，填好 API Key 点一下测试就能用，A 股/港股/美股公开行情开箱即通。</li>
 <li><strong>② 去哪点、怎么操作（按钮级指引）</strong><ul>
-<li><strong>第 1 步</strong>：在浏览器打开猎鹿人首页，点击左下角头像或直接访问 <code>/settings?tab=llm</code> 进入 <strong>「设置 → 大模型与偏好」</strong>；</li>
+<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">🎯 本节功能新窗口直达：</span><div class="direct-launch-actions"><a class="direct-launch-btn" href="/settings?tab=llm" target="_blank" rel="noopener">🚀 点击直达：大模型与偏好设置 (/settings?tab=llm) ↗</a> <a class="direct-launch-btn" href="/chat" target="_blank" rel="noopener">💬 点击直达：AI 对话主工作区 (/chat) ↗</a></div></div></li>
+<li><strong>第 1 步</strong>：在浏览器打开猎鹿人首页，点击左下角头像或直接点击上方按钮打开 <a class="inline-app-link" href="/settings?tab=llm" target="_blank" rel="noopener">设置 → 大模型与偏好 (/settings?tab=llm) ↗</a>；</li>
 <li><strong>第 2 步</strong>：选择你顺手的大模型服务商（支持 DeepSeek、通义千问、OpenAI、Claude 或本地 Ollama），粘贴你的 API Key 并点击 <strong>「保存并测试连接」</strong>；</li>
-<li><strong>第 3 步</strong>：确认右上角状态灯变绿，即可点击顶部 <strong>「返回对话」</strong> 开始看盘问股。</li>
+<li><strong>第 3 步</strong>：确认右上角状态灯变绿，即可点击顶部 <a class="inline-app-link" href="/chat" target="_blank" rel="noopener">返回 AI 对话 (/chat) ↗</a> 开始看盘问股。</li>
 </ul>
 </li>
 <li><strong>③ 真实界面高清截图与看点说明</strong>
@@ -787,7 +903,7 @@
 <li><strong>图中看点 2</strong>：支持一键切换主力推理模型与快速问答模型，所有密钥加密保存在你自己的机器上，绝不外传。</li>
 </ul>
 </li>
-<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 /chat）</span><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button></div><pre><code>请帮我检查当前行情数据源与知识库工具是否已经就绪，并报一下上证指数、恒生指数和贵州茅台（600519.SH）的最新实盘行情，确认时间与数据源。</code></pre></div>
+<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 <a href="/chat" target="_blank" rel="noopener" style="color:#ffbe7b;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button><a class="copy-btn" href="/chat" target="_blank" rel="noopener" style="text-decoration:none;">🚀 打开 /chat 提问 ↗</a></div></div><pre><code>请帮我检查当前行情数据源与知识库工具是否已经就绪，并报一下上证指数、恒生指数和贵州茅台（600519.SH）的最新实盘行情，确认时间与数据源。</code></pre></div>
 </li>
 </ul>
 <hr />
@@ -796,9 +912,10 @@
 <li><strong>① 解决你炒股的什么痛点？</strong>
     传统炒股软件菜单密密麻麻几百个，找个功能像走迷宫。猎鹿人把日常炒股浓缩成 <strong>4 大黄金入口</strong>，不管是平时随便问两句、盘中盯异动看公告，还是周末算定投跑回测，3 秒钟就能切过去。</li>
 <li><strong>② 去哪点、怎么操作（按钮级指引）</strong><ul>
-<li><strong>第 1 步</strong>：打开主界面 <code>/chat</code>（<strong>AI 对话主工作区</strong>），中间是对话框，左侧栏可以随时切自选股、持仓和历史对话；</li>
-<li><strong>第 2 步</strong>：点击顶部导航栏或侧边栏的 <strong>「投研工作台」</strong>（<code>/workbench</code>），进入集成了早报、自选股异动、公告 PDF 抽屉、个股 56+90 项体检、组合复盘与 ETF 定投的一站式看板；</li>
-<li><strong>第 3 步</strong>：点击顶部 <strong>「策略中心」</strong>（<code>/strategies/index.html</code>）或侧边栏 <strong>「模拟炒股 / 智能体交易」</strong>（<code>/finance/overview</code>），查看量化选股回测与 AI 模拟盘自动演练。</li>
+<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">🎯 本节功能新窗口直达：</span><div class="direct-launch-actions"><a class="direct-launch-btn" href="/chat" target="_blank" rel="noopener">💬 AI 对话 (/chat) ↗</a> <a class="direct-launch-btn" href="/workbench" target="_blank" rel="noopener">🚀 投研工作台 (/workbench) ↗</a> <a class="direct-launch-btn" href="/strategies/index.html" target="_blank" rel="noopener">📊 策略中心 (/strategies/index.html) ↗</a> <a class="direct-launch-btn" href="/finance/overview" target="_blank" rel="noopener">🤖 模拟自动炒股 (/finance/overview) ↗</a></div></div></li>
+<li><strong>第 1 步</strong>：打开主界面 <a class="inline-app-link" href="/chat" target="_blank" rel="noopener">AI 对话主工作区 (/chat) ↗</a>，中间是对话框，左侧栏可以随时切自选股、持仓和历史对话；</li>
+<li><strong>第 2 步</strong>：点击顶部导航栏或侧边栏的 <a class="inline-app-link" href="/workbench" target="_blank" rel="noopener">投研工作台 (/workbench) ↗</a>，进入集成了早报、自选股异动、公告 PDF 抽屉、个股 56+90 项体检、组合复盘与 ETF 定投的一站式看板；</li>
+<li><strong>第 3 步</strong>：点击顶部 <a class="inline-app-link" href="/strategies/index.html" target="_blank" rel="noopener">策略中心 (/strategies/index.html) ↗</a> 或侧边栏 <a class="inline-app-link" href="/finance/overview" target="_blank" rel="noopener">模拟炒股 / 智能体交易 (/finance/overview) ↗</a>，查看量化选股回测与 AI 模拟盘自动演练。</li>
 </ul>
 </li>
 <li><strong>③ 真实界面高清截图与看点说明</strong>
@@ -807,7 +924,7 @@
 <li><strong>图中看点 2</strong>：主工作区预设了股民最常问的快捷卡片（查个股、看早报、防踩雷、诊持仓），新手点一下卡片就能直接发问。</li>
 </ul>
 </li>
-<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 /chat）</span><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button></div><pre><code>我是刚用猎鹿人的普通股民，手头主要做 A 股蓝筹和宽基 ETF。请用大白话告诉我：早上开盘前、盘中看盘、收盘后复盘，我分别该怎么配合使用你？</code></pre></div>
+<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 <a href="/chat" target="_blank" rel="noopener" style="color:#ffbe7b;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button><a class="copy-btn" href="/chat" target="_blank" rel="noopener" style="text-decoration:none;">🚀 打开 /chat 提问 ↗</a></div></div><pre><code>我是刚用猎鹿人的普通股民，手头主要做 A 股蓝筹和宽基 ETF。请用大白话告诉我：早上开盘前、盘中看盘、收盘后复盘，我分别该怎么配合使用你？</code></pre></div>
 </li>
 </ul>
 <hr />
@@ -817,7 +934,8 @@
 <li><strong>① 解决你炒股的什么痛点？</strong>
     每天早上起来到处刷微信群、看财经公众号，消息真假难辨，还经常被没出处的“小作文”忽悠去集合竞价追高。猎鹿人的盘前观察卡严格把 <strong>【已核实事实】</strong>、<strong>【逻辑推断】</strong>、<strong>【待核实问题】</strong> 拆成三栏，而且每条数字都经过系统底层「数字回读校验」，杜绝 AI 瞎编价格和涨跌幅。</li>
 <li><strong>② 去哪点、怎么操作（按钮级指引）</strong><ul>
-<li><strong>第 1 步</strong>：点击顶部导航进入 <strong>「投研工作台」</strong>（<code>/workbench</code>），默认打开的就是第一个标签页 <strong>「市场工作台」</strong>；</li>
+<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">🎯 本节功能新窗口直达：</span><div class="direct-launch-actions"><a class="direct-launch-btn" href="/workbench?tab=market" target="_blank" rel="noopener">🚀 点击直达：投研工作台 市场工作台 (/workbench?tab=market) ↗</a> <a class="direct-launch-btn" href="/chat" target="_blank" rel="noopener">💬 去对话框问早报 (/chat) ↗</a></div></div></li>
+<li><strong>第 1 步</strong>：点击上方直达按钮或顶部导航进入 <a class="inline-app-link" href="/workbench" target="_blank" rel="noopener">投研工作台 (/workbench) ↗</a>，默认打开的就是第一个标签页 <strong>「市场工作台」</strong>；</li>
 <li><strong>第 2 步</strong>：点击右上角醒目的 <strong>「生成今日市场晨报（08:30 盘前观察卡）」</strong> 按钮；</li>
 <li><strong>第 3 步</strong>：先看右上角绿色的 <strong>「数字回读校验通过」</strong> 标志，再从左到右浏览【已核实事实】（隔夜外盘、A 股指数、真实新闻出处）、【逻辑推断】（对今日板块风向的推演）和【待核实问题】（今天开盘后重点盯哪几个信号）。</li>
 </ul>
@@ -828,7 +946,7 @@
 <li><strong>图中看点 2</strong>：下方「三栏证据结构」把事实（带明确时间戳与数据源）、推断（绝不伪装成事实）和今天开盘要盯的悬念彻底分开，帮你养成专业研究员的盘前习惯。</li>
 </ul>
 </li>
-<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 /chat）</span><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button></div><pre><code>请帮我生成一份今日 08:30 盘前观察卡：汇总隔夜全球重要行情、A 股与港股最新风向，以及我自选股过去 24 小时的重要公告。请严格按【已核实事实】【逻辑推断】【今日开盘待核实问题】三栏输出，所有数字必须标注来源与时间。</code></pre></div>
+<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 <a href="/chat" target="_blank" rel="noopener" style="color:#ffbe7b;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button><a class="copy-btn" href="/chat" target="_blank" rel="noopener" style="text-decoration:none;">🚀 打开 /chat 提问 ↗</a></div></div><pre><code>请帮我生成一份今日 08:30 盘前观察卡：汇总隔夜全球重要行情、A 股与港股最新风向，以及我自选股过去 24 小时的重要公告。请严格按【已核实事实】【逻辑推断】【今日开盘待核实问题】三栏输出，所有数字必须标注来源与时间。</code></pre></div>
 </li>
 </ul>
 <hr />
@@ -838,7 +956,8 @@
 <li><strong>① 解决你炒股的什么痛点？</strong>
     盘中自选股突然拉升或跳水，你到处问人“发生什么事了？”往往半小时后才看到消息；更坑的是，很多粗制滥造的软件遇到停牌或退市整理股票（比如 <code>600898.SH</code>）会把缺失价格当成 <code>0.00</code> 甚至算出“-100% 暴跌”吓死人。猎鹿人不仅能一键调动行情、公告、快讯解释盘中异动，而且对停牌/缺数股票诚实显示 <code>—</code> 并注明原因，绝不拿假 0 糊弄你。</li>
 <li><strong>② 去哪点、怎么操作（按钮级指引）</strong><ul>
-<li><strong>第 1 步</strong>：在「投研工作台」（<code>/workbench</code>）点击第二个标签页 <strong>「自选股工作台」</strong>；</li>
+<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">🎯 本节功能新窗口直达：</span><div class="direct-launch-actions"><a class="direct-launch-btn" href="/workbench?tab=watchlist" target="_blank" rel="noopener">🚀 点击直达：投研工作台 自选股工作台 (/workbench?tab=watchlist) ↗</a> <a class="direct-launch-btn" href="/workbench" target="_blank" rel="noopener">🚀 投研工作台首页 (/workbench) ↗</a></div></div></li>
+<li><strong>第 1 步</strong>：点击上方直达按钮进入 <a class="inline-app-link" href="/workbench?tab=watchlist" target="_blank" rel="noopener">投研工作台 · 自选股工作台 (/workbench?tab=watchlist) ↗</a>；</li>
 <li><strong>第 2 步</strong>：查看自选股实时行情列表——注意看正常交易票（如贵州茅台 <code>600519.SH</code>、腾讯控股 <code>00700.HK</code>）的实时涨跌与估值，以及异常/停牌测试票（<code>600898.SH</code>）诚实展示的 <code>—</code> 与状态说明；</li>
 <li><strong>第 3 步</strong>：当某只自选股盘中出现放量急涨或跳水时，点击 <strong>「盘中异动归因解释」</strong> 按钮，系统会立刻结合最新公告、板块联动和资金流给出多维度原因排查。</li>
 </ul>
@@ -849,7 +968,7 @@
 <li><strong>图中看点 2</strong>：下方的「盘中异动解释卡」自动串联盘口量价变化、同板块表现与最近公告，并提醒你哪些是已证实公告、哪些还需要等盘后龙虎榜确认。</li>
 </ul>
 </li>
-<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 /chat）</span><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button></div><pre><code>我的自选股贵州茅台（600519.SH）和招商银行（600036.SH）今天盘中走势有什么异动？请结合实时行情、同板块表现和最新公告帮我排查原因，区分已核实事实与市场传闻。</code></pre></div>
+<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 <a href="/chat" target="_blank" rel="noopener" style="color:#ffbe7b;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button><a class="copy-btn" href="/chat" target="_blank" rel="noopener" style="text-decoration:none;">🚀 打开 /chat 提问 ↗</a></div></div><pre><code>我的自选股贵州茅台（600519.SH）和招商银行（600036.SH）今天盘中走势有什么异动？请结合实时行情、同板块表现和最新公告帮我排查原因，区分已核实事实与市场传闻。</code></pre></div>
 </li>
 </ul>
 <hr />
@@ -858,7 +977,8 @@
 <li><strong>① 解决你炒股的什么痛点？</strong>
     上市公司发一份年报或重大合同公告动辄一两百页，自己翻眼花缭乱；只看别人写的两句话摘要，又怕漏掉“解除合同条款”或“大股东减持附加条件”。猎鹿人帮你提炼公告要点的同时，每一条都带着 <code>[来源：公告标题 · 第X页]</code> 标签，点一下就在右侧弹出 PDF 原文抽屉，直接对着页码核实原话！</li>
 <li><strong>② 去哪点、怎么操作（按钮级指引）</strong><ul>
-<li><strong>第 1 步</strong>：在 <strong>「自选股工作台」</strong> 下方的「最新公告与原文溯源」列表中，找到你想看的公司公告；</li>
+<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">🎯 本节功能新窗口直达：</span><div class="direct-launch-actions"><a class="direct-launch-btn" href="/workbench?tab=watchlist" target="_blank" rel="noopener">📄 点击直达：自选股公告与 PDF 原文抽屉 (/workbench?tab=watchlist) ↗</a></div></div></li>
+<li><strong>第 1 步</strong>：在 <a class="inline-app-link" href="/workbench?tab=watchlist" target="_blank" rel="noopener">投研工作台 · 自选股工作台 (/workbench?tab=watchlist) ↗</a> 下方的「最新公告与原文溯源」列表中，找到你想看的公司公告；</li>
 <li><strong>第 2 步</strong>：点击公告右侧的 <strong>「查看 PDF 原文页码溯源」</strong> 按钮；</li>
 <li><strong>第 3 步</strong>：画面右侧立刻滑出 <strong>「公告 PDF 原文溯源抽屉」</strong>，直接高亮展示该结论对应的第几页、第几段原文条款，核对完点右上角关闭即可继续看盘。</li>
 </ul>
@@ -869,7 +989,7 @@
 <li><strong>图中看点 2</strong>：抽屉内不仅给出原文关键段落摘录，还把“对股民意味着什么（支持/削弱原买入逻辑）”用大白话列在下方，不用跳出页面到处找 PDF 下载。</li>
 </ul>
 </li>
-<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 /chat）</span><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button></div><pre><code>请帮我检索贵州茅台（600519.SH）最近的重点公告，提炼对股东最关键的 3 条核心内容，每条必须标注原公告名称与具体页码，并告诉我有没有需要警惕的隐藏条款。</code></pre></div>
+<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 <a href="/chat" target="_blank" rel="noopener" style="color:#ffbe7b;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button><a class="copy-btn" href="/chat" target="_blank" rel="noopener" style="text-decoration:none;">🚀 打开 /chat 提问 ↗</a></div></div><pre><code>请帮我检索贵州茅台（600519.SH）最近的重点公告，提炼对股东最关键的 3 条核心内容，每条必须标注原公告名称与具体页码，并告诉我有没有需要警惕的隐藏条款。</code></pre></div>
 </li>
 </ul>
 <hr />
@@ -878,7 +998,8 @@
 <li><strong>① 解决你炒股的什么痛点？</strong>
     想买一只股票前，既想看技术面是不是买点（均线、MACD、RSI、布林带、主力资金怎么走），又怕公司基本面有雷（挣不挣钱、欠债多不多、现金流真不真、估值贵不贵）。自己拿计算器算完得花一下午，猎鹿人用底层确定性数学引擎 1 秒钟给你算齐 <strong>7 大类 56 项技术指标</strong> 和 <strong>6 大维度 90 项基本面体检评分卡</strong>，连“短线超买但中线趋势向上”这种多空信号打架都会主动提醒你！</li>
 <li><strong>② 去哪点、怎么操作（按钮级指引）</strong><ul>
-<li><strong>第 1 步</strong>：在「投研工作台」（<code>/workbench</code>）点击第三个标签页 <strong>「个股研究工作台」</strong>；</li>
+<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">🎯 本节功能新窗口直达：</span><div class="direct-launch-actions"><a class="direct-launch-btn" href="/workbench?tab=stock" target="_blank" rel="noopener">🔬 点击直达：投研工作台 个股研究工作台 (/workbench?tab=stock) ↗</a> <a class="direct-launch-btn" href="/workbench" target="_blank" rel="noopener">🚀 投研工作台 (/workbench) ↗</a></div></div></li>
+<li><strong>第 1 步</strong>：点击上方直达按钮进入 <a class="inline-app-link" href="/workbench?tab=stock" target="_blank" rel="noopener">投研工作台 · 个股研究工作台 (/workbench?tab=stock) ↗</a>；</li>
 <li><strong>第 2 步</strong>：在顶部输入框输入股票代码（例如 <code>600036.SH</code> 招商银行或 <code>600519.SH</code> 贵州茅台），并按需切换复权口径（<strong>前复权 <code>qfq</code></strong> 看短线连贯图形、<strong>后复权 <code>hfq</code></strong> 看长线真实含分红累计涨幅、<strong>不复权 <code>none</code></strong> 看除权缺口）；</li>
 <li><strong>第 3 步</strong>：先看左半边 <strong>「56 项技术面全景体检」</strong>（7 大分类得分 + <strong>多空冲突提醒框</strong>），再看右半边 <strong>「90 项基本面 6 维评分卡」</strong>（盈利能力、成长性、偿债安全、现金流质量、估值水位、公司治理与分红）。</li>
 </ul>
@@ -890,7 +1011,7 @@
 <li><strong>图中看点 3</strong>：右侧「90 项基本面体检」把枯燥的财报科目翻译成百分制得分与行业排位，哪一项强、哪一项弱一目了然。</li>
 </ul>
 </li>
-<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 /chat）</span><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button></div><pre><code>请对招商银行（600036.SH）或贵州茅台（600519.SH）做一次全套个体检：调用 56 项技术指标工具（前复权口径）和 90 项基本面评分卡工具，用大白话告诉我它现在技术面有哪几个多空冲突信号、基本面哪块最强哪块有短板？</code></pre></div>
+<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 <a href="/chat" target="_blank" rel="noopener" style="color:#ffbe7b;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button><a class="copy-btn" href="/chat" target="_blank" rel="noopener" style="text-decoration:none;">🚀 打开 /chat 提问 ↗</a></div></div><pre><code>请对招商银行（600036.SH）或贵州茅台（600519.SH）做一次全套个体检：调用 56 项技术指标工具（前复权口径）和 90 项基本面评分卡工具，用大白话告诉我它现在技术面有哪几个多空冲突信号、基本面哪块最强哪块有短板？</code></pre></div>
 </li>
 </ul>
 <hr />
@@ -899,9 +1020,10 @@
 <li><strong>① 解决你炒股的什么痛点？</strong>
     看板上的数字看完了，你还想找几个“老法师”帮你把把关：比如让价值派、成长派、激进派、风控官 6 个不同风格的专家吵一架（多空辩论），或者排查一下某只暴涨妖股是不是“杀猪盘/庄股出货”，又或者拆解今天的龙虎榜游资席位。猎鹿人内置了 <strong>22 个专业金融技能（SKILL）</strong>，点一下就能按机构级标准流程帮你深挖。</li>
 <li><strong>② 去哪点、怎么操作（按钮级指引）</strong><ul>
-<li><strong>第 1 步</strong>：点击左侧导航栏的 <strong>「能力库 / SKILL」</strong>（<code>/library</code>）查看全部 22 个内置金融技能与 20 个数据工具通道；</li>
+<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">🎯 本节功能新窗口直达：</span><div class="direct-launch-actions"><a class="direct-launch-btn" href="/library" target="_blank" rel="noopener">🧩 点击直达：能力库 / 22 个金融 SKILL (/library) ↗</a> <a class="direct-launch-btn" href="/chat" target="_blank" rel="noopener">💬 点击直达：AI 对话框 (/chat) ↗</a></div></div></li>
+<li><strong>第 1 步</strong>：点击左侧导航栏的 <a class="inline-app-link" href="/library" target="_blank" rel="noopener">能力库 / SKILL (/library) ↗</a> 查看全部 22 个内置金融技能与 20 个数据工具通道；</li>
 <li><strong>第 2 步</strong>：挑中你想要的技能（如 <code>deep_analysis</code> 深度个股研报、<code>investor_panel</code> 6 位投资大师圆桌辩论、<code>trap_detector</code> 财务造假与杀猪盘排雷、<code>lhb_analyzer</code> 龙虎榜席位拆解）；</li>
-<li><strong>第 3 步</strong>：回到 <code>/chat</code> 对话框，直接用大白话点名调用该技能，AI 就会严格按照该技能的步骤先查真实数据、再交叉验证、最后给你结构化结论。</li>
+<li><strong>第 3 步</strong>：打开 <a class="inline-app-link" href="/chat" target="_blank" rel="noopener">AI 对话框 (/chat) ↗</a>，直接用大白话点名调用该技能，AI 就会严格按照该技能的步骤先查真实数据、再交叉验证、最后给你结构化结论。</li>
 </ul>
 </li>
 <li><strong>③ 真实界面高清截图与看点说明</strong>
@@ -910,7 +1032,7 @@
 <li><strong>图中看点 2</strong>：所有技能都直接挂载本地 69 个真实金融 MCP 工具，做到“有数必查、无数必认、绝不瞎编”。</li>
 </ul>
 </li>
-<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 /chat）</span><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button></div><pre><code>请调用【6 位投资大师圆桌辩论（investor_panel）】和【排雷检测（trap_detector）】技能，帮我全面剖析用友网络（600588.SH）当前的多空分歧点、财务现金流质量以及我最该盯紧的 3 个风险信号。</code></pre></div>
+<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 <a href="/chat" target="_blank" rel="noopener" style="color:#ffbe7b;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button><a class="copy-btn" href="/chat" target="_blank" rel="noopener" style="text-decoration:none;">🚀 打开 /chat 提问 ↗</a></div></div><pre><code>请调用【6 位投资大师圆桌辩论（investor_panel）】和【排雷检测（trap_detector）】技能，帮我全面剖析用友网络（600588.SH）当前的多空分歧点、财务现金流质量以及我最该盯紧的 3 个风险信号。</code></pre></div>
 </li>
 </ul>
 <hr />
@@ -920,7 +1042,8 @@
 <li><strong>① 解决你炒股的什么痛点？</strong>
     很多散户炒股三年还是老样子，原因就是收盘关电脑就走，从不复盘，今天踩过的坑下个月接着踩。猎鹿人在下午 3 点半收盘后，一键帮你把今天的大盘表现、自选股涨跌原因、盘前预判对错整理成复盘卡片，并自动存进你电脑本地的 <strong>专属经验库（<code>fin_memory</code>）</strong>，以后再买同类股票时系统会自动翻旧账提醒你！</li>
 <li><strong>② 去哪点、怎么操作（按钮级指引）</strong><ul>
-<li><strong>第 1 步</strong>：下午 15:00 收盘后，打开 <strong>「投研工作台 → 市场工作台」</strong>（<code>/workbench</code>）；</li>
+<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">🎯 本节功能新窗口直达：</span><div class="direct-launch-actions"><a class="direct-launch-btn" href="/workbench?tab=market&amp;view=after_close" target="_blank" rel="noopener">🌇 点击直达：投研工作台 15:30 盘后复盘 (/workbench?tab=market&amp;view=after_close) ↗</a> <a class="direct-launch-btn" href="/workbench" target="_blank" rel="noopener">🚀 投研工作台 (/workbench) ↗</a></div></div></li>
+<li><strong>第 1 步</strong>：下午 15:00 收盘后，点击上方直达按钮打开 <a class="inline-app-link" href="/workbench?tab=market&amp;view=after_close" target="_blank" rel="noopener">投研工作台 → 市场工作台 (/workbench?tab=market&amp;view=after_close) ↗</a>；</li>
 <li><strong>第 2 步</strong>：点击 <strong>「执行今日盘后复盘（15:30 收盘总结）」</strong> 按钮；</li>
 <li><strong>第 3 步</strong>：查看生成的收盘总结卡片，确认右上角显示 <strong>「已归档至 fin_memory 本地经验库」</strong>，把今天的得失变成你自己的投研资产。</li>
 </ul>
@@ -931,7 +1054,7 @@
 <li><strong>图中看点 2</strong>：带有 <code>fin_memory</code> 本地记忆归档标识与唯一记录号，下次你在对话框问相关股票时，AI 能直接调出你当时的复盘笔记。</li>
 </ul>
 </li>
-<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 /chat）</span><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button></div><pre><code>现在已经收盘了，请帮我做一次今日 15:30 盘后复盘：总结今天 A 股与港股的核心主线、我自选股的全天表现，对比今天早上盘前观察卡有哪些预期差，并把复盘结论存入我的本地投研记忆库。</code></pre></div>
+<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 <a href="/chat" target="_blank" rel="noopener" style="color:#ffbe7b;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button><a class="copy-btn" href="/chat" target="_blank" rel="noopener" style="text-decoration:none;">🚀 打开 /chat 提问 ↗</a></div></div><pre><code>现在已经收盘了，请帮我做一次今日 15:30 盘后复盘：总结今天 A 股与港股的核心主线、我自选股的全天表现，对比今天早上盘前观察卡有哪些预期差，并把复盘结论存入我的本地投研记忆库。</code></pre></div>
 </li>
 </ul>
 <hr />
@@ -940,7 +1063,8 @@
 <li><strong>① 解决你炒股的什么痛点？</strong>
     股民最容易犯的错就是“凭感觉买、凭信仰套死”——明明当初是因为“业绩高增长”才买的，结果半年报业绩暴雷了，却安慰自己“我是做长线价值投资的”死扛不走。猎鹿人的 <strong>「组合复盘工作台」</strong> 专门帮你把每只持仓股的 <strong>「当初买入理由（投资论点）」</strong> 和 <strong>「什么情况下必须认错离场（失效条件）」</strong> 钉在看板上，每天自动拿最新公告和去重新闻帮你比对！</li>
 <li><strong>② 去哪点、怎么操作（按钮级指引）</strong><ul>
-<li><strong>第 1 步</strong>：在「投研工作台」（<code>/workbench</code>）点击第四个标签页 <strong>「组合复盘工作台」</strong>；</li>
+<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">🎯 本节功能新窗口直达：</span><div class="direct-launch-actions"><a class="direct-launch-btn" href="/workbench?tab=portfolio_review" target="_blank" rel="noopener">📝 点击直达：投研工作台 组合复盘工作台 (/workbench?tab=portfolio_review) ↗</a></div></div></li>
+<li><strong>第 1 步</strong>：点击上方直达按钮进入 <a class="inline-app-link" href="/workbench?tab=portfolio_review" target="_blank" rel="noopener">投研工作台 · 组合复盘工作台 (/workbench?tab=portfolio_review) ↗</a>；</li>
 <li><strong>第 2 步</strong>：在 <strong>「持仓投资论点（Thesis）状态看板」</strong> 中，逐只检查你的持仓股：看最新财报和公告是 <strong>【支持原逻辑】</strong>、<strong>【削弱原逻辑】</strong> 还是已经触发了 <strong>【失效红线】</strong>；</li>
 <li><strong>第 3 步</strong>：在右侧 <strong>「结构化交易日志」</strong> 记录你每次加减仓的心态与依据，并在下方查看自动合并了重复转发的 <strong>「去重聚合新闻流」</strong>（同一个消息被 10 家媒体转发只显示 1 条，清清爽爽）。</li>
 </ul>
@@ -951,7 +1075,7 @@
 <li><strong>图中看点 2</strong>：底部的去重新闻流（Deduplicated News Feed）自动把同源重复快讯折叠合并，标注首发来源与重复次数，再也不怕被刷屏消息干扰。</li>
 </ul>
 </li>
-<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 /chat）</span><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button></div><pre><code>请帮我巡检我当前的持仓组合：结合最近一周的财报、公告和行业新闻，逐只判断我当初买入贵州茅台（600519.SH）和招商银行（600036.SH）的投资逻辑是得到了强化还是被削弱？有没有触发失效条件？</code></pre></div>
+<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 <a href="/chat" target="_blank" rel="noopener" style="color:#ffbe7b;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button><a class="copy-btn" href="/chat" target="_blank" rel="noopener" style="text-decoration:none;">🚀 打开 /chat 提问 ↗</a></div></div><pre><code>请帮我巡检我当前的持仓组合：结合最近一周的财报、公告和行业新闻，逐只判断我当初买入贵州茅台（600519.SH）和招商银行（600036.SH）的投资逻辑是得到了强化还是被削弱？有没有触发失效条件？</code></pre></div>
 </li>
 </ul>
 <hr />
@@ -960,7 +1084,8 @@
 <li><strong>① 解决你炒股的什么痛点？</strong>
     想让 AI 帮你诊断手头的真实持仓，但一个个手敲股票代码和成本价太累；要是让软件连券商账号，又怕泄漏交易密码或者 AI 抽风乱买乱卖把本金亏光。猎鹿人采用 <strong>「物理级零交易接口」</strong> 设计：只提供 <strong>只读持仓同步（Read-Only OAuth）</strong> 和 <strong>本地 Excel/CSV 交割单导入</strong> 两种安全方式，代码里根本没有实盘下单函数，而且随时可以一键撤销授权！</li>
 <li><strong>② 去哪点、怎么操作（按钮级指引）</strong><ul>
-<li><strong>第 1 步</strong>：进入 <strong>「设置 → 合作券商只读授权与持仓导入」</strong>（<code>/settings?tab=broker</code>）；</li>
+<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">🎯 本节功能新窗口直达：</span><div class="direct-launch-actions"><a class="direct-launch-btn" href="/settings?tab=broker" target="_blank" rel="noopener">🔒 点击直达：设置 合作券商只读授权与持仓导入 (/settings?tab=broker) ↗</a></div></div></li>
+<li><strong>第 1 步</strong>：点击上方直达按钮进入 <a class="inline-app-link" href="/settings?tab=broker" target="_blank" rel="noopener">设置 → 合作券商只读授权与持仓导入 (/settings?tab=broker) ↗</a>；</li>
 <li><strong>第 2 步</strong>：方式 A（只读连接器）：选择模拟/合作只读通道，点击 <strong>「开启只读持仓授权」</strong>，系统仅拉取股票代码、持仓数量与成本价（绝不索要交易密码，随时可点「撤销授权」断开）；</li>
 <li><strong>第 3 步</strong>：方式 B（最推荐散户使用）：从你手机或电脑炒股软件导出 CSV/Excel 交割单或持仓表，点击 <strong>「上传交割单 / 持仓 CSV」</strong>，系统在本地秒级解析持仓结构、行业集中度与历史盈亏。</li>
 </ul>
@@ -971,7 +1096,7 @@
 <li><strong>图中看点 2</strong>：下方同时展示只读同步过来的持仓明细（含仓位占比、浮动盈亏）以及 CSV 交割单导入后的体检摘要卡片。</li>
 </ul>
 </li>
-<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 /chat）</span><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button></div><pre><code>我已经导入了最新持仓，请帮我做一次持仓组合风险体检：看看我的仓位是不是太集中在某一个行业？如果大盘回调 10% 或消费/银行板块波动，我的组合最大回撤大概是多少？</code></pre></div>
+<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 <a href="/chat" target="_blank" rel="noopener" style="color:#ffbe7b;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button><a class="copy-btn" href="/chat" target="_blank" rel="noopener" style="text-decoration:none;">🚀 打开 /chat 提问 ↗</a></div></div><pre><code>我已经导入了最新持仓，请帮我做一次持仓组合风险体检：看看我的仓位是不是太集中在某一个行业？如果大盘回调 10% 或消费/银行板块波动，我的组合最大回撤大概是多少？</code></pre></div>
 </li>
 </ul>
 <hr />
@@ -981,7 +1106,8 @@
 <li><strong>① 解决你炒股的什么痛点？</strong>
     很多上班族没空天天盯盘，想每月发工资定投沪深 300、纳指或红利 ETF，但算不清“每月投 3000 块、坚持 5 年能攒多少钱？真实年化收益（XIRR）到底是多少？跟一次性买入比哪个划算？”；另外看到网上吹嘘“年化 80% 的神级选股公式”，不知道是不是用了未来数据造假。猎鹿人的 <strong>「量化研究与 ETF 定投工作台」</strong> 把这两件事做成傻瓜式工具，1 秒出结果！</li>
 <li><strong>② 去哪点、怎么操作（按钮级指引）</strong><ul>
-<li><strong>第 1 步</strong>：在「投研工作台」（<code>/workbench</code>）点击第五个标签页 <strong>「量化研究与 ETF 定投工作台」</strong>；</li>
+<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">🎯 本节功能新窗口直达：</span><div class="direct-launch-actions"><a class="direct-launch-btn" href="/workbench?tab=quant" target="_blank" rel="noopener">📐 点击直达：投研工作台 量化研究与 ETF 定投 (/workbench?tab=quant) ↗</a> <a class="direct-launch-btn" href="/workbench" target="_blank" rel="noopener">🚀 投研工作台 (/workbench) ↗</a></div></div></li>
+<li><strong>第 1 步</strong>：点击上方直达按钮进入 <a class="inline-app-link" href="/workbench?tab=quant" target="_blank" rel="noopener">投研工作台 · 量化研究与 ETF 定投工作台 (/workbench?tab=quant) ↗</a>；</li>
 <li><strong>第 2 步</strong>：在左侧 <strong>「ETF 定投（DCA）全生命周期计算器」</strong> 中，设定定投标的（如 <code>510300.SH</code> 沪深300ETF）、每月定投金额或目标攒钱金额，一键查看 <strong>真实内部收益率（XIRR）</strong>、微笑曲线摊薄成本过程，以及 <strong>「定投 vs 一次性买入（Lump-Sum）」</strong> 的抗回撤对比；</li>
 <li><strong>第 3 步</strong>：在右侧查看 <strong>「量化因子 5 分位分层检验」</strong> 与 <strong>「回测 6 维防坑审计清单」</strong>（自动检查有没有偷看未来数据、有没有把退市烂票剔除掉算虚高收益、有没有扣除印花税和滑点成本）。</li>
 </ul>
@@ -992,7 +1118,7 @@
 <li><strong>图中看点 2</strong>：右侧的「6 维防坑审计（Bias Audit）」给策略逐项打勾验身（前视偏差、幸存者偏差、交易成本、涨跌停不可成交约束等），帮你戳破假回测神话。</li>
 </ul>
 </li>
-<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 /chat）</span><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button></div><pre><code>我打算每月发工资定投 3000 元沪深300ETF（510300.SH）搭配红利ETF（510880.SH），请调用 ETF 定投计算器工具帮我测算历史定投的真实年化收益率（XIRR）、最大回撤，并对比一次性买入哪种更适合普通上班族？</code></pre></div>
+<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 <a href="/chat" target="_blank" rel="noopener" style="color:#ffbe7b;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button><a class="copy-btn" href="/chat" target="_blank" rel="noopener" style="text-decoration:none;">🚀 打开 /chat 提问 ↗</a></div></div><pre><code>我打算每月发工资定投 3000 元沪深300ETF（510300.SH）搭配红利ETF（510880.SH），请调用 ETF 定投计算器工具帮我测算历史定投的真实年化收益率（XIRR）、最大回撤，并对比一次性买入哪种更适合普通上班族？</code></pre></div>
 </li>
 </ul>
 <hr />
@@ -1001,9 +1127,10 @@
 <li><strong>① 解决你炒股的什么痛点？</strong>
     想试试多因子量化选股策略，或者想看 AI 智能体如果自己在盘前、早盘、盘中、尾盘全天候盯盘买卖会做成什么样，但绝不想拿自己的血汗钱去冒险。猎鹿人自带完整的 <strong>「策略中心」</strong>（<code>/strategies/index.html</code>）与 <strong>「AI 智能体模拟炒股训练场」</strong>（<code>/finance/overview</code>），用 100% 虚拟资金在真实历史与实盘行情上全自动演练，赚了帮你找灵感，亏了不伤你一分钱！</li>
 <li><strong>② 去哪点、怎么操作（按钮级指引）</strong><ul>
-<li><strong>第 1 步</strong>：点击顶部导航栏 <strong>「策略中心」</strong>（<code>/strategies/index.html</code>），浏览官方内置策略库、因子广场（估值/质量/动量/资金流因子）与可视化回测工作台；</li>
+<li class="direct-launch-item"><div class="direct-launch-card"><span class="direct-launch-label">🎯 本节功能新窗口直达：</span><div class="direct-launch-actions"><a class="direct-launch-btn" href="/strategies/index.html" target="_blank" rel="noopener">📊 点击直达：策略中心 (/strategies/index.html) ↗</a> <a class="direct-launch-btn" href="/finance/overview" target="_blank" rel="noopener">🤖 点击直达：AI 智能体模拟自动炒股 (/finance/overview) ↗</a></div></div></li>
+<li><strong>第 1 步</strong>：点击上方直达按钮进入 <a class="inline-app-link" href="/strategies/index.html" target="_blank" rel="noopener">策略中心 (/strategies/index.html) ↗</a>，浏览官方内置策略库、因子广场（估值/质量/动量/资金流因子）与可视化回测工作台；</li>
 <li><strong>第 2 步</strong>：挑选任意策略查看它的净值曲线、超额收益、最大回撤与每期换手率；</li>
-<li><strong>第 3 步</strong>：若想看 AI 全天候自动模拟操盘，访问 <strong>「智能体模拟自动炒股」</strong>（<code>/finance/overview</code>），观察智能体在每日 <strong>6 大固定交易时点（08:35 盘前、09:35 早盘、11:35 午盘、14:30 尾盘、15:10 收盘、20:00 晚间复盘）</strong> 自动生成的虚拟持仓调仓记录与理由。</li>
+<li><strong>第 3 步</strong>：若想看 AI 全天候自动模拟操盘，点击访问 <a class="inline-app-link" href="/finance/overview" target="_blank" rel="noopener">智能体模拟自动炒股 (/finance/overview) ↗</a>，观察智能体在每日 <strong>6 大固定交易时点（08:35 盘前、09:35 早盘、11:35 午盘、14:30 尾盘、15:10 收盘、20:00 晚间复盘）</strong> 自动生成的虚拟持仓调仓记录与理由。</li>
 </ul>
 </li>
 <li><strong>③ 真实界面高清截图与看点说明</strong>
@@ -1012,12 +1139,12 @@
 <li><strong>图中看点 2</strong>：支持从「官方策略 → 因子广场 → 策略对比 → 模拟盘演练」全链路打通，普通股民不用写一行 Python 代码就能用上量化研究所的武器。</li>
 </ul>
 </li>
-<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 /chat）</span><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button></div><pre><code>请帮我用大白话选股器筛选 A 股里“ROE 连续三年大于 15%、市盈率处于历史中低位、且经营现金流健康的蓝筹股”，并调用量化回测防坑工具看看这种低估值高股息策略在过去三年的表现和最大回撤。</code></pre></div>
+<li><strong>④ 可一键复制的对话框提问口令</strong><div class="prompt-box"><div class="prompt-bar"><span class="prompt-tag">💬 对话框提问口令（可直接粘贴到 <a href="/chat" target="_blank" rel="noopener" style="color:#ffbe7b;text-decoration:underline;">/chat ↗</a>）</span><div style="display:flex;gap:8px;align-items:center;"><button type="button" class="copy-btn" onclick="copyPrompt(this)">📋 一键复制提问口令</button><a class="copy-btn" href="/chat" target="_blank" rel="noopener" style="text-decoration:none;">🚀 打开 /chat 提问 ↗</a></div></div><pre><code>请帮我用大白话选股器筛选 A 股里“ROE 连续三年大于 15%、市盈率处于历史中低位、且经营现金流健康的蓝筹股”，并调用量化回测防坑工具看看这种低估值高股息策略在过去三年的表现和最大回撤。</code></pre></div>
 </li>
 </ul>
 <hr />
 <h2 id="6-22-skill-20-mcp">第 6 章：22 个内置金融技能（SKILL）与 20 个数据通道（MCP）大白话速查表</h2>
-<p>不知道在 <code>/chat</code> 对话框里怎么提问最管用？直接按下面这张表，对号入座点名调用：</p>
+<p>不知道在 <a class="inline-app-link" href="/chat" target="_blank" rel="noopener">AI 对话框 (/chat) ↗</a> 里怎么提问最管用？直接按下面这张表，对号入座点名调用：</p>
 <h3 id="61-22-skill">6.1 22 个内置金融技能（SKILL）场景速查</h3>
 <table>
 <thead>
@@ -1199,7 +1326,7 @@
 <ul>
 <li><strong>答：绝对不会，物理级 0 风险！</strong> 猎鹿人从底层代码设计上就遵循 <strong>「只做投研与模拟、绝不碰实盘下单」</strong> 的铁律：<ol>
 <li>合作券商连接器只有 <strong>只读权限（Read-Only）</strong>，代码里根本不存在实盘委托买入/卖出或银证转账接口；</li>
-<li>「智能体自动炒股」（<code>/finance/overview</code>）跑在 100% 独立的虚拟模拟盘账户上，哪怕点错任何按钮，也绝不会动你实盘账户里的一分钱。</li>
+<li>「智能体自动炒股」（<a class="inline-app-link" href="/finance/overview" target="_blank" rel="noopener">点击打开 /finance/overview ↗</a>）跑在 100% 独立的虚拟模拟盘账户上，哪怕点错任何按钮，也绝不会动你实盘账户里的一分钱。</li>
 </ol>
 </li>
 </ul>
@@ -1218,9 +1345,9 @@
 <h3 id="q5">Q5：如果打开页面提示“大模型未响应”或某只股票行情没刷出来，我该怎么排查？</h3>
 <ul>
 <li><strong>答：按下面 3 步，1 分钟就能自己搞定：</strong><ol>
-<li><strong>查大模型 Key</strong>：去 <code>/settings?tab=llm</code> 点一下「测试连接」，看看是不是 API Key 填错了或者余额用完了；</li>
+<li><strong>查大模型 Key</strong>：去 <a class="inline-app-link" href="/settings?tab=llm" target="_blank" rel="noopener">设置 → 大模型配置 (/settings?tab=llm) ↗</a> 点一下「测试连接」，看看是不是 API Key 填错了或者余额用完了；</li>
 <li><strong>看股票代码后缀</strong>：输入代码时尽量带上市场后缀（上交所 <code>.SH</code> 如 <code>600519.SH</code>、深交所 <code>.SZ</code> 如 <code>000001.SZ</code>、港股 <code>.HK</code> 如 <code>00700.HK</code>），避免同名股票混淆；</li>
-<li><strong>看数据源状态灯</strong>：在 <code>/workbench</code> 顶部或 <code>/settings</code> 查看行情源状态，如果是周末或节假日休市，系统会自动显示最近一个交易日的收盘截面数据并标注时间戳。</li>
+<li><strong>看数据源状态灯</strong>：在 <a class="inline-app-link" href="/workbench" target="_blank" rel="noopener">投研工作台 (/workbench) ↗</a> 顶部或 <a class="inline-app-link" href="/settings?tab=llm" target="_blank" rel="noopener">设置页 (/settings?tab=llm) ↗</a> 查看行情源状态，如果是周末或节假日休市，系统会自动显示最近一个交易日的收盘截面数据并标注时间戳。</li>
 </ol>
 </li>
 </ul>
