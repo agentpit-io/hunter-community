@@ -38,6 +38,7 @@ function fmtVal(v: unknown, suffix = '', digits = 2): string {
 }
 
 export default function BrokerDailyWorkbenchPage() {
+  const [selectedTradeDate, setSelectedTradeDate] = useState<string>(() => new Date().toISOString().slice(0, 10))
  const [activeTab, setActiveTab] = useState<WorkbenchTab>('market')
  const [loading, setLoading] = useState<boolean>(false)
  const [errorMsg, setErrorMsg] = useState<string | null>(null)
@@ -73,7 +74,7 @@ export default function BrokerDailyWorkbenchPage() {
  const [dcaFrequency, setDcaFrequency] = useState<string>('monthly')
  const [investDay, setInvestDay] = useState<number>(15)
  const [dcaStartDate, setDcaStartDate] = useState<string>('2023-11-01')
- const [dcaEndDate, setDcaEndDate] = useState<string>('2026-11-13')
+ const [dcaEndDate, setDcaEndDate] = useState<string>(new Date().toISOString().slice(0, 10))
  const [subFeePct, setSubFeePct] = useState<number>(0.10)
  const [dividendReinvest, setDividendReinvest] = useState<boolean>(true)
  const [targetAmount, setTargetAmount] = useState<number>(100000)
@@ -130,7 +131,7 @@ export default function BrokerDailyWorkbenchPage() {
   setLoading(true)
   setErrorMsg(null)
   try {
-   const r = await fetch('/api/workflows/workbench/market?market=CN_A&trade_date=2026-11-13')
+   const r = await fetch(`/api/workflows/workbench/market?market=CN_A&trade_date=${selectedTradeDate || new Date().toISOString().slice(0, 10)}`)
    if (!r.ok) throw new Error(`HTTP ${r.status}`)
    const d = await r.json()
    setMarketData(d)
@@ -150,7 +151,7 @@ export default function BrokerDailyWorkbenchPage() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
      market: 'CN_A',
-     trade_date: '2026-11-13',
+     trade_date: selectedTradeDate || new Date().toISOString().slice(0, 10),
      watchlist_symbols: watchlistSymbolsInput.split(',').map((s) => s.trim()).filter(Boolean),
     }),
    })
@@ -173,7 +174,7 @@ export default function BrokerDailyWorkbenchPage() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
      market: 'CN_A',
-     trade_date: '2026-11-13',
+     trade_date: selectedTradeDate || new Date().toISOString().slice(0, 10),
      watchlist_symbols: watchlistSymbolsInput.split(',').map((s) => s.trim()).filter(Boolean),
     }),
    })
@@ -621,7 +622,7 @@ export default function BrokerDailyWorkbenchPage() {
       {preCard?.market_overview && (
        <div className="grid grid-cols-1 md:grid-cols-4 gap-4" data-testid="market-indices-grid">
         {(preCard.market_overview.indices || []).map((idx: any) => {
-         const pct = idx.pct_chg ?? idx.pct_change ?? 0
+         const pct = idx.pct_chg ?? idx.pct_change ?? null
          const isUp = Number(pct) >= 0
          return (
           <div key={idx.symbol} className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
@@ -1256,7 +1257,7 @@ export default function BrokerDailyWorkbenchPage() {
              <td className="p-2 border border-slate-200 font-mono">{m.report_period}</td>
              <td className="p-2 border border-slate-200">
               <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-800">
-               {m.evaluation || '正常'}
+               {m.evaluation || '—'}
               </span>
              </td>
             </tr>
