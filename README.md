@@ -248,6 +248,9 @@ docker compose --profile fin up -d --remove-orphans
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/hangeaiagent"><img src="https://avatars.githubusercontent.com/u/203139500?v=4&size=72" width="72px" height="72px" alt="hangeaiagent"/><br /><sub><b>hangeaiagent</b></sub></a><br /><a href="https://github.com/agentpit-io/hunter-community/commits?author=hangeaiagent" title="Code">💻</a></td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/jay23606"><img src="https://avatars.githubusercontent.com/u/4602056?v=4&size=72" width="72px" height="72px" alt="Jay"/><br /><sub><b>Jay</b></sub></a><br /><a href="https://github.com/agentpit-io/hunter-community/commits?author=jay23606" title="Code">💻</a></td>
     </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/nabeelbaghoor"><img src="https://avatars.githubusercontent.com/u/60441195?v=4&size=72" width="72px" height="72px" alt="Nabeel Hassan"/><br /><sub><b>Nabeel Hassan</b></sub></a><br /><a href="https://github.com/agentpit-io/hunter-community/commits?author=nabeelbaghoor" title="Code">💻</a></td>
+    </tr>
   </tbody>
 </table>
 
