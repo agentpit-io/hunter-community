@@ -12,7 +12,7 @@ from typing import Optional
 
 from loguru import logger
 
-from app import activities, config, schedules
+from app import activities, config, schedules, temporal_status
 from app.workflows import ALL_WORKFLOWS
 
 
@@ -118,7 +118,11 @@ async def run_worker_forever() -> None:
     )
     logger.info("[worker] 开始监听任务队列 {}（Activity 线程池 {}）",
                 config.temporal_task_queue(), config.activity_workers())
+    # 置位放在 try 之前：ensure_schedules / Worker(...) 任一抛错时标志从未置位；
+    # 一旦置位，finally 保证 worker.run() 无论如何退出都会清除。
+    temporal_status.set_connected()
     try:
         await worker.run()
     finally:
+        temporal_status.clear_connected()
         executor.shutdown(wait=False)
