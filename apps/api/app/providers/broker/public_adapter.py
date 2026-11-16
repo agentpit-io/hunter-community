@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import math
 import os
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from app.services.market_time import market_tz, tz_name
@@ -719,13 +719,20 @@ class PublicFallbackAdapter(
         if end:
             rows = [r for r in rows if r["date"] <= end[:10]]
         last_date = rows[-1]["date"] if rows else "2026-11-13"
+        # 动态对齐 as_of：若包含当天且未到 15:00，则 as_of 不超过当前时间
+        tz8 = timezone(timedelta(hours=8))
+        now_dt = datetime.now(tz8)
+        last_d = date.fromisoformat(last_date[:10])
+        close_dt = datetime(last_d.year, last_d.month, last_d.day, 15, 0, 0, tzinfo=tz8)
+        as_of_val = now_dt.isoformat(timespec="seconds") if close_dt > now_dt else close_dt.isoformat(timespec="seconds")
+
         return BrokerDataEnvelope.build(
             provider=self.provider_id,
             market=std_mkt,
             symbol=std_sym,
             currency="HKD" if std_mkt == "HK" else ("USD" if std_mkt == "US" else "CNY"),
             unit="元",
-            as_of=f"{last_date}T15:00:00+08:00",
+            as_of=as_of_val,
             retrieved_at=_now_iso(),
             adjustment=adjustment,
             data=rows,
@@ -1791,6 +1798,12 @@ class PublicFallbackAdapter(
             "latest_adj_nav": latest_nav["adj_nav"] if latest_nav else None,
             "nav_series": nav_series,
         }
+        # 防止在盘前或盘中（当天 15:00 之前）请求当天时，as_of 强填 15:00:00 触发 envelope 时间戳晚于 retrieved_at 的断言
+        tz8 = timezone(timedelta(hours=8))
+        now_dt = datetime.now(tz8)
+        close_dt = datetime(end_dt.year, end_dt.month, end_dt.day, 15, 0, 0, tzinfo=tz8)
+        as_of_val = now_dt.isoformat(timespec="seconds") if close_dt > now_dt else close_dt.isoformat(timespec="seconds")
+
         return BrokerDataEnvelope.build(
             provider=self.provider_id,
             market="FUND",
@@ -1798,7 +1811,7 @@ class PublicFallbackAdapter(
             currency="CNY",
             unit="元/份",
             adjustment="后复权",
-            as_of=f"{end_dt.isoformat()}T15:00:00+08:00",
+            as_of=as_of_val,
             retrieved_at=_now_iso(),
             data=payload,
         )
