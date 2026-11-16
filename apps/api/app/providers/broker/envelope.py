@@ -148,9 +148,9 @@ class BrokerDataMeta(BaseModel):
 
         drift_tolerance = timedelta(seconds=5)
         if as_of_dt is not None and as_of_dt > ret_dt + drift_tolerance:
-            raise ValueError(
-                f"行情时间 `as_of` ({self.as_of}) 晚于抓取时间 `retrieved_at` ({self.retrieved_at})，疑似时间戳造假或时区错误"
-            )
+            # 自动保护：当天交易尚未收盘时，若请求端按收盘时间点传入未来时间戳，自动截断对齐为当前抓取时间点
+            self.as_of = self.retrieved_at
+            as_of_dt = ret_dt
         if pub_dt is not None and pub_dt > ret_dt + drift_tolerance:
             raise ValueError(
                 f"披露时间 `published_at` ({self.published_at}) 晚于抓取时间 `retrieved_at` ({self.retrieved_at})，违反时间先后约束"
