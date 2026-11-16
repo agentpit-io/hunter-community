@@ -1,4 +1,4 @@
-# Hunter Community Edition (AtomCode Unified v3.5.1) · 默认编排(**只用预构建镜像**)
+# Hunter Community Edition (AtomCode Unified v3.5.3) · 默认编排(**只用预构建镜像**)
 #
 # `git clone` 之后直接 `docker compose up -d` 就能起,不需要先改 .env、
 # 也不需要本地构建 —— 自家服务全部走 GHCR 上的预构建镜像。
@@ -45,7 +45,7 @@ services:
       retries: 10
 
   api:
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-api:${HUNTER_VERSION:-3.5.1}
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-api:${HUNTER_VERSION:-3.5.3}
     <<: *restart
     depends_on:
       postgres:
@@ -121,7 +121,7 @@ services:
       - "${API_HOST_PORT:-8100}:8000"
 
   paper:
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-paper:${FIN_TAG:-3.5.1}
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-paper:${FIN_TAG:-3.5.3}
     <<: *restart
     profiles: ["fin"]
     depends_on:
@@ -179,7 +179,7 @@ services:
       retries: 5
 
   fin-worker:
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-fin-worker:${FIN_TAG:-3.5.1}
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-fin-worker:${FIN_TAG:-3.5.3}
     <<: *restart
     profiles: ["fin"]
     depends_on:
@@ -211,7 +211,7 @@ services:
       - "127.0.0.1:${FIN_WORKER_HOST_PORT:-8300}:8300"
 
   web:
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-web:${HUNTER_VERSION:-3.5.1}
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-web:${HUNTER_VERSION:-3.5.3}
     <<: *restart
     depends_on:
       - api
@@ -236,7 +236,7 @@ services:
       - hunter_secrets:/opt/hunter-secrets:ro
 
   llm-shim:
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-llm-shim:${HUNTER_VERSION:-3.5.1}
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-llm-shim:${HUNTER_VERSION:-3.5.3}
     <<: *restart
     environment:
       HUNTER_BIND_HOST: "${HUNTER_BIND_HOST:-0.0.0.0}"
@@ -249,7 +249,7 @@ services:
       NO_PROXY: ${NO_PROXY_UPSTREAM:-localhost,127.0.0.1,api,web,postgres,redis,daemon,opencode,llm-shim}
 
   opencode:
-    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-opencode:${HUNTER_VERSION:-3.5.1}
+    image: ${HUNTER_REGISTRY:-ghcr.io/agentpit-io}/hunter-community-opencode:${HUNTER_VERSION:-3.5.3}
     hostname: daemon
     <<: *restart
     networks:

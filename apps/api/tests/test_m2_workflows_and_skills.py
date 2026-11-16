@@ -25,7 +25,7 @@ from app.services.workflows import (
     verify_report_numbers_against_truth,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = Path(__file__).resolve().parents[3] if len(Path(__file__).resolve().parents) > 3 else Path("/repo")
 
 
 def test_tc_calc_04_number_verifier_passes_exact_truth_and_blocks_hallucination() -> None:

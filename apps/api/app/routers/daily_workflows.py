@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 
 from app.providers.broker.router import get_default_broker_router
 from app.services.etf_dca import calculate_etf_dca_full_plan
+from app.services.workflows.daily_workflows import _default_trade_date
 from app.services.workflows import (
     build_natural_language_screener,
     run_after_close_workflow,
@@ -47,7 +48,7 @@ router = APIRouter(prefix="/workflows", tags=["daily_workflows"])
 
 class PreMarketWorkflowRequest(BaseModel):
     market: str = Field(default="CN_A", description="市场代码：CN_A / HK / US")
-    trade_date: str = Field(default="2026-11-13", description="交易日期 YYYY-MM-DD")
+    trade_date: str = Field(default_factory=_default_trade_date, description="交易日期 YYYY-MM-DD")
     watchlist_symbols: list[str] | None = Field(default=None, description="自选股代码列表")
     ai_draft_report: str | None = Field(default=None, description="可选 AI 初稿，用于正则数字回读校验")
 
@@ -64,7 +65,7 @@ class IntradayAnomalyRequest(BaseModel):
 
 class AfterCloseWorkflowRequest(BaseModel):
     market: str = Field(default="CN_A", description="市场代码")
-    trade_date: str = Field(default="2026-11-13", description="交易日期 YYYY-MM-DD")
+    trade_date: str = Field(default_factory=_default_trade_date, description="交易日期 YYYY-MM-DD")
     watchlist_symbols: list[str] | None = Field(default=None, description="自选股代码列表")
     ai_draft_report: str | None = Field(default=None, description="可选 AI 初稿，用于正则数字回读校验")
 
@@ -80,7 +81,7 @@ class EtfDcaCalculateRequest(BaseModel):
     frequency: str = Field(default="monthly", description="定投频率：monthly / biweekly / weekly")
     invest_day: int = Field(default=15, ge=1, le=28, description="每月扣款日（1-28）或每周星期几（1-5）")
     start_date: str = Field(default="2023-11-01", description="回测起始日期 YYYY-MM-DD")
-    end_date: str = Field(default="2026-11-13", description="回测截止日期 YYYY-MM-DD")
+    end_date: str = Field(default_factory=_default_trade_date, description="回测截止日期 YYYY-MM-DD")
     subscription_fee_pct: float = Field(default=0.10, ge=0.0, lt=5.0, description="申购费率(%)")
     dividend_reinvest: bool = Field(default=True, description="是否分红再投资")
     target_amount: float = Field(default=100000.0, gt=0, description="未来目标金额（元）")
@@ -335,15 +336,16 @@ def api_run_after_close_workflow(req: AfterCloseWorkflowRequest) -> dict[str, An
 @router.get("/workbench/market")
 def api_get_market_workbench(
     market: str = Query(default="CN_A"),
-    trade_date: str = Query(default="2026-11-13"),
+    trade_date: str | None = Query(default=None),
 ) -> dict[str, Any]:
     """市场工作台聚合数据：包含 08:30 盘前观察卡与 15:30 盘后复盘卡片。"""
-    pre_res = run_pre_market_workflow(market=market, trade_date=trade_date)  # type: ignore[arg-type]
-    after_res = run_after_close_workflow(market=market, trade_date=trade_date)  # type: ignore[arg-type]
+    td = trade_date or _default_trade_date()
+    pre_res = run_pre_market_workflow(market=market, trade_date=td)  # type: ignore[arg-type]
+    after_res = run_after_close_workflow(market=market, trade_date=td)  # type: ignore[arg-type]
     return {
         "ok": True,
         "workbench": "market",
-        "trade_date": trade_date,
+        "trade_date": td,
         "market": market,
         "pre_market_card": pre_res,
         "after_close_card": after_res,
@@ -381,7 +383,7 @@ def api_get_quant_workbench(
     frequency: str = Query(default="monthly", description="定投频率：monthly / biweekly / weekly"),
     invest_day: int = Query(default=15, ge=1, le=28),
     start_date: str = Query(default="2023-11-01"),
-    end_date: str = Query(default="2026-11-13"),
+    end_date: str | None = Query(default=None),
     subscription_fee_pct: float = Query(default=0.10, ge=0.0, lt=5.0),
     dividend_reinvest: bool = Query(default=True),
     target_amount: float = Query(default=100000.0, gt=0),
@@ -390,13 +392,14 @@ def api_get_quant_workbench(
     factor_id: str = Query(default="low_pe_high_div", description="因子ID"),
 ) -> dict[str, Any]:
     """量化研究工作台一站式数据：ETF定投计算器 + 因子有效性IC/分层回测 + 回测质量审计 + 自然语言选股器。"""
+    ed = end_date or _default_trade_date()
     return run_quant_workbench_bundle(
         etf_symbol=etf_symbol,
         periodic_amount=periodic_amount,
         frequency=frequency,
         invest_day=invest_day,
         start_date=start_date,
-        end_date=end_date,
+        end_date=ed,
         subscription_fee_pct=subscription_fee_pct,
         dividend_reinvest=dividend_reinvest,
         target_amount=target_amount,

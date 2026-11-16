@@ -8,7 +8,7 @@
 
 <img src="./docs/assets/logo.png" alt="HunterCode" width="160" height="160" />
 
-# HunterCode · AtomCode Unified (`v3.5.2`)
+# HunterCode · AtomCode Unified (`v3.5.3`)
 
 ### Community & AtomCode Edition
 
@@ -17,7 +17,7 @@
 HunterCode 是腾讯 WorkBuddy 金融版的开源本地替代方案 · 面向私募机构私有化部署、证券公司接口联调与专业个人投资者<br>
 <sub>腾讯、WorkBuddy 是腾讯公司的商标。HunterCode 与腾讯公司无隶属、合作或授权关系。</sub>
 
-[![Version](https://img.shields.io/badge/version-v3.5.2-blue)](https://github.com/agentpit-io/hunter-community/releases)
+[![Version](https://img.shields.io/badge/version-v3.5.3-blue)](https://github.com/agentpit-io/hunter-community/releases)
 [![Kernel](https://img.shields.io/badge/AtomCode-v5.1.0_Fork-0A7E8C)](./pins.lock)
 [![License](https://img.shields.io/badge/license-Apache_2.0-green)](./LICENSE)
 [![CI](https://github.com/agentpit-io/hunter-community/actions/workflows/ci.yml/badge.svg)](https://github.com/agentpit-io/hunter-community/actions/workflows/ci.yml)
@@ -28,7 +28,7 @@ HunterCode 是腾讯 WorkBuddy 金融版的开源本地替代方案 · 面向私
 
 [**🚀 在线演示**](https://hunter-community.agentpit.io) &nbsp;·&nbsp; [**⚡ 5 分钟部署**](#-5-分钟跑起来) &nbsp;·&nbsp; [**📖 产品说明书**](./doc/产品说明书.md) &nbsp;·&nbsp; [**帮助中心**](https://hunter-community.agentpit.io/help/index.html) &nbsp;·&nbsp; [**运维手册**](./docs/部署与运维.md) &nbsp;·&nbsp; [**💬 讨论区**](https://github.com/agentpit-io/hunter-community/discussions)
 
-🚀 **2026-11-14 里程碑发布 `v3.5.2`：全面建成证券公司接口适配层（20 个 MCP 服务 · 69 个工具）+ 56 项技术指标/90 项基本面/ETF 定投确定性计算引擎 + 22 个金融 SKILL + 每日三段式工作流与五大工作台 + CSDN 实战示例包！**  
+🚀 **2026-11-14 里程碑发布 `v3.5.3`：全面建成证券公司接口适配层（20 个 MCP 服务 · 69 个工具）+ 56 项技术指标/90 项基本面/ETF 定投确定性计算引擎 + 22 个金融 SKILL + 每日三段式工作流与五大工作台 + CSDN 实战示例包！**  
 `hunter-community` 与 `huntercode-atomcode`（GitHub & GitCode）自 `v3.0.0` 起实现**双仓同源同 SHA 统一**（原 OpenCode v2.2 分支归档于 `legacy/opencode-v2.2`）。
 
 🏆 [入围世界人工智能开源大赛(GOAI)总决赛 · 赛道二 TOP 15](https://mp.weixin.qq.com/s/n8olfrqdP0-rkj6mU_N6Hg) · [与 WorkBuddy 金融版逐项对比(附官方来源)](https://www.agentpit.io/compare/workbuddy) · [完整演示视频 3 分钟](https://www.agentpit.io/media/huntercode-demo-0919.mp4)
@@ -39,7 +39,7 @@ HunterCode 是腾讯 WorkBuddy 金融版的开源本地替代方案 · 面向私
 
 ---
 
-## 🎉 `v3.5.2` 证券公司接口与金融 SKILL 体系核心全景（20 个 MCP + 22 个金融 SKILL）
+## 🎉 `v3.5.3` 证券公司接口与金融 SKILL 体系核心全景（20 个 MCP + 22 个金融 SKILL）
 
 ### 1. 20 个标准 MCP 服务（12 个既有服务 + 8 个新增证券公司专属只读 MCP · 共 69 个工具）
 

@@ -37,9 +37,35 @@ function fmtVal(v: unknown, suffix = '', digits = 2): string {
  return `${String(v)}${suffix}`
 }
 
+function getShanghaiLatestTradeDateISO(): string {
+  const now = new Date()
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now)
+  const y = Number(parts.find((p) => p.type === 'year')?.value || now.getUTCFullYear())
+  const m = Number(parts.find((p) => p.type === 'month')?.value || now.getUTCMonth() + 1)
+  const d = Number(parts.find((p) => p.type === 'day')?.value || now.getUTCDate())
+  const dt = new Date(Date.UTC(y, m - 1, d))
+  const dow = dt.getUTCDay()
+  if (dow === 6) dt.setUTCDate(dt.getUTCDate() - 1)
+  else if (dow === 0) dt.setUTCDate(dt.getUTCDate() - 2)
+  return dt.toISOString().slice(0, 10)
+}
+
+function getDefaultDcaStartDateISO(endStr: string, yearsBack = 3): string {
+  const parts = endStr.split('-').map(Number)
+  if (parts.length !== 3 || parts.some(Number.isNaN)) return '2023-01-01'
+  const dt = new Date(Date.UTC(parts[0] - yearsBack, parts[1] - 1, parts[2]))
+  return dt.toISOString().slice(0, 10)
+}
+
 export default function BrokerDailyWorkbenchPage() {
-  const [selectedTradeDate, setSelectedTradeDate] = useState<string>(() => new Date().toISOString().slice(0, 10))
+  const [selectedTradeDate, setSelectedTradeDate] = useState<string>(() => getShanghaiLatestTradeDateISO())
  const [activeTab, setActiveTab] = useState<WorkbenchTab>('market')
+  const [loadedTabs, setLoadedTabs] = useState<Record<string, boolean>>({})
  const [loading, setLoading] = useState<boolean>(false)
  const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
@@ -53,14 +79,18 @@ export default function BrokerDailyWorkbenchPage() {
  // 2. 自选股工作台状态
  const [watchlistSymbolsInput, setWatchlistSymbolsInput] = useState<string>('600036.SH,600519.SH,600000.SH,600898.SH')
  const [newSymbolInput, setNewSymbolInput] = useState<string>('')
+ const [selectedAnomalySymbol, setSelectedAnomalySymbol] = useState<string>('600036.SH')
  const [watchlistData, setWatchlistData] = useState<any>(null)
  const [intradayResult, setIntradayResult] = useState<any>(null)
  const [drawerOpen, setDrawerOpen] = useState<boolean>(false)
  const [selectedAnn, setSelectedAnn] = useState<AnnouncementItem | null>(null)
  const [selectedPageIdx, setSelectedPageIdx] = useState<number>(0)
+ const [pdfKeyword, setPdfKeyword] = useState<string>('净利润')
+ const [pdfViewMode, setPdfViewMode] = useState<'structured' | 'pdf_sheet'>('structured')
 
  // 3. 个股研究工作台状态
  const [stockSymbol, setStockSymbol] = useState<string>('600036.SH')
+ const [customStockInput, setCustomStockInput] = useState<string>('')
  const [adjustment, setAdjustment] = useState<string>('前复权')
  const [restated, setRestated] = useState<boolean>(true)
  const [stockData, setStockData] = useState<any>(null)
@@ -73,8 +103,8 @@ export default function BrokerDailyWorkbenchPage() {
  const [periodicAmount, setPeriodicAmount] = useState<number>(2000)
  const [dcaFrequency, setDcaFrequency] = useState<string>('monthly')
  const [investDay, setInvestDay] = useState<number>(15)
- const [dcaStartDate, setDcaStartDate] = useState<string>('2023-11-01')
- const [dcaEndDate, setDcaEndDate] = useState<string>(new Date().toISOString().slice(0, 10))
+ const [dcaStartDate, setDcaStartDate] = useState<string>(() => getDefaultDcaStartDateISO(getShanghaiLatestTradeDateISO(), 3))
+ const [dcaEndDate, setDcaEndDate] = useState<string>(() => getShanghaiLatestTradeDateISO())
  const [subFeePct, setSubFeePct] = useState<number>(0.10)
  const [dividendReinvest, setDividendReinvest] = useState<boolean>(true)
  const [targetAmount, setTargetAmount] = useState<number>(100000)
@@ -95,25 +125,38 @@ export default function BrokerDailyWorkbenchPage() {
  const [customThesisInput, setCustomThesisInput] = useState<string>('')
  const [customInvalidationInput, setCustomInvalidationInput] = useState<string>('')
 
- useEffect(() => {
-  if (typeof window !== 'undefined') {
-   const params = new URLSearchParams(window.location.search)
-   const tabParam = params.get('tab') as WorkbenchTab | null
-   if (tabParam && ['market', 'watchlist', 'stock', 'quant', 'portfolio_review'].includes(tabParam)) {
-    setActiveTab(tabParam)
-   }
-   const viewParam = params.get('view')
-   if (viewParam === 'after_close' || viewParam === 'pre_market') {
-    setActiveWorkflowView(viewParam)
-   }
-  }
-  void fetchCatalog()
-  void loadMarketWorkbench()
-  void loadWatchlistWorkbench('600036.SH,600519.SH,600000.SH,600898.SH')
-  void loadStockWorkbench('600036.SH', '前复权', true)
-  void loadQuantWorkbench()
-  void loadPortfolioReviewWorkbench()
- }, [])
+  useEffect(() => {
+    let initialTab: WorkbenchTab = 'market'
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      const tabParam = params.get('tab') as WorkbenchTab | null
+      if (tabParam && ['market', 'watchlist', 'stock', 'quant', 'portfolio_review'].includes(tabParam)) {
+        initialTab = tabParam
+        setActiveTab(tabParam)
+      }
+      const viewParam = params.get('view')
+      if (viewParam === 'after_close' || viewParam === 'pre_market') {
+        setActiveWorkflowView(viewParam)
+      }
+    }
+    void fetchCatalog()
+    setLoadedTabs({ [initialTab]: true })
+    if (initialTab === 'market') void loadMarketWorkbench()
+    else if (initialTab === 'watchlist') void loadWatchlistWorkbench()
+    else if (initialTab === 'stock') void loadStockWorkbench('600036.SH', '前复权', true)
+    else if (initialTab === 'quant') void loadQuantWorkbench()
+    else if (initialTab === 'portfolio_review') void loadPortfolioReviewWorkbench()
+  }, [])
+
+  useEffect(() => {
+    if (loadedTabs[activeTab]) return
+    setLoadedTabs((prev) => ({ ...prev, [activeTab]: true }))
+    if (activeTab === 'market') void loadMarketWorkbench()
+    else if (activeTab === 'watchlist') void loadWatchlistWorkbench()
+    else if (activeTab === 'stock') void loadStockWorkbench(stockSymbol, adjustment, restated)
+    else if (activeTab === 'quant') void loadQuantWorkbench()
+    else if (activeTab === 'portfolio_review') void loadPortfolioReviewWorkbench()
+  }, [activeTab])
 
  async function fetchCatalog() {
   try {
@@ -131,7 +174,7 @@ export default function BrokerDailyWorkbenchPage() {
   setLoading(true)
   setErrorMsg(null)
   try {
-   const r = await fetch(`/api/workflows/workbench/market?market=CN_A&trade_date=${selectedTradeDate || new Date().toISOString().slice(0, 10)}`)
+   const r = await fetch(`/api/workflows/workbench/market?market=CN_A&trade_date=${selectedTradeDate || getShanghaiLatestTradeDateISO()}`)
    if (!r.ok) throw new Error(`HTTP ${r.status}`)
    const d = await r.json()
    setMarketData(d)
@@ -151,7 +194,7 @@ export default function BrokerDailyWorkbenchPage() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
      market: 'CN_A',
-     trade_date: selectedTradeDate || new Date().toISOString().slice(0, 10),
+     trade_date: selectedTradeDate || getShanghaiLatestTradeDateISO(),
      watchlist_symbols: watchlistSymbolsInput.split(',').map((s) => s.trim()).filter(Boolean),
     }),
    })
@@ -174,7 +217,7 @@ export default function BrokerDailyWorkbenchPage() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
      market: 'CN_A',
-     trade_date: selectedTradeDate || new Date().toISOString().slice(0, 10),
+     trade_date: selectedTradeDate || getShanghaiLatestTradeDateISO(),
      watchlist_symbols: watchlistSymbolsInput.split(',').map((s) => s.trim()).filter(Boolean),
     }),
    })
@@ -189,10 +232,44 @@ export default function BrokerDailyWorkbenchPage() {
  }
 
  async function loadWatchlistWorkbench(symbolsStr?: string) {
-  const targetSyms = symbolsStr ?? watchlistSymbolsInput
+  let targetSyms = symbolsStr ?? watchlistSymbolsInput
   setLoading(true)
   setErrorMsg(null)
   try {
+   if (!symbolsStr && typeof window !== 'undefined') {
+    const token = localStorage.getItem('hunter_token')
+    if (token) {
+     try {
+      const wr = await fetch('/api/watchlist', { headers: { Authorization: `Bearer ${token}` } })
+      if (wr.ok) {
+       const wl = await wr.json()
+       if (Array.isArray(wl) && wl.length > 0) {
+        const baseSyms = ['600036.SH', '600519.SH', '600000.SH', '600898.SH']
+        const userSyms = wl
+         .map((item: any) => {
+          const code = String(item.code || item.symbol || '').trim().toUpperCase()
+          if (!code) return ''
+          if (code.includes('.')) return code
+          const ex = String(item.exchange || '').trim().toUpperCase()
+          if (ex === 'SH' || ex === 'SZ' || ex === 'BJ') return `${code}.${ex}`
+          if (/^\d{6}$/.test(code)) {
+           if (code.startsWith('6') || code.startsWith('5')) return `${code}.SH`
+           if (code.startsWith('4') || code.startsWith('8')) return `${code}.BJ`
+           return `${code}.SZ`
+          }
+          return code
+         })
+         .filter(Boolean)
+        const merged = Array.from(new Set([...baseSyms, ...userSyms]))
+        targetSyms = merged.join(',')
+        setWatchlistSymbolsInput(targetSyms)
+       }
+      }
+     } catch {
+      // ignore watchlist fetch fallback
+     }
+    }
+   }
    const r = await fetch(`/api/workflows/workbench/watchlist?symbols=${encodeURIComponent(targetSyms)}&market=CN_A`)
    if (!r.ok) throw new Error(`HTTP ${r.status}`)
    const d = await r.json()
@@ -205,15 +282,41 @@ export default function BrokerDailyWorkbenchPage() {
  }
 
  async function handleAddWatchlistSymbol() {
-  const trimmed = newSymbolInput.trim().toUpperCase()
-  if (!trimmed) return
+  const raw = newSymbolInput.trim().toUpperCase()
+  if (!raw) return
+  let normalized = raw
+  if (/^\d{6}$/.test(raw)) {
+   if (raw.startsWith('6') || raw.startsWith('5')) normalized = `${raw}.SH`
+   else if (raw.startsWith('4') || raw.startsWith('8')) normalized = `${raw}.BJ`
+   else normalized = `${raw}.SZ`
+  }
   const currentList = watchlistSymbolsInput.split(',').map((s) => s.trim()).filter(Boolean)
-  if (!currentList.includes(trimmed)) {
-   currentList.push(trimmed)
+  if (!currentList.includes(normalized)) {
+   currentList.push(normalized)
   }
   const nextStr = currentList.join(',')
   setWatchlistSymbolsInput(nextStr)
+  setSelectedAnomalySymbol(normalized)
   setNewSymbolInput('')
+  if (typeof window !== 'undefined') {
+   const parts = normalized.split('.')
+   const codePart = parts[0]
+   const exPart = parts[1] === 'SZ' ? 'SZ' : 'SH'
+   const token = localStorage.getItem('hunter_token')
+   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+   if (token) headers['Authorization'] = `Bearer ${token}`
+   void fetch('/api/watchlist', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+     code: codePart,
+     name: normalized,
+     market: 'A',
+     exchange: exPart,
+     asset_type: 'stock',
+    }),
+   }).catch(() => {})
+  }
   await loadWatchlistWorkbench(nextStr)
  }
 
@@ -245,6 +348,24 @@ export default function BrokerDailyWorkbenchPage() {
   setSelectedAnn(ann)
   setSelectedPageIdx(pageIndex)
   setDrawerOpen(true)
+  if (ann?.announcement_id) {
+   void fetch(`/api/workflows/announcement/${encodeURIComponent(ann.announcement_id)}?page_range=1-5`)
+    .then((r) => (r.ok ? r.json() : null))
+    .then((d) => {
+     if (d?.ok && d?.data?.pages?.length) {
+      setSelectedAnn((prev) =>
+       prev && prev.announcement_id === ann.announcement_id
+        ? {
+           ...prev,
+           pages: d.data.pages,
+           page_count: d.data.total_pages || d.data.page_count || d.data.pages.length,
+          }
+        : prev
+      )
+     }
+    })
+    .catch(() => {})
+  }
  }
 
  async function loadStockWorkbench(sym?: string, adj?: string, rest?: boolean) {
@@ -464,7 +585,7 @@ export default function BrokerDailyWorkbenchPage() {
       <div>
        <div className="flex items-center gap-2.5">
         <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-[#203C30]/10 text-[#203C30] dark:text-emerald-400">
-         HunterCode v3.5.2 · v3.5.1 · v3.4.0 · 券商数据信封认证
+         HunterCode v3.5.3 · v3.5.0 · 券商数据信封认证
         </span>
         <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800">
          正则数字回读 100% 校验 · AES-256-GCM 只读授权
@@ -492,7 +613,7 @@ export default function BrokerDailyWorkbenchPage() {
           : 'text-slate-600 hover:text-slate-900 hover:bg-white'
         }`}
        >
-        <span className="font-mono mr-1.5">01 / MARKET</span>（市场工作台 · 盘前/盘后）
+        市场工作台（盘前/盘后）
        </button>
        <button
         data-testid="tab-watchlist-workbench"
@@ -503,7 +624,7 @@ export default function BrokerDailyWorkbenchPage() {
           : 'text-slate-600 hover:text-slate-900 hover:bg-white'
         }`}
        >
-        <span className="font-mono mr-1.5">02 / WATCHLIST</span>（自选股工作台 · 排雷/公告PDF）
+        自选股工作台（排雷/公告PDF）
        </button>
        <button
         data-testid="tab-stock-workbench"
@@ -514,7 +635,7 @@ export default function BrokerDailyWorkbenchPage() {
           : 'text-slate-600 hover:text-slate-900 hover:bg-white'
         }`}
        >
-        <span className="font-mono mr-1.5">03 / STOCK RESEARCH</span>（个股深度体检 · 56技术/90基本面）
+        个股深度体检（56技术/90基本面）
        </button>
        <button
         data-testid="tab-quant-workbench"
@@ -525,7 +646,7 @@ export default function BrokerDailyWorkbenchPage() {
           : 'text-slate-600 hover:text-slate-900 hover:bg-white'
         }`}
        >
-        <span className="font-mono mr-1.5">04 / QUANT LAB</span>（量化研究 · ETF定投/因子/审计）
+        量化研究（ETF定投/因子/审计）
        </button>
        <button
         data-testid="tab-portfolio-review-workbench"
@@ -536,36 +657,10 @@ export default function BrokerDailyWorkbenchPage() {
           : 'text-slate-600 hover:text-slate-900 hover:bg-white'
         }`}
        >
-        <span className="font-mono mr-1.5">05 / PORTFOLIO</span>（组合复盘 · 论点/日志/去重）
+        组合复盘（论点/日志/去重）
        </button>
       </div>
      </div>
-
-     {/* 8 大 P0 + 7 大 P1 技能速览条 */}
-     {(catalog?.p0_daily_skills || catalog?.p1_advanced_skills) && (
-      <div className="mt-4 pt-4 border-t border-slate-200 flex flex-wrap gap-2">
-       {(catalog?.p0_daily_skills || []).map((sk: any) => (
-        <span
-         key={sk.name}
-         className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs bg-slate-50 border border-slate-200 text-slate-700"
-        >
-         <strong className="text-[#203C30] dark:text-emerald-400">{sk.display_name}</strong>
-         <span className="text-slate-400">({sk.name})</span>
-         <span className="px-1.5 py-0.2 rounded bg-[#203C30]/10 text-[#203C30] dark:text-emerald-400">{sk.stage}</span>
-        </span>
-       ))}
-       {(catalog?.p1_advanced_skills || []).map((sk: any) => (
-        <span
-         key={sk.name}
-         className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs bg-slate-50 border border-slate-200 text-slate-800"
-        >
-         <strong className="text-[#203C30] dark:text-emerald-400">{sk.display_name}</strong>
-         <span className="text-slate-500">({sk.name})</span>
-         <span className="px-1.5 py-0.2 rounded bg-slate-200 text-slate-800">P1 · {sk.stage}</span>
-        </span>
-       ))}
-      </div>
-     )}
     </div>
 
     {errorMsg && (
@@ -579,7 +674,20 @@ export default function BrokerDailyWorkbenchPage() {
      <div data-testid="panel-market-workbench" className="space-y-6">
       {/* 操作控制栏 */}
       <div className="bg-white rounded-xl border border-slate-200 p-4 flex flex-wrap items-center justify-between gap-3">
-       <div className="flex items-center gap-3">
+       <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-1.5">
+         <span className="text-xs font-semibold text-slate-700">交易日期：</span>
+         <input
+          data-testid="input-market-trade-date"
+          type="date"
+          value={selectedTradeDate}
+          onChange={(e) => {
+           const nextDate = e.target.value
+           setSelectedTradeDate(nextDate)
+          }}
+          className="px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs font-mono bg-white"
+         />
+        </div>
         <button
          data-testid="btn-generate-pre-market"
          onClick={triggerPreMarketWorkflow}
@@ -623,7 +731,8 @@ export default function BrokerDailyWorkbenchPage() {
        <div className="grid grid-cols-1 md:grid-cols-4 gap-4" data-testid="market-indices-grid">
         {(preCard.market_overview.indices || []).map((idx: any) => {
          const pct = idx.pct_chg ?? idx.pct_change ?? null
-         const isUp = Number(pct) >= 0
+         const hasPct = pct !== null && pct !== undefined && pct !== '' && !Number.isNaN(Number(pct))
+                  const isUp = hasPct && Number(pct) >= 0
          return (
           <div key={idx.symbol} className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
            <div className="flex items-center justify-between">
@@ -635,7 +744,7 @@ export default function BrokerDailyWorkbenchPage() {
            </div>
            <div className="flex items-center justify-between mt-1 text-xs">
             <span className={isUp ? 'text-red-600 font-semibold' : 'text-emerald-600 font-semibold'}>
-             {isUp ? '+' : ''}{fmtVal(pct, '%')}
+             {hasPct ? `${isUp ? '+' : ''}${fmtVal(pct, '%')}` : '—'}
             </span>
             <span className="text-slate-500">成交 {fmtVal(idx.turnover_billion, '亿', 1)}</span>
            </div>
@@ -649,7 +758,7 @@ export default function BrokerDailyWorkbenchPage() {
       {preCard?.market_overview && (
        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-white rounded-xl border border-slate-200 p-4">
-         <h3 className="text-sm font-bold text-slate-900 mb-2">MARKET BREADTH 市场涨跌家数与交易日历状态</h3>
+         <h3 className="text-sm font-bold text-slate-900 mb-2">市场涨跌家数与交易日历状态</h3>
          <div className="text-xs text-slate-600 space-y-1.5">
           <div>交易日历状态：<strong className="text-[#172B22] dark:text-emerald-300">{preCard.calendar_note}</strong></div>
           <div>两市总成交额：<strong>{fmtVal(preCard.market_overview.total_turnover_billion, ' 亿元', 1)}</strong></div>
@@ -662,7 +771,7 @@ export default function BrokerDailyWorkbenchPage() {
         </div>
 
         <div className="bg-white rounded-xl border border-slate-200 p-4">
-         <h3 className="text-sm font-bold text-slate-900 mb-2">SECTOR LEADER 领涨行业板块</h3>
+         <h3 className="text-sm font-bold text-slate-900 mb-2">领涨行业板块</h3>
          <div className="space-y-1.5">
           {(preCard.market_overview.leading_sectors || []).map((s: any) => (
            <div key={s.sector} className="flex items-center justify-between text-xs">
@@ -693,7 +802,7 @@ export default function BrokerDailyWorkbenchPage() {
         <div className="flex items-center justify-between mb-4">
          <h2 className="text-lg font-bold text-slate-900">
           {activeWorkflowView === 'pre_market'
-           ? 'EVIDENCE MATRIX 《今日盘前观察卡》 · 三栏证据拆解'
+           ? '《今日盘前观察卡》 · 三栏证据拆解'
            : ' 《15:30 盘后复盘与经验沉淀报告》 · 三栏证据拆解'}
          </h2>
          {activeWorkflowView === 'after_close' && afterCard?.fin_memory_receipt && (
@@ -790,17 +899,36 @@ export default function BrokerDailyWorkbenchPage() {
         </button>
        </div>
 
-       <div className="flex items-center gap-2">
+       <div className="flex flex-wrap items-center gap-2">
+        <select
+         data-testid="select-anomaly-symbol"
+         value={selectedAnomalySymbol}
+         onChange={(e) => setSelectedAnomalySymbol(e.target.value)}
+         className="px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs font-mono bg-white text-slate-800"
+        >
+         {(watchlistData?.watchlist_rows?.length
+          ? watchlistData.watchlist_rows.map((r: any) => ({ symbol: r.symbol, name: r.name }))
+          : watchlistSymbolsInput
+             .split(',')
+             .map((s) => s.trim())
+             .filter(Boolean)
+             .map((sym) => ({ symbol: sym, name: sym }))
+         ).map((item: any) => (
+          <option key={item.symbol} value={item.symbol}>
+           {item.symbol}{item.name && item.name !== item.symbol ? ` · ${item.name}` : ''}
+          </option>
+         ))}
+        </select>
         <button
          data-testid="btn-trigger-intraday-anomaly"
-         onClick={() => triggerIntradayAnomaly('600036.SH', false)}
+         onClick={() => triggerIntradayAnomaly(selectedAnomalySymbol, false)}
          className="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-[#203C30] text-white hover:bg-[#182E24]"
         >
-         INTRADAY RADAR 盘中异动解释流 (600036.SH)
+         盘中异动解释流 ({selectedAnomalySymbol})
         </button>
         <button
          data-testid="btn-trigger-disconnect-drill"
-         onClick={() => triggerIntradayAnomaly('600036.SH', true)}
+         onClick={() => triggerIntradayAnomaly(selectedAnomalySymbol, true)}
          className="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-200 text-slate-800 hover:bg-slate-300"
         >
           演练数据源断连诚实告警
@@ -828,7 +956,7 @@ export default function BrokerDailyWorkbenchPage() {
          <div>
           <div className="flex items-center justify-between mb-2">
            <span className="font-bold text-sm">
-            INTRADAY ATTRIBUTION 盘中异动客观归因：{intradayResult.symbol}（{intradayResult.name}） · 原投资论点状态：【{intradayResult.thesis_check?.status_label}】
+            盘中异动客观归因：{intradayResult.symbol}（{intradayResult.name}） · 原投资论点状态：【{intradayResult.thesis_check?.status_label}】
            </span>
            <span className="text-xs text-slate-600">
             窗口推送计数：{intradayResult.alert_count_in_window} / 冷却 {intradayResult.cooldown_seconds}s
@@ -850,7 +978,7 @@ export default function BrokerDailyWorkbenchPage() {
       {/* 自选股行情与基本面全景表格 */}
       <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
        <h2 className="text-base font-bold text-slate-900 mb-3">
-        WATCHLIST MATRIX 自选股行情、基本面与风险状态表（停牌/缺失字段严格显示 `—`，严禁假 0）
+        自选股行情、基本面与风险状态表（停牌/缺失字段严格显示 `—`，严禁假 0）
        </h2>
        <div className="overflow-x-auto">
         <table className="w-full text-xs text-left border-collapse" data-testid="watchlist-table">
@@ -864,7 +992,7 @@ export default function BrokerDailyWorkbenchPage() {
            <th className="p-2.5 border border-slate-200">涨跌幅</th>
            <th className="p-2.5 border border-slate-200">PE-TTM</th>
            <th className="p-2.5 border border-slate-200">PB-MRQ</th>
-           <th className="p-2.5 border border-slate-200">加权ROE(2026Q3)</th>
+           <th className="p-2.5 border border-slate-200">加权ROE({watchlistData?.watchlist_rows?.[0]?.report_period || '最新期'})</th>
            <th className="p-2.5 border border-slate-200">数据时间 (as_of)</th>
            <th className="p-2.5 border border-slate-200">操作</th>
           </tr>
@@ -951,7 +1079,7 @@ export default function BrokerDailyWorkbenchPage() {
        {watchlistData?.portfolio_risk && (
         <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm" data-testid="portfolio-risk-card">
          <h2 className="text-base font-bold text-slate-900 mb-3">
-          PORTFOLIO RISK 组合风险暴露与压力测试巡检（`portfolio_risk_check`）
+          组合风险暴露与压力测试巡检（`portfolio_risk_check`）
          </h2>
          <div className="grid grid-cols-2 gap-3 mb-4 text-xs">
           <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
@@ -978,7 +1106,7 @@ export default function BrokerDailyWorkbenchPage() {
          {(watchlistData.portfolio_risk.alerts || []).length > 0 && (
           <div className="mb-4 p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs text-[#203C30] dark:text-emerald-400 space-y-1">
            {watchlistData.portfolio_risk.alerts.map((al: string, i: number) => (
-            <div key={i}>[ALERT] {al}</div>
+            <div key={i}>【风险预警】 {al}</div>
            ))}
           </div>
          )}
@@ -1026,6 +1154,30 @@ export default function BrokerDailyWorkbenchPage() {
          </button>
         ))}
 
+        <div className="flex items-center gap-1.5 ml-1">
+         <input
+          data-testid="input-custom-stock-symbol"
+          type="text"
+          value={customStockInput}
+          onChange={(e) => setCustomStockInput(e.target.value)}
+          placeholder="输入代码如 600588.SH"
+          className="px-2.5 py-1 rounded-lg border border-slate-300 text-xs font-mono w-36"
+         />
+         <button
+          data-testid="btn-search-custom-stock"
+          onClick={() => {
+           const raw = customStockInput.trim().toUpperCase()
+           if (!raw) return
+           const norm = raw.includes('.') ? raw : (raw.startsWith('6') || raw.startsWith('5') ? `${raw}.SH` : `${raw}.SZ`)
+           setStockSymbol(norm)
+           void loadStockWorkbench(norm, adjustment, restated)
+          }}
+          className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-[#203C30] text-white hover:bg-[#182E24]"
+         >
+          查询体检
+         </button>
+        </div>
+
         <span className="text-sm font-bold text-slate-800 ml-2">复权方式：</span>
         {['前复权', '后复权', '不复权'].map((adj) => (
          <button
@@ -1043,6 +1195,19 @@ export default function BrokerDailyWorkbenchPage() {
           {adj}
          </button>
         ))}
+
+        <span className="text-sm font-bold text-slate-800 ml-2">财报口径：</span>
+        <button
+         data-testid="btn-toggle-restated"
+         onClick={() => {
+          const nextRestated = !restated
+          setRestated(nextRestated)
+          void loadStockWorkbench(stockSymbol, adjustment, nextRestated)
+         }}
+         className="px-2.5 py-1 rounded text-xs font-semibold bg-slate-100 text-[#203C30] border border-slate-300 hover:bg-slate-200"
+        >
+         {restated ? '调整后（重述口径）' : '调整前（原始披露）'}
+        </button>
        </div>
 
        {stockData?.quote && (
@@ -1123,7 +1288,7 @@ export default function BrokerDailyWorkbenchPage() {
         {/* 多指标信号冲突告警 */}
         {(tech56.signal_conflicts || []).length > 0 && (
          <div className="mb-4 p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs text-[#203C30] dark:text-emerald-400">
-          <strong>[SIGNAL CONFLICT] 多指标客观冲突提示：</strong>
+          <strong>【信号冲突】 多指标客观冲突提示：</strong>
           {tech56.signal_conflicts.map((c: any, i: number) => (
            <span key={i} className="ml-2">{c.summary || c.type}</span>
           ))}
@@ -1196,21 +1361,123 @@ export default function BrokerDailyWorkbenchPage() {
         </div>
 
         {/* 六维评分雷达/进度卡 */}
-        {fund90.scorecard?.dimensions && (
-         <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-5">
-          {Object.entries(fund90.scorecard.dimensions).map(([dimName, dimInfo]: [string, any]) => (
-           <div key={dimName} className="p-3 rounded-xl bg-slate-50 border border-slate-200">
-            <div className="text-xs font-semibold text-slate-700">{dimName}</div>
-            <div className="flex items-baseline justify-between mt-1">
-             <span className="text-xl font-bold text-slate-900">{fmtVal(dimInfo.score, '', 1)}</span>
-             <span className="text-xs font-bold px-1.5 py-0.5 rounded bg-slate-100 text-[#203C30] dark:text-emerald-400">
-              {dimInfo.grade}
-             </span>
+        {fund90.scorecard?.dimensions && (() => {
+         const dimEntries = Object.entries(fund90.scorecard.dimensions) as [string, any][]
+         const cx = 130
+         const cy = 115
+         const maxR = 76
+         const n = Math.max(dimEntries.length, 6)
+         const getPt = (idx: number, radius: number) => {
+          const angle = -Math.PI / 2 + (idx * 2 * Math.PI) / n
+          return {
+           x: Number((cx + radius * Math.cos(angle)).toFixed(1)),
+           y: Number((cy + radius * Math.sin(angle)).toFixed(1)),
+          }
+         }
+         const dataPolygonPts = dimEntries
+          .map(([, info], idx) => {
+           const sc = Math.max(0, Math.min(100, Number(info?.score ?? 60)))
+           const p = getPt(idx, (sc / 100) * maxR)
+           return `${p.x},${p.y}`
+          })
+          .join(' ')
+
+         return (
+          <div className="space-y-4 mb-5">
+           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 p-4 rounded-xl bg-slate-50/70 border border-slate-200 items-center">
+            <div className="lg:col-span-5 flex flex-col items-center">
+             <div className="text-xs font-bold text-slate-700 mb-1">
+              六维基本面蜘蛛网雷达图（综合评分 {fmtVal(fund90.scorecard?.overall_score, '', 1)} / {fund90.scorecard?.overall_grade}）
+             </div>
+             <svg
+              data-testid="fundamental-radar-svg"
+              viewBox="0 0 260 230"
+              className="w-full max-w-[260px] h-auto overflow-visible"
+             >
+              {[0.25, 0.5, 0.75, 1].map((lvl) => {
+               const ringPts = Array.from({ length: n }, (_, i) => {
+                const p = getPt(i, maxR * lvl)
+                return `${p.x},${p.y}`
+               }).join(' ')
+               return (
+                <polygon
+                 key={lvl}
+                 points={ringPts}
+                 fill="none"
+                 stroke="#CBD5E1"
+                 strokeWidth={lvl === 1 ? '1.2' : '0.8'}
+                 strokeDasharray={lvl < 1 ? '2,2' : undefined}
+                />
+               )
+              })}
+              {dimEntries.map(([dimName, info], idx) => {
+               const outer = getPt(idx, maxR)
+               const labelPt = getPt(idx, maxR + 22)
+               const sc = Math.max(0, Math.min(100, Number(info?.score ?? 60)))
+               const valPt = getPt(idx, (sc / 100) * maxR)
+               return (
+                <g key={dimName}>
+                 <line x1={cx} y1={cy} x2={outer.x} y2={outer.y} stroke="#CBD5E1" strokeWidth="0.9" />
+                 <circle cx={valPt.x} cy={valPt.y} r="3.2" fill="#203C30" />
+                 <text
+                  x={labelPt.x}
+                  y={labelPt.y}
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  className="fill-slate-700 text-[9px] font-semibold"
+                 >
+                  {dimName}({fmtVal(info?.score, '', 0)})
+                 </text>
+                </g>
+               )
+              })}
+              <polygon
+               points={dataPolygonPts}
+               fill="rgba(32, 60, 48, 0.22)"
+               stroke="#203C30"
+               strokeWidth="2"
+              />
+             </svg>
+            </div>
+            <div className="lg:col-span-7 space-y-2.5">
+             {dimEntries.map(([dimName, dimInfo]) => {
+              const sc = Math.max(0, Math.min(100, Number(dimInfo?.score ?? 0)))
+              return (
+               <div key={dimName} className="space-y-1">
+                <div className="flex items-center justify-between text-xs">
+                 <span className="font-semibold text-slate-800">{dimName}</span>
+                 <span className="font-mono font-bold text-[#203C30]">
+                  {fmtVal(dimInfo.score, ' 分', 1)} · 等级 {dimInfo.grade}
+                 </span>
+                </div>
+                <div className="w-full h-2 rounded-full bg-slate-200 overflow-hidden">
+                 <div
+                  className="h-full rounded-full bg-[#203C30]"
+                  style={{ width: `${sc}%` }}
+                 />
+                </div>
+               </div>
+              )
+             })}
             </div>
            </div>
-          ))}
-         </div>
-        )}
+
+           <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+            {dimEntries.map(([dimName, dimInfo]) => (
+             <div key={dimName} className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+              <div className="text-xs font-semibold text-slate-700">{dimName}</div>
+              <div className="flex items-baseline justify-between mt-1">
+               <span className="text-xl font-bold text-slate-900">{fmtVal(dimInfo.score, '', 1)}</span>
+               <span className="text-xs font-bold px-1.5 py-0.5 rounded bg-slate-100 text-[#203C30] dark:text-emerald-400">
+                {dimInfo.grade}
+               </span>
+              </div>
+             </div>
+            ))}
+           </div>
+          </div>
+         )
+        })()}
 
         {/* 会计准则重述（调整前 vs 调整后）对照表（对应 TC-CALC-02） */}
         {fund90.restatement_comparison && (
@@ -1378,6 +1645,64 @@ export default function BrokerDailyWorkbenchPage() {
         </div>
        </div>
 
+       {/* 高级参数控制条（支持自定义任意 ETF 代码、起止日期、目标年限、假设年化收益） */}
+       <div className="grid grid-cols-2 md:grid-cols-5 gap-3 p-3.5 rounded-xl bg-slate-50/60 border border-slate-200 mb-5">
+        <div>
+         <label className="block text-xs font-semibold text-slate-700 mb-1">自定义 ETF 代码</label>
+         <input
+          data-testid="input-dca-custom-etf-symbol"
+          type="text"
+          value={etfSymbol}
+          onChange={(e) => setEtfSymbol(e.target.value.trim().toUpperCase())}
+          placeholder="如 510300.SH / 588000.SH"
+          className="w-full px-2.5 py-1 rounded-lg border border-slate-300 text-xs bg-white font-mono"
+         />
+        </div>
+        <div>
+         <label className="block text-xs font-semibold text-slate-700 mb-1">定投起始日</label>
+         <input
+          data-testid="input-dca-start-date"
+          type="date"
+          value={dcaStartDate}
+          onChange={(e) => setDcaStartDate(e.target.value)}
+          className="w-full px-2.5 py-1 rounded-lg border border-slate-300 text-xs bg-white font-mono"
+         />
+        </div>
+        <div>
+         <label className="block text-xs font-semibold text-slate-700 mb-1">定投截止日</label>
+         <input
+          data-testid="input-dca-end-date"
+          type="date"
+          value={dcaEndDate}
+          onChange={(e) => setDcaEndDate(e.target.value)}
+          className="w-full px-2.5 py-1 rounded-lg border border-slate-300 text-xs bg-white font-mono"
+         />
+        </div>
+        <div>
+         <label className="block text-xs font-semibold text-slate-700 mb-1">目标年限 (年)</label>
+         <input
+          data-testid="input-dca-target-years"
+          type="number"
+          step="0.5"
+          min="0.5"
+          value={targetYears}
+          onChange={(e) => setTargetYears(Number(e.target.value))}
+          className="w-full px-2.5 py-1 rounded-lg border border-slate-300 text-xs bg-white font-mono"
+         />
+        </div>
+        <div>
+         <label className="block text-xs font-semibold text-slate-700 mb-1">假设年化收益 (%)</label>
+         <input
+          data-testid="input-dca-assumed-return"
+          type="number"
+          step="0.5"
+          value={assumedReturnPct}
+          onChange={(e) => setAssumedReturnPct(Number(e.target.value))}
+          className="w-full px-2.5 py-1 rounded-lg border border-slate-300 text-xs bg-white font-mono"
+         />
+        </div>
+       </div>
+
        {/* 核心测算结果指标卡 */}
        {quantData?.etf_dca?.backtest?.summary && (
         <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-5" data-testid="dca-summary-metrics">
@@ -1423,6 +1748,103 @@ export default function BrokerDailyWorkbenchPage() {
         </div>
        )}
 
+       {/* 定投累计本金 vs 定投总市值双线面积走势图 */}
+       {quantData?.etf_dca?.backtest?.summary && (() => {
+        const bt = quantData.etf_dca.backtest
+        const rawCurve =
+         (Array.isArray(bt.equity_curve) && bt.equity_curve.length > 1 && bt.equity_curve) ||
+         (Array.isArray(bt.schedule_records) && bt.schedule_records.length > 1 && bt.schedule_records) ||
+         [
+          {
+           date: bt.parameters?.start_date || dcaStartDate,
+           cumulative_invested: Number(bt.parameters?.periodic_amount || periodicAmount),
+           market_value: Number(bt.parameters?.periodic_amount || periodicAmount),
+          },
+          {
+           date: bt.parameters?.end_date || dcaEndDate,
+           cumulative_invested: Number(bt.summary.total_invested || 0),
+           market_value: Number(bt.summary.final_market_value || 0),
+          },
+         ]
+        const w = 680
+        const h = 190
+        const padL = 56
+        const padR = 24
+        const padT = 20
+        const padB = 28
+        const plotW = w - padL - padR
+        const plotH = h - padT - padB
+        const maxVal = Math.max(
+         1,
+         ...rawCurve.map((p: any) => Math.max(Number(p.cumulative_invested || 0), Number(p.market_value || 0)))
+        )
+        const toX = (i: number) =>
+         rawCurve.length <= 1 ? padL + plotW / 2 : Number((padL + (i / (rawCurve.length - 1)) * plotW).toFixed(1))
+        const toY = (v: number) => Number((padT + plotH - (Math.max(0, v) / maxVal) * plotH).toFixed(1))
+
+        const invPts = rawCurve.map((p: any, i: number) => `${toX(i)},${toY(Number(p.cumulative_invested || 0))}`).join(' ')
+        const mvPts = rawCurve.map((p: any, i: number) => `${toX(i)},${toY(Number(p.market_value || 0))}`).join(' ')
+        const mvAreaPts = `${toX(0)},${padT + plotH} ${mvPts} ${toX(rawCurve.length - 1)},${padT + plotH}`
+        const invAreaPts = `${toX(0)},${padT + plotH} ${invPts} ${toX(rawCurve.length - 1)},${padT + plotH}`
+
+        return (
+         <div className="p-4 rounded-xl bg-slate-50/70 border border-slate-200 mb-5">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+           <span className="text-xs font-bold text-slate-800">
+            定投累计投入本金 vs 定投账户总市值双线面积走势图（{rawCurve[0]?.date} 至 {rawCurve[rawCurve.length - 1]?.date} · 共 {rawCurve.length} 个采样期）
+           </span>
+           <div className="flex items-center gap-4 text-xs">
+            <span className="inline-flex items-center gap-1.5 text-slate-600">
+             <span className="w-3 h-0.5 bg-slate-500 inline-block" /> 累计投入本金
+            </span>
+            <span className="inline-flex items-center gap-1.5 text-[#203C30] font-semibold">
+             <span className="w-3 h-2 rounded-sm bg-[#203C30]/80 inline-block" /> 定投账户总市值
+            </span>
+           </div>
+          </div>
+          <svg
+           data-testid="dca-curve-svg"
+           viewBox={`0 0 ${w} ${h}`}
+           className="w-full h-44 overflow-visible"
+          >
+           {[0, 0.5, 1].map((ratio) => {
+            const y = Number((padT + plotH * (1 - ratio)).toFixed(1))
+            const val = Math.round(maxVal * ratio)
+            return (
+             <g key={ratio}>
+              <line x1={padL} y1={y} x2={w - padR} y2={y} stroke="#E2E8F0" strokeWidth="1" />
+              <text x={padL - 6} y={y + 3} textAnchor="end" className="fill-slate-500 text-[9px] font-mono">
+               {val}
+              </text>
+             </g>
+            )
+           })}
+           <polygon points={invAreaPts} fill="rgba(100, 116, 139, 0.10)" />
+           <polygon points={mvAreaPts} fill="rgba(32, 60, 48, 0.18)" />
+           <polyline
+            fill="none"
+            stroke="#64748B"
+            strokeWidth="1.8"
+            strokeDasharray="4,3"
+            points={invPts}
+           />
+           <polyline
+            fill="none"
+            stroke="#203C30"
+            strokeWidth="2.4"
+            points={mvPts}
+           />
+           <text x={padL} y={h - 6} className="fill-slate-500 text-[9px] font-mono">
+            {rawCurve[0]?.date}
+           </text>
+           <text x={w - padR} y={h - 6} textAnchor="end" className="fill-slate-500 text-[9px] font-mono">
+            {rawCurve[rawCurve.length - 1]?.date}
+           </text>
+          </svg>
+         </div>
+        )
+       })()}
+
        {/* 定投 vs 一次性买入同区间对比 + 目标金额反推情景矩阵 */}
        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
         {quantData?.etf_dca?.dca_vs_lump_sum?.lump_sum_summary && (
@@ -1453,7 +1875,7 @@ export default function BrokerDailyWorkbenchPage() {
         {quantData?.etf_dca?.target_reverse_plan && (
          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200" data-testid="dca-target-reverse-box">
           <h3 className="text-sm font-bold text-slate-900 mb-2">
-           GOAL SCENARIO 目标金额反推情景矩阵（目标 {fmtVal(quantData.etf_dca.target_reverse_plan.target_amount, ' 元', 0)} · {quantData.etf_dca.target_reverse_plan.years} 年）
+           目标金额反推情景矩阵（目标 {fmtVal(quantData.etf_dca.target_reverse_plan.target_amount, ' 元', 0)} · {quantData.etf_dca.target_reverse_plan.years} 年）
           </h3>
           <table className="w-full text-xs text-left border-collapse bg-white">
            <thead>
@@ -1539,6 +1961,59 @@ export default function BrokerDailyWorkbenchPage() {
          <h4 className="text-xs font-bold text-slate-800 mb-2">
           5 层分层回测年化收益单调性检验（单调性得分：{fmtVal(quantData.factor_research.metrics.monotonicity_score, '', 1)} · 多空年化：{fmtVal(quantData.factor_research.metrics.long_short_annualized_pct, '%')}）
          </h4>
+         {Array.isArray(quantData.factor_research.layer_backtest) && quantData.factor_research.layer_backtest.length > 0 && (() => {
+          const layers = quantData.factor_research.layer_backtest
+          const maxAbs = Math.max(
+           5,
+           ...layers.map((ly: any) => Math.abs(Number(ly.annualized_return_pct || 0)))
+          )
+          const svgW = 460
+          const svgH = 140
+          const baseLineY = 98
+          const maxBarH = 62
+          const slotW = (svgW - 40) / layers.length
+
+          return (
+           <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 mb-3">
+            <svg
+             data-testid="factor-layer-bar-svg"
+             viewBox={`0 0 ${svgW} ${svgH}`}
+             className="w-full h-32 overflow-visible"
+            >
+             <line x1="20" y1={baseLineY} x2={svgW - 20} y2={baseLineY} stroke="#CBD5E1" strokeWidth="1.2" />
+             {layers.map((ly: any, idx: number) => {
+              const val = Number(ly.annualized_return_pct || 0)
+              const barH = Math.max(4, Math.round((Math.abs(val) / maxAbs) * maxBarH))
+              const barW = Math.min(46, slotW * 0.58)
+              const x = Math.round(20 + idx * slotW + (slotW - barW) / 2)
+              const y = val >= 0 ? baseLineY - barH : baseLineY
+              const fill = val >= 0 ? '#203C30' : '#E11D48'
+              return (
+               <g key={ly.layer || idx}>
+                <rect x={x} y={y} width={barW} height={barH} rx="4" fill={fill} />
+                <text
+                 x={x + barW / 2}
+                 y={val >= 0 ? y - 5 : y + barH + 11}
+                 textAnchor="middle"
+                 className="fill-slate-800 text-[9px] font-mono font-bold"
+                >
+                 {fmtVal(val, '%', 1)}
+                </text>
+                <text
+                 x={x + barW / 2}
+                 y={svgH - 8}
+                 textAnchor="middle"
+                 className="fill-slate-600 text-[9px] font-semibold"
+                >
+                 {String(ly.layer || `Q${idx + 1}`).split(' ')[0]}
+                </text>
+               </g>
+              )
+             })}
+            </svg>
+           </div>
+          )
+         })()}
          <table className="w-full text-xs text-left border-collapse mb-3">
           <thead>
            <tr className="bg-slate-100 text-slate-700">
@@ -1575,7 +2050,7 @@ export default function BrokerDailyWorkbenchPage() {
             P1 · backtest_quality_auditor
            </span>
            <h3 className="text-base font-bold text-slate-900 mt-1">
-            AUDIT MATRIX 量化回测质量 6 维防坑审计卡
+            量化回测质量 6 维防坑审计卡
            </h3>
           </div>
           <div className="text-right">
@@ -1600,14 +2075,14 @@ export default function BrokerDailyWorkbenchPage() {
            onClick={() => runBacktestAudit(true, true, true, true)}
            className="px-2.5 py-1 rounded bg-[#203C30] text-white font-semibold hover:bg-[#182E24]"
           >
-           [PASS] 标准合规回测（PIT财报+历史成分股+扣费）
+           【合规通过】标准合规回测（PIT财报+历史成分股+扣费）
           </button>
           <button
            data-testid="btn-audit-simulate-pit-fail"
            onClick={() => runBacktestAudit(false, false, false, true)}
            className="px-2.5 py-1 rounded bg-rose-700 text-white font-semibold hover:bg-rose-800"
           >
-           [INTERCEPT] 模拟未来函数与幸存者偏差（触发拦截）
+           【拦截演练】模拟未来函数与幸存者偏差（触发拦截）
           </button>
          </div>
 
@@ -1692,7 +2167,7 @@ export default function BrokerDailyWorkbenchPage() {
          ))}
          {(quantData.stock_screener.unsupported_fields || []).map((u: any, idx: number) => (
           <span key={idx} className="px-2.5 py-1 rounded-md text-xs bg-rose-50 border border-rose-300 text-rose-900 font-semibold" data-testid="screener-unsupported-badge">
-           [UNSUPPORTED] {u.requested_term}：{u.reason}
+           【未支持字段】 {u.requested_term}：{u.reason}
           </span>
          ))}
         </div>
@@ -1758,7 +2233,36 @@ export default function BrokerDailyWorkbenchPage() {
          </div>
         </div>
 
-        {/* 新增或更新论点核查 */}
+        {/* 按股票代码筛选论点 + 新增或更新论点核查 */}
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+         <span className="text-xs font-semibold text-slate-700">按股票代码过滤论点：</span>
+         <input
+          data-testid="input-filter-thesis-symbol"
+          type="text"
+          value={thesisSymbolFilter}
+          onChange={(e) => setThesisSymbolFilter(e.target.value.toUpperCase())}
+          placeholder="输入股票代码如 600036.SH（留空查看全部）"
+          className="px-3 py-1 rounded-lg border border-slate-300 text-xs font-mono bg-white w-56"
+         />
+         <button
+          data-testid="btn-filter-thesis-symbol"
+          onClick={() => void loadPortfolioReviewWorkbench(thesisSymbolFilter)}
+          className="px-3 py-1 rounded-lg text-xs font-semibold bg-[#203C30] text-white hover:bg-[#182E24]"
+         >
+          筛选
+         </button>
+         <button
+          data-testid="btn-reset-thesis-symbol"
+          onClick={() => {
+           setThesisSymbolFilter('')
+           void loadPortfolioReviewWorkbench('')
+          }}
+          className="px-3 py-1 rounded-lg text-xs font-semibold bg-slate-100 text-slate-700 hover:bg-slate-200"
+         >
+          全部
+         </button>
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-3.5 rounded-xl bg-slate-50 border border-slate-200 mb-4">
          <input
           data-testid="input-custom-thesis"
@@ -1855,7 +2359,7 @@ export default function BrokerDailyWorkbenchPage() {
             P1 · trading_journal
            </span>
            <h3 className="text-base font-bold text-slate-900 mt-1">
-            TRADING JOURNAL 交易与研究日志闭环（计划 vs 执行 vs 纪律评分）
+            交易与研究日志闭环（计划 vs 执行 vs 纪律评分）
            </h3>
           </div>
           <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-900">
@@ -1963,46 +2467,131 @@ export default function BrokerDailyWorkbenchPage() {
       </div>
 
       {/* 页码切换标签 */}
-      <div className="px-4 py-2.5 border-b border-slate-200 flex items-center gap-2 bg-white">
-       <span className="text-xs text-slate-500 font-medium">定位页码：</span>
-       {(selectedAnn.pages || []).map((p: PageItem, i: number) => {
-        const pNo = p.page_no ?? p.page_number ?? i + 1
-        return (
-         <button
-          key={i}
-          data-testid={`btn-pdf-page-${pNo}`}
-          onClick={() => setSelectedPageIdx(i)}
-          className={`px-3 py-1 rounded text-xs font-semibold ${
-           selectedPageIdx === i
-            ? 'bg-[#203C30] text-white'
-            : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-          }`}
-         >
-          第 {pNo} 页
-         </button>
-        )
-       })}
+      <div className="px-4 py-2.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 bg-white">
+       <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-slate-500 font-medium">定位页码：</span>
+        {(selectedAnn.pages || []).map((p: PageItem, i: number) => {
+         const pNo = p.page_no ?? p.page_number ?? i + 1
+         return (
+          <button
+           key={i}
+           data-testid={`btn-pdf-page-${pNo}`}
+           onClick={() => setSelectedPageIdx(i)}
+           className={`px-3 py-1 rounded text-xs font-semibold ${
+            selectedPageIdx === i
+             ? 'bg-[#203C30] text-white'
+             : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+           }`}
+          >
+           第 {pNo} 页
+          </button>
+         )
+        })}
+       </div>
+       <div className="flex items-center gap-1">
+        <button
+         data-testid="btn-pdf-view-structured"
+         onClick={() => setPdfViewMode('structured')}
+         className={`px-2.5 py-1 rounded text-xs font-semibold ${
+          pdfViewMode === 'structured'
+           ? 'bg-[#203C30] text-white'
+           : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+         }`}
+        >
+         结构化分页视图
+        </button>
+        <button
+         data-testid="btn-pdf-view-sheet"
+         onClick={() => setPdfViewMode('pdf_sheet')}
+         className={`px-2.5 py-1 rounded text-xs font-semibold ${
+          pdfViewMode === 'pdf_sheet'
+           ? 'bg-[#203C30] text-white'
+           : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+         }`}
+        >
+         仿真PDF原件版式
+        </button>
+       </div>
+      </div>
+
+      {/* 条款关键词高亮定位工具栏 */}
+      <div className="px-4 py-2.5 border-b border-slate-200 bg-slate-50/70 space-y-2">
+       <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-semibold text-slate-700">条款关键词高亮定位：</span>
+        <input
+         data-testid="input-pdf-keyword"
+         type="text"
+         value={pdfKeyword}
+         onChange={(e) => setPdfKeyword(e.target.value)}
+         placeholder="输入检索词高亮定位"
+         className="px-2.5 py-1 rounded border border-slate-300 text-xs bg-white w-36"
+        />
+        <div className="flex flex-wrap items-center gap-1">
+         {['净利润', '同比增长', '分红', '回购', '减持', '不良率', '停牌'].map((kw) => (
+          <button
+           key={kw}
+           onClick={() => setPdfKeyword(kw)}
+           className={`px-2 py-0.5 rounded text-xs font-medium ${
+            pdfKeyword === kw
+             ? 'bg-[#203C30] text-white'
+             : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
+           }`}
+          >
+           {kw}
+          </button>
+         ))}
+        </div>
+       </div>
       </div>
 
       {/* 当前高亮页码原文内容 */}
       <div className="flex-1 p-5 overflow-y-auto space-y-4">
-       {selectedAnn.pages && selectedAnn.pages[selectedPageIdx] ? (
-        <div className="p-4 rounded-xl border-2 border-[#203C30] bg-slate-50/30">
-         <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-bold text-[#203C30] dark:text-emerald-400">
-            当前高亮页码：第 {selectedAnn.pages[selectedPageIdx].page_no ?? selectedAnn.pages[selectedPageIdx].page_number ?? selectedPageIdx + 1} 页
-           {selectedAnn.pages[selectedPageIdx].page_title ? ` · ${selectedAnn.pages[selectedPageIdx].page_title}` : ''}
-          </span>
-          <span className="text-xs font-mono bg-slate-100 text-[#203C30] dark:text-emerald-400 px-2 py-0.5 rounded" data-testid="drawer-page-citation">
-           {selectedAnn.pages[selectedPageIdx].citation_tag ||
-            `[来源：${selectedAnn.title} · 第${selectedAnn.pages[selectedPageIdx].page_no ?? selectedPageIdx + 1}页]`}
-          </span>
+       {selectedAnn.pages && selectedAnn.pages[selectedPageIdx] ? (() => {
+        const curPage = selectedAnn.pages[selectedPageIdx]
+        const rawText = String(curPage.content_md || curPage.text || '')
+        const kw = pdfKeyword.trim()
+        const renderHighlighted = (text: string) => {
+         if (!kw) return text
+         const parts = text.split(kw)
+         if (parts.length <= 1) return text
+         return parts.map((part, idx) => (
+          <React.Fragment key={idx}>
+           {part}
+           {idx < parts.length - 1 && (
+            <mark className="bg-amber-200 text-slate-900 px-0.5 rounded font-semibold">{kw}</mark>
+           )}
+          </React.Fragment>
+         ))
+        }
+
+        return (
+         <div
+          className={
+           pdfViewMode === 'pdf_sheet'
+            ? 'p-6 rounded-sm border border-slate-300 bg-white shadow-lg mx-auto max-w-xl font-serif'
+            : 'p-4 rounded-xl border-2 border-[#203C30] bg-slate-50/30'
+          }
+         >
+          <div className="flex items-center justify-between mb-2">
+           <span className="text-xs font-bold text-[#203C30] dark:text-emerald-400">
+             当前高亮页码：第 {curPage.page_no ?? curPage.page_number ?? selectedPageIdx + 1} 页
+            {curPage.page_title ? ` · ${curPage.page_title}` : ''}
+           </span>
+           <span className="text-xs font-mono bg-slate-100 text-[#203C30] dark:text-emerald-400 px-2 py-0.5 rounded" data-testid="drawer-page-citation">
+            {curPage.citation_tag ||
+             `[来源：${selectedAnn.title} · 第${curPage.page_no ?? selectedPageIdx + 1}页]`}
+           </span>
+          </div>
+          <pre
+           className={`whitespace-pre-wrap text-xs text-slate-800 leading-relaxed bg-white p-3.5 rounded-lg border border-slate-200 ${
+            pdfViewMode === 'pdf_sheet' ? 'font-serif tracking-wide' : 'font-sans'
+           }`}
+          >
+           {renderHighlighted(rawText)}
+          </pre>
          </div>
-         <pre className="whitespace-pre-wrap text-xs text-slate-800 font-sans leading-relaxed bg-white p-3.5 rounded-lg border border-slate-200">
-          {selectedAnn.pages[selectedPageIdx].content_md || selectedAnn.pages[selectedPageIdx].text}
-         </pre>
-        </div>
-       ) : (
+        )
+       })() : (
         <div className="text-xs text-slate-500">该页暂无文本内容</div>
        )}
       </div>

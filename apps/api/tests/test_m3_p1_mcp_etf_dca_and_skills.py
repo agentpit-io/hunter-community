@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = Path(__file__).resolve().parents[3] if len(Path(__file__).resolve().parents) > 3 else Path("/repo")
 sys.path.insert(0, str(REPO_ROOT / "apps" / "api"))
 sys.path.insert(0, str(REPO_ROOT / "distro" / "mcp-servers"))
 

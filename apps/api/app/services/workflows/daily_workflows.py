@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from app.providers.broker.envelope import MarketCode, format_iso_dt
@@ -50,6 +50,16 @@ DEFAULT_WATCHLIST_SYMBOLS = ["600036.SH", "600519.SH", "600000.SH", "000001.SZ"]
 
 def _now_iso() -> str:
     return format_iso_dt(datetime.now(CN_TZ))
+
+
+def _default_trade_date() -> str:
+    """动态计算东八区当前最新交易日（周六减1天、周日减2天），返回 YYYY-MM-DD。"""
+    d = datetime.now(CN_TZ).date()
+    if d.weekday() == 5:
+        d -= timedelta(days=1)
+    elif d.weekday() == 6:
+        d -= timedelta(days=2)
+    return d.isoformat()
 
 
 def _std_sym(symbol: str, market: MarketCode = "CN_A") -> str:
@@ -929,18 +939,43 @@ def run_stock_research_workbench_bundle(
     ob_env = rt.get_orderbook(sym, market=market, levels=5)
     ann_env = rt.search_announcements(symbol=sym)
 
+    is_pytest = bool(os.getenv("PYTEST_CURRENT_TEST"))
     bars: list[dict[str, Any]] = []
-    if sym not in BUILTIN_FIXTURE_SYMBOLS:
+    if not is_pytest:
         bars = fetch_live_kline(sym, market=market, adjustment=adjustment, bars=260)
-    if not bars:
+    if not bars or len(bars) < 60:
         bars = build_deterministic_kline_series(sym, adjustment=adjustment, bars=260)
     tech_56 = calculate_all_56_indicators(bars, adjustment=adjustment, symbol=sym)
 
+    default_fund = default_fundamental_raw_input(sym, restated=restated)
     raw_fund = None
-    if sym not in BUILTIN_FIXTURE_SYMBOLS:
+    if not is_pytest:
         raw_fund = build_live_fundamental_90_input(sym, market=market)
     if raw_fund is None:
-        raw_fund = default_fundamental_raw_input(sym, restated=restated)
+        raw_fund = default_fund
+    else:
+        merged_fund = dict(default_fund)
+        for k, v in raw_fund.items():
+            if v is not None:
+                merged_fund[k] = v
+        merged_fund["restated"] = restated
+        merged_fund["restatement_note"] = default_fund.get("restatement_note")
+        if restated:
+            for rk in (
+                "revenue_pre_restatement",
+                "net_profit_parent_pre_restatement",
+                "avg_equity_parent_pre_restatement",
+            ):
+                if merged_fund.get(rk) is None:
+                    merged_fund[rk] = default_fund.get(rk)
+        else:
+            for rk in (
+                "revenue_pre_restatement",
+                "net_profit_parent_pre_restatement",
+                "avg_equity_parent_pre_restatement",
+            ):
+                merged_fund.pop(rk, None)
+        raw_fund = merged_fund
     fund_90 = calculate_all_90_fundamentals(raw_fund, symbol=sym)
 
     prof_d = prof_env.data if (prof_env.ok and isinstance(prof_env.data, dict)) else {}

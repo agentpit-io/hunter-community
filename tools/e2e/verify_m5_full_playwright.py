@@ -115,6 +115,7 @@ def run_m5_full_e2e_verification() -> dict:
         # ── 2. 自选股工作台（停牌缺值 — + 盘中异动 + PDF 页码抽屉）────────────
         page.click("[data-testid='tab-watchlist-workbench']")
         page.wait_for_selector("[data-testid='panel-watchlist-workbench']", timeout=15000)
+        page.wait_for_function("document.querySelector('[data-testid=\"watchlist-table\"]')?.innerText?.includes('600036.SH')", timeout=15000)
         wl_text = page.locator("[data-testid='watchlist-table']").inner_text()
         assert "600036.SH" in wl_text and "600898.SH" in wl_text and "—" in wl_text
 
@@ -137,6 +138,7 @@ def run_m5_full_e2e_verification() -> dict:
         # ── 3. 个股研究工作台（56 项技术指标 + 90 项基本面评分卡）──────────────
         page.click("[data-testid='tab-stock-workbench']")
         page.wait_for_selector("[data-testid='panel-stock-workbench']", timeout=15000)
+        page.wait_for_function("document.querySelector('[data-testid=\"panel-stock-workbench\"]')?.innerText?.includes('56/56 项')", timeout=15000)
         sr_text = page.locator("[data-testid='panel-stock-workbench']").inner_text()
         assert "56/56 项" in sr_text and "90/90 项" in sr_text
         assert "NaN" not in sr_text and "undefined" not in sr_text
@@ -148,6 +150,7 @@ def run_m5_full_e2e_verification() -> dict:
         # ── 4. 量化研究与 ETF 定投工作台 ───────────────────────────────────────
         page.click("[data-testid='tab-quant-workbench']")
         page.wait_for_selector("[data-testid='panel-quant-workbench']", timeout=15000)
+        page.wait_for_function("document.querySelector('[data-testid=\"panel-quant-workbench\"]')?.innerText?.includes('基于历史净值与假设参数测算')", timeout=15000)
         quant_text = page.locator("[data-testid='panel-quant-workbench']").inner_text()
         assert "基于历史净值与假设参数测算，历史表现不代表未来收益" in quant_text
         assert "510300.SH" in quant_text
@@ -160,6 +163,7 @@ def run_m5_full_e2e_verification() -> dict:
         # ── 5. 组合复盘工作台 ──────────────────────────────────────────────────
         page.click("[data-testid='tab-portfolio-review-workbench']")
         page.wait_for_selector("[data-testid='panel-portfolio-review-workbench']", timeout=15000)
+        page.wait_for_function("document.querySelector('[data-testid=\"panel-portfolio-review-workbench\"]')?.innerText?.includes('投资论点')", timeout=15000)
         pr_text = page.locator("[data-testid='panel-portfolio-review-workbench']").inner_text()
         assert "investment_thesis_tracker" in pr_text or "投资论点" in pr_text
         assert "NaN" not in pr_text and "undefined" not in pr_text

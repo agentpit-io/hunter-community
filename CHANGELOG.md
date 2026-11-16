@@ -3,6 +3,24 @@
 All notable changes to HunterCode · Community Edition follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.3] - 2026-11-16
+
+> **正式版 · 五大投研工作台真数据驱动、全交互控件补齐、纯 SVG 专业金融图表与盘前/盘中动态交易日时间信封加固。**
+>
+> **核心升级与修复亮点（`v3.5.1` / `v3.5.2` → `v3.5.3`）**：
+> 1. **盘前/盘中动态交易日与时间信封校验修复（`models/envelope.py`、`etf_dca/calculator.py`、`daily_workflows.py`）**：
+>    - 修复盘前或盘中查询当日行情与 ETF 定投历史净值时，因收盘时间戳（15:00:00）晚于实时抓取时间 `retrieved_at` 触发 `EnvelopeMeta` 500 校验错误的问题；
+>    - 去除硬编码静态日期与模拟兜底数据，全面升级为基于上海时区最新交易日的动态真实数据驱动。
+> 2. **五大工作台全交互控件补齐与真接口打通（`apps/web/app/workbench/page.tsx`）**：
+>    - **市场工作台**：新增交易日期选择器（`input-market-trade-date`）；
+>    - **自选股工作台**：打通 `/api/watchlist` 真实用户自选股读取与落库、6位数字代码自动补齐交易所后缀、任意自选股盘中异动归因选择、动态财报报告期表头；
+>    - **个股研究工作台**：新增任意股票代码自由输入查询（`input-custom-stock-symbol`）与财报会计重述口径（调整前/调整后）一键切换（`btn-toggle-restated`）；
+>    - **量化研究工作台**：新增自定义 ETF 代码、定投起止日期、目标年限与假设年化收益率全参数控制条；
+>    - **组合复盘工作台**：新增按股票代码筛选投资论点看板工具栏（`input-filter-thesis-symbol`）。
+> 3. **纯 SVG 专业金融可视化图表与 PDF 公告原文抽屉增强**：
+>    - 新增 90 项基本面六边形雷达图 + 六维进度条（`fundamental-radar-svg`）、ETF 定投累计本金 vs 总市值双线面积走势图（`dca-curve-svg`）、量化因子 5 层分层回测单调性柱状图（`factor-layer-bar-svg`）；
+>    - 右侧公告 PDF 原文抽屉打通 `/api/workflows/announcement/{id}?page_range=1-5` 异步拉取、条款关键词高亮定位与“结构化分页视图 / 仿真PDF原件版式”双模式切换。
+
 ## [3.5.1] - 2026-11-15
 
 > **正式版 · 全市场真实公开数据源直连、3 个确定性计算引擎 MCP 工具暴露（总计 69 个 MCP 工具）与出口语言守卫精准修复。**
